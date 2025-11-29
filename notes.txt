@@ -9,3 +9,7 @@ npm run dev
 ###Git Patching###
 git apply --check codex.patch
 git apply codex.patch
+
+Testing: 
+.\apps\api> npm test -- --runInBand
+.\apps\web> npm run lint

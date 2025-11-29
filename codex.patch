@@ -1,257 +1,530 @@
-diff --git a/apps/api/src/app.controller.spec.ts b/apps/api/src/app.controller.spec.ts
-index d22f3890a380cea30641cfecc329b5c794ef5fb2..14e14cae0d8683669c4694343b3f53836cd6ac8b 100644
---- a/apps/api/src/app.controller.spec.ts
-+++ b/apps/api/src/app.controller.spec.ts
-@@ -1,22 +1,54 @@
- import { Test, TestingModule } from '@nestjs/testing';
-+import { ConfigService } from '@nestjs/config';
+diff --git a/apps/api/.env.development.local.example b/apps/api/.env.development.local.example
+new file mode 100644
+index 0000000000000000000000000000000000000000..81f6a0b643ff303f6abfdc3426729605bb526a19
+--- /dev/null
++++ b/apps/api/.env.development.local.example
+@@ -0,0 +1,2 @@
++DATABASE_URL=postgresql://postgres:postgres@localhost:5432/target_this_role
++JWT_SECRET=change-me
+diff --git a/apps/api/package.json b/apps/api/package.json
+index 4e3bac7da4b810745a6f37c677d0ecc47642d88a..23c0e230f7c67a70faa7c96b0e9564c1e4ff6905 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -1,57 +1,67 @@
+ {
+   "name": "api",
+   "version": "0.0.1",
+   "description": "",
+   "author": "",
+   "private": true,
+   "license": "UNLICENSED",
+   "scripts": {
+     "build": "nest build",
+     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+     "start": "nest start",
+     "start:dev": "nest start --watch",
+     "start:debug": "nest start --debug --watch",
+     "start:prod": "node dist/main",
+     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+     "test": "jest",
+     "test:watch": "jest --watch",
+     "test:cov": "jest --coverage",
+     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+     "test:e2e": "jest --config ./test/jest-e2e.json"
+   },
+   "dependencies": {
++    "@nestjs/jwt": "^11.0.0",
++    "@nestjs/passport": "^11.0.0",
+     "@nestjs/common": "^11.0.1",
+     "@nestjs/config": "^4.0.2",
+     "@nestjs/core": "^11.0.1",
+     "@nestjs/platform-express": "^11.0.1",
++    "@nestjs/typeorm": "^11.0.0",
++    "bcrypt": "^5.1.1",
++    "passport": "^0.7.0",
++    "passport-jwt": "^4.0.1",
++    "pg": "^8.13.1",
+     "reflect-metadata": "^0.2.2",
+-    "rxjs": "^7.8.1"
++    "rxjs": "^7.8.1",
++    "typeorm": "^0.3.20"
+   },
+   "devDependencies": {
+     "@eslint/eslintrc": "^3.2.0",
+     "@eslint/js": "^9.18.0",
++    "@types/passport": "^1.0.17",
++    "@types/passport-jwt": "^4.0.1",
+     "@nestjs/cli": "^11.0.0",
+     "@nestjs/schematics": "^11.0.0",
+     "@nestjs/testing": "^11.0.1",
+     "@types/express": "^5.0.0",
+     "@types/jest": "^30.0.0",
+     "@types/node": "^22.10.7",
+     "@types/supertest": "^6.0.2",
+     "eslint": "^9.18.0",
+     "eslint-config-prettier": "^10.0.1",
+     "eslint-plugin-prettier": "^5.2.2",
+     "globals": "^16.0.0",
+     "jest": "^30.0.0",
+     "prettier": "^3.4.2",
+     "source-map-support": "^0.5.21",
+     "supertest": "^7.0.0",
+     "ts-jest": "^29.2.5",
+     "ts-loader": "^9.5.2",
+     "ts-node": "^10.9.2",
+     "tsconfig-paths": "^4.2.0",
+     "typescript": "^5.7.3",
+     "typescript-eslint": "^8.20.0"
+   },
+   "jest": {
+     "moduleFileExtensions": [
+       "js",
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 33dcc71d815176d99ab4ae97e0fb670806eb78d7..f08132f3ad65149a65d91af8abdf9bd1d6ed31c7 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,16 +1,33 @@
+ import { Module } from '@nestjs/common';
+-import { ConfigModule } from '@nestjs/config';
++import { ConfigModule, ConfigService } from '@nestjs/config';
++import { TypeOrmModule } from '@nestjs/typeorm';
  import { AppController } from './app.controller';
--import { AppService } from './app.service';
+ import { AppService } from './app.service';
++import { AuthModule } from './auth/auth.module';
++import { User } from './users/user.entity';
++import { UsersModule } from './users/users.module';
  
- describe('AppController', () => {
-   let appController: AppController;
- 
-   beforeEach(async () => {
-     const app: TestingModule = await Test.createTestingModule({
-       controllers: [AppController],
--      providers: [AppService],
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env'],
+     }),
++    TypeOrmModule.forRootAsync({
++      imports: [ConfigModule],
++      inject: [ConfigService],
++      useFactory: (configService: ConfigService) => ({
++        type: 'postgres',
++        url: configService.get<string>('DATABASE_URL'),
++        entities: [User],
++        synchronize: configService.get<string>('NODE_ENV') !== 'production',
++        autoLoadEntities: true,
++      }),
++    }),
++    UsersModule,
++    AuthModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/auth/auth.controller.spec.ts b/apps/api/src/auth/auth.controller.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..79c7adf26ea0a5f3a66c3165fe4b8d2992127a00
+--- /dev/null
++++ b/apps/api/src/auth/auth.controller.spec.ts
+@@ -0,0 +1,50 @@
++import { Test, TestingModule } from '@nestjs/testing';
++import { AuthController } from './auth.controller';
++import { AuthService } from './auth.service';
++import { LoginDto } from './dto/login.dto';
++import { RegisterDto } from './dto/register.dto';
++
++describe('AuthController', () => {
++  let controller: AuthController;
++  let authService: jest.Mocked<AuthService>;
++
++  beforeEach(async () => {
++    const module: TestingModule = await Test.createTestingModule({
++      controllers: [AuthController],
 +      providers: [
 +        {
-+          provide: ConfigService,
++          provide: AuthService,
 +          useValue: {
-+            get: jest.fn(() => undefined),
++            register: jest.fn(),
++            login: jest.fn(),
 +          },
 +        },
 +      ],
-     }).compile();
- 
-     appController = app.get<AppController>(AppController);
-   });
- 
--  describe('root', () => {
--    it('should return "Hello World!"', () => {
--      expect(appController.getHello()).toBe('Hello World!');
-+  it('returns a health payload', () => {
-+    const response = appController.getHealth();
++    }).compile();
 +
-+    expect(response).toMatchObject({ status: 'ok', service: 'api' });
-+    expect(response.timestamp).toBeDefined();
++    controller = module.get<AuthController>(AuthController);
++    authService = module.get(AuthService);
 +  });
 +
-+  it('returns version metadata with fallbacks', () => {
-+    const response = appController.getVersion();
++  it('handles registration', async () => {
++    const dto: RegisterDto = { email: 'test@example.com', password: 'Password123' };
++    const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
++    authService.register.mockResolvedValue(response);
 +
-+    expect(response).toMatchObject({
-+      version: 'unknown',
-+      env: 'development',
-+      port: 3001,
-+    });
-+    expect(response.timestamp).toBeDefined();
++    const result = await controller.register(dto);
++
++    expect(authService.register).toHaveBeenCalledWith(dto);
++    expect(result).toEqual(response);
 +  });
 +
-+  it('returns combined status payload', () => {
-+    const response = appController.getStatus();
++  it('handles login', async () => {
++    const dto: LoginDto = { email: 'test@example.com', password: 'Password123' };
++    const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
++    authService.login.mockResolvedValue(response);
 +
-+    expect(response).toMatchObject({
-+      status: 'ok',
-+      service: 'api',
-+      version: 'unknown',
-+      env: 'development',
-+      port: 3001,
-     });
-+    expect(response.timestamp).toBeDefined();
-   });
- });
-diff --git a/apps/api/src/app.controller.ts b/apps/api/src/app.controller.ts
-index 32f4cdf559a7a1c7787ae846aceb0f4eb3f177c4..0a0b04a276e8f758ccc5482dc5869bea172732a6 100644
---- a/apps/api/src/app.controller.ts
-+++ b/apps/api/src/app.controller.ts
-@@ -1,26 +1,42 @@
- import { Controller, Get } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
- 
- @Controller()
- export class AppController {
-   constructor(private readonly config: ConfigService) {}
- 
-+  private getTimestamp() {
-+    return new Date().toISOString();
++    const result = await controller.login(dto);
++
++    expect(authService.login).toHaveBeenCalledWith(dto);
++    expect(result).toEqual(response);
++  });
++});
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6d87fcb5428c83f58f3955b37af29c3b96dfb71
+--- /dev/null
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -0,0 +1,26 @@
++import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import { AuthService } from './auth.service';
++import { LoginDto } from './dto/login.dto';
++import { RegisterDto } from './dto/register.dto';
++
++@Controller('auth')
++export class AuthController {
++  constructor(private readonly authService: AuthService) {}
++
++  @Post('register')
++  register(@Body() payload: RegisterDto) {
++    return this.authService.register(payload);
 +  }
 +
-   @Get('health')
-   getHealth() {
-     return {
-       status: 'ok',
-       service: 'api',
--      timestamp: new Date().toISOString(),
-+      timestamp: this.getTimestamp(),
-     };
-   }
- 
-   @Get('version')
-   getVersion() {
-     return {
-       version: this.config.get<string>('APP_VERSION') ?? 'unknown',
-       env: this.config.get<string>('NODE_ENV') ?? 'development',
-       port: this.config.get<number>('PORT') ?? 3001,
--      timestamp: new Date().toISOString(),
-+      timestamp: this.getTimestamp(),
++  @Post('login')
++  login(@Body() payload: LoginDto) {
++    return this.authService.login(payload);
++  }
++
++  @UseGuards(AuthGuard('jwt'))
++  @Get('me')
++  me(@Req() request: { user?: unknown }) {
++    return { user: request.user };
++  }
++}
+diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..89e9e43b2cbe54889d4bae3430af6e7e737bcf25
+--- /dev/null
++++ b/apps/api/src/auth/auth.module.ts
+@@ -0,0 +1,27 @@
++import { Module } from '@nestjs/common';
++import { ConfigModule, ConfigService } from '@nestjs/config';
++import { JwtModule } from '@nestjs/jwt';
++import { PassportModule } from '@nestjs/passport';
++import { UsersModule } from '../users/users.module';
++import { AuthController } from './auth.controller';
++import { AuthService } from './auth.service';
++import { JwtStrategy } from './jwt.strategy';
++
++@Module({
++  imports: [
++    ConfigModule,
++    UsersModule,
++    PassportModule,
++    JwtModule.registerAsync({
++      imports: [ConfigModule],
++      inject: [ConfigService],
++      useFactory: (configService: ConfigService) => ({
++        secret: configService.get<string>('JWT_SECRET'),
++        signOptions: { expiresIn: '1h' },
++      }),
++    }),
++  ],
++  controllers: [AuthController],
++  providers: [AuthService, JwtStrategy],
++})
++export class AuthModule {}
+diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e1b671f745b6a5984daef92373634e1453e158d8
+--- /dev/null
++++ b/apps/api/src/auth/auth.service.spec.ts
+@@ -0,0 +1,81 @@
++import { JwtService } from '@nestjs/jwt';
++import { Test, TestingModule } from '@nestjs/testing';
++import * as bcrypt from 'bcrypt';
++import { AuthService } from './auth.service';
++import { LoginDto } from './dto/login.dto';
++import { RegisterDto } from './dto/register.dto';
++import { User } from '../users/user.entity';
++import { UsersService } from '../users/users.service';
++
++describe('AuthService', () => {
++  let service: AuthService;
++  let usersService: jest.Mocked<UsersService>;
++  let jwtService: JwtService;
++
++  beforeEach(async () => {
++    const module: TestingModule = await Test.createTestingModule({
++      providers: [
++        AuthService,
++        JwtService,
++        {
++          provide: UsersService,
++          useValue: {
++            findByEmail: jest.fn(),
++            findById: jest.fn(),
++            create: jest.fn(),
++          },
++        },
++      ],
++    }).compile();
++
++    service = module.get<AuthService>(AuthService);
++    usersService = module.get(UsersService);
++    jwtService = module.get(JwtService);
++    jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
++  });
++
++  it('registers a user and returns a token', async () => {
++    const payload: RegisterDto = { email: 'user@example.com', password: 'Password123' };
++    const savedUser: User = {
++      id: 'user-id',
++      email: payload.email,
++      passwordHash: '',
++      createdAt: new Date(),
++      updatedAt: new Date(),
 +    };
++
++    usersService.findByEmail.mockResolvedValue(null);
++    usersService.create.mockImplementation(async (email, passwordHash) => ({
++      ...savedUser,
++      email,
++      passwordHash,
++    }));
++
++    const result = await service.register(payload);
++    const hashedPasswordArg = usersService.create.mock.calls[0][1];
++
++    expect(hashedPasswordArg).not.toEqual(payload.password);
++    expect(result.accessToken).toEqual('signed-token');
++    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
++    expect(result.user).not.toHaveProperty('passwordHash');
++  });
++
++  it('logs in a user with valid credentials', async () => {
++    const payload: LoginDto = { email: 'user@example.com', password: 'Password123' };
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const savedUser: User = {
++      id: 'user-id',
++      email: payload.email,
++      passwordHash,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    usersService.findByEmail.mockResolvedValue(savedUser);
++
++    const result = await service.login(payload);
++
++    expect(result.accessToken).toEqual('signed-token');
++    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
++  });
++});
+diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2cb3cdab76d2630a87d177415a79a36b243dee54
+--- /dev/null
++++ b/apps/api/src/auth/auth.service.ts
+@@ -0,0 +1,58 @@
++import {
++  BadRequestException,
++  Injectable,
++  UnauthorizedException,
++} from '@nestjs/common';
++import { JwtService } from '@nestjs/jwt';
++import * as bcrypt from 'bcrypt';
++import { UsersService } from '../users/users.service';
++import { LoginDto } from './dto/login.dto';
++import { RegisterDto } from './dto/register.dto';
++import { User } from '../users/user.entity';
++
++type SanitizedUser = Omit<User, 'passwordHash'>;
++
++@Injectable()
++export class AuthService {
++  constructor(
++    private readonly usersService: UsersService,
++    private readonly jwtService: JwtService,
++  ) {}
++
++  async register(payload: RegisterDto): Promise<{ user: SanitizedUser; accessToken: string }> {
++    const existing = await this.usersService.findByEmail(payload.email);
++
++    if (existing) {
++      throw new BadRequestException('Email already registered');
++    }
++
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const user = await this.usersService.create(payload.email, passwordHash);
++
++    return this.buildAuthResponse(user);
 +  }
 +
-+  @Get('status')
-+  getStatus() {
-+    return {
-+      status: 'ok',
-+      service: 'api',
-+      version: this.config.get<string>('APP_VERSION') ?? 'unknown',
-+      env: this.config.get<string>('NODE_ENV') ?? 'development',
-+      port: this.config.get<number>('PORT') ?? 3001,
-+      timestamp: this.getTimestamp(),
-     };
-   }
- }
-diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
-index fd743983a3b180646f42f806df3d2dbb145edd58..1803176a965a621e9eb52a5f8c21d16c5af9426e 100644
---- a/apps/web/app/page.tsx
-+++ b/apps/web/app/page.tsx
-@@ -1,58 +1,114 @@
- 'use client';
- 
--import { useEffect, useState } from 'react';
-+import { useCallback, useEffect, useState } from 'react';
- 
--type HealthResponse = {
-+type StatusResponse = {
-   status: string;
-   service: string;
-+  version: string;
-+  env: string;
-+  port: number;
-   timestamp: string;
- };
- 
- export default function Home() {
--  const [health, setHealth] = useState<HealthResponse | null>(null);
-+  const [status, setStatus] = useState<StatusResponse | null>(null);
-   const [error, setError] = useState<string | null>(null);
-+  const [isLoading, setIsLoading] = useState(true);
- 
--  useEffect(() => {
-+  const fetchStatus = useCallback(() => {
-     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
- 
-     if (!baseUrl) {
-       setError('NEXT_PUBLIC_API_BASE_URL is not set');
-+      setIsLoading(false);
-       return;
-     }
- 
--    fetch(`${baseUrl}/health`)
-+    setIsLoading(true);
++  async login(payload: LoginDto): Promise<{ user: SanitizedUser; accessToken: string }> {
++    const user = await this.usersService.findByEmail(payload.email);
 +
-+    fetch(`${baseUrl}/status`)
-       .then(async (res) => {
-         if (!res.ok) {
-           throw new Error(`HTTP ${res.status}`);
-         }
--        const data = (await res.json()) as HealthResponse;
--        setHealth(data);
-+        const data = (await res.json()) as StatusResponse;
-+        setStatus(data);
-+        setError(null);
-       })
-       .catch((err) => {
-         console.error(err);
-         setError(err.message);
-+        setStatus(null);
-+      })
-+      .finally(() => {
-+        setIsLoading(false);
-       });
-   }, []);
- 
-+  useEffect(() => {
-+    // Initial load should still hydrate status from the API.
-+    // eslint-disable-next-line react-hooks/set-state-in-effect
-+    fetchStatus();
-+  }, [fetchStatus]);
++    if (!user) {
++      throw new UnauthorizedException('Invalid credentials');
++    }
 +
-   return (
--    <main className="min-h-screen flex flex-col items-center justify-center gap-4">
--      <h1 className="text-3xl font-bold">Target This Role – Dev Dashboard</h1>
--
--      {health && (
--        <pre className="bg-gray-100 rounded-md p-4 text-sm">
--          {JSON.stringify(health, null, 2)}
--        </pre>
--      )}
--
--      {error && (
--        <p className="text-red-600 text-sm">
--          Failed to reach API: {error}
--        </p>
--      )}
--
--      {!health && !error && (
--        <p className="text-sm text-gray-600">Checking API health…</p>
--      )}
-+    <main className="min-h-screen flex flex-col items-center justify-center gap-6 px-4">
-+      <h1 className="text-3xl font-bold text-center">
-+        Target This Role – Dev Dashboard
-+      </h1>
++    const isValidPassword = await bcrypt.compare(payload.password, user.passwordHash);
 +
-+      <section className="w-full max-w-xl space-y-3">
-+        <div className="flex items-center justify-between">
-+          <h2 className="text-xl font-semibold">API Status</h2>
-+          <button
-+            onClick={fetchStatus}
-+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-500"
-+            disabled={isLoading}
-+          >
-+            Refresh
-+          </button>
-+        </div>
++    if (!isValidPassword) {
++      throw new UnauthorizedException('Invalid credentials');
++    }
 +
-+        {status && (
-+          <dl className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
-+            <div>
-+              <dt className="font-semibold text-gray-700">Service</dt>
-+              <dd className="text-gray-900">{status.service}</dd>
-+            </div>
-+            <div>
-+              <dt className="font-semibold text-gray-700">Status</dt>
-+              <dd className="text-gray-900">{status.status}</dd>
-+            </div>
-+            <div>
-+              <dt className="font-semibold text-gray-700">Version</dt>
-+              <dd className="text-gray-900">{status.version}</dd>
-+            </div>
-+            <div>
-+              <dt className="font-semibold text-gray-700">Environment</dt>
-+              <dd className="text-gray-900">{status.env}</dd>
-+            </div>
-+            <div>
-+              <dt className="font-semibold text-gray-700">Port</dt>
-+              <dd className="text-gray-900">{status.port}</dd>
-+            </div>
-+            <div className="col-span-2">
-+              <dt className="font-semibold text-gray-700">Timestamp</dt>
-+              <dd className="text-gray-900">{status.timestamp}</dd>
-+            </div>
-+          </dl>
-+        )}
++    return this.buildAuthResponse(user);
++  }
 +
-+        {error && (
-+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-+            Failed to reach API: {error}
-+          </p>
-+        )}
++  private buildAuthResponse(user: User): { user: SanitizedUser; accessToken: string } {
++    const payload = { sub: user.id, email: user.email };
++    const accessToken = this.jwtService.sign(payload);
++    const { passwordHash, ...sanitizedUser } = user;
 +
-+        {isLoading && (
-+          <p className="text-sm text-gray-600">Checking API status…</p>
-+        )}
-+      </section>
-     </main>
-   );
- }
++    return { accessToken, user: sanitizedUser };
++  }
++}
+diff --git a/apps/api/src/auth/dto/login.dto.ts b/apps/api/src/auth/dto/login.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7d158ad4b75b3c0910ecc048cb9de16f72b58e0d
+--- /dev/null
++++ b/apps/api/src/auth/dto/login.dto.ts
+@@ -0,0 +1,4 @@
++export class LoginDto {
++  email!: string;
++  password!: string;
++}
+diff --git a/apps/api/src/auth/dto/register.dto.ts b/apps/api/src/auth/dto/register.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1f089937c08614cf568f3729c39203fc382c25ea
+--- /dev/null
++++ b/apps/api/src/auth/dto/register.dto.ts
+@@ -0,0 +1,4 @@
++export class RegisterDto {
++  email!: string;
++  password!: string;
++}
+diff --git a/apps/api/src/auth/jwt.strategy.ts b/apps/api/src/auth/jwt.strategy.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf378ab7deb895c274ecb68ab0a870a09f775872
+--- /dev/null
++++ b/apps/api/src/auth/jwt.strategy.ts
+@@ -0,0 +1,31 @@
++import { Injectable, UnauthorizedException } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import { PassportStrategy } from '@nestjs/passport';
++import { ExtractJwt, Strategy } from 'passport-jwt';
++import { UsersService } from '../users/users.service';
++
++@Injectable()
++export class JwtStrategy extends PassportStrategy(Strategy) {
++  constructor(
++    configService: ConfigService,
++    private readonly usersService: UsersService,
++  ) {
++    super({
++      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
++      ignoreExpiration: false,
++      secretOrKey: configService.get<string>('JWT_SECRET'),
++    });
++  }
++
++  async validate(payload: { sub: string; email: string }) {
++    const user = await this.usersService.findById(payload.sub);
++
++    if (!user) {
++      throw new UnauthorizedException('User not found');
++    }
++
++    const { passwordHash, ...sanitizedUser } = user;
++
++    return sanitizedUser;
++  }
++}
+diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ae5ce4597704db1378ce1838317321432f139fc
+--- /dev/null
++++ b/apps/api/src/users/user.entity.ts
+@@ -0,0 +1,27 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  Index,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++
++@Entity({ name: 'users' })
++export class User {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Index({ unique: true })
++  @Column({ unique: true })
++  email!: string;
++
++  @Column()
++  passwordHash!: string;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
+diff --git a/apps/api/src/users/users.module.ts b/apps/api/src/users/users.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3ffa0fbe5893e2fc340d74ddac58a32b0e8d1ef9
+--- /dev/null
++++ b/apps/api/src/users/users.module.ts
+@@ -0,0 +1,11 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { User } from './user.entity';
++import { UsersService } from './users.service';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([User])],
++  providers: [UsersService],
++  exports: [UsersService],
++})
++export class UsersModule {}
+diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..85586d3c85982a3ce6c5b009d7f87522848d189a
+--- /dev/null
++++ b/apps/api/src/users/users.service.ts
+@@ -0,0 +1,25 @@
++import { Injectable } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { User } from './user.entity';
++
++@Injectable()
++export class UsersService {
++  constructor(
++    @InjectRepository(User)
++    private readonly usersRepository: Repository<User>,
++  ) {}
++
++  async create(email: string, passwordHash: string): Promise<User> {
++    const user = this.usersRepository.create({ email, passwordHash });
++    return this.usersRepository.save(user);
++  }
++
++  findByEmail(email: string): Promise<User | null> {
++    return this.usersRepository.findOne({ where: { email } });
++  }
++
++  findById(id: string): Promise<User | null> {
++    return this.usersRepository.findOne({ where: { id } });
++  }
++}
