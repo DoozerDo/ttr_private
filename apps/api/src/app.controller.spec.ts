@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
-import { AppService } from './app.service';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -8,15 +8,47 @@ describe('AppController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(() => undefined),
+          },
+        },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
   });
 
-  describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+  it('returns a health payload', () => {
+    const response = appController.getHealth();
+
+    expect(response).toMatchObject({ status: 'ok', service: 'api' });
+    expect(response.timestamp).toBeDefined();
+  });
+
+  it('returns version metadata with fallbacks', () => {
+    const response = appController.getVersion();
+
+    expect(response).toMatchObject({
+      version: 'unknown',
+      env: 'development',
+      port: 3001,
     });
+    expect(response.timestamp).toBeDefined();
+  });
+
+  it('returns combined status payload', () => {
+    const response = appController.getStatus();
+
+    expect(response).toMatchObject({
+      status: 'ok',
+      service: 'api',
+      version: 'unknown',
+      env: 'development',
+      port: 3001,
+    });
+    expect(response.timestamp).toBeDefined();
   });
 });
