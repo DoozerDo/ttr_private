@@ -1,2 +1,5 @@
 cd apps/api
 npm run start:dev
+
+cd apps/web
+npm run dev
