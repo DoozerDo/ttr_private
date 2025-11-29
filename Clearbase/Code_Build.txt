@@ -1,0 +1,304 @@
+0. Guiding principles (so we don’t refactor later)
+
+We’ll structure things so:
+
+Everything runs via Docker Compose (locally and on DO).
+
+The app is 12-factor style: config via env vars, no hardcoded hosts/ports/paths.
+
+The repo is ready for multiple services (API, web, workers) but starts small.
+
+Stack assumption (can be changed later, but I’ll pick something concrete so we can move):
+
+Backend: NestJS (Node, TypeScript)
+
+Frontend: Next.js (React)
+
+DB: Postgres (via a Docker container locally)
+
+1. Lay out the repo structure
+
+In your TargetThisRole repo, create this top-level structure:
+
+apps/
+
+api/ → NestJS backend
+
+web/ → Next.js frontend
+
+infra/
+
+docker/ → Dockerfiles, docker-compose
+
+(later) terraform/
+
+packages/
+
+shared/ → shared types/interfaces, utility functions (optional for now)
+
+README.md
+
+You can do this manually or with a few terminal commands, but the key is: apps/api, apps/web, infra/docker.
+
+2. Bootstrap the backend (apps/api)
+
+Inside apps/api:
+
+Initialize NestJS:
+
+Use nest new api inside apps/api, or scaffold manually if you prefer.
+
+Ensure:
+
+Uses TypeScript
+
+Has .env support (Nest config module or similar)
+
+Add a minimal “health” endpoint:
+
+GET /health returns something like { status: 'ok', uptime: ..., version: ... }.
+
+Add initial DB integration:
+
+Install a Postgres ORM (e.g., Prisma or TypeORM).
+
+Configure via env vars:
+
+DATABASE_URL=postgres://... or individual DB_HOST, DB_PORT, etc.
+
+Create a single initial migration or model:
+
+Example: users table with id, email, created_at.
+
+Goal of this step:
+From your terminal, you can run the API (without Docker yet) and hit http://localhost:3001/health (or whatever port), and it responds.
+
+3. Bootstrap the frontend (apps/web)
+
+Inside apps/web:
+
+Initialize Next.js (or Vite+React, but Next gives routing/build-in SSR):
+
+npx create-next-app@latest . (inside apps/web)
+
+Create a very simple page structure:
+
+/ → landing/dashboard placeholder
+
+/auth/login → login placeholder
+
+/baseline → placeholder “Upload your baseline resume” page
+
+Add a config for the backend URL:
+
+Env var: NEXT_PUBLIC_API_BASE_URL=http://localhost:8080 (for example)
+
+Use that in the frontend to call /health and display the result.
+
+Goal of this step:
+From your terminal, npm run dev (or equivalent) in apps/web shows a basic page and proves it can talk to the API when both run locally without Docker.
+
+4. Introduce Docker for local dev
+
+Now we containerize, but keep it simple and DO-ready.
+
+4.1 Dockerfiles
+
+Create:
+
+infra/docker/api.Dockerfile
+
+infra/docker/web.Dockerfile
+
+Each should:
+
+Use a Node LTS base image
+
+Copy the relevant app directory
+
+Install dependencies
+
+Build (for web if needed)
+
+Run the app
+
+We can flesh out the exact Dockerfile contents later; for now just know the pattern.
+
+4.2 docker-compose for local
+
+Create infra/docker/docker-compose.dev.yml with services:
+
+api
+
+Build from api.Dockerfile
+
+Mount code as a volume (for live reload if desired)
+
+Depends on db
+
+Env vars for DB connection, etc.
+
+web
+
+Build from web.Dockerfile
+
+Uses NEXT_PUBLIC_API_BASE_URL=http://api:3001 (API’s internal docker name)
+
+db
+
+Use postgres:16 (or similar) image
+
+Expose port 5432 locally
+
+Env vars for POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+
+Volume for data persistence (db_data:/var/lib/postgresql/data)
+
+nginx (optional at first)
+
+Acts as a reverse proxy (later: targetthisrole.local → web, etc.)
+
+Goal of this step:
+You can run one command from the repo root:
+
+docker compose -f infra/docker/docker-compose.dev.yml up --build
+
+And then:
+
+http://localhost:3000 → frontend
+
+http://localhost:8080/health (or via nginx at /api/health) → backend
+
+This is exactly how it’ll run on DigitalOcean; the only thing that changes later is where the host machine lives and where Postgres lives (droplet vs. managed DB).
+
+5. Add configuration & environment handling
+
+To avoid refactors later, get config patterns right now:
+
+.env for local non-Docker runs:
+
+DATABASE_URL=...
+
+JWT_SECRET=...
+
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
+
+.env.docker (optional) for Docker-specific config:
+
+DATABASE_URL=postgres://user:pass@db:5432/dbname
+
+NEXT_PUBLIC_API_BASE_URL=http://api:3001
+
+In code, never hardcode localhost. Always read from env.
+
+This way, when you move to DO:
+
+Frontend env: NEXT_PUBLIC_API_BASE_URL=https://api.targetthisrole.com
+
+API env: DATABASE_URL pointing at DO’s managed Postgres
+
+No code changes, just different env files.
+
+6. Initial “real” features to build locally
+
+Once the skeleton is up, I’d prioritize one vertical slice:
+
+Auth
+
+Sign up with email + password (or even just “log in with magic link” later).
+
+JWT-based auth, stored in HttpOnly cookie or similar.
+
+Baseline Upload (stub)
+
+Page in web where user can “upload resume” (no full parsing yet).
+
+API endpoint that accepts file upload and stores it in local disk (later S3/Spaces).
+
+Job Ingestion (stub)
+
+Textarea where user pastes a JD.
+
+API endpoint that stores raw JD text and returns a simple “received” response.
+
+Fit Score (stubbed)
+
+For now: compute a fake or very simple score (hardcoded or based on keyword count).
+
+Show that score on a “Fit Review” page.
+
+The idea: you and your collaborator get a demo-able flow:
+
+Log in
+
+Upload baseline
+
+Paste JD
+
+Get a Fit Score
+
+All still local, but architected the same way it will be in prod.
+
+7. Prepare for collaboration (Git workflow)
+
+Since someone else is involved:
+
+Set main as the protected branch.
+
+Use feature branches:
+
+feature/api-auth
+
+feature/web-baseline-upload
+
+Use PRs for each slice of work (even small ones) so you both get context.
+
+Add a basic CONTRIBUTING.md that explains:
+
+npm install / pnpm install
+
+How to run API locally
+
+How to run web locally
+
+How to run Docker Compose
+
+This also becomes implicit documentation for Codex prompts later.
+
+8. When you’re ready for DigitalOcean (preview only)
+
+Because we’re container-first and env-driven, the move to DO will be:
+
+Create a droplet (manually at first).
+
+Install Docker + docker-compose.
+
+Copy repo & env files to the droplet.
+
+Run the same docker compose up -d command.
+
+Later:
+
+Replace local Postgres container with DO Managed DB.
+
+Add Terraform to codify the droplet, DB, firewall, etc.
+
+But we don’t need to touch that now; the choices we’re making above already future-proof the structure.
+
+What I’d suggest you do next
+
+If you want a concrete immediate to-do list:
+
+Create the folder structure (apps/api, apps/web, infra/docker).
+
+Scaffold NestJS in apps/api and add a GET /health.
+
+Scaffold Next.js in apps/web and add a page that calls /health and shows the result.
+
+Add a basic docker-compose.dev.yml with api, web, and db services (even if the DB isn’t used yet).
+
+If you’d like, in the next message I can:
+
+Propose a specific docker-compose.dev.yml layout, and
+
+Outline the exact env vars we should standardize on for API and web.

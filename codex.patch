@@ -1,0 +1,257 @@
+diff --git a/apps/api/src/app.controller.spec.ts b/apps/api/src/app.controller.spec.ts
+index d22f3890a380cea30641cfecc329b5c794ef5fb2..14e14cae0d8683669c4694343b3f53836cd6ac8b 100644
+--- a/apps/api/src/app.controller.spec.ts
++++ b/apps/api/src/app.controller.spec.ts
+@@ -1,22 +1,54 @@
+ import { Test, TestingModule } from '@nestjs/testing';
++import { ConfigService } from '@nestjs/config';
+ import { AppController } from './app.controller';
+-import { AppService } from './app.service';
+ 
+ describe('AppController', () => {
+   let appController: AppController;
+ 
+   beforeEach(async () => {
+     const app: TestingModule = await Test.createTestingModule({
+       controllers: [AppController],
+-      providers: [AppService],
++      providers: [
++        {
++          provide: ConfigService,
++          useValue: {
++            get: jest.fn(() => undefined),
++          },
++        },
++      ],
+     }).compile();
+ 
+     appController = app.get<AppController>(AppController);
+   });
+ 
+-  describe('root', () => {
+-    it('should return "Hello World!"', () => {
+-      expect(appController.getHello()).toBe('Hello World!');
++  it('returns a health payload', () => {
++    const response = appController.getHealth();
++
++    expect(response).toMatchObject({ status: 'ok', service: 'api' });
++    expect(response.timestamp).toBeDefined();
++  });
++
++  it('returns version metadata with fallbacks', () => {
++    const response = appController.getVersion();
++
++    expect(response).toMatchObject({
++      version: 'unknown',
++      env: 'development',
++      port: 3001,
++    });
++    expect(response.timestamp).toBeDefined();
++  });
++
++  it('returns combined status payload', () => {
++    const response = appController.getStatus();
++
++    expect(response).toMatchObject({
++      status: 'ok',
++      service: 'api',
++      version: 'unknown',
++      env: 'development',
++      port: 3001,
+     });
++    expect(response.timestamp).toBeDefined();
+   });
+ });
+diff --git a/apps/api/src/app.controller.ts b/apps/api/src/app.controller.ts
+index 32f4cdf559a7a1c7787ae846aceb0f4eb3f177c4..0a0b04a276e8f758ccc5482dc5869bea172732a6 100644
+--- a/apps/api/src/app.controller.ts
++++ b/apps/api/src/app.controller.ts
+@@ -1,26 +1,42 @@
+ import { Controller, Get } from '@nestjs/common';
+ import { ConfigService } from '@nestjs/config';
+ 
+ @Controller()
+ export class AppController {
+   constructor(private readonly config: ConfigService) {}
+ 
++  private getTimestamp() {
++    return new Date().toISOString();
++  }
++
+   @Get('health')
+   getHealth() {
+     return {
+       status: 'ok',
+       service: 'api',
+-      timestamp: new Date().toISOString(),
++      timestamp: this.getTimestamp(),
+     };
+   }
+ 
+   @Get('version')
+   getVersion() {
+     return {
+       version: this.config.get<string>('APP_VERSION') ?? 'unknown',
+       env: this.config.get<string>('NODE_ENV') ?? 'development',
+       port: this.config.get<number>('PORT') ?? 3001,
+-      timestamp: new Date().toISOString(),
++      timestamp: this.getTimestamp(),
++    };
++  }
++
++  @Get('status')
++  getStatus() {
++    return {
++      status: 'ok',
++      service: 'api',
++      version: this.config.get<string>('APP_VERSION') ?? 'unknown',
++      env: this.config.get<string>('NODE_ENV') ?? 'development',
++      port: this.config.get<number>('PORT') ?? 3001,
++      timestamp: this.getTimestamp(),
+     };
+   }
+ }
+diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
+index fd743983a3b180646f42f806df3d2dbb145edd58..1803176a965a621e9eb52a5f8c21d16c5af9426e 100644
+--- a/apps/web/app/page.tsx
++++ b/apps/web/app/page.tsx
+@@ -1,58 +1,114 @@
+ 'use client';
+ 
+-import { useEffect, useState } from 'react';
++import { useCallback, useEffect, useState } from 'react';
+ 
+-type HealthResponse = {
++type StatusResponse = {
+   status: string;
+   service: string;
++  version: string;
++  env: string;
++  port: number;
+   timestamp: string;
+ };
+ 
+ export default function Home() {
+-  const [health, setHealth] = useState<HealthResponse | null>(null);
++  const [status, setStatus] = useState<StatusResponse | null>(null);
+   const [error, setError] = useState<string | null>(null);
++  const [isLoading, setIsLoading] = useState(true);
+ 
+-  useEffect(() => {
++  const fetchStatus = useCallback(() => {
+     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+ 
+     if (!baseUrl) {
+       setError('NEXT_PUBLIC_API_BASE_URL is not set');
++      setIsLoading(false);
+       return;
+     }
+ 
+-    fetch(`${baseUrl}/health`)
++    setIsLoading(true);
++
++    fetch(`${baseUrl}/status`)
+       .then(async (res) => {
+         if (!res.ok) {
+           throw new Error(`HTTP ${res.status}`);
+         }
+-        const data = (await res.json()) as HealthResponse;
+-        setHealth(data);
++        const data = (await res.json()) as StatusResponse;
++        setStatus(data);
++        setError(null);
+       })
+       .catch((err) => {
+         console.error(err);
+         setError(err.message);
++        setStatus(null);
++      })
++      .finally(() => {
++        setIsLoading(false);
+       });
+   }, []);
+ 
++  useEffect(() => {
++    // Initial load should still hydrate status from the API.
++    // eslint-disable-next-line react-hooks/set-state-in-effect
++    fetchStatus();
++  }, [fetchStatus]);
++
+   return (
+-    <main className="min-h-screen flex flex-col items-center justify-center gap-4">
+-      <h1 className="text-3xl font-bold">Target This Role – Dev Dashboard</h1>
+-
+-      {health && (
+-        <pre className="bg-gray-100 rounded-md p-4 text-sm">
+-          {JSON.stringify(health, null, 2)}
+-        </pre>
+-      )}
+-
+-      {error && (
+-        <p className="text-red-600 text-sm">
+-          Failed to reach API: {error}
+-        </p>
+-      )}
+-
+-      {!health && !error && (
+-        <p className="text-sm text-gray-600">Checking API health…</p>
+-      )}
++    <main className="min-h-screen flex flex-col items-center justify-center gap-6 px-4">
++      <h1 className="text-3xl font-bold text-center">
++        Target This Role – Dev Dashboard
++      </h1>
++
++      <section className="w-full max-w-xl space-y-3">
++        <div className="flex items-center justify-between">
++          <h2 className="text-xl font-semibold">API Status</h2>
++          <button
++            onClick={fetchStatus}
++            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-500"
++            disabled={isLoading}
++          >
++            Refresh
++          </button>
++        </div>
++
++        {status && (
++          <dl className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
++            <div>
++              <dt className="font-semibold text-gray-700">Service</dt>
++              <dd className="text-gray-900">{status.service}</dd>
++            </div>
++            <div>
++              <dt className="font-semibold text-gray-700">Status</dt>
++              <dd className="text-gray-900">{status.status}</dd>
++            </div>
++            <div>
++              <dt className="font-semibold text-gray-700">Version</dt>
++              <dd className="text-gray-900">{status.version}</dd>
++            </div>
++            <div>
++              <dt className="font-semibold text-gray-700">Environment</dt>
++              <dd className="text-gray-900">{status.env}</dd>
++            </div>
++            <div>
++              <dt className="font-semibold text-gray-700">Port</dt>
++              <dd className="text-gray-900">{status.port}</dd>
++            </div>
++            <div className="col-span-2">
++              <dt className="font-semibold text-gray-700">Timestamp</dt>
++              <dd className="text-gray-900">{status.timestamp}</dd>
++            </div>
++          </dl>
++        )}
++
++        {error && (
++          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
++            Failed to reach API: {error}
++          </p>
++        )}
++
++        {isLoading && (
++          <p className="text-sm text-gray-600">Checking API status…</p>
++        )}
++      </section>
+     </main>
+   );
+ }

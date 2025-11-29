@@ -3,3 +3,9 @@ npm run start:dev
 
 cd apps/web
 npm run dev
+
+
+
+###Git Patching###
+git apply --check codex.patch
+git apply codex.patch
