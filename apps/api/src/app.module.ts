@@ -11,14 +11,16 @@ import { UsersModule } from './users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env.development.local', '.env'],
+      envFilePath: ['.env.development.local', '.env.local', '.env'],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
-        url: configService.get<string>('DATABASE_URL'),
+        url:
+          configService.get<string>('DATABASE_URL') ??
+          'postgresql://postgres:postgres@db:5432/targetthisrole',
         entities: [User],
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
         autoLoadEntities: true,
