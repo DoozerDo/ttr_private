@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: targetthisrole
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@db:5432/targetthisrole
+      JWT_SECRET: change-me-in-prod
+      PORT: 3001
+    depends_on:
+      - db
+    ports:
+      - "3001:3001"
+    # NOTE: no volumes, no npm ci here
+    # rely on the Dockerfile's CMD, e.g. `npm run start:prod`
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    # NOTE: no source bind mounts, no dev server; use `npm run start`
+
+volumes:
+  db_data:

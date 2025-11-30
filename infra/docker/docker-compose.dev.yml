@@ -1,3 +1,6 @@
+# docker-compose.dev.yml
+# Local development stack only.
+# Production deployments should use docker-compose.prod.yml or cloud-native config.
 version: "3.9"
 
 services:
@@ -21,6 +24,12 @@ services:
       - ../../apps/api/.env.development.local
     environment:
       NODE_ENV: development
+
+    # DEV-ONLY service:
+    # - mounts local source for live reload
+    # - installs node_modules for Linux on container startup
+    # Do NOT copy this pattern to production.
+    command: sh -c "npm ci && npm run start:dev"
     volumes:
       - ../../apps/api:/usr/src/app
       - /usr/src/app/node_modules
