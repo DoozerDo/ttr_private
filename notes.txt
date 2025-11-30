@@ -13,3 +13,18 @@ git apply codex.patch
 Testing: 
 .\apps\api> npm test -- --runInBand
 .\apps\web> npm run lint
+
+
+###Docker
+
+Restart API:
+docker compose -f infra\docker\docker-compose.dev.yml restart api
+
+Rebuild API:
+docker compose -f docker compose -f infra\docker\docker-compose.dev.yml up -d up -d --build api
+docker compose -f infra\docker\docker-compose.dev.yml up -d
+
+Rebuild All: 
+docker compose -f infra\docker\docker-compose.dev.yml down -v
+docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+
