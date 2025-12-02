@@ -28,3 +28,5 @@ Rebuild All:
 docker compose -f infra\docker\docker-compose.dev.yml down -v
 docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 
+Docker Logs:
+docker compose -f infra\docker\docker-compose.dev.yml logs -f --timestamps
