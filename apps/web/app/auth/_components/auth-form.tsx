@@ -18,32 +18,57 @@ export function AuthForm({ mode }: AuthFormProps) {
   const isLogin = mode === "login";
   const title = isLogin ? "Log in" : "Create an account";
   const actionLabel = isLogin ? "Log in" : "Register";
-  const helperText = isLogin
-    ? "Don't have an account?"
-    : "Already registered?";
+  const helperText = isLogin ? "Don't have an account?" : "Already registered?";
   const helperHref = isLogin ? "/auth/register" : "/auth/login";
   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    setIsSubmitting(true);
     setError(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+
+      // Try to parse JSON if there is a body; ignore parse errors
+      const text = await response.text();
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          // non-JSON body (e.g. 404 HTML) – data stays null
+        }
+      }
 
       if (!response.ok) {
-        setError(data?.error ?? "Authentication failed");
+        const messageFromApi =
+          (typeof data?.message === "string" && data.message) ||
+          (Array.isArray(data?.message) && data.message.join(", ")) ||
+          (typeof data?.error === "string" && data.error) ||
+          (isLogin ? "Login failed" : "Registration failed");
+
+        setError(messageFromApi);
         return;
       }
 
+      // At this point, the API route should have:
+      // - validated credentials
+      // - set the auth cookie
+      // We just navigate.
       router.push("/");
     } catch (submitError) {
       console.error("Auth request failed", submitError);
@@ -67,7 +92,10 @@ export function AuthForm({ mode }: AuthFormProps) {
         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
       >
         <div className="space-y-2">
-          <label className="block text-sm font-semibold text-gray-700" htmlFor="email">
+          <label
+            className="block text-sm font-semibold text-gray-700"
+            htmlFor="email"
+          >
             Email
           </label>
           <input
@@ -118,7 +146,10 @@ export function AuthForm({ mode }: AuthFormProps) {
 
       <p className="text-center text-sm text-gray-700">
         {helperText}{" "}
-        <Link href={helperHref} className="font-semibold text-blue-600 hover:underline">
+        <Link
+          href={helperHref}
+          className="font-semibold text-blue-600 hover:underline"
+        >
           {helperLinkLabel}
         </Link>
       </p>
