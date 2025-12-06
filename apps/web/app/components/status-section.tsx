@@ -17,20 +17,16 @@ export function StatusSection() {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchStatus = useCallback(() => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-
-    if (!baseUrl) {
-      setError("NEXT_PUBLIC_API_BASE_URL is not set");
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
 
-    fetch(`${baseUrl}/status`)
+    fetch("/api/status")
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          const data = (await res.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          const message = data?.error ?? `HTTP ${res.status}`;
+          throw new Error(message);
         }
         const data = (await res.json()) as StatusResponse;
         setStatus(data);

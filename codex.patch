@@ -1,677 +1,118 @@
-diff --git a/apps/web/app/api/auth/helpers.ts b/apps/web/app/api/auth/helpers.ts
+diff --git a/apps/web/app/api/status/route.ts b/apps/web/app/api/status/route.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..4e67b46aa79833e09a6ba0872d136dc9d266f24c
+index 0000000000000000000000000000000000000000..c17c4562de88f12690ac67ca94c8370e4219aee0
 --- /dev/null
-+++ b/apps/web/app/api/auth/helpers.ts
-@@ -0,0 +1,88 @@
++++ b/apps/web/app/api/status/route.ts
+@@ -0,0 +1,43 @@
 +import { NextResponse } from "next/server";
 +
-+const ACCESS_TOKEN_COOKIE = "auth_token";
-+
-+function buildErrorMessage(message: unknown): string {
-+  if (typeof message === "string") {
-+    return message;
-+  }
-+
-+  if (Array.isArray(message)) {
-+    return message.join(", ");
-+  }
-+
-+  return "Authentication failed";
++function getApiBaseUrl() {
++  return process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? null;
 +}
 +
-+export async function forwardAuthRequest(
-+  endpoint: string,
-+  body: Record<string, unknown>,
-+) {
-+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
++export async function GET() {
++  const baseUrl = getApiBaseUrl();
 +
 +  if (!baseUrl) {
 +    return NextResponse.json(
-+      { error: "NEXT_PUBLIC_API_BASE_URL is not configured" },
++      { error: "API base URL is not configured" },
 +      { status: 500 },
 +    );
 +  }
 +
-+  let apiResponse: Response;
++  let response: Response;
 +
 +  try {
-+    apiResponse = await fetch(`${baseUrl}${endpoint}`, {
-+      method: "POST",
-+      headers: { "Content-Type": "application/json" },
-+      body: JSON.stringify(body),
-+    });
++    response = await fetch(`${baseUrl}/status`, { cache: "no-store" });
 +  } catch (error) {
-+    console.error("Auth request failed", error);
-+    return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
++    console.error("Status check failed", error);
++    return NextResponse.json({ error: "Unable to reach API" }, { status: 503 });
 +  }
 +
-+  type AuthApiResponse = {
-+    accessToken?: string;
-+    user?: unknown;
-+    message?: unknown;
-+  } | null;
-+
-+  let data: AuthApiResponse = null;
++  if (!response.ok) {
++    return NextResponse.json(
++      { error: `API returned HTTP ${response.status}` },
++      { status: response.status },
++    );
++  }
 +
 +  try {
-+    data = await apiResponse.json();
++    const data = await response.json();
++    return NextResponse.json(data, { status: 200 });
 +  } catch (error) {
-+    console.error("Failed to parse auth response", error);
++    console.error("Unable to parse status response", error);
++    return NextResponse.json(
++      { error: "Invalid status response from API" },
++      { status: 502 },
++    );
 +  }
-+
-+  if (!apiResponse.ok) {
-+    const errorMessage = buildErrorMessage(data?.message);
-+    return NextResponse.json({ error: errorMessage }, { status: apiResponse.status });
-+  }
-+
-+  const response = NextResponse.json({ user: data?.user ?? null });
-+
-+  if (data?.accessToken) {
-+    response.cookies.set({
-+      name: ACCESS_TOKEN_COOKIE,
-+      value: data.accessToken,
-+      httpOnly: true,
-+      sameSite: "lax",
-+      secure: process.env.NODE_ENV === "production",
-+      path: "/",
-+    });
-+  }
-+
-+  return response;
-+}
-+
-+export function clearAuthCookie() {
-+  const response = NextResponse.json({ success: true });
-+  response.cookies.set({
-+    name: ACCESS_TOKEN_COOKIE,
-+    value: "",
-+    path: "/",
-+    httpOnly: true,
-+    maxAge: 0,
-+  });
-+  return response;
-+}
-diff --git a/apps/web/app/api/auth/login/route.ts b/apps/web/app/api/auth/login/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c5aad947a1e476a51b203469406cb3afc79423dd
---- /dev/null
-+++ b/apps/web/app/api/auth/login/route.ts
-@@ -0,0 +1,6 @@
-+import { forwardAuthRequest } from "../helpers";
-+
-+export async function POST(request: Request) {
-+  const payload = await request.json();
-+  return forwardAuthRequest("/auth/login", payload);
-+}
-diff --git a/apps/web/app/api/auth/logout/route.ts b/apps/web/app/api/auth/logout/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..22541a03255da023857d2725b9d0765572d6467b
---- /dev/null
-+++ b/apps/web/app/api/auth/logout/route.ts
-@@ -0,0 +1,5 @@
-+import { clearAuthCookie } from "../helpers";
-+
-+export async function POST() {
-+  return clearAuthCookie();
-+}
-diff --git a/apps/web/app/api/auth/register/route.ts b/apps/web/app/api/auth/register/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..eb9acb284f2e60432cef7f29474b01673c3cf3f7
---- /dev/null
-+++ b/apps/web/app/api/auth/register/route.ts
-@@ -0,0 +1,6 @@
-+import { forwardAuthRequest } from "../helpers";
-+
-+export async function POST(request: Request) {
-+  const payload = await request.json();
-+  return forwardAuthRequest("/auth/register", payload);
-+}
-diff --git a/apps/web/app/auth/_components/auth-form.tsx b/apps/web/app/auth/_components/auth-form.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..35506674037c5b7792681203826e16788f465baa
---- /dev/null
-+++ b/apps/web/app/auth/_components/auth-form.tsx
-@@ -0,0 +1,127 @@
-+"use client";
-+
-+import Link from "next/link";
-+import { useRouter } from "next/navigation";
-+import { FormEvent, useState } from "react";
-+
-+interface AuthFormProps {
-+  mode: "login" | "register";
-+}
-+
-+export function AuthForm({ mode }: AuthFormProps) {
-+  const router = useRouter();
-+  const [email, setEmail] = useState("");
-+  const [password, setPassword] = useState("");
-+  const [error, setError] = useState<string | null>(null);
-+  const [isSubmitting, setIsSubmitting] = useState(false);
-+
-+  const isLogin = mode === "login";
-+  const title = isLogin ? "Log in" : "Create an account";
-+  const actionLabel = isLogin ? "Log in" : "Register";
-+  const helperText = isLogin
-+    ? "Don't have an account?"
-+    : "Already registered?";
-+  const helperHref = isLogin ? "/auth/register" : "/auth/login";
-+  const helperLinkLabel = isLogin ? "Sign up" : "Log in";
-+  const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
-+
-+  const onSubmit = async (event: FormEvent) => {
-+    event.preventDefault();
-+    setIsSubmitting(true);
-+    setError(null);
-+
-+    try {
-+      const response = await fetch(endpoint, {
-+        method: "POST",
-+        headers: { "Content-Type": "application/json" },
-+        body: JSON.stringify({ email, password }),
-+      });
-+
-+      const data = await response.json();
-+
-+      if (!response.ok) {
-+        setError(data?.error ?? "Authentication failed");
-+        return;
-+      }
-+
-+      router.push("/");
-+    } catch (submitError) {
-+      console.error("Auth request failed", submitError);
-+      setError("Unable to reach authentication service");
-+    } finally {
-+      setIsSubmitting(false);
-+    }
-+  };
-+
-+  return (
-+    <div className="mx-auto w-full max-w-md space-y-6">
-+      <div className="space-y-2 text-center">
-+        <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
-+        <p className="text-sm text-gray-600">
-+          Use your Target This Role credentials to continue.
-+        </p>
-+      </div>
-+
-+      <form
-+        onSubmit={onSubmit}
-+        className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
-+      >
-+        <div className="space-y-2">
-+          <label className="block text-sm font-semibold text-gray-700" htmlFor="email">
-+            Email
-+          </label>
-+          <input
-+            id="email"
-+            type="email"
-+            required
-+            autoComplete="email"
-+            value={email}
-+            onChange={(event) => setEmail(event.target.value)}
-+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+            placeholder="you@example.com"
-+          />
-+        </div>
-+
-+        <div className="space-y-2">
-+          <label
-+            className="block text-sm font-semibold text-gray-700"
-+            htmlFor="password"
-+          >
-+            Password
-+          </label>
-+          <input
-+            id="password"
-+            type="password"
-+            required
-+            autoComplete={isLogin ? "current-password" : "new-password"}
-+            value={password}
-+            onChange={(event) => setPassword(event.target.value)}
-+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+            placeholder="••••••••"
-+          />
-+        </div>
-+
-+        {error && (
-+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-+            {error}
-+          </p>
-+        )}
-+
-+        <button
-+          type="submit"
-+          disabled={isSubmitting}
-+          className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
-+        >
-+          {isSubmitting ? "Working..." : actionLabel}
-+        </button>
-+      </form>
-+
-+      <p className="text-center text-sm text-gray-700">
-+        {helperText}{" "}
-+        <Link href={helperHref} className="font-semibold text-blue-600 hover:underline">
-+          {helperLinkLabel}
-+        </Link>
-+      </p>
-+    </div>
-+  );
-+}
-diff --git a/apps/web/app/auth/login/page.tsx b/apps/web/app/auth/login/page.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..ccbaf74ea6e5c631032e2f436ded23a86c3ec160
---- /dev/null
-+++ b/apps/web/app/auth/login/page.tsx
-@@ -0,0 +1,9 @@
-+import { AuthForm } from "../_components/auth-form";
-+
-+export default function LoginPage() {
-+  return (
-+    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+      <AuthForm mode="login" />
-+    </main>
-+  );
-+}
-diff --git a/apps/web/app/auth/register/page.tsx b/apps/web/app/auth/register/page.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..db1666de8e2bb627ce8527c6b1985a7f147e2d98
---- /dev/null
-+++ b/apps/web/app/auth/register/page.tsx
-@@ -0,0 +1,9 @@
-+import { AuthForm } from "../_components/auth-form";
-+
-+export default function RegisterPage() {
-+  return (
-+    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+      <AuthForm mode="register" />
-+    </main>
-+  );
-+}
-diff --git a/apps/web/app/components/auth-status.tsx b/apps/web/app/components/auth-status.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..3e90747fabf8cab12203ca6044ce3c305474e98c
---- /dev/null
-+++ b/apps/web/app/components/auth-status.tsx
-@@ -0,0 +1,55 @@
-+"use client";
-+
-+import { useRouter } from "next/navigation";
-+import { useState } from "react";
-+
-+interface AuthStatusProps {
-+  email: string;
-+}
-+
-+export function AuthStatus({ email }: AuthStatusProps) {
-+  const router = useRouter();
-+  const [isLoggingOut, setIsLoggingOut] = useState(false);
-+  const [error, setError] = useState<string | null>(null);
-+
-+  const handleLogout = async () => {
-+    setIsLoggingOut(true);
-+    setError(null);
-+
-+    try {
-+      const response = await fetch("/api/auth/logout", { method: "POST" });
-+
-+      if (!response.ok) {
-+        const data = await response.json();
-+        setError(data?.error ?? "Logout failed");
-+        return;
-+      }
-+
-+      router.push("/auth/login");
-+    } catch (logoutError) {
-+      console.error("Logout failed", logoutError);
-+      setError("Unable to log out right now");
-+    } finally {
-+      setIsLoggingOut(false);
-+    }
-+  };
-+
-+  return (
-+    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-+      <div>
-+        <p className="text-sm text-gray-600">You are logged in as</p>
-+        <p className="text-lg font-semibold text-gray-900">{email}</p>
-+      </div>
-+      <div className="flex flex-col items-start gap-2 sm:items-end">
-+        <button
-+          onClick={handleLogout}
-+          disabled={isLoggingOut}
-+          className="rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-70"
-+        >
-+          {isLoggingOut ? "Logging out..." : "Log out"}
-+        </button>
-+        {error && <p className="text-sm text-red-600">{error}</p>}
-+      </div>
-+    </div>
-+  );
 +}
 diff --git a/apps/web/app/components/status-section.tsx b/apps/web/app/components/status-section.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..33a44d0b0de903266fece7f25c39acae062f3c20
---- /dev/null
+index 33a44d0b0de903266fece7f25c39acae062f3c20..a713883848327224332575799da3f9ad2c0367e2 100644
+--- a/apps/web/app/components/status-section.tsx
 +++ b/apps/web/app/components/status-section.tsx
-@@ -0,0 +1,108 @@
-+"use client";
-+
-+import { useCallback, useEffect, useState } from "react";
-+
-+type StatusResponse = {
-+  status: string;
-+  service: string;
-+  version: string;
-+  env: string;
-+  port: number;
-+  timestamp: string;
-+};
-+
-+export function StatusSection() {
-+  const [status, setStatus] = useState<StatusResponse | null>(null);
-+  const [error, setError] = useState<string | null>(null);
-+  const [isLoading, setIsLoading] = useState(true);
-+
-+  const fetchStatus = useCallback(() => {
-+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-+
-+    if (!baseUrl) {
-+      setError("NEXT_PUBLIC_API_BASE_URL is not set");
-+      setIsLoading(false);
-+      return;
-+    }
-+
-+    setIsLoading(true);
-+
-+    fetch(`${baseUrl}/status`)
-+      .then(async (res) => {
-+        if (!res.ok) {
-+          throw new Error(`HTTP ${res.status}`);
-+        }
-+        const data = (await res.json()) as StatusResponse;
-+        setStatus(data);
-+        setError(null);
-+      })
-+      .catch((err) => {
-+        console.error(err);
-+        setError(err.message);
-+        setStatus(null);
-+      })
-+      .finally(() => {
-+        setIsLoading(false);
-+      });
-+  }, []);
-+
-+  useEffect(() => {
-+    // Initial load should still hydrate status from the API.
-+    // eslint-disable-next-line react-hooks/set-state-in-effect
-+    fetchStatus();
-+  }, [fetchStatus]);
-+
-+  return (
-+    <section className="w-full max-w-3xl space-y-3">
-+      <div className="flex items-center justify-between">
-+        <h2 className="text-xl font-semibold">API Status</h2>
-+        <button
-+          onClick={fetchStatus}
-+          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-500"
-+          disabled={isLoading}
-+        >
-+          Refresh
-+        </button>
-+      </div>
-+
-+      {status && (
-+        <dl className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
-+          <div>
-+            <dt className="font-semibold text-gray-700">Service</dt>
-+            <dd className="text-gray-900">{status.service}</dd>
-+          </div>
-+          <div>
-+            <dt className="font-semibold text-gray-700">Status</dt>
-+            <dd className="text-gray-900">{status.status}</dd>
-+          </div>
-+          <div>
-+            <dt className="font-semibold text-gray-700">Version</dt>
-+            <dd className="text-gray-900">{status.version}</dd>
-+          </div>
-+          <div>
-+            <dt className="font-semibold text-gray-700">Environment</dt>
-+            <dd className="text-gray-900">{status.env}</dd>
-+          </div>
-+          <div>
-+            <dt className="font-semibold text-gray-700">Port</dt>
-+            <dd className="text-gray-900">{status.port}</dd>
-+          </div>
-+          <div className="col-span-2">
-+            <dt className="font-semibold text-gray-700">Timestamp</dt>
-+            <dd className="text-gray-900">{status.timestamp}</dd>
-+          </div>
-+        </dl>
-+      )}
-+
-+      {error && (
-+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-+          Failed to reach API: {error}
-+        </p>
-+      )}
-+
-+      {isLoading && (
-+        <p className="text-sm text-gray-600">Checking API status…</p>
-+      )}
-+    </section>
-+  );
-+}
-diff --git a/apps/web/app/layout.tsx b/apps/web/app/layout.tsx
-index f7fa87eb875260ed98651bc419c8139b5119e554..4e7db019b22e663245e8d9db9717f47c20eca0cd 100644
---- a/apps/web/app/layout.tsx
-+++ b/apps/web/app/layout.tsx
-@@ -1,34 +1,34 @@
- import type { Metadata } from "next";
- import { Geist, Geist_Mono } from "next/font/google";
- import "./globals.css";
+@@ -1,58 +1,54 @@
+ "use client";
  
- const geistSans = Geist({
-   variable: "--font-geist-sans",
-   subsets: ["latin"],
- });
+ import { useCallback, useEffect, useState } from "react";
  
- const geistMono = Geist_Mono({
-   variable: "--font-geist-mono",
-   subsets: ["latin"],
- });
- 
- export const metadata: Metadata = {
--  title: "Create Next App",
--  description: "Generated by create next app",
-+  title: "Target This Role",
-+  description: "Dashboard and authentication for Target This Role",
+ type StatusResponse = {
+   status: string;
+   service: string;
+   version: string;
+   env: string;
+   port: number;
+   timestamp: string;
  };
  
- export default function RootLayout({
-   children,
- }: Readonly<{
-   children: React.ReactNode;
- }>) {
-   return (
-     <html lang="en">
-       <body
-         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-       >
-         {children}
-       </body>
-     </html>
-   );
- }
-diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
-index 1803176a965a621e9eb52a5f8c21d16c5af9426e..360a524b8b6a19571f3278a2875c498de754f31f 100644
---- a/apps/web/app/page.tsx
-+++ b/apps/web/app/page.tsx
-@@ -1,114 +1,36 @@
--'use client';
-+import { cookies } from "next/headers";
-+import { redirect } from "next/navigation";
+ export function StatusSection() {
+   const [status, setStatus] = useState<StatusResponse | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [isLoading, setIsLoading] = useState(true);
  
--import { useCallback, useEffect, useState } from 'react';
--
--type StatusResponse = {
--  status: string;
--  service: string;
--  version: string;
--  env: string;
--  port: number;
--  timestamp: string;
--};
-+import { AuthStatus } from "./components/auth-status";
-+import { StatusSection } from "./components/status-section";
-+import { decodeJwt } from "../lib/auth";
- 
- export default function Home() {
--  const [status, setStatus] = useState<StatusResponse | null>(null);
--  const [error, setError] = useState<string | null>(null);
--  const [isLoading, setIsLoading] = useState(true);
--
--  const fetchStatus = useCallback(() => {
+   const fetchStatus = useCallback(() => {
 -    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 -
 -    if (!baseUrl) {
--      setError('NEXT_PUBLIC_API_BASE_URL is not set');
+-      setError("NEXT_PUBLIC_API_BASE_URL is not set");
 -      setIsLoading(false);
 -      return;
 -    }
-+  const token = cookies().get("auth_token")?.value;
- 
--    setIsLoading(true);
-+  if (!token) {
-+    redirect("/auth/login");
-+  }
+-
+     setIsLoading(true);
  
 -    fetch(`${baseUrl}/status`)
--      .then(async (res) => {
--        if (!res.ok) {
++    fetch("/api/status")
+       .then(async (res) => {
+         if (!res.ok) {
 -          throw new Error(`HTTP ${res.status}`);
--        }
--        const data = (await res.json()) as StatusResponse;
--        setStatus(data);
--        setError(null);
--      })
--      .catch((err) => {
--        console.error(err);
--        setError(err.message);
--        setStatus(null);
--      })
--      .finally(() => {
--        setIsLoading(false);
--      });
--  }, []);
-+  const payload = decodeJwt(token);
++          const data = (await res.json().catch(() => null)) as
++            | { error?: string }
++            | null;
++          const message = data?.error ?? `HTTP ${res.status}`;
++          throw new Error(message);
+         }
+         const data = (await res.json()) as StatusResponse;
+         setStatus(data);
+         setError(null);
+       })
+       .catch((err) => {
+         console.error(err);
+         setError(err.message);
+         setStatus(null);
+       })
+       .finally(() => {
+         setIsLoading(false);
+       });
+   }, []);
  
--  useEffect(() => {
--    // Initial load should still hydrate status from the API.
--    // eslint-disable-next-line react-hooks/set-state-in-effect
--    fetchStatus();
--  }, [fetchStatus]);
-+  if (!payload?.email) {
-+    redirect("/auth/login");
-+  }
+   useEffect(() => {
+     // Initial load should still hydrate status from the API.
+     // eslint-disable-next-line react-hooks/set-state-in-effect
+     fetchStatus();
+   }, [fetchStatus]);
  
    return (
--    <main className="min-h-screen flex flex-col items-center justify-center gap-6 px-4">
--      <h1 className="text-3xl font-bold text-center">
--        Target This Role – Dev Dashboard
--      </h1>
--
--      <section className="w-full max-w-xl space-y-3">
--        <div className="flex items-center justify-between">
--          <h2 className="text-xl font-semibold">API Status</h2>
--          <button
--            onClick={fetchStatus}
--            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-blue-500"
--            disabled={isLoading}
--          >
--            Refresh
--          </button>
--        </div>
--
--        {status && (
--          <dl className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
--            <div>
--              <dt className="font-semibold text-gray-700">Service</dt>
--              <dd className="text-gray-900">{status.service}</dd>
--            </div>
--            <div>
--              <dt className="font-semibold text-gray-700">Status</dt>
--              <dd className="text-gray-900">{status.status}</dd>
--            </div>
--            <div>
--              <dt className="font-semibold text-gray-700">Version</dt>
--              <dd className="text-gray-900">{status.version}</dd>
--            </div>
--            <div>
--              <dt className="font-semibold text-gray-700">Environment</dt>
--              <dd className="text-gray-900">{status.env}</dd>
--            </div>
--            <div>
--              <dt className="font-semibold text-gray-700">Port</dt>
--              <dd className="text-gray-900">{status.port}</dd>
--            </div>
--            <div className="col-span-2">
--              <dt className="font-semibold text-gray-700">Timestamp</dt>
--              <dd className="text-gray-900">{status.timestamp}</dd>
--            </div>
--          </dl>
--        )}
--
--        {error && (
--          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
--            Failed to reach API: {error}
-+    <main className="min-h-screen bg-gray-50 px-4 py-8">
-+      <div className="mx-auto flex max-w-4xl flex-col gap-6">
-+        <header className="flex flex-col gap-2 text-center sm:text-left">
-+          <h1 className="text-3xl font-bold text-gray-900">Target This Role – Dashboard</h1>
-+          <p className="text-sm text-gray-700">
-+            Monitor your API status and manage your session.
-           </p>
--        )}
-+        </header>
- 
--        {isLoading && (
--          <p className="text-sm text-gray-600">Checking API status…</p>
--        )}
--      </section>
-+        <AuthStatus email={payload.email} />
-+        <StatusSection />
-+      </div>
-     </main>
-   );
- }
-diff --git a/apps/web/lib/auth.ts b/apps/web/lib/auth.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..fede7394d2716f1674f935a57d6e22324b7e2ef3
---- /dev/null
-+++ b/apps/web/lib/auth.ts
-@@ -0,0 +1,21 @@
-+export type JwtPayload = {
-+  sub?: string;
-+  email?: string;
-+  exp?: number;
-+};
-+
-+export function decodeJwt(token: string): JwtPayload | null {
-+  try {
-+    const [, payload] = token.split(".");
-+
-+    if (!payload) {
-+      return null;
-+    }
-+
-+    const decoded = Buffer.from(payload, "base64").toString("utf8");
-+    return JSON.parse(decoded) as JwtPayload;
-+  } catch (error) {
-+    console.error("Failed to decode JWT", error);
-+    return null;
-+  }
-+}
+     <section className="w-full max-w-3xl space-y-3">
+       <div className="flex items-center justify-between">
+         <h2 className="text-xl font-semibold">API Status</h2>
