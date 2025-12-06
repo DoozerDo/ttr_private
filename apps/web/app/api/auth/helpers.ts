@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 const ACCESS_TOKEN_COOKIE = "auth_token";
 
+function getApiBaseUrl() {
+  const serverBaseUrl = process.env.API_BASE_URL;
+  const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  return serverBaseUrl ?? clientBaseUrl ?? null;
+}
+
 function buildErrorMessage(message: unknown): string {
   if (typeof message === "string") {
     return message;
@@ -18,11 +25,11 @@ export async function forwardAuthRequest(
   endpoint: string,
   body: Record<string, unknown>,
 ) {
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  const baseUrl = getApiBaseUrl();
 
   if (!baseUrl) {
     return NextResponse.json(
-      { error: "NEXT_PUBLIC_API_BASE_URL is not configured" },
+      { error: "API base URL is not configured" },
       { status: 500 },
     );
   }
