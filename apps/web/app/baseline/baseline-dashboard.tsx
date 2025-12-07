@@ -39,6 +39,7 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
     try {
       const response = await fetch("/api/baselines", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
@@ -105,7 +106,10 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
               setIsUploading(true);
               setError(null);
               try {
-                const response = await fetch("/api/baselines", { cache: "no-store" });
+                const response = await fetch("/api/baselines", {
+                  cache: "no-store",
+                  credentials: "include",
+                });
                 const data = await response.json();
                 if (!response.ok) {
                   throw new Error(data?.error || "Unable to refresh baselines");
