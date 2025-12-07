@@ -45,6 +45,11 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        window.location.href = "/auth/login";
+        return;
+      }
+
       if (!response.ok) {
         const message = data?.message || data?.error || "Upload failed";
         setError(typeof message === "string" ? message : "Upload failed");
@@ -111,6 +116,11 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
                   credentials: "include",
                 });
                 const data = await response.json();
+                if (response.status === 401) {
+                  window.location.href = "/auth/login";
+                  return;
+                }
+
                 if (!response.ok) {
                   throw new Error(data?.error || "Unable to refresh baselines");
                 }

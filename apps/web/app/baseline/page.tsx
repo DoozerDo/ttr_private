@@ -18,6 +18,10 @@ async function fetchBaselines(token: string): Promise<BaselineDto[]> {
     cache: "no-store",
   });
 
+  if (response.status === 401) {
+    redirect("/auth/login");
+  }
+
   if (!response.ok) {
     return [];
   }
