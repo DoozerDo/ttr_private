@@ -18,6 +18,16 @@ export class BaselineService {
     private readonly baselineRepository: Repository<Baseline>,
   ) {}
 
+  private sanitizeSectionContent(content?: string | null) {
+    if (!content) {
+      return 'Uploaded file content';
+    }
+
+    // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
+    // so we do not send invalid UTF-8 to Postgres.
+    return content.replace(/\u0000/g, '');
+  }
+
   async createBaseline(
     userId: string,
     file: FileMetadata,
@@ -32,13 +42,13 @@ export class BaselineService {
       sections:
         parsedSections?.map((section, index) => ({
           type: section.type ?? 'other',
-          content: section.content ?? 'Uploaded file content',
+          content: this.sanitizeSectionContent(section.content),
           includePolicy: section.includePolicy ?? 'optional',
           orderIndex: section.orderIndex ?? index,
         })) ?? [
           {
             type: 'other',
-            content: 'Uploaded file content',
+            content: this.sanitizeSectionContent(),
             includePolicy: 'optional',
             orderIndex: 0,
           },
@@ -78,9 +88,11 @@ export class BaselineService {
     let content = `Uploaded file: ${fallbackFilename}`;
 
     try {
-      const buffer = await readFile(filePath, 'utf8');
-      if (buffer.trim()) {
-        content = buffer.slice(0, 4000);
+      const buffer = await readFile(filePath);
+      const textContent = buffer.toString('utf8').replace(/\u0000/g, '');
+
+      if (textContent.trim()) {
+        content = textContent.slice(0, 4000);
       }
     } catch {
       // ignore parse errors and keep fallback content
