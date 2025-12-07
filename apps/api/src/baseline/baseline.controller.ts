@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Request, Express  } from 'express';
+import { Request, Express } from 'express';
 import { BaselineService } from './baseline.service';
 
 @Controller('baselines')
@@ -35,10 +35,7 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const sections = await this.baselineService.buildSectionsFromFile(
-      file.path,
-      file.originalname,
-    );
+    const sections = await this.baselineService.buildSectionsFromFile(file);
 
     const baseline = await this.baselineService.createBaseline(
       userId,

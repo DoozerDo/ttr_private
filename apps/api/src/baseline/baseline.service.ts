@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { readFile } from 'node:fs/promises';
 import { Repository } from 'typeorm';
+import type { Express } from 'express';
+import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import { BaselineSection } from './baseline-section.entity';
 import { Baseline } from './baseline.entity';
 
@@ -16,6 +17,7 @@ export class BaselineService {
   constructor(
     @InjectRepository(Baseline)
     private readonly baselineRepository: Repository<Baseline>,
+    private readonly baselineTextExtractor: BaselineTextExtractor,
   ) {}
 
   private sanitizeSectionContent(content?: string | null) {
@@ -83,20 +85,8 @@ export class BaselineService {
     return baseline;
   }
 
-  async buildSectionsFromFile(filePath: string, fallbackFilename: string) {
-    // TODO: Replace with real parsing. For now, read what we can and store as a single section.
-    let content = `Uploaded file: ${fallbackFilename}`;
-
-    try {
-      const buffer = await readFile(filePath);
-      const textContent = buffer.toString('utf8').replace(/\u0000/g, '');
-
-      if (textContent.trim()) {
-        content = textContent.slice(0, 4000);
-      }
-    } catch {
-      // ignore parse errors and keep fallback content
-    }
+  async buildSectionsFromFile(file: Express.Multer.File) {
+    const content = await this.baselineTextExtractor.extractText(file);
 
     return [
       {

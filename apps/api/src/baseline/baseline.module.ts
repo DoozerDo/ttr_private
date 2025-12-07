@@ -9,6 +9,7 @@ import { BaselineSection } from './baseline-section.entity';
 import { BaselineController } from './baseline.controller';
 import { Baseline } from './baseline.entity';
 import { BaselineService } from './baseline.service';
+import { BaselineTextExtractor } from './baseline-text-extractor.service';
 
 @Module({
   imports: [
@@ -48,7 +49,7 @@ import { BaselineService } from './baseline.service';
       }),
     }),
   ],
-  providers: [BaselineService],
+  providers: [BaselineService, BaselineTextExtractor],
   controllers: [BaselineController],
 })
 export class BaselineModule {}
