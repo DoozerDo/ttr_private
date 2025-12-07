@@ -1,3 +1,14 @@
+Current URLs:
+http://localhost:3000
+http://localhost:3000/auth/register
+http://localhost:3000/auth/login
+http://localhost:3001/health
+http://localhost:3001/status
+http://localhost:3001/version
+
+
+
+
 cd apps/api
 npm run start:dev
 
@@ -21,8 +32,15 @@ Restart API:
 docker compose -f infra\docker\docker-compose.dev.yml restart api
 
 Rebuild API:
-docker compose -f docker compose -f infra\docker\docker-compose.dev.yml up -d up -d --build api
+docker compose -f infra\docker\docker-compose.dev.yml up -d --build api
 docker compose -f infra\docker\docker-compose.dev.yml up -d
+
+Rebuild Web:
+docker compose -f infra\docker\docker-compose.dev.yml up -d --build web
+docker compose -f infra\docker\docker-compose.dev.yml up -d
+
+Rebuild Both:
+docker compose -f infra\docker\docker-compose.dev.yml up -d --build web api
 
 Rebuild All: 
 docker compose -f infra\docker\docker-compose.dev.yml down -v

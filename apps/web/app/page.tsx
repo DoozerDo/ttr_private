@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import Link from "next/link";
+
 import { AuthStatus } from "./components/auth-status";
 import { StatusSection } from "./components/status-section";
 import { decodeJwt } from "../lib/auth";
@@ -30,6 +32,21 @@ export default async function Home() {
             Monitor your API status and manage your session.
           </p>
         </header>
+
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-gray-900">Navigate</p>
+            <p className="text-xs text-gray-700">
+              Jump to your baseline library to upload and review your résumé.
+            </p>
+          </div>
+          <Link
+            href="/baseline"
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500"
+          >
+            Go to Baseline
+          </Link>
+        </div>
 
         <AuthStatus email={payload.email} />
         <StatusSection />
