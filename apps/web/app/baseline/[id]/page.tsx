@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
+import { formatDateTime } from "../../../lib/format-date";
 
 async function fetchBaseline(id: string, token: string): Promise<BaselineDto | null> {
   const baseUrl = process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -41,8 +42,9 @@ function groupSections(sections: BaselineSectionDto[]) {
 export default async function BaselineDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const resolvedParams = await params;
   const cookieStore = await cookies();
   const token = cookieStore.get("auth_token")?.value;
 
@@ -50,7 +52,11 @@ export default async function BaselineDetailPage({
     redirect("/auth/login");
   }
 
-  const baseline = await fetchBaseline(params.id, token);
+  if (!resolvedParams?.id) {
+    notFound();
+  }
+
+  const baseline = await fetchBaseline(resolvedParams.id, token);
 
   if (!baseline) {
     notFound();
@@ -70,7 +76,7 @@ export default async function BaselineDetailPage({
               {baseline.originalFilename}
             </h1>
             <p className="text-sm text-gray-700">
-              Uploaded {new Date(baseline.createdAt).toLocaleString()}
+              Uploaded {formatDateTime(baseline.createdAt)}
             </p>
           </div>
           <Link

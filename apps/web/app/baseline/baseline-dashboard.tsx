@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { BaselineDto } from "../../lib/baselines";
+import { formatDateTime } from "../../lib/format-date";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -150,7 +151,7 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
                       {baseline.originalFilename}
                     </p>
                     <p className="text-xs text-gray-600">
-                      Uploaded {new Date(baseline.createdAt).toLocaleString()}
+                      Uploaded {formatDateTime(baseline.createdAt)}
                     </p>
                   </div>
                   <Link
