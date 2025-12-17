@@ -10,6 +10,7 @@ import { BaselineController } from './baseline.controller';
 import { Baseline } from './baseline.entity';
 import { BaselineService } from './baseline.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
+import { BaselineParserService } from './baseline-parser.service';
 
 @Module({
   imports: [
@@ -49,7 +50,11 @@ import { BaselineTextExtractor } from './baseline-text-extractor.service';
       }),
     }),
   ],
-  providers: [BaselineService, BaselineTextExtractor],
+  providers: [
+    BaselineService,
+    BaselineTextExtractor,
+    BaselineParserService,
+  ],
   controllers: [BaselineController],
 })
 export class BaselineModule {}

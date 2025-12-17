@@ -26,17 +26,72 @@ async function fetchBaseline(id: string, token: string): Promise<BaselineDto | n
   return (await response.json()) as BaselineDto;
 }
 
-function groupSections(sections: BaselineSectionDto[]) {
+const friendlyTitles: Record<string, string> = {
+  SUMMARY: "Summary",
+  EXPERIENCE: "Experience",
+  PROJECT: "Projects / Programs",
+  SKILLS: "Skills",
+  EDUCATION: "Education",
+  OTHER: "Other",
+  RAW: "Raw",
+};
+
+const displayOrder = [
+  "SUMMARY",
+  "EXPERIENCE",
+  "PROJECT",
+  "SKILLS",
+  "EDUCATION",
+  "OTHER",
+  "RAW",
+];
+
+function organizeSections(sections: BaselineSectionDto[]) {
+  const sorted = [...sections].sort((a, b) => a.order - b.order);
   const grouped: Record<string, BaselineSectionDto[]> = {};
 
-  sections.forEach((section) => {
-    if (!grouped[section.type]) {
-      grouped[section.type] = [];
+  sorted.forEach((section) => {
+    const key = section.sectionType ?? "OTHER";
+    if (!grouped[key]) {
+      grouped[key] = [];
     }
-    grouped[section.type].push(section);
+    grouped[key].push(section);
   });
 
   return grouped;
+}
+
+function renderContentSections(groupedSections: Record<string, BaselineSectionDto[]>) {
+  const keys = displayOrder.filter((key) => groupedSections[key]?.length);
+
+  return keys.map((type) => (
+    <div key={type} className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold uppercase text-gray-700">
+          {friendlyTitles[type] ?? type}
+        </span>
+        <span className="text-xs text-gray-600">
+          {groupedSections[type].length} section
+          {groupedSections[type].length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {groupedSections[type].map((section) => (
+          <article
+            key={section.id}
+            className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+          >
+            <div className="mb-2 text-xs font-semibold uppercase text-gray-600">
+              {section.title || friendlyTitles[type] || type}
+            </div>
+            <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+              {section.content}
+            </pre>
+          </article>
+        ))}
+      </div>
+    </div>
+  ));
 }
 
 export default async function BaselineDetailPage({
@@ -62,7 +117,15 @@ export default async function BaselineDetailPage({
     notFound();
   }
 
-  const groupedSections = groupSections(baseline.sections ?? []);
+  const groupedSections = organizeSections(baseline.sections ?? []);
+  const hasRenderableSections = Object.values(groupedSections).some(
+    (sections) => sections.length > 0,
+  );
+
+  const fallbackContent =
+    !hasRenderableSections && baseline.sections?.[0]?.content
+      ? baseline.sections[0].content
+      : null;
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-8">
@@ -89,34 +152,18 @@ export default async function BaselineDetailPage({
 
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
-          {Object.keys(groupedSections).length === 0 ? (
+          {!hasRenderableSections && !fallbackContent ? (
             <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
           ) : (
             <div className="space-y-6">
-              {Object.entries(groupedSections).map(([type, sections]) => (
-                <div key={type} className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold uppercase text-gray-700">
-                      {type}
-                    </span>
-                    <span className="text-xs text-gray-600">
-                      {sections.length} section{sections.length === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <div className="space-y-3">
-                    {sections.map((section) => (
-                      <article
-                        key={section.id}
-                        className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
-                      >
-                        <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-                          {section.content}
-                        </pre>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              ))}
+              {hasRenderableSections && renderContentSections(groupedSections)}
+              {!hasRenderableSections && fallbackContent ? (
+                <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
+                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+                    {fallbackContent}
+                  </pre>
+                </article>
+              ) : null}
             </div>
           )}
         </section>

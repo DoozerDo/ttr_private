@@ -50,6 +50,20 @@ export class BaselineController {
     return baseline;
   }
 
+  @Post(':id/reparse')
+  async reparseBaseline(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineService.reparseBaselineForUser(id, userId);
+  }
+
   @Get()
   async listBaselines(@Req() request: Request & { user?: { id?: string } }) {
     const userId = request.user?.id;

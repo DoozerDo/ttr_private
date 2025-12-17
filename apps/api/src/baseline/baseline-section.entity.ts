@@ -5,15 +5,19 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { Baseline } from './baseline.entity';
 
-export type BaselineSectionType =
-  | 'summary'
-  | 'experience'
-  | 'skills'
-  | 'education'
-  | 'other';
+export enum BaselineSectionType {
+  RAW = 'RAW',
+  SUMMARY = 'SUMMARY',
+  EXPERIENCE = 'EXPERIENCE',
+  PROJECT = 'PROJECT',
+  SKILLS = 'SKILLS',
+  EDUCATION = 'EDUCATION',
+  OTHER = 'OTHER',
+}
 
 export type BaselineIncludePolicy = 'always' | 'optional' | 'never';
 
@@ -31,8 +35,16 @@ export class BaselineSection {
   @Column()
   baselineId!: string;
 
-  @Column({ type: 'varchar' })
-  type!: BaselineSectionType;
+  @Column({
+    name: 'type',
+    type: 'enum',
+    enum: BaselineSectionType,
+    default: BaselineSectionType.OTHER,
+  })
+  sectionType!: BaselineSectionType;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  title!: string | null;
 
   @Column({ type: 'text' })
   content!: string;
@@ -40,9 +52,28 @@ export class BaselineSection {
   @Column({ type: 'varchar', default: 'optional' })
   includePolicy!: BaselineIncludePolicy;
 
-  @Column({ type: 'int', default: 0 })
-  orderIndex!: number;
+  @Column({ name: 'orderIndex', type: 'int', default: 0 })
+  order!: number;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt!: Date;
+
+  get type(): BaselineSectionType {
+    return this.sectionType;
+  }
+
+  set type(value: BaselineSectionType) {
+    this.sectionType = value;
+  }
+
+  get orderIndex(): number {
+    return this.order;
+  }
+
+  set orderIndex(value: number) {
+    this.order = value;
+  }
 }

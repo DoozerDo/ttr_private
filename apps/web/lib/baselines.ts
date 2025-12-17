@@ -1,20 +1,24 @@
 export type BaselineSectionType =
-  | "summary"
-  | "experience"
-  | "skills"
-  | "education"
-  | "other";
+  | "RAW"
+  | "SUMMARY"
+  | "EXPERIENCE"
+  | "PROJECT"
+  | "SKILLS"
+  | "EDUCATION"
+  | "OTHER";
 
 export type BaselineIncludePolicy = "always" | "optional" | "never";
 
 export interface BaselineSectionDto {
   id: string;
   baselineId: string;
-  type: BaselineSectionType;
+  sectionType: BaselineSectionType;
+  title: string | null;
   content: string;
   includePolicy: BaselineIncludePolicy;
-  orderIndex: number;
+  order: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface BaselineDto {
