@@ -19,7 +19,11 @@ export enum BaselineSectionType {
   OTHER = 'OTHER',
 }
 
-export type BaselineIncludePolicy = 'always' | 'optional' | 'never';
+export enum BaselineIncludePolicy {
+  ALWAYS = 'always',
+  OPTIONAL = 'optional',
+  NEVER = 'never',
+}
 
 @Entity({ name: 'baseline_sections' })
 export class BaselineSection {
@@ -49,7 +53,7 @@ export class BaselineSection {
   @Column({ type: 'text' })
   content!: string;
 
-  @Column({ type: 'varchar', default: 'optional' })
+  @Column({ type: 'varchar', default: BaselineIncludePolicy.OPTIONAL })
   includePolicy!: BaselineIncludePolicy;
 
   @Column({ name: 'orderIndex', type: 'int', default: 0 })

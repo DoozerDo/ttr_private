@@ -23,4 +23,5 @@ Function Update-NPM {
     npm install
     cd C:\Users\decla\Documents\GitHub\TargetThisRole\apps\web
     npm install
+    cd C:\Users\decla\Documents\GitHub\TargetThisRole
 }

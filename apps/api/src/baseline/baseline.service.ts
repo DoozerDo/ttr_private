@@ -48,9 +48,7 @@ export class BaselineService {
       sectionType: section.sectionType,
       title: section.title,
       content: this.sanitizeSectionContent(section.content),
-      includePolicy:
-        (section.includePolicy as BaselineIncludePolicy | undefined) ??
-        BaselineIncludePolicy.OPTIONAL,
+      includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
       // ensure RAW stays first; fall back to index if section.order is undefined
       order: (section.order ?? index) + 1,
     }));
@@ -83,9 +81,7 @@ export class BaselineService {
           sectionType: section.sectionType ?? BaselineSectionType.OTHER,
           title: section.title ?? null,
           content: this.sanitizeSectionContent(section.content),
-          includePolicy:
-            (section.includePolicy as BaselineIncludePolicy | undefined) ??
-            BaselineIncludePolicy.OPTIONAL,
+          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
           order: section.order ?? index,
         })) ?? [
           {

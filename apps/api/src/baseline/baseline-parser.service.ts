@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { BaselineSectionType } from './baseline-section.entity';
+import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
 
 export interface ParsedSection {
   sectionType: BaselineSectionType;
   title: string | null;
   content: string;
   order: number;
+  includePolicy?: BaselineIncludePolicy;
 }
 
 type ParseStrategy = 'rules' | 'llm';

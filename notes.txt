@@ -2,16 +2,27 @@ Current URLs:
 http://localhost:3000
 http://localhost:3000/auth/register
 http://localhost:3000/auth/login
+http://localhost:3000/baseline
+
 http://localhost:3001/health
 http://localhost:3001/status
 http://localhost:3001/version
 
 
 
+##NODEJS Notes: 
+## These need to be run whenever a change is made to package.json
+## There are currently two package.json files. 
+cd apps/api
+npm install
 
+cd apps/web
+npm install
+
+
+##Ignore these for now. 
 cd apps/api
 npm run start:dev
-
 cd apps/web
 npm run dev
 
@@ -27,19 +38,23 @@ Testing:
 
 
 ###Docker
+docker compose -f infra/docker/docker-compose.dev.yml logs api --tail=100
 
 Restart API:
-docker compose -f infra\docker\docker-compose.dev.yml restart api
+docker compose -f infra\docker\docker-compose.dev.yml restart api 
 
 Rebuild API:
+docker compose -f infra\docker\docker-compose.dev.yml down -v api
 docker compose -f infra\docker\docker-compose.dev.yml up -d --build api
 docker compose -f infra\docker\docker-compose.dev.yml up -d
 
 Rebuild Web:
+docker compose -f infra\docker\docker-compose.dev.yml down -v web
 docker compose -f infra\docker\docker-compose.dev.yml up -d --build web
 docker compose -f infra\docker\docker-compose.dev.yml up -d
 
 Rebuild Both:
+docker compose -f infra\docker\docker-compose.dev.yml down -v web api
 docker compose -f infra\docker\docker-compose.dev.yml up -d --build web api
 
 Rebuild All: 
@@ -48,3 +63,7 @@ docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 
 Docker Logs:
 docker compose -f infra\docker\docker-compose.dev.yml logs -f --timestamps
+
+Docker Container Check: 
+docker compose -f infra/docker/docker-compose.dev.yml ps 
+
