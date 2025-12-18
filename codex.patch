@@ -1,33 +1,957 @@
-diff --git a/apps/web/app/globals.css b/apps/web/app/globals.css
-index a2dc41ecee5ec435200fe7cba2bde4107f823774..13314d94e4c520f90e5706e967d7447052d08f05 100644
---- a/apps/web/app/globals.css
-+++ b/apps/web/app/globals.css
-@@ -1,26 +1,26 @@
- @import "tailwindcss";
+diff --git a/apps/api/src/baseline/baseline-parser.service.spec.ts b/apps/api/src/baseline/baseline-parser.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc63f3392963150a415ba0316636f38021b05097
+--- /dev/null
++++ b/apps/api/src/baseline/baseline-parser.service.spec.ts
+@@ -0,0 +1,64 @@
++import { BaselineParserService } from './baseline-parser.service';
++import { BaselineSectionType } from './baseline-section.entity';
++
++describe('BaselineParserService', () => {
++  let service: BaselineParserService;
++
++  beforeEach(() => {
++    service = new BaselineParserService();
++  });
++
++  it('parses known headings into ordered sections', () => {
++    const rawText = `SUMMARY
++A driven engineer
++
++WORK EXPERIENCE
++Company A - Developer
++
++EDUCATION
++Great University`;
++
++    const sections = service.parseBaseline(rawText);
++
++    expect(sections).toHaveLength(3);
++    expect(sections[0]).toMatchObject({
++      sectionType: BaselineSectionType.SUMMARY,
++      order: 0,
++    });
++    expect(sections[1]).toMatchObject({
++      sectionType: BaselineSectionType.EXPERIENCE,
++      order: 1,
++    });
++    expect(sections[2]).toMatchObject({
++      sectionType: BaselineSectionType.EDUCATION,
++      order: 2,
++    });
++  });
++
++  it('returns a single OTHER section when no headings are found', () => {
++    const rawText = 'Just a simple resume without headings.';
++
++    const sections = service.parseBaseline(rawText);
++
++    expect(sections).toHaveLength(1);
++    expect(sections[0]).toMatchObject({
++      sectionType: BaselineSectionType.OTHER,
++      order: 0,
++    });
++    expect(sections[0].content).toContain('simple resume');
++  });
++
++  it('maps unknown headings to OTHER', () => {
++    const rawText = `Overview
++Line one
++
++Random Header
++Line two`;
++
++    const sections = service.parseBaseline(rawText);
++
++    expect(sections).toHaveLength(2);
++    expect(sections[0].sectionType).toBe(BaselineSectionType.OTHER);
++    expect(sections[1].sectionType).toBe(BaselineSectionType.OTHER);
++  });
++});
+diff --git a/apps/api/src/baseline/baseline-parser.service.ts b/apps/api/src/baseline/baseline-parser.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e02702e479aa3a2b24e628bc851864501dba4a6b
+--- /dev/null
++++ b/apps/api/src/baseline/baseline-parser.service.ts
+@@ -0,0 +1,154 @@
++import { Injectable } from '@nestjs/common';
++import { BaselineSectionType } from './baseline-section.entity';
++
++export interface ParsedSection {
++  sectionType: BaselineSectionType;
++  title: string | null;
++  content: string;
++  order: number;
++}
++
++type ParseStrategy = 'rules' | 'llm';
++
++interface HeadingMatch {
++  sectionType: BaselineSectionType;
++  title: string;
++}
++
++@Injectable()
++export class BaselineParserService {
++  parseBaseline(
++    rawText: string,
++    opts: { strategy?: ParseStrategy } = {},
++  ): ParsedSection[] {
++    const strategy = opts.strategy ?? 'rules';
++
++    if (strategy === 'llm') {
++      return this.parseWithLLM(rawText);
++    }
++
++    return this.parseWithRules(rawText);
++  }
++
++  parseWithRules(rawText: string): ParsedSection[] {
++    const normalizedText = rawText.replace(/\r\n/g, '\n');
++    const lines = normalizedText.split('\n');
++
++    const sections: ParsedSection[] = [];
++    let currentHeading: HeadingMatch | null = null;
++    let buffer: string[] = [];
++
++    const flushSection = (nextHeading: HeadingMatch | null, order: number) => {
++      if (buffer.length === 0 && !nextHeading) {
++        return;
++      }
++
++      const content = buffer.join('\n').trim();
++      const headingToUse = currentHeading ?? nextHeading;
++
++      sections.push({
++        sectionType: headingToUse?.sectionType ?? BaselineSectionType.OTHER,
++        title: headingToUse?.title ?? null,
++        content: content || '',
++        order,
++      });
++    };
++
++    const headingMatches: { pattern: RegExp; type: BaselineSectionType }[] = [
++      {
++        pattern: /^(summary|professional summary|profile)\b/i,
++        type: BaselineSectionType.SUMMARY,
++      },
++      {
++        pattern: /^(experience|professional experience|work experience)\b/i,
++        type: BaselineSectionType.EXPERIENCE,
++      },
++      {
++        pattern: /^(projects?|programs?)\b/i,
++        type: BaselineSectionType.PROJECT,
++      },
++      {
++        pattern: /^(skills|technical skills|key skills)\b/i,
++        type: BaselineSectionType.SKILLS,
++      },
++      {
++        pattern: /^(education|academic background|training)\b/i,
++        type: BaselineSectionType.EDUCATION,
++      },
++    ];
++
++    const isHeadingLine = (line: string): HeadingMatch | null => {
++      const trimmed = line.trim();
++      if (!trimmed) {
++        return null;
++      }
++
++      if (trimmed.length > 80) {
++        return null;
++      }
++
++      for (const matcher of headingMatches) {
++        if (matcher.pattern.test(trimmed)) {
++          return {
++            sectionType: matcher.type,
++            title: this.normalizeHeading(trimmed),
++          };
++        }
++      }
++
++      return null;
++    };
++
++    lines.forEach((line) => {
++      const heading = isHeadingLine(line);
++
++      if (heading) {
++        if (currentHeading || buffer.length > 0) {
++          flushSection(heading, sections.length);
++          buffer = [];
++        }
++        currentHeading = heading;
++      } else {
++        buffer.push(line);
++      }
++    });
++
++    if (buffer.length > 0 || currentHeading) {
++      flushSection(null, sections.length);
++    }
++
++    if (sections.length === 0) {
++      return [
++        {
++          sectionType: BaselineSectionType.OTHER,
++          title: null,
++          content: normalizedText.trim(),
++          order: 0,
++        },
++      ];
++    }
++
++    return sections.map((section, index) => ({
++      ...section,
++      order: index,
++    }));
++  }
++
++  parseWithLLM(rawText: string): ParsedSection[] {
++    // TODO: Hook up LLM-based parsing for richer extraction (titles, dates, roles, etc.).
++    return this.parseWithRules(rawText);
++  }
++
++  private normalizeHeading(heading: string): string {
++    const trimmed = heading.trim();
++    if (trimmed === trimmed.toUpperCase()) {
++      return trimmed
++        .toLowerCase()
++        .split(' ')
++        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
++        .join(' ');
++    }
++
++    return trimmed;
++  }
++}
+diff --git a/apps/api/src/baseline/baseline-section.entity.ts b/apps/api/src/baseline/baseline-section.entity.ts
+index 7b65d31c13188a292577d42fd1b6fef83431e885..b3d407275f65953f1d5c038bd8afb764a07b24e4 100644
+--- a/apps/api/src/baseline/baseline-section.entity.ts
++++ b/apps/api/src/baseline/baseline-section.entity.ts
+@@ -1,48 +1,79 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   JoinColumn,
+   ManyToOne,
+   PrimaryGeneratedColumn,
++  UpdateDateColumn,
+ } from 'typeorm';
+ import { Baseline } from './baseline.entity';
  
- :root {
--  --background: #ffffff;
-+  --background: #808080;
-   --foreground: #171717;
+-export type BaselineSectionType =
+-  | 'summary'
+-  | 'experience'
+-  | 'skills'
+-  | 'education'
+-  | 'other';
++export enum BaselineSectionType {
++  RAW = 'RAW',
++  SUMMARY = 'SUMMARY',
++  EXPERIENCE = 'EXPERIENCE',
++  PROJECT = 'PROJECT',
++  SKILLS = 'SKILLS',
++  EDUCATION = 'EDUCATION',
++  OTHER = 'OTHER',
++}
+ 
+ export type BaselineIncludePolicy = 'always' | 'optional' | 'never';
+ 
+ @Entity({ name: 'baseline_sections' })
+ export class BaselineSection {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @ManyToOne(() => Baseline, (baseline) => baseline.sections, {
+     onDelete: 'CASCADE',
+   })
+   @JoinColumn({ name: 'baselineId' })
+   baseline!: Baseline;
+ 
+   @Column()
+   baselineId!: string;
+ 
+-  @Column({ type: 'varchar' })
+-  type!: BaselineSectionType;
++  @Column({
++    name: 'type',
++    type: 'enum',
++    enum: BaselineSectionType,
++    default: BaselineSectionType.OTHER,
++  })
++  sectionType!: BaselineSectionType;
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  title!: string | null;
+ 
+   @Column({ type: 'text' })
+   content!: string;
+ 
+   @Column({ type: 'varchar', default: 'optional' })
+   includePolicy!: BaselineIncludePolicy;
+ 
+-  @Column({ type: 'int', default: 0 })
+-  orderIndex!: number;
++  @Column({ name: 'orderIndex', type: 'int', default: 0 })
++  order!: number;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++
++  get type(): BaselineSectionType {
++    return this.sectionType;
++  }
++
++  set type(value: BaselineSectionType) {
++    this.sectionType = value;
++  }
++
++  get orderIndex(): number {
++    return this.order;
++  }
++
++  set orderIndex(value: number) {
++    this.order = value;
++  }
  }
+diff --git a/apps/api/src/baseline/baseline.controller.ts b/apps/api/src/baseline/baseline.controller.ts
+index 59f1af1c4295a83770b214bbb07c75d4ffe0f1b7..7ae8cd78e68d1bc4b57d24d6cf9eb69113770e56 100644
+--- a/apps/api/src/baseline/baseline.controller.ts
++++ b/apps/api/src/baseline/baseline.controller.ts
+@@ -28,50 +28,64 @@ export class BaselineController {
+     if (!file) {
+       throw new BadRequestException('No file uploaded');
+     }
  
- @theme inline {
-   --color-background: var(--background);
-   --color-foreground: var(--foreground);
-   --font-sans: var(--font-geist-sans);
-   --font-mono: var(--font-geist-mono);
- }
+     const userId = request.user?.id;
  
- @media (prefers-color-scheme: dark) {
-   :root {
--    --background: #0a0a0a;
-+    --background: #808080;
-     --foreground: #ededed;
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     const sections = await this.baselineService.buildSectionsFromFile(file);
+ 
+     const baseline = await this.baselineService.createBaseline(
+       userId,
+       {
+         originalname: file.originalname,
+         mimetype: file.mimetype,
+         path: file.path,
+       },
+       sections,
+     );
+ 
+     return baseline;
+   }
+ 
++  @Post(':id/reparse')
++  async reparseBaseline(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.baselineService.reparseBaselineForUser(id, userId);
++  }
++
+   @Get()
+   async listBaselines(@Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.baselineService.listBaselinesForUser(userId);
+   }
+ 
+   @Get(':id')
+   async getBaseline(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.baselineService.getBaselineByIdForUser(id, userId);
    }
  }
+diff --git a/apps/api/src/baseline/baseline.module.ts b/apps/api/src/baseline/baseline.module.ts
+index 8b0196513b21d9c117c79a5103cab0de314ece54..18b710bffd30e9a72f771f53ff0ea9a7fdf5e0e3 100644
+--- a/apps/api/src/baseline/baseline.module.ts
++++ b/apps/api/src/baseline/baseline.module.ts
+@@ -1,55 +1,60 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { MulterModule } from '@nestjs/platform-express';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { diskStorage } from 'multer';
+ import { mkdirSync } from 'node:fs';
+ import path from 'node:path';
+ import { BaselineSection } from './baseline-section.entity';
+ import { BaselineController } from './baseline.controller';
+ import { Baseline } from './baseline.entity';
+ import { BaselineService } from './baseline.service';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
++import { BaselineParserService } from './baseline-parser.service';
  
- body {
-   background: var(--background);
-   color: var(--foreground);
-   font-family: Arial, Helvetica, sans-serif;
+ @Module({
+   imports: [
+     ConfigModule,
+     TypeOrmModule.forFeature([Baseline, BaselineSection]),
+     MulterModule.registerAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         storage: diskStorage({
+           destination: (_req, _file, cb) => {
+             const uploadDir =
+               configService.get<string>('BASELINE_STORAGE_PATH') ??
+               path.join(process.cwd(), 'storage', 'baselines');
+ 
+             mkdirSync(uploadDir, { recursive: true });
+             cb(null, uploadDir);
+           },
+           filename: (_req, file, cb) => {
+             const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+             const ext = path.extname(file.originalname) || '.bin';
+             cb(null, `${uniqueSuffix}${ext}`);
+           },
+         }),
+         fileFilter: (_req, file, cb) => {
+           const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+ 
+           if (!allowedMimes.includes(file.mimetype)) {
+             return cb(
+               new Error('Only PDF and DOCX uploads are supported for baselines'),
+               false,
+             );
+           }
+ 
+           cb(null, true);
+         },
+       }),
+     }),
+   ],
+-  providers: [BaselineService, BaselineTextExtractor],
++  providers: [
++    BaselineService,
++    BaselineTextExtractor,
++    BaselineParserService,
++  ],
+   controllers: [BaselineController],
+ })
+ export class BaselineModule {}
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index 48310ddcf8f78b5435f953d21ae207945bdb8ba5..8b609f2ba46a221f2c134a5f781edf8c01def1d6 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -1,100 +1,150 @@
+ import { Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import type { Express } from 'express';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+-import { BaselineSection } from './baseline-section.entity';
++import { BaselineSection, BaselineSectionType } from './baseline-section.entity';
+ import { Baseline } from './baseline.entity';
++import { BaselineParserService, ParsedSection } from './baseline-parser.service';
+ 
+ export type FileMetadata = {
+   originalname: string;
+   mimetype: string;
+   path: string;
+ };
+ 
+ @Injectable()
+ export class BaselineService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
++    @InjectRepository(BaselineSection)
++    private readonly baselineSectionRepository: Repository<BaselineSection>,
+     private readonly baselineTextExtractor: BaselineTextExtractor,
++    private readonly baselineParser: BaselineParserService,
+   ) {}
+ 
+   private sanitizeSectionContent(content?: string | null) {
+     if (!content) {
+       return 'Uploaded file content';
+     }
+ 
+     // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
+     // so we do not send invalid UTF-8 to Postgres.
+     return content.replace(/\u0000/g, '');
+   }
+ 
++  private buildSections(
++    rawText: string,
++    parsedSections: ParsedSection[],
++  ): Partial<BaselineSection>[] {
++    const sanitizedRaw = this.sanitizeSectionContent(rawText);
++    const structuredSections = parsedSections.map((section) => ({
++      sectionType: section.sectionType,
++      title: section.title,
++      content: this.sanitizeSectionContent(section.content),
++      includePolicy: 'optional',
++      order: section.order + 1, // ensure RAW stays first
++    }));
++
++    return [
++      {
++        sectionType: BaselineSectionType.RAW,
++        title: 'Raw',
++        content: sanitizedRaw,
++        includePolicy: 'never',
++        order: 0,
++      },
++      ...structuredSections,
++    ];
++  }
++
+   async createBaseline(
+     userId: string,
+     file: FileMetadata,
+     parsedSections?: Partial<BaselineSection>[],
+   ) {
+     const baseline = this.baselineRepository.create({
+       userId,
+       originalFilename: file.originalname,
+       mimeType: file.mimetype,
+       storagePath: file.path,
+       hash: null,
+       sections:
+         parsedSections?.map((section, index) => ({
+-          type: section.type ?? 'other',
++          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
++          title: section.title ?? null,
+           content: this.sanitizeSectionContent(section.content),
+           includePolicy: section.includePolicy ?? 'optional',
+-          orderIndex: section.orderIndex ?? index,
++          order: section.order ?? index,
+         })) ?? [
+           {
+-            type: 'other',
++            sectionType: BaselineSectionType.OTHER,
++            title: null,
+             content: this.sanitizeSectionContent(),
+             includePolicy: 'optional',
+-            orderIndex: 0,
++            order: 0,
+           },
+         ],
+     });
+ 
+     return this.baselineRepository.save(baseline);
+   }
+ 
+   async listBaselinesForUser(userId: string) {
+     return this.baselineRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
+ 
+   async getBaselineByIdForUser(id: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id, userId },
+       relations: ['sections'],
+       order: {
+         sections: {
+-          orderIndex: 'ASC',
++          order: 'ASC',
+         },
+       },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     return baseline;
+   }
+ 
+   async buildSectionsFromFile(file: Express.Multer.File) {
+     const content = await this.baselineTextExtractor.extractText(file);
++    const parsedSections = this.baselineParser.parseBaseline(content);
+ 
+-    return [
+-      {
+-        type: 'other',
+-        content,
+-        includePolicy: 'optional',
+-        orderIndex: 0,
+-      } as Partial<BaselineSection>,
+-    ];
++    return this.buildSections(content, parsedSections);
++  }
++
++  async reparseBaselineForUser(baselineId: string, userId: string) {
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineId, userId },
++      relations: ['sections'],
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    const rawSection =
++      baseline.sections.find(
++        (section) => section.sectionType === BaselineSectionType.RAW,
++      ) ?? baseline.sections[0];
++
++    const rawText = rawSection?.content ?? '';
++    const parsedSections = this.baselineParser.parseBaseline(rawText);
++    const rebuiltSections = this.buildSections(rawText, parsedSections);
++
++    await this.baselineSectionRepository.delete({ baselineId: baseline.id });
++
++    baseline.sections = rebuiltSections as BaselineSection[];
++    return this.baselineRepository.save(baseline);
+   }
+ }
+diff --git a/apps/api/src/migrations/1710000000000-BaselineSectionStructured.ts b/apps/api/src/migrations/1710000000000-BaselineSectionStructured.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0528d5fd83e4431537abb901b9073e3c342d3953
+--- /dev/null
++++ b/apps/api/src/migrations/1710000000000-BaselineSectionStructured.ts
+@@ -0,0 +1,70 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class BaselineSectionStructured1710000000000
++  implements MigrationInterface
++{
++  name = 'BaselineSectionStructured1710000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(
++      `CREATE TYPE "baseline_sections_type_enum" AS ENUM('RAW', 'SUMMARY', 'EXPERIENCE', 'PROJECT', 'SKILLS', 'EDUCATION', 'OTHER')`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "baseline_sections" ALTER COLUMN "type" TYPE "baseline_sections_type_enum" USING upper("type")::"baseline_sections_type_enum"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "baseline_sections" ALTER COLUMN "type" SET DEFAULT 'OTHER'::"baseline_sections_type_enum"`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "baseline_sections" ADD "title" character varying(255)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "baseline_sections" ADD "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()`,
++    );
++
++    await queryRunner.query(
++      `CREATE INDEX IF NOT EXISTS "IDX_baseline_sections_baselineId" ON "baseline_sections" ("baselineId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX IF NOT EXISTS "IDX_baseline_sections_orderIndex" ON "baseline_sections" ("orderIndex")`,
++    );
++
++    await queryRunner.query(
++      `INSERT INTO "baseline_sections" ("id", "baselineId", "type", "title", "content", "includePolicy", "orderIndex", "createdAt", "updatedAt")
++       SELECT gen_random_uuid(), bs."baselineId", 'RAW', 'Raw', bs."content", 'never', 0, NOW(), NOW()
++       FROM "baseline_sections" bs
++       WHERE NOT EXISTS (
++         SELECT 1 FROM "baseline_sections" existing
++         WHERE existing."baselineId" = bs."baselineId" AND existing."type" = 'RAW'
++       )
++       GROUP BY bs."baselineId", bs."content"`,
++    );
++
++    await queryRunner.query(
++      `UPDATE "baseline_sections" SET "orderIndex" = "orderIndex" + 1 WHERE "type" <> 'RAW'`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `UPDATE "baseline_sections" SET "orderIndex" = CASE WHEN "orderIndex" > 0 THEN "orderIndex" - 1 ELSE 0 END WHERE "type" <> 'RAW'`,
++    );
++    await queryRunner.query(
++      `DELETE FROM "baseline_sections" WHERE "type" = 'RAW'`,
++    );
++
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_sections_orderIndex"`);
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_sections_baselineId"`);
++    await queryRunner.query(`ALTER TABLE "baseline_sections" DROP COLUMN "updatedAt"`);
++    await queryRunner.query(`ALTER TABLE "baseline_sections" DROP COLUMN "title"`);
++    await queryRunner.query(`ALTER TABLE "baseline_sections" ALTER COLUMN "type" DROP DEFAULT`);
++    await queryRunner.query(
++      `ALTER TABLE "baseline_sections" ALTER COLUMN "type" TYPE character varying USING "type"::text`,
++    );
++    await queryRunner.query(`DROP TYPE "baseline_sections_type_enum"`);
++  }
++}
+diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
+index df589945916d141d18a94988d5a4c8c4275a6a44..fd0428786cb7c3078c34b768fe52587dba7afa38 100644
+--- a/apps/web/app/baseline/[id]/page.tsx
++++ b/apps/web/app/baseline/[id]/page.tsx
+@@ -4,123 +4,170 @@ import { notFound, redirect } from "next/navigation";
+ 
+ import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
+ import { formatDateTime } from "../../../lib/format-date";
+ 
+ async function fetchBaseline(id: string, token: string): Promise<BaselineDto | null> {
+   const baseUrl = process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
+ 
+   if (!baseUrl) {
+     return null;
+   }
+ 
+   const response = await fetch(`${baseUrl}/baselines/${id}`, {
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+     cache: "no-store",
+   });
+ 
+   if (!response.ok) {
+     return null;
+   }
+ 
+   return (await response.json()) as BaselineDto;
+ }
+ 
+-function groupSections(sections: BaselineSectionDto[]) {
++const friendlyTitles: Record<string, string> = {
++  SUMMARY: "Summary",
++  EXPERIENCE: "Experience",
++  PROJECT: "Projects / Programs",
++  SKILLS: "Skills",
++  EDUCATION: "Education",
++  OTHER: "Other",
++  RAW: "Raw",
++};
++
++const displayOrder = [
++  "SUMMARY",
++  "EXPERIENCE",
++  "PROJECT",
++  "SKILLS",
++  "EDUCATION",
++  "OTHER",
++  "RAW",
++];
++
++function organizeSections(sections: BaselineSectionDto[]) {
++  const sorted = [...sections].sort((a, b) => a.order - b.order);
+   const grouped: Record<string, BaselineSectionDto[]> = {};
+ 
+-  sections.forEach((section) => {
+-    if (!grouped[section.type]) {
+-      grouped[section.type] = [];
++  sorted.forEach((section) => {
++    const key = section.sectionType ?? "OTHER";
++    if (!grouped[key]) {
++      grouped[key] = [];
+     }
+-    grouped[section.type].push(section);
++    grouped[key].push(section);
+   });
+ 
+   return grouped;
+ }
+ 
++function renderContentSections(groupedSections: Record<string, BaselineSectionDto[]>) {
++  const keys = displayOrder.filter((key) => groupedSections[key]?.length);
++
++  return keys.map((type) => (
++    <div key={type} className="space-y-2">
++      <div className="flex items-center gap-2">
++        <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold uppercase text-gray-700">
++          {friendlyTitles[type] ?? type}
++        </span>
++        <span className="text-xs text-gray-600">
++          {groupedSections[type].length} section
++          {groupedSections[type].length === 1 ? "" : "s"}
++        </span>
++      </div>
++      <div className="space-y-3">
++        {groupedSections[type].map((section) => (
++          <article
++            key={section.id}
++            className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
++          >
++            <div className="mb-2 text-xs font-semibold uppercase text-gray-600">
++              {section.title || friendlyTitles[type] || type}
++            </div>
++            <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
++              {section.content}
++            </pre>
++          </article>
++        ))}
++      </div>
++    </div>
++  ));
++}
++
+ export default async function BaselineDetailPage({
+   params,
+ }: {
+   params: Promise<{ id: string }>;
+ }) {
+   const resolvedParams = await params;
+   const cookieStore = await cookies();
+   const token = cookieStore.get("auth_token")?.value;
+ 
+   if (!token) {
+     redirect("/auth/login");
+   }
+ 
+   if (!resolvedParams?.id) {
+     notFound();
+   }
+ 
+   const baseline = await fetchBaseline(resolvedParams.id, token);
+ 
+   if (!baseline) {
+     notFound();
+   }
+ 
+-  const groupedSections = groupSections(baseline.sections ?? []);
++  const groupedSections = organizeSections(baseline.sections ?? []);
++  const hasRenderableSections = Object.values(groupedSections).some(
++    (sections) => sections.length > 0,
++  );
++
++  const fallbackContent =
++    !hasRenderableSections && baseline.sections?.[0]?.content
++      ? baseline.sections[0].content
++      : null;
+ 
+   return (
+     <main className="min-h-screen bg-gray-50 px-4 py-8">
+       <div className="mx-auto flex max-w-5xl flex-col gap-6">
+         <div className="flex items-center justify-between">
+           <div className="space-y-2">
+             <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">
+               Baseline details
+             </p>
+             <h1 className="text-3xl font-bold text-gray-900">
+               {baseline.originalFilename}
+             </h1>
+             <p className="text-sm text-gray-700">
+               Uploaded {formatDateTime(baseline.createdAt)}
+             </p>
+           </div>
+           <Link
+             href="/baseline"
+             className="text-sm font-semibold text-blue-600 hover:underline"
+           >
+             Back to baselines
+           </Link>
+         </div>
+ 
+         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
+-          {Object.keys(groupedSections).length === 0 ? (
++          {!hasRenderableSections && !fallbackContent ? (
+             <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
+           ) : (
+             <div className="space-y-6">
+-              {Object.entries(groupedSections).map(([type, sections]) => (
+-                <div key={type} className="space-y-2">
+-                  <div className="flex items-center gap-2">
+-                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold uppercase text-gray-700">
+-                      {type}
+-                    </span>
+-                    <span className="text-xs text-gray-600">
+-                      {sections.length} section{sections.length === 1 ? "" : "s"}
+-                    </span>
+-                  </div>
+-                  <div className="space-y-3">
+-                    {sections.map((section) => (
+-                      <article
+-                        key={section.id}
+-                        className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+-                      >
+-                        <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+-                          {section.content}
+-                        </pre>
+-                      </article>
+-                    ))}
+-                  </div>
+-                </div>
+-              ))}
++              {hasRenderableSections && renderContentSections(groupedSections)}
++              {!hasRenderableSections && fallbackContent ? (
++                <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
++                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
++                    {fallbackContent}
++                  </pre>
++                </article>
++              ) : null}
+             </div>
+           )}
+         </section>
+       </div>
+     </main>
+   );
+ }
+diff --git a/apps/web/lib/baselines.ts b/apps/web/lib/baselines.ts
+index 91c41a714622e3764b3055a6827f3d579c29d903..a0c93d39023de9a9327188a4fc3c45b268c0005e 100644
+--- a/apps/web/lib/baselines.ts
++++ b/apps/web/lib/baselines.ts
+@@ -1,31 +1,35 @@
+ export type BaselineSectionType =
+-  | "summary"
+-  | "experience"
+-  | "skills"
+-  | "education"
+-  | "other";
++  | "RAW"
++  | "SUMMARY"
++  | "EXPERIENCE"
++  | "PROJECT"
++  | "SKILLS"
++  | "EDUCATION"
++  | "OTHER";
+ 
+ export type BaselineIncludePolicy = "always" | "optional" | "never";
+ 
+ export interface BaselineSectionDto {
+   id: string;
+   baselineId: string;
+-  type: BaselineSectionType;
++  sectionType: BaselineSectionType;
++  title: string | null;
+   content: string;
+   includePolicy: BaselineIncludePolicy;
+-  orderIndex: number;
++  order: number;
+   createdAt: string;
++  updatedAt: string;
+ }
+ 
+ export interface BaselineDto {
+   id: string;
+   userId: string;
+   version: number;
+   originalFilename: string;
+   mimeType: string;
+   storagePath: string;
+   hash: string | null;
+   createdAt: string;
+   updatedAt: string;
+   sections?: BaselineSectionDto[];
  }
