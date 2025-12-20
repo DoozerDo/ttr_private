@@ -35,21 +35,45 @@ export function AuthStatus({ email }: AuthStatusProps) {
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className="
+        flex flex-col gap-3 rounded-xl
+        border border-white/10
+        bg-gradient-to-br from-slate-900/60 to-slate-800/40
+        p-5 shadow-lg
+        sm:flex-row sm:items-center sm:justify-between
+      "
+    >
       <div>
-        <p className="text-sm text-gray-600">You are logged in as</p>
-        <p className="text-lg font-semibold text-gray-900">{email}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">
+          Logged in as
+        </p>
+        <p className="text-lg font-semibold text-slate-100">
+          {email}
+        </p>
       </div>
+
       <div className="flex flex-col items-start gap-2 sm:items-end">
         <button
           onClick={handleLogout}
           disabled={isLoggingOut}
-          className="rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-70"
+          className="
+            rounded-lg bg-slate-700/70 px-4 py-2
+            text-sm font-semibold text-slate-100
+            shadow hover:bg-slate-600/80
+            disabled:cursor-not-allowed disabled:opacity-60
+          "
         >
-          {isLoggingOut ? "Logging out..." : "Log out"}
+          {isLoggingOut ? "Logging out…" : "Log out"}
         </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {error && (
+          <p className="text-sm text-red-400">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );
 }
+

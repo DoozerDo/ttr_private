@@ -1,11 +1,12 @@
 // apps/web/app/analyze/page.tsx
 "use client";
 
-import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
-import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+import type { CSSProperties } from "react";
+
 import type { BaselineDto } from "../../lib/baselines";
+import { InstrumentShell } from "../ui/InstrumentShell";
+import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
 
 interface AnalysisResult {
   ok?: boolean;
@@ -70,6 +71,7 @@ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
           }}
         />
       </svg>
+
       <div
         style={{
           position: "absolute",
@@ -127,12 +129,16 @@ export default function AnalyzePage() {
   const [baselineId, setBaselineId] = useState("");
   const [baselineLoading, setBaselineLoading] = useState(true);
   const [baselineError, setBaselineError] = useState<string | null>(null);
+
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [animatedScore, setAnimatedScore] = useState(0);
   const [showRaw, setShowRaw] = useState(false);
+
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
 
   const canAnalyze =
@@ -147,22 +153,19 @@ export default function AnalyzePage() {
 
       try {
         const response = await fetch("/api/baselines", { cache: "no-store" });
-
         if (!response.ok) {
           const message = await response.text();
           throw new Error(message || "Unable to load baselines.");
         }
 
         const data = (await response.json()) as BaselineDto[];
-
         if (cancelled) return;
+
         setBaselines(data);
 
         if (data.length > 0) {
           setBaselineId((prev) => {
-            if (prev && data.some((baseline) => baseline.id === prev)) {
-              return prev;
-            }
+            if (prev && data.some((b) => b.id === prev)) return prev;
             return data[0].id;
           });
         } else {
@@ -176,14 +179,11 @@ export default function AnalyzePage() {
         setBaselines([]);
         setBaselineId("");
       } finally {
-        if (!cancelled) {
-          setBaselineLoading(false);
-        }
+        if (!cancelled) setBaselineLoading(false);
       }
     };
 
     loadBaselines();
-
     return () => {
       cancelled = true;
     };
@@ -227,6 +227,7 @@ export default function AnalyzePage() {
 
     check();
     const interval = setInterval(check, 10000);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -284,28 +285,10 @@ export default function AnalyzePage() {
       : "1px solid rgba(251, 191, 36, 0.6)";
 
   const pillText =
-    apiStatus === "online"
-      ? "Online"
-      : apiStatus === "offline"
-      ? "Offline"
-      : "Checking";
+    apiStatus === "online" ? "Online" : apiStatus === "offline" ? "Offline" : "Checking";
 
   const pillTextColor =
-    apiStatus === "online"
-      ? "#4ade80"
-      : apiStatus === "offline"
-      ? "#fca5a5"
-      : "#fbbf24";
-
-  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
-
-  const subtleLabelStyle: CSSProperties = ttrTypography.subtleLabel;
-
-  const fieldLabelStyle: CSSProperties = ttrComponents.fieldLabel;
-
-  const inputStyle: CSSProperties = ttrComponents.input;
-
-  const chipStyle: CSSProperties = ttrComponents.chip;
+    apiStatus === "online" ? "#4ade80" : apiStatus === "offline" ? "#fca5a5" : "#fbbf24";
 
   const apiStatusPill = (
     <div
@@ -336,24 +319,15 @@ export default function AnalyzePage() {
     </div>
   );
 
+  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+
   return (
-    <InstrumentPanelShell
-      kicker="Role fit console"
-      title="Baseline analyzer"
-      rightSlot={apiStatusPill}
-    >
+    <InstrumentShell kicker="Role fit console" title="Baseline analyzer" rightSlot={apiStatusPill}>
       <div style={ttrLayout.panelsRow}>
         <section style={{ ...basePanelStyle, flex: 1.05 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={subtleLabelStyle}>Input</span>
+              <span style={ttrTypography.subtleLabel}>Input</span>
               <h2 style={ttrTypography.h2}>Baseline + role</h2>
             </div>
 
@@ -374,20 +348,17 @@ export default function AnalyzePage() {
 
           <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
             <div>
-              <label style={fieldLabelStyle} htmlFor="baselineId">
+              <label style={ttrComponents.fieldLabel} htmlFor="baselineId">
                 Baseline
               </label>
+
               <select
                 id="baselineId"
                 name="baselineId"
                 value={baselineId}
                 onChange={(event) => setBaselineId(event.target.value)}
-                style={inputStyle}
+                style={ttrComponents.input}
                 disabled={baselineLoading || baselines.length === 0}
-                onFocus={(e) =>
-                  (e.currentTarget.style.border = "1px solid rgba(251,191,36,0.65)")
-                }
-                onBlur={(e) => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.08)")}
               >
                 {baselineLoading && <option value="">Loading baselines…</option>}
                 {!baselineLoading && baselines.length === 0 && (
@@ -399,6 +370,7 @@ export default function AnalyzePage() {
                   </option>
                 ))}
               </select>
+
               {baselineError ? (
                 <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>
                   {baselineError}
@@ -411,9 +383,10 @@ export default function AnalyzePage() {
             </div>
 
             <div>
-              <label style={fieldLabelStyle} htmlFor="jobDescription">
+              <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
                 Job description
               </label>
+
               <textarea
                 id="jobDescription"
                 name="jobDescription"
@@ -422,19 +395,17 @@ export default function AnalyzePage() {
                 onChange={(event) => setJobDescription(event.target.value)}
                 placeholder="Paste the role you want to target..."
                 style={{
-                  ...inputStyle,
+                  ...ttrComponents.input,
                   resize: "vertical",
                   minHeight: 150,
                   fontFamily: "Inter, system-ui, -apple-system, sans-serif",
                 }}
-                onFocus={(e) =>
-                  (e.currentTarget.style.border = "1px solid rgba(251,191,36,0.65)")
-                }
-                onBlur={(e) => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.08)")}
               />
+
               <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
                 We only send this content to the analyzer service for this check.
               </p>
+
               <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
                 Characters: {jobDescription.length}
               </div>
@@ -446,15 +417,6 @@ export default function AnalyzePage() {
               type="button"
               onClick={handleAnalyze}
               disabled={!canAnalyze}
-              onMouseEnter={(e) => {
-                if (!canAnalyze) return;
-                e.currentTarget.style.transform = "translateY(-1px)";
-                e.currentTarget.style.boxShadow = "0 18px 30px rgba(249,115,22,0.32)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 15px 25px rgba(249,115,22,0.25)";
-              }}
               style={{
                 ...ttrComponents.primaryButton,
                 cursor: canAnalyze ? "pointer" : "not-allowed",
@@ -476,17 +438,10 @@ export default function AnalyzePage() {
               pointerEvents: "none",
             }}
           />
-          <div
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-            }}
-          >
+
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={subtleLabelStyle}>Results</span>
+              <span style={ttrTypography.subtleLabel}>Results</span>
               <h2 style={ttrTypography.h2}>Fit telemetry</h2>
             </div>
             <div
@@ -505,81 +460,38 @@ export default function AnalyzePage() {
           </div>
 
           <div style={{ position: "relative", marginTop: 20 }}>
-            <style>{`
-              @keyframes shimmer {
-                0% { background-position: -200px 0; }
-                100% { background-position: 200px 0; }
-              }
-            `}</style>
+            {!loading && !result && (
+              <div
+                style={{
+                  border: "1px dashed rgba(251,191,36,0.35)",
+                  borderRadius: 14,
+                  padding: "32px 22px",
+                  background: "rgba(255,255,255,0.03)",
+                  textAlign: "center",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    letterSpacing: 3,
+                    textTransform: "uppercase",
+                    color: "rgba(251,191,36,0.75)",
+                    fontWeight: 700,
+                  }}
+                >
+                  Awaiting analysis
+                </p>
+                <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
+                  Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
+                </p>
+              </div>
+            )}
 
             {loading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                  <div
-                    style={{
-                      height: 176,
-                      width: 176,
-                      borderRadius: "50%",
-                      background:
-                        "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
-                      backgroundSize: "200px 100%",
-                      animation: "shimmer 1.3s infinite",
-                    }}
-                  />
-                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 220 }}>
-                    <div
-                      style={{
-                        height: 14,
-                        width: "40%",
-                        borderRadius: 8,
-                        background:
-                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
-                        backgroundSize: "200px 100%",
-                        animation: "shimmer 1.3s infinite",
-                      }}
-                    />
-                    <div
-                      style={{
-                        height: 10,
-                        width: "55%",
-                        borderRadius: 8,
-                        background:
-                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
-                        backgroundSize: "200px 100%",
-                        animation: "shimmer 1.3s infinite",
-                      }}
-                    />
-                    <div
-                      style={{
-                        height: 10,
-                        width: "75%",
-                        borderRadius: 8,
-                        background:
-                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
-                        backgroundSize: "200px 100%",
-                        animation: "shimmer 1.3s infinite",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {["60%", "75%", "50%"].map((w) => (
-                    <div
-                      key={w}
-                      style={{
-                        height: 10,
-                        width: w,
-                        borderRadius: 8,
-                        background:
-                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
-                        backgroundSize: "200px 100%",
-                        animation: "shimmer 1.3s infinite",
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.75)" }}>
+                Analyzing…
+              </p>
             )}
 
             {!loading && result && (
@@ -628,6 +540,7 @@ export default function AnalyzePage() {
                           }}
                         />
                       </div>
+
                       <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
                         Signal quality: {quality.label}
                       </span>
@@ -641,22 +554,22 @@ export default function AnalyzePage() {
                   </div>
                 </div>
 
-                {result.strengths && result.strengths.length > 0 && (
+                {result.strengths?.length ? (
                   <div>
                     <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
                       Signals in your favor
                     </p>
                     <div style={{ display: "flex", flexWrap: "wrap" }}>
                       {result.strengths.map((item, index) => (
-                        <span key={`${item}-${index}`} style={chipStyle}>
+                        <span key={`${item}-${index}`} style={ttrComponents.chip}>
                           {item}
                         </span>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
-                {result.gaps && result.gaps.length > 0 && (
+                {result.gaps?.length ? (
                   <div>
                     <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
                       Gaps to address
@@ -666,7 +579,7 @@ export default function AnalyzePage() {
                         <span
                           key={`${item}-${index}`}
                           style={{
-                            ...chipStyle,
+                            ...ttrComponents.chip,
                             background: "rgba(248,113,113,0.12)",
                             border: "1px solid rgba(248,113,113,0.4)",
                             color: "#fecdd3",
@@ -677,9 +590,9 @@ export default function AnalyzePage() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
-                {result.recommendedActions && result.recommendedActions.length > 0 && (
+                {result.recommendedActions?.length ? (
                   <div
                     style={{
                       marginTop: 6,
@@ -692,6 +605,7 @@ export default function AnalyzePage() {
                     <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
                       Next steps
                     </p>
+
                     <ol
                       style={{
                         margin: 0,
@@ -707,7 +621,7 @@ export default function AnalyzePage() {
                       ))}
                     </ol>
                   </div>
-                )}
+                ) : null}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
                   <button
@@ -727,7 +641,7 @@ export default function AnalyzePage() {
                   </button>
                 </div>
 
-                {showRaw && (
+                {showRaw ? (
                   <pre
                     style={{
                       margin: 0,
@@ -744,40 +658,12 @@ export default function AnalyzePage() {
                   >
                     {JSON.stringify(result, null, 2)}
                   </pre>
-                )}
-              </div>
-            )}
-
-            {!loading && !result && (
-              <div
-                style={{
-                  border: "1px dashed rgba(251,191,36,0.35)",
-                  borderRadius: 14,
-                  padding: "32px 22px",
-                  background: "rgba(255,255,255,0.03)",
-                  textAlign: "center",
-                }}
-              >
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    letterSpacing: 3,
-                    textTransform: "uppercase",
-                    color: "rgba(251,191,36,0.75)",
-                    fontWeight: 700,
-                  }}
-                >
-                  Awaiting analysis
-                </p>
-                <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
-                  Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
-                </p>
+                ) : null}
               </div>
             )}
           </div>
         </section>
       </div>
-    </InstrumentPanelShell>
+    </InstrumentShell>
   );
 }
