@@ -36,14 +36,14 @@ const NAV_ITEMS: NavItem[] = [
     description: "Run fit scoring",
   },
   {
+    href: "/calibrate",
     label: "Calibrate",
     description: "Refine signal and weighting",
-    disabled: true,
   },
   {
+    href: "/results",
     label: "Results",
     description: "Review match output",
-    disabled: true,
   },
 ];
 
@@ -80,9 +80,7 @@ function ShellNav({ onNavigate }: { onNavigate?: () => void }) {
               }}
             >
               <span style={{ fontSize: 14, fontWeight: 900 }}>{item.label}</span>
-              {item.description ? (
-                <span style={{ fontSize: 12 }}>{item.description}</span>
-              ) : null}
+              {item.description ? <span style={{ fontSize: 12 }}>{item.description}</span> : null}
             </div>
           );
         }
@@ -98,18 +96,14 @@ function ShellNav({ onNavigate }: { onNavigate?: () => void }) {
               border: isActive
                 ? "1px solid rgba(148,163,184,0.35)"
                 : "1px solid rgba(255,255,255,0.06)",
-              background: isActive
-                ? "rgba(148,163,184,0.12)"
-                : "rgba(2,6,23,0.18)",
+              background: isActive ? "rgba(148,163,184,0.12)" : "rgba(2,6,23,0.18)",
               color: "rgba(226,232,240,0.92)",
             }}
             aria-current={isActive ? "page" : undefined}
           >
             <span style={{ fontSize: 14, fontWeight: 900 }}>{item.label}</span>
             {item.description ? (
-              <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                {item.description}
-              </span>
+              <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>{item.description}</span>
             ) : null}
           </Link>
         );
@@ -241,8 +235,7 @@ export function InstrumentPanelShell({
                 border: "1px solid rgba(255,255,255,0.06)",
                 borderRadius: 16,
                 padding: 14,
-                background:
-                  "linear-gradient(135deg, rgba(15,23,42,0.72), rgba(30,41,59,0.55))",
+                background: "linear-gradient(135deg, rgba(15,23,42,0.72), rgba(30,41,59,0.55))",
                 boxShadow:
                   "0 15px 45px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)",
                 backdropFilter: "blur(10px)",
@@ -278,8 +271,7 @@ export function InstrumentPanelShell({
               width: "min(360px, 92vw)",
               borderRadius: 18,
               border: "1px solid rgba(255,255,255,0.10)",
-              background:
-                "linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.82))",
+              background: "linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.82))",
               boxShadow:
                 "0 25px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)",
               padding: 14,
@@ -295,6 +287,7 @@ export function InstrumentPanelShell({
     </main>
   );
 }
+
 
 
 

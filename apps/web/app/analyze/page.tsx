@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import Link from "next/link";
 
 import type { BaselineDto } from "../../lib/baselines";
 import { InstrumentShell } from "../ui/InstrumentShell";
@@ -325,7 +326,14 @@ export default function AnalyzePage() {
     <InstrumentShell kicker="Role fit console" title="Baseline analyzer" rightSlot={apiStatusPill}>
       <div style={ttrLayout.panelsRow}>
         <section style={{ ...basePanelStyle, flex: 1.05 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={ttrTypography.subtleLabel}>Input</span>
               <h2 style={ttrTypography.h2}>Baseline + role</h2>
@@ -425,6 +433,33 @@ export default function AnalyzePage() {
             >
               {loading ? "Analyzing…" : "Analyze role fit"}
             </button>
+
+            <div
+              style={{
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.04)",
+                padding: "10px 12px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
+                  Want to tune what matters
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                  Use Calibrate to preview signal weighting before we wire it into scoring.
+                </div>
+              </div>
+
+              <Link href="/calibrate" style={ttrComponents.quietButton}>
+                Open Calibrate
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -439,7 +474,15 @@ export default function AnalyzePage() {
             }}
           />
 
-          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={ttrTypography.subtleLabel}>Results</span>
               <h2 style={ttrTypography.h2}>Fit telemetry</h2>
@@ -497,12 +540,29 @@ export default function AnalyzePage() {
             {!loading && result && (
               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                 <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
                     <ScoreRing score={animatedScore} loading={loading} />
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>{scoreLabel}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                      {scoreLabel}
+                    </div>
                   </div>
 
-                  <div style={{ flex: 1, minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      minWidth: 240,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
                     <p
                       style={{
                         margin: 0,
@@ -516,8 +576,16 @@ export default function AnalyzePage() {
                       Alignment summary
                     </p>
 
-                    <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "rgba(241,245,249,0.95)" }}>
-                      {result.summary || "We will summarize how your baseline maps to this role once analysis completes."}
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 15,
+                        lineHeight: 1.6,
+                        color: "rgba(241,245,249,0.95)",
+                      }}
+                    >
+                      {result.summary ||
+                        "We will summarize how your baseline maps to this role once analysis completes."}
                     </p>
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -541,7 +609,13 @@ export default function AnalyzePage() {
                         />
                       </div>
 
-                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(226,232,240,0.7)",
+                          fontWeight: 700,
+                        }}
+                      >
                         Signal quality: {quality.label}
                       </span>
                     </div>
@@ -623,7 +697,11 @@ export default function AnalyzePage() {
                   </div>
                 ) : null}
 
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+                  <Link href="/results" style={ttrComponents.quietButton}>
+                    View in Results
+                  </Link>
+
                   <button
                     type="button"
                     onClick={() => setShowRaw((prev) => !prev)}
@@ -667,3 +745,4 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
+
