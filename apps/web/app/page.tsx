@@ -6,6 +6,8 @@ import Link from "next/link";
 
 import { AuthStatus } from "./components/auth-status";
 import { StatusSection } from "./components/status-section";
+import { LastAnalysisCard } from "./components/last-analysis-card";
+import { NextStepCard } from "./components/next-step-card";
 import { decodeJwt } from "../lib/auth";
 
 import { ttrComponents, ttrLayout, ttrTypography } from "./ui/ttrStyles";
@@ -73,62 +75,8 @@ export default async function Home() {
             </div>
 
             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div
-                style={{
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.04)",
-                  padding: "12px 12px",
-                }}
-              >
-                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
-                  Next step
-                </p>
-                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
-                  Upload or confirm your baseline, then run an analysis to generate a fit score and guidance.
-                </p>
-
-                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link href="/baseline" style={ttrComponents.quietButton}>
-                    Open Baseline
-                  </Link>
-                  <Link href="/analyze" style={ttrComponents.primaryButton}>
-                    Start Analyze
-                  </Link>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  border: "1px dashed rgba(251,191,36,0.35)",
-                  borderRadius: 14,
-                  padding: "16px 14px",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    letterSpacing: 2.5,
-                    textTransform: "uppercase",
-                    color: "rgba(251,191,36,0.75)",
-                    fontWeight: 800,
-                  }}
-                >
-                  Last analysis
-                </p>
-                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
-                  Coming soon. This section will show the latest fit score and last updated timestamp from your browser
-                  session, plus a one click continue to Results.
-                </p>
-
-                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link href="/results" style={ttrComponents.quietButton}>
-                    Open Results
-                  </Link>
-                </div>
-              </div>
+              <NextStepCard />
+              <LastAnalysisCard />
             </div>
           </section>
 
@@ -177,4 +125,5 @@ export default async function Home() {
     </main>
   );
 }
+
 
