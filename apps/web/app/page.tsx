@@ -1,3 +1,5 @@
+// apps/web/app/page.tsx
+import type { CSSProperties } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -5,6 +7,8 @@ import Link from "next/link";
 import { AuthStatus } from "./components/auth-status";
 import { StatusSection } from "./components/status-section";
 import { decodeJwt } from "../lib/auth";
+
+import { ttrComponents, ttrLayout, ttrTypography } from "./ui/ttrStyles";
 
 export default async function Home() {
   const cookieStore = await cookies();
@@ -20,157 +24,157 @@ export default async function Home() {
     redirect("/auth/login");
   }
 
-  const shellStyle: React.CSSProperties = {
-    minHeight: "100vh",
-    background:
-      "radial-gradient(circle at 20% 20%, rgba(251,191,36,0.08), transparent 30%), radial-gradient(circle at 80% 0%, rgba(248,113,113,0.08), transparent 30%), linear-gradient(180deg, #0f172a, #0b1220 60%, #0f172a)",
-    color: "#e2e8f0",
-    padding: "48px 0 72px",
-  };
-
-  const containerStyle: React.CSSProperties = {
-    margin: "0 auto",
-    maxWidth: 980,
-    padding: "0 20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 18,
-  };
-
-  const headerCardStyle: React.CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    padding: "14px 16px",
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.06)",
-    background:
-      "linear-gradient(120deg, rgba(255,255,255,0.02), rgba(251,191,36,0.05))",
-    boxShadow: "0 10px 35px rgba(0,0,0,0.3)",
-  };
-
-  const panelStyle: React.CSSProperties = {
-    position: "relative",
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 18,
-    padding: 20,
-    background:
-      "linear-gradient(135deg, rgba(15,23,42,0.85), rgba(30,41,59,0.75))",
-    boxShadow:
-      "0 15px 45px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)",
-    backdropFilter: "blur(10px)",
-  };
-
-  const subtleLabel: React.CSSProperties = {
-    fontSize: 12,
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    color: "rgba(251,191,36,0.8)",
-    fontWeight: 700,
-  };
-
-  const h1Style: React.CSSProperties = {
-    margin: 0,
-    fontSize: 24,
-    fontWeight: 800,
-    color: "#f8fafc",
-  };
-
-  const paragraphStyle: React.CSSProperties = {
-    margin: 0,
-    fontSize: 13,
-    color: "rgba(226,232,240,0.75)",
-    lineHeight: 1.6,
-  };
-
-  const linkButtonBase: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "10px 12px",
-    borderRadius: 12,
-    fontSize: 13,
-    fontWeight: 800,
-    textDecoration: "none",
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(255,255,255,0.06)",
-    color: "rgba(241,245,249,0.92)",
-  };
-
-  const primaryButton: React.CSSProperties = {
-    ...linkButtonBase,
-    border: "none",
-    background: "linear-gradient(120deg, #fbbf24, #f97316)",
-    color: "#0f172a",
-    boxShadow: "0 15px 25px rgba(249,115,22,0.25)",
-  };
+  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
   return (
-    <main style={shellStyle}>
-      <div style={containerStyle}>
-        <div style={headerCardStyle}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={subtleLabel}>Console</span>
-            <h1 style={h1Style}>Target This Role</h1>
-            <p style={paragraphStyle}>
-              Session management and status. Use this console to jump into baseline and analysis.
-            </p>
+    <main style={ttrLayout.shell}>
+      <div style={ttrLayout.container}>
+        <header style={ttrComponents.headerCard}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={ttrTypography.kicker}>Console</span>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <h1 style={ttrTypography.h1}>Dashboard</h1>
+              <p style={ttrTypography.paragraph}>
+                Session hub. Pick up where you left off and move to the next step.
+              </p>
+            </div>
           </div>
 
           <div
             style={{
               display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
               gap: 10,
               flexWrap: "wrap",
-              justifyContent: "flex-end",
             }}
           >
-            <Link href="/baseline" style={linkButtonBase}>
-              Baseline library
+            <Link href="/baseline" style={ttrComponents.quietButton}>
+              Baseline
             </Link>
-            <Link href="/analyze" style={primaryButton}>
-              Analyze a role
+            <Link href="/analyze" style={ttrComponents.primaryButton}>
+              Analyze
+            </Link>
+            <Link href="/calibrate" style={ttrComponents.quietButton}>
+              Calibrate
+            </Link>
+            <Link href="/results" style={ttrComponents.quietButton}>
+              Results
             </Link>
           </div>
-        </div>
+        </header>
 
-        <section style={panelStyle}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#f8fafc" }}>
-                Quick actions
-              </div>
+        <div style={ttrLayout.panelsRow}>
+          <section style={{ ...basePanelStyle, flex: 1.05 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Session</span>
+              <h2 style={ttrTypography.h2}>Current state</h2>
+            </div>
+
+            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
               <div
                 style={{
-                  fontSize: 13,
-                  color: "rgba(226,232,240,0.75)",
-                  lineHeight: 1.6,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.04)",
+                  padding: "12px 12px",
                 }}
               >
-                Upload a locked baseline, then run a role analysis to generate a fit score and notes.
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
+                  Next step
+                </p>
+                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
+                  Upload or confirm your baseline, then run an analysis to generate a fit score and guidance.
+                </p>
+
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <Link href="/baseline" style={ttrComponents.quietButton}>
+                    Open Baseline
+                  </Link>
+                  <Link href="/analyze" style={ttrComponents.primaryButton}>
+                    Start Analyze
+                  </Link>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  border: "1px dashed rgba(251,191,36,0.35)",
+                  borderRadius: 14,
+                  padding: "16px 14px",
+                  background: "rgba(255,255,255,0.03)",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    letterSpacing: 2.5,
+                    textTransform: "uppercase",
+                    color: "rgba(251,191,36,0.75)",
+                    fontWeight: 800,
+                  }}
+                >
+                  Last analysis
+                </p>
+                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
+                  Coming soon. This section will show the latest fit score and last updated timestamp from your browser
+                  session, plus a one click continue to Results.
+                </p>
+
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <Link href="/results" style={ttrComponents.quietButton}>
+                    Open Results
+                  </Link>
+                </div>
               </div>
             </div>
+          </section>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link href="/baseline" style={linkButtonBase}>
-                Go to baseline
-              </Link>
-              <Link href="/analyze" style={primaryButton}>
-                Start analysis
-              </Link>
+          <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
+                pointerEvents: "none",
+              }}
+            />
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Identity</span>
+              <h2 style={ttrTypography.h2}>Session access</h2>
             </div>
-          </div>
-        </section>
 
-        <section style={panelStyle}>
-          <AuthStatus email={payload.email} />
-        </section>
+            <div style={{ position: "relative", marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(0,0,0,0.18)",
+                  padding: "12px 12px",
+                }}
+              >
+                <AuthStatus email={payload.email} />
+              </div>
 
-        <section style={panelStyle}>
-          <StatusSection />
-        </section>
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(0,0,0,0.18)",
+                  padding: "12px 12px",
+                }}
+              >
+                <StatusSection />
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
   );
 }
+
