@@ -1,0 +1,713 @@
+// apps/web/app/analyze/page.tsx
+"use client";
+
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
+import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+
+interface AnalysisResult {
+  ok?: boolean;
+  baselineId?: string;
+  score: number;
+  summary?: string;
+  strengths?: string[];
+  gaps?: string[];
+  recommendedActions?: string[];
+  debug?: unknown;
+}
+
+type ApiStatus = "unknown" | "online" | "offline";
+
+const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
+  const radius = 72;
+  const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
+  const clampedScore = Math.min(Math.max(score, 0), 100);
+  const offset = circumference * (1 - clampedScore / 100);
+  const gradientId = "scoreRingGradient";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        display: "flex",
+        height: 176,
+        width: 176,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stopColor="#f59e0b" />
+            <stop offset="50%" stopColor="#fbbf24" />
+            <stop offset="100%" stopColor="#f97316" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="100"
+          cy="100"
+          r={radius}
+          stroke="rgba(255,255,255,0.08)"
+          strokeWidth={14}
+          fill="none"
+        />
+        <circle
+          cx="100"
+          cy="100"
+          r={radius}
+          stroke={`url(#${gradientId})`}
+          strokeWidth={14}
+          fill="none"
+          strokeDasharray={circumference}
+          strokeDashoffset={loading ? circumference : offset}
+          strokeLinecap="round"
+          style={{
+            transition: "stroke-dashoffset 800ms ease-out",
+            filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))",
+          }}
+        />
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 36,
+            fontWeight: 800,
+            color: "#fde68a",
+            textShadow: "0 2px 14px rgba(0,0,0,0.35)",
+          }}
+        >
+          {Math.round(clampedScore)}
+        </div>
+        <span
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            letterSpacing: 2.5,
+            textTransform: "uppercase",
+            color: "rgba(252, 211, 77, 0.8)",
+          }}
+        >
+          Fit score
+        </span>
+      </div>
+    </div>
+  );
+};
+
+function fitLabel(score: number | null) {
+  if (score === null) return "";
+  if (score >= 90) return "Strong fit";
+  if (score >= 75) return "Solid fit";
+  if (score >= 60) return "Mixed fit";
+  return "Weak fit";
+}
+
+function signalQuality(score: number | null) {
+  if (score === null) return { label: "n/a", color: "rgba(255,255,255,0.3)" };
+  if (score >= 90) return { label: "High", color: "#22c55e" };
+  if (score >= 75) return { label: "Medium", color: "#f59e0b" };
+  return { label: "Low", color: "#f97316" };
+}
+
+export default function AnalyzePage() {
+  const [baselineId, setBaselineId] = useState("baseline-120925");
+  const [jobDescription, setJobDescription] = useState("");
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [animatedScore, setAnimatedScore] = useState(0);
+  const [showRaw, setShowRaw] = useState(false);
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+
+  const canAnalyze =
+    !loading && baselineId.trim().length > 0 && jobDescription.trim().length > 0;
+
+  useEffect(() => {
+    if (loading) {
+      setAnimatedScore(0);
+      return;
+    }
+
+    if (result?.score !== undefined && result?.score !== null) {
+      setAnimatedScore(0);
+      const frame = requestAnimationFrame(() => {
+        setAnimatedScore(result.score);
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    setAnimatedScore(0);
+  }, [loading, result]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const probe = async (url: string) => {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    };
+
+    const check = async () => {
+      setApiStatus((prev) => (prev === "online" ? "online" : "unknown"));
+      const online = (await probe("/api/status")) || (await probe("/api/health"));
+      if (cancelled) return;
+      setApiStatus(online ? "online" : "offline");
+    };
+
+    check();
+    const interval = setInterval(check, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleAnalyze = async () => {
+    if (!baselineId.trim() || !jobDescription.trim()) {
+      setError("Please select a baseline and paste a job description.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baselineId, jobDescription }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Unable to analyze this role right now.");
+      }
+
+      const data = (await response.json()) as AnalysisResult;
+      setResult(data);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unexpected error";
+      setError(message);
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const scoreLabel = fitLabel(result?.score ?? null);
+  const quality = signalQuality(result?.score ?? null);
+
+  const pillColor =
+    apiStatus === "online"
+      ? "rgba(74, 222, 128, 0.15)"
+      : apiStatus === "offline"
+      ? "rgba(248, 113, 113, 0.18)"
+      : "rgba(251, 191, 36, 0.18)";
+
+  const pillBorder =
+    apiStatus === "online"
+      ? "1px solid rgba(74, 222, 128, 0.6)"
+      : apiStatus === "offline"
+      ? "1px solid rgba(248, 113, 113, 0.7)"
+      : "1px solid rgba(251, 191, 36, 0.6)";
+
+  const pillText =
+    apiStatus === "online"
+      ? "Online"
+      : apiStatus === "offline"
+      ? "Offline"
+      : "Checking";
+
+  const pillTextColor =
+    apiStatus === "online"
+      ? "#4ade80"
+      : apiStatus === "offline"
+      ? "#fca5a5"
+      : "#fbbf24";
+
+  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+
+  const subtleLabelStyle: CSSProperties = ttrTypography.subtleLabel;
+
+  const fieldLabelStyle: CSSProperties = ttrComponents.fieldLabel;
+
+  const inputStyle: CSSProperties = ttrComponents.input;
+
+  const chipStyle: CSSProperties = ttrComponents.chip;
+
+  const apiStatusPill = (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderRadius: 999,
+        background: pillColor,
+        border: pillBorder,
+        color: pillTextColor,
+        fontSize: 13,
+        fontWeight: 700,
+      }}
+      title="API status"
+    >
+      <span
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          background: pillTextColor,
+          boxShadow: `0 0 12px ${pillTextColor}`,
+        }}
+      />
+      <span>{pillText}</span>
+    </div>
+  );
+
+  return (
+    <InstrumentPanelShell
+      kicker="Role fit console"
+      title="Baseline analyzer"
+      rightSlot={apiStatusPill}
+    >
+      <div style={ttrLayout.panelsRow}>
+        <section style={{ ...basePanelStyle, flex: 1.05 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={subtleLabelStyle}>Input</span>
+              <h2 style={ttrTypography.h2}>Baseline + role</h2>
+            </div>
+
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 700,
+                color: "rgba(251,191,36,0.9)",
+                border: "1px solid rgba(251,191,36,0.35)",
+                background: "rgba(251,191,36,0.08)",
+              }}
+            >
+              Encrypted transit
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <label style={fieldLabelStyle} htmlFor="baselineId">
+                Baseline
+              </label>
+              <select
+                id="baselineId"
+                name="baselineId"
+                value={baselineId}
+                onChange={(event) => setBaselineId(event.target.value)}
+                style={inputStyle}
+                onFocus={(e) =>
+                  (e.currentTarget.style.border = "1px solid rgba(251,191,36,0.65)")
+                }
+                onBlur={(e) => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.08)")}
+              >
+                <option value="baseline-120925">Baseline120925.docx</option>
+              </select>
+              <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                Baseline selection is currently locked to your beta baseline.
+              </p>
+            </div>
+
+            <div>
+              <label style={fieldLabelStyle} htmlFor="jobDescription">
+                Job description
+              </label>
+              <textarea
+                id="jobDescription"
+                name="jobDescription"
+                rows={8}
+                value={jobDescription}
+                onChange={(event) => setJobDescription(event.target.value)}
+                placeholder="Paste the role you want to target..."
+                style={{
+                  ...inputStyle,
+                  resize: "vertical",
+                  minHeight: 150,
+                  fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+                }}
+                onFocus={(e) =>
+                  (e.currentTarget.style.border = "1px solid rgba(251,191,36,0.65)")
+                }
+                onBlur={(e) => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.08)")}
+              />
+              <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                We only send this content to the analyzer service for this check.
+              </p>
+              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
+                Characters: {jobDescription.length}
+              </div>
+            </div>
+
+            {error && <div style={ttrComponents.dangerBox}>{error}</div>}
+
+            <button
+              type="button"
+              onClick={handleAnalyze}
+              disabled={!canAnalyze}
+              onMouseEnter={(e) => {
+                if (!canAnalyze) return;
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 18px 30px rgba(249,115,22,0.32)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 15px 25px rgba(249,115,22,0.25)";
+              }}
+              style={{
+                ...ttrComponents.primaryButton,
+                cursor: canAnalyze ? "pointer" : "not-allowed",
+                opacity: canAnalyze ? 1 : 0.6,
+              }}
+            >
+              {loading ? "Analyzing…" : "Analyze role fit"}
+            </button>
+          </div>
+        </section>
+
+        <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={subtleLabelStyle}>Results</span>
+              <h2 style={ttrTypography.h2}>Fit telemetry</h2>
+            </div>
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 700,
+                color: "rgba(226,232,240,0.9)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.06)",
+              }}
+            >
+              Live feed
+            </div>
+          </div>
+
+          <div style={{ position: "relative", marginTop: 20 }}>
+            <style>{`
+              @keyframes shimmer {
+                0% { background-position: -200px 0; }
+                100% { background-position: 200px 0; }
+              }
+            `}</style>
+
+            {loading && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      height: 176,
+                      width: 176,
+                      borderRadius: "50%",
+                      background:
+                        "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
+                      backgroundSize: "200px 100%",
+                      animation: "shimmer 1.3s infinite",
+                    }}
+                  />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, minWidth: 220 }}>
+                    <div
+                      style={{
+                        height: 14,
+                        width: "40%",
+                        borderRadius: 8,
+                        background:
+                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
+                        backgroundSize: "200px 100%",
+                        animation: "shimmer 1.3s infinite",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: 10,
+                        width: "55%",
+                        borderRadius: 8,
+                        background:
+                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
+                        backgroundSize: "200px 100%",
+                        animation: "shimmer 1.3s infinite",
+                      }}
+                    />
+                    <div
+                      style={{
+                        height: 10,
+                        width: "75%",
+                        borderRadius: 8,
+                        background:
+                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
+                        backgroundSize: "200px 100%",
+                        animation: "shimmer 1.3s infinite",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {["60%", "75%", "50%"].map((w) => (
+                    <div
+                      key={w}
+                      style={{
+                        height: 10,
+                        width: w,
+                        borderRadius: 8,
+                        background:
+                          "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.08) 75%)",
+                        backgroundSize: "200px 100%",
+                        animation: "shimmer 1.3s infinite",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!loading && result && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                    <ScoreRing score={animatedScore} loading={loading} />
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>{scoreLabel}</div>
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 13,
+                        letterSpacing: 2,
+                        textTransform: "uppercase",
+                        color: "rgba(251,191,36,0.75)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Alignment summary
+                    </p>
+
+                    <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "rgba(241,245,249,0.95)" }}>
+                      {result.summary || "We will summarize how your baseline maps to this role once analysis completes."}
+                    </p>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div
+                        style={{
+                          width: 120,
+                          height: 8,
+                          borderRadius: 999,
+                          background: "rgba(255,255,255,0.08)",
+                          overflow: "hidden",
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${Math.min(Math.max((result.score ?? 0) / 100, 0), 1) * 100}%`,
+                            height: "100%",
+                            background: quality.color,
+                            transition: "width 400ms ease",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
+                        Signal quality: {quality.label}
+                      </span>
+                    </div>
+
+                    {result.baselineId && (
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                        Baseline: {result.baselineId}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {result.strengths && result.strengths.length > 0 && (
+                  <div>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                      Signals in your favor
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap" }}>
+                      {result.strengths.map((item, index) => (
+                        <span key={`${item}-${index}`} style={chipStyle}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {result.gaps && result.gaps.length > 0 && (
+                  <div>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
+                      Gaps to address
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap" }}>
+                      {result.gaps.map((item, index) => (
+                        <span
+                          key={`${item}-${index}`}
+                          style={{
+                            ...chipStyle,
+                            background: "rgba(248,113,113,0.12)",
+                            border: "1px solid rgba(248,113,113,0.4)",
+                            color: "#fecdd3",
+                          }}
+                        >
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {result.recommendedActions && result.recommendedActions.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: "1px solid rgba(251,191,36,0.25)",
+                      background: "rgba(251,191,36,0.06)",
+                    }}
+                  >
+                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                      Next steps
+                    </p>
+                    <ol
+                      style={{
+                        margin: 0,
+                        paddingLeft: 18,
+                        display: "grid",
+                        gap: 6,
+                        color: "rgba(241,245,249,0.9)",
+                        fontSize: 14,
+                      }}
+                    >
+                      {result.recommendedActions.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowRaw((prev) => !prev)}
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.04)",
+                      color: "rgba(255,255,255,0.75)",
+                      padding: "6px 10px",
+                      borderRadius: 10,
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showRaw ? "Hide raw" : "View raw JSON"}
+                  </button>
+                </div>
+
+                {showRaw && (
+                  <pre
+                    style={{
+                      margin: 0,
+                      marginTop: 6,
+                      padding: 12,
+                      borderRadius: 10,
+                      background: "rgba(0,0,0,0.35)",
+                      border: "1px solid rgba(255,255,255,0.05)",
+                      color: "#e2e8f0",
+                      fontSize: 12,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {!loading && !result && (
+              <div
+                style={{
+                  border: "1px dashed rgba(251,191,36,0.35)",
+                  borderRadius: 14,
+                  padding: "32px 22px",
+                  background: "rgba(255,255,255,0.03)",
+                  textAlign: "center",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    letterSpacing: 3,
+                    textTransform: "uppercase",
+                    color: "rgba(251,191,36,0.75)",
+                    fontWeight: 700,
+                  }}
+                >
+                  Awaiting analysis
+                </p>
+                <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
+                  Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </InstrumentPanelShell>
+  );
+}

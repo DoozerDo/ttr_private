@@ -52,6 +52,21 @@ export default async function BaselinePage() {
             that feed tailored résumés, cover letters, and interview prep flows.
           </p>
         </header>
+        <a
+  href="/analyze"
+  style={{
+    display: "inline-block",
+    marginTop: 12,
+    padding: "10px 14px",
+    backgroundColor: "black",
+    color: "white",
+    textDecoration: "none",
+    borderRadius: 6
+  }}
+>
+  Analyze a role
+</a>
+
 
         <BaselineDashboard initialBaselines={baselines} />
       </div>
