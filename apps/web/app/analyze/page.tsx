@@ -20,7 +20,14 @@ interface AnalysisResult {
   debug?: unknown;
 }
 
+type StoredPayload = {
+  result: AnalysisResult;
+  savedAt: string;
+};
+
 type ApiStatus = "unknown" | "online" | "offline";
+
+const STORAGE_KEY = "ttr:lastAnalysis";
 
 const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
   const radius = 72;
@@ -259,6 +266,13 @@ export default function AnalyzePage() {
 
       const data = (await response.json()) as AnalysisResult;
       setResult(data);
+
+      try {
+        const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch {
+        // no-op
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unexpected error";
       setError(message);
@@ -326,14 +340,7 @@ export default function AnalyzePage() {
     <InstrumentShell kicker="Role fit console" title="Baseline analyzer" rightSlot={apiStatusPill}>
       <div style={ttrLayout.panelsRow}>
         <section style={{ ...basePanelStyle, flex: 1.05 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={ttrTypography.subtleLabel}>Input</span>
               <h2 style={ttrTypography.h2}>Baseline + role</h2>
@@ -369,9 +376,7 @@ export default function AnalyzePage() {
                 disabled={baselineLoading || baselines.length === 0}
               >
                 {baselineLoading && <option value="">Loading baselines…</option>}
-                {!baselineLoading && baselines.length === 0 && (
-                  <option value="">No baselines uploaded yet</option>
-                )}
+                {!baselineLoading && baselines.length === 0 && <option value="">No baselines uploaded yet</option>}
                 {baselines.map((baseline) => (
                   <option key={baseline.id} value={baseline.id}>
                     {baseline.originalFilename}
@@ -414,9 +419,7 @@ export default function AnalyzePage() {
                 We only send this content to the analyzer service for this check.
               </p>
 
-              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
-                Characters: {jobDescription.length}
-              </div>
+              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>Characters: {jobDescription.length}</div>
             </div>
 
             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
@@ -474,15 +477,7 @@ export default function AnalyzePage() {
             }}
           />
 
-          <div
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-            }}
-          >
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={ttrTypography.subtleLabel}>Results</span>
               <h2 style={ttrTypography.h2}>Fit telemetry</h2>
@@ -531,38 +526,17 @@ export default function AnalyzePage() {
               </div>
             )}
 
-            {loading && (
-              <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.75)" }}>
-                Analyzing…
-              </p>
-            )}
+            {loading && <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.75)" }}>Analyzing…</p>}
 
             {!loading && result && (
               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                 <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
                     <ScoreRing score={animatedScore} loading={loading} />
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                      {scoreLabel}
-                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>{scoreLabel}</div>
                   </div>
 
-                  <div
-                    style={{
-                      flex: 1,
-                      minWidth: 240,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
+                  <div style={{ flex: 1, minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
                     <p
                       style={{
                         margin: 0,
@@ -576,16 +550,8 @@ export default function AnalyzePage() {
                       Alignment summary
                     </p>
 
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 15,
-                        lineHeight: 1.6,
-                        color: "rgba(241,245,249,0.95)",
-                      }}
-                    >
-                      {result.summary ||
-                        "We will summarize how your baseline maps to this role once analysis completes."}
+                    <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "rgba(241,245,249,0.95)" }}>
+                      {result.summary || "We will summarize how your baseline maps to this role once analysis completes."}
                     </p>
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -609,21 +575,13 @@ export default function AnalyzePage() {
                         />
                       </div>
 
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "rgba(226,232,240,0.7)",
-                          fontWeight: 700,
-                        }}
-                      >
+                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
                         Signal quality: {quality.label}
                       </span>
                     </div>
 
                     {result.baselineId && (
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-                        Baseline: {result.baselineId}
-                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>Baseline: {result.baselineId}</div>
                     )}
                   </div>
                 </div>
@@ -676,9 +634,7 @@ export default function AnalyzePage() {
                       background: "rgba(251,191,36,0.06)",
                     }}
                   >
-                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                      Next steps
-                    </p>
+                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>Next steps</p>
 
                     <ol
                       style={{
@@ -745,4 +701,6 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
+
+
 
