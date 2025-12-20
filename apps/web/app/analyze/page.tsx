@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+import type { BaselineDto } from "../../lib/baselines";
 
 interface AnalysisResult {
   ok?: boolean;
@@ -122,7 +123,10 @@ function signalQuality(score: number | null) {
 }
 
 export default function AnalyzePage() {
-  const [baselineId, setBaselineId] = useState("baseline-120925");
+  const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+  const [baselineId, setBaselineId] = useState("");
+  const [baselineLoading, setBaselineLoading] = useState(true);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -133,6 +137,57 @@ export default function AnalyzePage() {
 
   const canAnalyze =
     !loading && baselineId.trim().length > 0 && jobDescription.trim().length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBaselines = async () => {
+      setBaselineLoading(true);
+      setBaselineError(null);
+
+      try {
+        const response = await fetch("/api/baselines", { cache: "no-store" });
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "Unable to load baselines.");
+        }
+
+        const data = (await response.json()) as BaselineDto[];
+
+        if (cancelled) return;
+        setBaselines(data);
+
+        if (data.length > 0) {
+          setBaselineId((prev) => {
+            if (prev && data.some((baseline) => baseline.id === prev)) {
+              return prev;
+            }
+            return data[0].id;
+          });
+        } else {
+          setBaselineId("");
+        }
+      } catch (loadError) {
+        if (cancelled) return;
+        setBaselineError(
+          loadError instanceof Error ? loadError.message : "Unable to load baselines.",
+        );
+        setBaselines([]);
+        setBaselineId("");
+      } finally {
+        if (!cancelled) {
+          setBaselineLoading(false);
+        }
+      }
+    };
+
+    loadBaselines();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (loading) {
@@ -328,16 +383,31 @@ export default function AnalyzePage() {
                 value={baselineId}
                 onChange={(event) => setBaselineId(event.target.value)}
                 style={inputStyle}
+                disabled={baselineLoading || baselines.length === 0}
                 onFocus={(e) =>
                   (e.currentTarget.style.border = "1px solid rgba(251,191,36,0.65)")
                 }
                 onBlur={(e) => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.08)")}
               >
-                <option value="baseline-120925">Baseline120925.docx</option>
+                {baselineLoading && <option value="">Loading baselines…</option>}
+                {!baselineLoading && baselines.length === 0 && (
+                  <option value="">No baselines uploaded yet</option>
+                )}
+                {baselines.map((baseline) => (
+                  <option key={baseline.id} value={baseline.id}>
+                    {baseline.originalFilename}
+                  </option>
+                ))}
               </select>
-              <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                Baseline selection is currently locked to your beta baseline.
-              </p>
+              {baselineError ? (
+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>
+                  {baselineError}
+                </p>
+              ) : (
+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                  Choose one of your uploaded baselines to analyze against this role.
+                </p>
+              )}
             </div>
 
             <div>
