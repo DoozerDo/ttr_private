@@ -269,15 +269,15 @@ export default function AnalyzePage() {
     apiStatus === "online"
       ? "rgba(74, 222, 128, 0.15)"
       : apiStatus === "offline"
-      ? "rgba(248, 113, 113, 0.18)"
-      : "rgba(251, 191, 36, 0.18)";
+        ? "rgba(248, 113, 113, 0.18)"
+        : "rgba(251, 191, 36, 0.18)";
 
   const pillBorder =
     apiStatus === "online"
       ? "1px solid rgba(74, 222, 128, 0.6)"
       : apiStatus === "offline"
-      ? "1px solid rgba(248, 113, 113, 0.7)"
-      : "1px solid rgba(251, 191, 36, 0.6)";
+        ? "1px solid rgba(248, 113, 113, 0.7)"
+        : "1px solid rgba(251, 191, 36, 0.6)";
 
   const pillText =
     apiStatus === "online" ? "Online" : apiStatus === "offline" ? "Offline" : "Checking";
@@ -397,7 +397,9 @@ export default function AnalyzePage() {
                 We only send this content to the analyzer service for this check.
               </p>
 
-              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>Characters: {jobDescription.length}</div>
+              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
+                Characters: {jobDescription.length}
+              </div>
             </div>
 
             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
@@ -559,14 +561,18 @@ export default function AnalyzePage() {
                     </div>
 
                     {result.baselineId && (
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>Baseline: {result.baselineId}</div>
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                        Baseline: {result.baselineId}
+                      </div>
                     )}
                   </div>
                 </div>
 
                 {result.strengths?.length ? (
                   <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>Signals in your favor</p>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                      Signals in your favor
+                    </p>
                     <div style={{ display: "flex", flexWrap: "wrap" }}>
                       {result.strengths.map((item, index) => (
                         <span key={`${item}-${index}`} style={ttrComponents.chip}>
@@ -579,7 +585,9 @@ export default function AnalyzePage() {
 
                 {result.gaps?.length ? (
                   <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>Gaps to address</p>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
+                      Gaps to address
+                    </p>
                     <div style={{ display: "flex", flexWrap: "wrap" }}>
                       {result.gaps.map((item, index) => (
                         <span
@@ -608,7 +616,9 @@ export default function AnalyzePage() {
                       background: "rgba(251,191,36,0.06)",
                     }}
                   >
-                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>Next steps</p>
+                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                      Next steps
+                    </p>
 
                     <ol
                       style={{
@@ -675,6 +685,7 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
+
 
 
 
