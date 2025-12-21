@@ -8,26 +8,10 @@ import Link from "next/link";
 import type { BaselineDto } from "../../lib/baselines";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
-
-interface AnalysisResult {
-  ok?: boolean;
-  baselineId?: string;
-  score: number;
-  summary?: string;
-  strengths?: string[];
-  gaps?: string[];
-  recommendedActions?: string[];
-  debug?: unknown;
-}
-
-type StoredPayload = {
-  result: AnalysisResult;
-  savedAt: string;
-};
+import type { AnalysisResult, StoredPayload } from "../lib/session";
+import { saveLastAnalysis } from "../lib/session";
 
 type ApiStatus = "unknown" | "online" | "offline";
-
-const STORAGE_KEY = "ttr:lastAnalysis";
 
 const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
   const radius = 72;
@@ -267,12 +251,8 @@ export default function AnalyzePage() {
       const data = (await response.json()) as AnalysisResult;
       setResult(data);
 
-      try {
-        const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      } catch {
-        // no-op
-      }
+      const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+      saveLastAnalysis(payload);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unexpected error";
       setError(message);
@@ -385,9 +365,7 @@ export default function AnalyzePage() {
               </select>
 
               {baselineError ? (
-                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>
-                  {baselineError}
-                </p>
+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{baselineError}</p>
               ) : (
                 <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
                   Choose one of your uploaded baselines to analyze against this role.
@@ -588,9 +566,7 @@ export default function AnalyzePage() {
 
                 {result.strengths?.length ? (
                   <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                      Signals in your favor
-                    </p>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>Signals in your favor</p>
                     <div style={{ display: "flex", flexWrap: "wrap" }}>
                       {result.strengths.map((item, index) => (
                         <span key={`${item}-${index}`} style={ttrComponents.chip}>
@@ -603,9 +579,7 @@ export default function AnalyzePage() {
 
                 {result.gaps?.length ? (
                   <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
-                      Gaps to address
-                    </p>
+                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>Gaps to address</p>
                     <div style={{ display: "flex", flexWrap: "wrap" }}>
                       {result.gaps.map((item, index) => (
                         <span
@@ -701,6 +675,8 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
+
+
 
 
 
