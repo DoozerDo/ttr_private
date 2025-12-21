@@ -1,223 +1,46 @@
-diff --git a/apps/web/app/components/last-analysis-card.tsx b/apps/web/app/components/last-analysis-card.tsx
-index abb07a36e4206516f99f2af0e4a6a3b665f12495..9f7a70943e67c9be193a3f61fcc20f4a9cc7fa36 100644
---- a/apps/web/app/components/last-analysis-card.tsx
-+++ b/apps/web/app/components/last-analysis-card.tsx
-@@ -1,49 +1,34 @@
- // apps/web/app/components/last-analysis-card.tsx
+diff --git a/apps/web/app/ui/InstrumentShell.tsx b/apps/web/app/ui/InstrumentShell.tsx
+index cbd7a40dbd3bc787f8d640f37b91689d9596dc18..b97941183cb946bac309dcd6f53446800df4012d 100644
+--- a/apps/web/app/ui/InstrumentShell.tsx
++++ b/apps/web/app/ui/InstrumentShell.tsx
+@@ -1,37 +1,38 @@
  "use client";
  
- import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
- import type { CSSProperties } from "react";
+ import { ReactNode } from "react";
  
- import { ttrComponents } from "../ui/ttrStyles";
--
--type AnalysisResult = {
--  ok?: boolean;
--  baselineId?: string;
--  score: number;
--  summary?: string;
--  strengths?: string[];
--  gaps?: string[];
--  recommendedActions?: string[];
--  debug?: unknown;
--};
--
--type StoredPayload = {
--  result: AnalysisResult;
--  savedAt: string;
--};
-+import type { StoredPayload } from "../lib/session";
+ import { InstrumentPanelShell } from "./InstrumentPanelShell";
+ import { ttrLayout } from "./ttrStyles";
  
- const STORAGE_KEY = "ttr:lastAnalysis";
+ type InstrumentShellProps = {
+   children: ReactNode;
+   kicker?: string;
+-  title?: string;
++  title: string;
++  subtitle?: string;
+   rightSlot?: ReactNode;
+ };
  
- function fitLabel(score: number) {
-   if (score >= 90) return "Strong fit";
-   if (score >= 75) return "Solid fit";
-   if (score >= 60) return "Mixed fit";
-   return "Weak fit";
- }
- 
- function safeParse(payload: string | null): StoredPayload | null {
-   if (!payload) return null;
- 
-   try {
-     const parsed = JSON.parse(payload) as StoredPayload;
- 
-     if (!parsed || typeof parsed !== "object") return null;
-     if (!parsed.result || typeof parsed.result.score !== "number") return null;
-     if (!parsed.savedAt || typeof parsed.savedAt !== "string") return null;
- 
-     return parsed;
-   } catch {
-     return null;
-   }
- }
-diff --git a/apps/web/app/components/next-step-card.tsx b/apps/web/app/components/next-step-card.tsx
-index 72f1ba2db8041e512bfdd055b8bb917b6695eb71..6dc0e8835d05749e8b2c0567160811393ea7bcf4 100644
---- a/apps/web/app/components/next-step-card.tsx
-+++ b/apps/web/app/components/next-step-card.tsx
-@@ -1,48 +1,33 @@
- // apps/web/app/components/next-step-card.tsx
- "use client";
- 
- import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
- 
- import { ttrComponents } from "../ui/ttrStyles";
--
--type AnalysisResult = {
--  ok?: boolean;
--  baselineId?: string;
--  score: number;
--  summary?: string;
--  strengths?: string[];
--  gaps?: string[];
--  recommendedActions?: string[];
--  debug?: unknown;
--};
--
--type StoredPayload = {
--  result: AnalysisResult;
--  savedAt: string;
--};
-+import type { StoredPayload } from "../lib/session";
- 
- const STORAGE_KEY = "ttr:lastAnalysis";
- 
- function safeParse(payload: string | null): StoredPayload | null {
-   if (!payload) return null;
- 
-   try {
-     const parsed = JSON.parse(payload) as StoredPayload;
- 
-     if (!parsed || typeof parsed !== "object") return null;
-     if (!parsed.result || typeof parsed.result.score !== "number") return null;
-     if (!parsed.savedAt || typeof parsed.savedAt !== "string") return null;
- 
-     return parsed;
-   } catch {
-     return null;
-   }
- }
- 
- export function NextStepCard() {
-   const [stored, setStored] = useState<StoredPayload | null>(null);
- 
-   useEffect(() => {
-     const read = () => {
-       const raw = sessionStorage.getItem(STORAGE_KEY);
-diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index 198a8a2135c092fd70c801d50e258b911e4b9de9..a0816b54a13bb645c4fc1aceaa68c7ceb70bacf4 100644
---- a/apps/web/app/results/page.tsx
-+++ b/apps/web/app/results/page.tsx
-@@ -1,50 +1,35 @@
- // apps/web/app/results/page.tsx
- "use client";
- 
- import type { CSSProperties } from "react";
- import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
- 
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
--
--interface AnalysisResult {
--  ok?: boolean;
--  baselineId?: string;
--  score: number;
--  summary?: string;
--  strengths?: string[];
--  gaps?: string[];
--  recommendedActions?: string[];
--  debug?: unknown;
--}
--
--type StoredPayload = {
--  result: AnalysisResult;
--  savedAt: string;
--};
-+import type { AnalysisResult, StoredPayload } from "../lib/session";
- 
- const STORAGE_KEY = "ttr:lastAnalysis";
- 
- function fitLabel(score: number | null) {
-   if (score === null) return "";
-   if (score >= 90) return "Strong fit";
-   if (score >= 75) return "Solid fit";
-   if (score >= 60) return "Mixed fit";
-   return "Weak fit";
- }
- 
- function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string } | null {
-   try {
-     const parsed = JSON.parse(raw) as unknown;
- 
-     // New format: { result, savedAt }
-     if (
-       parsed &&
-       typeof parsed === "object" &&
-       "result" in parsed &&
-       "savedAt" in parsed &&
-       typeof (parsed as any).savedAt === "string"
-     ) {
-       const payload = parsed as StoredPayload;
-       if (payload?.result && typeof payload.result.score === "number") {
-@@ -316,26 +301,25 @@ export default function ResultsPage() {
-                   borderRadius: 12,
-                   border: "1px solid rgba(255,255,255,0.08)",
-                   background: "rgba(0,0,0,0.18)",
-                   padding: "12px 12px",
-                 }}
-               >
-                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Quick links</div>
-                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                   <Link href="/analyze" style={ttrComponents.quietButton}>
-                     Run another analysis
-                   </Link>
-                   <Link href="/calibrate" style={ttrComponents.quietButton}>
-                     Open Calibrate
-                   </Link>
-                 </div>
-               </div>
-             ) : null}
-           </div>
-         </section>
+ export function InstrumentShell({
+   children,
+   kicker,
+   title,
++  subtitle,
+   rightSlot,
+ }: InstrumentShellProps) {
+   return (
+     <main style={ttrLayout.pageShell}>
+       <div style={ttrLayout.pageContainer}>
+         <InstrumentPanelShell
+           kicker={kicker}
+           title={title}
++          subtitle={subtitle}
+           rightSlot={rightSlot}
+         >
+           {children}
+         </InstrumentPanelShell>
        </div>
-     </InstrumentShell>
+     </main>
    );
  }
  
- 
 -
-diff --git a/apps/web/lib/session.ts b/apps/web/lib/session.ts
-index 3871c4562573e53f2860d6e96968e5d5fd6f9066..8cf3b58f4c8ca9e417d4e7e81711f09f9502bd67 100644
---- a/apps/web/lib/session.ts
-+++ b/apps/web/lib/session.ts
-@@ -1,6 +1,22 @@
--export type StoredPayload = unknown;
-+export type AnalysisResult = {
-+  ok?: boolean;
-+  baselineId?: string;
-+  score: number;
-+  summary?: string;
-+  strengths?: string[];
-+  gaps?: string[];
-+  recommendedActions?: string[];
-+  debug?: unknown;
-+};
- 
--export async function saveLastAnalysis(_payload: StoredPayload) {
--  return;
--}
-+export type StoredPayload = {
-+  result: AnalysisResult;
-+  savedAt: string;
-+};
-+
-+const STORAGE_KEY = "ttr:lastAnalysis";
- 
-+export async function saveLastAnalysis(payload: StoredPayload) {
-+  if (typeof window === "undefined") return;
-+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-+}
+-
