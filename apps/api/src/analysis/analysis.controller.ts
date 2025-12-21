@@ -1,0 +1,32 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import type { Request } from 'express';
+import { AnalysisService } from './analysis.service';
+import type { AnalysisRequest } from './analysis.service';
+
+@Controller('analysis')
+@UseGuards(AuthGuard('jwt'))
+export class AnalysisController {
+  constructor(private readonly analysisService: AnalysisService) {}
+
+  @Post()
+  async analyze(
+    @Body() body: AnalysisRequest,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.analyzeForUser(userId, body);
+  }
+}

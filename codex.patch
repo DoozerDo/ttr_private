@@ -1,404 +1,307 @@
-diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
-index 7c0d392cf1fab99d16341df4b79c5bc7f52645ce..dc8fec4f22c04a1cfb8b277b7305027a91927237 100644
---- a/apps/web/app/analyze/page.tsx
-+++ b/apps/web/app/analyze/page.tsx
-@@ -1,33 +1,34 @@
- // apps/web/app/analyze/page.tsx
- "use client";
- 
- import { useEffect, useMemo, useState } from "react";
- import type { CSSProperties } from "react";
- import Link from "next/link";
- 
- import type { BaselineDto } from "../../lib/baselines";
-+import type { JobDto } from "../../lib/jobs";
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
- import type { AnalysisResult, StoredPayload } from "../lib/session";
- import { saveLastAnalysis } from "../lib/session";
- 
- type ApiStatus = "unknown" | "online" | "offline";
- 
- const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
-   const radius = 72;
-   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
-   const clampedScore = Math.min(Math.max(score, 0), 100);
-   const offset = circumference * (1 - clampedScore / 100);
-   const gradientId = "scoreRingGradient";
- 
-   return (
-     <div
-       style={{
-         position: "relative",
-         display: "flex",
-         height: 176,
-         width: 176,
-         alignItems: "center",
-         justifyContent: "center",
-       }}
-     >
-@@ -100,169 +101,222 @@ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
-     </div>
-   );
- };
- 
- function fitLabel(score: number | null) {
-   if (score === null) return "";
-   if (score >= 90) return "Strong fit";
-   if (score >= 75) return "Solid fit";
-   if (score >= 60) return "Mixed fit";
-   return "Weak fit";
- }
- 
- function signalQuality(score: number | null) {
-   if (score === null) return { label: "n/a", color: "rgba(255,255,255,0.3)" };
-   if (score >= 90) return { label: "High", color: "#22c55e" };
-   if (score >= 75) return { label: "Medium", color: "#f59e0b" };
-   return { label: "Low", color: "#f97316" };
- }
- 
- export default function AnalyzePage() {
-   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
-   const [baselineId, setBaselineId] = useState("");
-   const [baselineLoading, setBaselineLoading] = useState(true);
-   const [baselineError, setBaselineError] = useState<string | null>(null);
- 
-+  const [jobs, setJobs] = useState<JobDto[]>([]);
-+  const [jobId, setJobId] = useState("");
-+  const [jobsLoading, setJobsLoading] = useState(true);
-+  const [jobsError, setJobsError] = useState<string | null>(null);
+diff --git a/apps/api/src/analysis/analysis.controller.ts b/apps/api/src/analysis/analysis.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dfa154dd64e11d0d30cdf39787b9625d1c6947f9
+--- /dev/null
++++ b/apps/api/src/analysis/analysis.controller.ts
+@@ -0,0 +1,32 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { AnalysisService } from './analysis.service';
++import type { AnalysisRequest } from './analysis.service';
 +
-   const [jobDescription, setJobDescription] = useState("");
-   const [result, setResult] = useState<AnalysisResult | null>(null);
- 
-   const [loading, setLoading] = useState(false);
-   const [error, setError] = useState<string | null>(null);
- 
-   const [animatedScore, setAnimatedScore] = useState(0);
-   const [showRaw, setShowRaw] = useState(false);
- 
-   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
- 
--  const canAnalyze =
--    !loading && baselineId.trim().length > 0 && jobDescription.trim().length > 0;
-+  const hasBaseline = baselineId.trim().length > 0;
-+  const hasSelectedJob = jobId.trim().length > 0;
-+  const hasJobDescription = jobDescription.trim().length > 0;
-+  const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const loadBaselines = async () => {
-       setBaselineLoading(true);
-       setBaselineError(null);
- 
-       try {
-         const response = await fetch("/api/baselines", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load baselines.");
-         }
- 
-         const data = (await response.json()) as BaselineDto[];
-         if (cancelled) return;
- 
-         setBaselines(data);
- 
-         if (data.length > 0) {
-           setBaselineId((prev) => {
-             if (prev && data.some((b) => b.id === prev)) return prev;
-             return data[0].id;
-           });
-         } else {
-           setBaselineId("");
-         }
-       } catch (loadError) {
-         if (cancelled) return;
-         setBaselineError(
-           loadError instanceof Error ? loadError.message : "Unable to load baselines.",
-         );
-         setBaselines([]);
-         setBaselineId("");
-       } finally {
-         if (!cancelled) setBaselineLoading(false);
-       }
-     };
- 
-     loadBaselines();
-     return () => {
-       cancelled = true;
-     };
-   }, []);
- 
-+  useEffect(() => {
-+    let cancelled = false;
++@Controller('analysis')
++@UseGuards(AuthGuard('jwt'))
++export class AnalysisController {
++  constructor(private readonly analysisService: AnalysisService) {}
 +
-+    const loadJobs = async () => {
-+      setJobsLoading(true);
-+      setJobsError(null);
++  @Post()
++  async analyze(
++    @Body() body: AnalysisRequest,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
 +
-+      try {
-+        const response = await fetch("/api/jobs", { cache: "no-store" });
-+        if (!response.ok) {
-+          const message = await response.text();
-+          throw new Error(message || "Unable to load saved jobs.");
-+        }
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
 +
-+        const data = (await response.json()) as JobDto[];
-+        if (cancelled) return;
++    return this.analysisService.analyzeForUser(userId, body);
++  }
++}
+diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..516ed757de916937209d8ca3d10cf8f61035521e
+--- /dev/null
++++ b/apps/api/src/analysis/analysis.module.ts
+@@ -0,0 +1,14 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineSection } from '../baseline/baseline-section.entity';
++import { Job } from '../jobs/job.entity';
++import { AnalysisController } from './analysis.controller';
++import { AnalysisService } from './analysis.service';
 +
-+        setJobs(data);
++@Module({
++  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, Job])],
++  controllers: [AnalysisController],
++  providers: [AnalysisService],
++})
++export class AnalysisModule {}
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b741cd18bf4380d35edc7f0aa9210c8f8083156b
+--- /dev/null
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -0,0 +1,144 @@
++import {
++  BadRequestException,
++  Injectable,
++  NotFoundException,
++} from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { Baseline } from '../baseline/baseline.entity';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++} from '../baseline/baseline-section.entity';
++import { Job } from '../jobs/job.entity';
 +
-+        if (data.length === 0) {
-+          setJobId("");
-+          return;
-+        }
++export type AnalysisRequest = {
++  baselineId: string;
++  jobId?: string;
++  jobDescription?: string;
++};
 +
-+        setJobId((prev) => {
-+          if (prev && data.some((job) => job.id === prev)) return prev;
-+          return "";
-+        });
-+      } catch (loadError) {
-+        if (cancelled) return;
-+        setJobsError(loadError instanceof Error ? loadError.message : "Unable to load saved jobs.");
-+        setJobs([]);
-+        setJobId("");
-+      } finally {
-+        if (!cancelled) setJobsLoading(false);
-+      }
++export type AnalysisResult = {
++  ok: boolean;
++  baselineId: string;
++  score: number;
++  strengths: string[];
++  gaps: string[];
++  summary: string;
++};
++
++@Injectable()
++export class AnalysisService {
++  constructor(
++    @InjectRepository(Baseline)
++    private readonly baselineRepository: Repository<Baseline>,
++    @InjectRepository(BaselineSection)
++    private readonly baselineSectionRepository: Repository<BaselineSection>,
++    @InjectRepository(Job)
++    private readonly jobRepository: Repository<Job>,
++  ) {}
++
++  private normalizeKeywords(text: string) {
++    const tokens = text
++      .toLowerCase()
++      .match(/[a-z0-9]+/g)
++      ?.filter((token) => token.length >= 3) ?? [];
++
++    const frequencies = new Map<string, number>();
++    for (const token of tokens) {
++      frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
++    }
++
++    return frequencies;
++  }
++
++  private sortByFrequency(values: Map<string, number>, items: string[]) {
++    return [...items].sort((a, b) => {
++      const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
++      if (delta !== 0) return delta;
++      return a.localeCompare(b);
++    });
++  }
++
++  private buildBaselineText(sections: BaselineSection[]) {
++    return sections
++      .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
++      .map((section) => section.content)
++      .join('\n');
++  }
++
++  async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
++    const baselineId = payload.baselineId?.trim();
++    if (!baselineId) {
++      throw new BadRequestException('baselineId is required');
++    }
++
++    const hasJobId = Boolean(payload.jobId?.trim());
++    const hasJobDescription = Boolean(payload.jobDescription?.trim());
++
++    if (!hasJobId && !hasJobDescription) {
++      throw new BadRequestException('jobId or jobDescription is required');
++    }
++
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    if (!baseline.sections?.length) {
++      baseline.sections = await this.baselineSectionRepository.find({
++        where: { baselineId: baseline.id },
++        order: { order: 'ASC' },
++      });
++    }
++
++    const jobDescription = hasJobId
++      ? (await this.jobRepository.findOne({
++          where: { id: payload.jobId?.trim(), userId },
++        }))?.rawDescription
++      : payload.jobDescription?.trim();
++
++    if (!jobDescription) {
++      throw new NotFoundException('Job not found');
++    }
++
++    const baselineText = this.buildBaselineText(baseline.sections ?? []);
++    const baselineKeywords = this.normalizeKeywords(baselineText);
++    const jobKeywords = this.normalizeKeywords(jobDescription);
++
++    const baselineSet = new Set(baselineKeywords.keys());
++    const jobSet = new Set(jobKeywords.keys());
++
++    const overlap = [...jobSet].filter((keyword) => baselineSet.has(keyword));
++    const gaps = [...jobSet].filter((keyword) => !baselineSet.has(keyword));
++
++    const overlapSorted = this.sortByFrequency(jobKeywords, overlap);
++    const gapsSorted = this.sortByFrequency(jobKeywords, gaps);
++
++    const total = jobSet.size;
++    const matched = overlap.length;
++    const score = total === 0 ? 0 : Math.round((matched / total) * 100);
++
++    const strengths = overlapSorted.slice(0, 8);
++    const gapList = gapsSorted.slice(0, 8);
++
++    const summary =
++      total === 0
++        ? 'No keywords found in the job description.'
++        : `Matched ${matched} of ${total} key terms from the job description.`;
++
++    return {
++      ok: true,
++      baselineId: baseline.id,
++      score,
++      strengths,
++      gaps: gapList,
++      summary,
 +    };
++  }
++}
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index b5ec4d1ac4de27fb95271321b4392504b7e76a7c..7bb000e6fa6c432bcc3226c08e37249beb976fb4 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,39 +1,41 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { AppController } from './app.controller';
+ import { AppService } from './app.service';
+ import { AuthModule } from './auth/auth.module';
++import { AnalysisModule } from './analysis/analysis.module';
+ import { BaselineModule } from './baseline/baseline.module';
+ import { JobsModule } from './jobs/jobs.module';
+ import { User } from './users/user.entity';
+ import { UsersModule } from './users/users.module';
+ 
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env.local', '.env'],
+     }),
+     TypeOrmModule.forRootAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         type: 'postgres',
+         url:
+           configService.get<string>('DATABASE_URL') ??
+           'postgresql://postgres:postgres@db:5432/targetthisrole',
+         entities: [User],
+         synchronize: configService.get<string>('NODE_ENV') !== 'production',
+         autoLoadEntities: true,
+       }),
+     }),
+     UsersModule,
+     AuthModule,
++    AnalysisModule,
+     BaselineModule,
+     JobsModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/web/app/api/analyze/route.ts b/apps/web/app/api/analyze/route.ts
+index 98e478e35a100edb30fac05f28ceab66b4b3fd72..f95df692ad1df98b9f205342741067709396cee1 100644
+--- a/apps/web/app/api/analyze/route.ts
++++ b/apps/web/app/api/analyze/route.ts
+@@ -1,20 +1,34 @@
+-import { NextResponse } from "next/server";
++import { NextRequest, NextResponse } from "next/server";
 +
-+    loadJobs();
-+    return () => {
-+      cancelled = true;
-+    };
-+  }, []);
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+ 
+ export const runtime = "nodejs";
+ 
+-export async function POST(req: Request) {
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
 +
-   useEffect(() => {
-     if (loading) {
-       setAnimatedScore(0);
-       return;
-     }
- 
-     if (result?.score !== undefined && result?.score !== null) {
-       setAnimatedScore(0);
-       const frame = requestAnimationFrame(() => {
-         setAnimatedScore(result.score);
-       });
-       return () => cancelAnimationFrame(frame);
-     }
- 
-     setAnimatedScore(0);
-   }, [loading, result]);
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const probe = async (url: string) => {
-       try {
-         const res = await fetch(url, { cache: "no-store" });
-         return res.ok;
-       } catch {
-         return false;
-       }
-     };
- 
-     const check = async () => {
-       setApiStatus((prev) => (prev === "online" ? "online" : "unknown"));
-       const online = (await probe("/api/status")) || (await probe("/api/health"));
-       if (cancelled) return;
-       setApiStatus(online ? "online" : "offline");
-     };
- 
-     check();
-     const interval = setInterval(check, 10000);
- 
-     return () => {
-       cancelled = true;
-       clearInterval(interval);
-     };
-   }, []);
- 
-   const handleAnalyze = async () => {
--    if (!baselineId.trim() || !jobDescription.trim()) {
--      setError("Please select a baseline and paste a job description.");
-+    if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
-+      setError("Please select a baseline and either choose a saved job or paste a description.");
-       return;
-     }
- 
-     setLoading(true);
-     setError(null);
-     setResult(null);
- 
-     try {
-       const response = await fetch("/api/analyze", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
--        body: JSON.stringify({ baselineId, jobDescription }),
-+        body: JSON.stringify(
-+          hasSelectedJob ? { baselineId, jobId } : { baselineId, jobDescription },
-+        ),
-       });
- 
-       if (!response.ok) {
-         const message = await response.text();
-         throw new Error(message || "Unable to analyze this role right now.");
-       }
- 
-       const data = (await response.json()) as AnalysisResult;
-       setResult(data);
- 
-       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-       saveLastAnalysis(payload);
-     } catch (e) {
-       const message = e instanceof Error ? e.message : "Unexpected error";
-       setError(message);
-       setResult(null);
-     } finally {
-       setLoading(false);
-     }
-   };
- 
-   const scoreLabel = fitLabel(result?.score ?? null);
-   const quality = signalQuality(result?.score ?? null);
- 
-   const pillColor =
-@@ -351,72 +405,106 @@ export default function AnalyzePage() {
-                 id="baselineId"
-                 name="baselineId"
-                 value={baselineId}
-                 onChange={(event) => setBaselineId(event.target.value)}
-                 style={ttrComponents.input}
-                 disabled={baselineLoading || baselines.length === 0}
-               >
-                 {baselineLoading && <option value="">Loading baselines…</option>}
-                 {!baselineLoading && baselines.length === 0 && <option value="">No baselines uploaded yet</option>}
-                 {baselines.map((baseline) => (
-                   <option key={baseline.id} value={baseline.id}>
-                     {baseline.originalFilename}
-                   </option>
-                 ))}
-               </select>
- 
-               {baselineError ? (
-                 <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{baselineError}</p>
-               ) : (
-                 <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Choose one of your uploaded baselines to analyze against this role.
-                 </p>
-               )}
-             </div>
- 
-+            <div>
-+              <label style={ttrComponents.fieldLabel} htmlFor="jobId">
-+                Saved job posting (optional)
-+              </label>
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
 +
-+              <select
-+                id="jobId"
-+                name="jobId"
-+                value={jobId}
-+                onChange={(event) => setJobId(event.target.value)}
-+                style={ttrComponents.input}
-+                disabled={jobsLoading || jobs.length === 0}
-+              >
-+                <option value="">Select a saved job</option>
-+                {jobsLoading && <option value="">Loading saved jobs…</option>}
-+                {!jobsLoading && jobs.length === 0 && <option value="">No saved jobs yet</option>}
-+                {jobs.map((job) => (
-+                  <option key={job.id} value={job.id}>
-+                    {job.title || "Untitled role"}
-+                    {job.company ? ` · ${job.company}` : ""}
-+                  </option>
-+                ))}
-+              </select>
++  if (!token) {
++    return error;
++  }
 +
-+              {jobsError ? (
-+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{jobsError}</p>
-+              ) : (
-+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-+                  Pick a previously saved job posting or paste a new description below.
-+                </p>
-+              )}
-+            </div>
-+
-             <div>
-               <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
--                Job description
-+                Paste a new job description
-               </label>
- 
-               <textarea
-                 id="jobDescription"
-                 name="jobDescription"
-                 rows={8}
-                 value={jobDescription}
-                 onChange={(event) => setJobDescription(event.target.value)}
-                 placeholder="Paste the role you want to target..."
-                 style={{
-                   ...ttrComponents.input,
-                   resize: "vertical",
-                   minHeight: 150,
-                   fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-                 }}
-               />
- 
-               <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
--                We only send this content to the analyzer service for this check.
-+                We only send this content to the analyzer service for this check. If you select a saved
-+                job posting, we will use that instead.
-               </p>
- 
-               <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
-                 Characters: {jobDescription.length}
-               </div>
-             </div>
- 
-             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
- 
-             <button
-               type="button"
-               onClick={handleAnalyze}
-               disabled={!canAnalyze}
-               style={{
-                 ...ttrComponents.primaryButton,
-                 cursor: canAnalyze ? "pointer" : "not-allowed",
-                 opacity: canAnalyze ? 1 : 0.6,
-               }}
-             >
-               {loading ? "Analyzing…" : "Analyze role fit"}
-             </button>
- 
-             <div
-               style={{
-                 borderRadius: 12,
-@@ -667,27 +755,25 @@ export default function AnalyzePage() {
-                       padding: 12,
-                       borderRadius: 10,
-                       background: "rgba(0,0,0,0.35)",
-                       border: "1px solid rgba(255,255,255,0.05)",
-                       color: "#e2e8f0",
-                       fontSize: 12,
-                       whiteSpace: "pre-wrap",
-                       wordBreak: "break-word",
-                     }}
-                   >
-                     {JSON.stringify(result, null, 2)}
-                   </pre>
-                 ) : null}
-               </div>
-             )}
-           </div>
-         </section>
-       </div>
-     </InstrumentShell>
-   );
- }
- 
- 
- 
- 
+   const body = await req.json();
+-  const baselineId = (body?.baselineId ?? "").toString();
+-  const jobDescription = (body?.jobDescription ?? "").toString();
 -
--
+-  return NextResponse.json({
+-    ok: true,
+-    baselineId,
+-    score: 82,
+-    summary: "Mock API response. Real scoring will replace this endpoint next.",
+-    debug: {
+-      receivedChars: jobDescription.length
+-    }
++
++  const response = await fetch(`${baseUrl}/analysis`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
+   });
+-}
+ 
++  return relayApiResponse(response);
++}

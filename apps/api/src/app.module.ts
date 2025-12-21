@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { AnalysisModule } from './analysis/analysis.module';
 import { BaselineModule } from './baseline/baseline.module';
 import { JobsModule } from './jobs/jobs.module';
 import { User } from './users/user.entity';
@@ -30,6 +31,7 @@ import { UsersModule } from './users/users.module';
     }),
     UsersModule,
     AuthModule,
+    AnalysisModule,
     BaselineModule,
     JobsModule,
   ],
