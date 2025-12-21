@@ -1,224 +1,17 @@
-diff --git a/apps/api/src/analysis/analysis.controller.ts b/apps/api/src/analysis/analysis.controller.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..dfa154dd64e11d0d30cdf39787b9625d1c6947f9
---- /dev/null
-+++ b/apps/api/src/analysis/analysis.controller.ts
-@@ -0,0 +1,32 @@
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
-+import { AnalysisService } from './analysis.service';
-+import type { AnalysisRequest } from './analysis.service';
-+
-+@Controller('analysis')
-+@UseGuards(AuthGuard('jwt'))
-+export class AnalysisController {
-+  constructor(private readonly analysisService: AnalysisService) {}
-+
-+  @Post()
-+  async analyze(
-+    @Body() body: AnalysisRequest,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.analysisService.analyzeForUser(userId, body);
-+  }
-+}
-diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..516ed757de916937209d8ca3d10cf8f61035521e
---- /dev/null
-+++ b/apps/api/src/analysis/analysis.module.ts
-@@ -0,0 +1,14 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { Baseline } from '../baseline/baseline.entity';
-+import { BaselineSection } from '../baseline/baseline-section.entity';
-+import { Job } from '../jobs/job.entity';
-+import { AnalysisController } from './analysis.controller';
-+import { AnalysisService } from './analysis.service';
-+
-+@Module({
-+  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, Job])],
-+  controllers: [AnalysisController],
-+  providers: [AnalysisService],
-+})
-+export class AnalysisModule {}
-diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..b741cd18bf4380d35edc7f0aa9210c8f8083156b
---- /dev/null
-+++ b/apps/api/src/analysis/analysis.service.ts
-@@ -0,0 +1,144 @@
-+import {
-+  BadRequestException,
-+  Injectable,
-+  NotFoundException,
-+} from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
-+import { Baseline } from '../baseline/baseline.entity';
-+import {
-+  BaselineIncludePolicy,
-+  BaselineSection,
-+} from '../baseline/baseline-section.entity';
-+import { Job } from '../jobs/job.entity';
-+
-+export type AnalysisRequest = {
-+  baselineId: string;
-+  jobId?: string;
-+  jobDescription?: string;
-+};
-+
-+export type AnalysisResult = {
-+  ok: boolean;
-+  baselineId: string;
-+  score: number;
-+  strengths: string[];
-+  gaps: string[];
-+  summary: string;
-+};
-+
-+@Injectable()
-+export class AnalysisService {
-+  constructor(
-+    @InjectRepository(Baseline)
-+    private readonly baselineRepository: Repository<Baseline>,
-+    @InjectRepository(BaselineSection)
-+    private readonly baselineSectionRepository: Repository<BaselineSection>,
-+    @InjectRepository(Job)
-+    private readonly jobRepository: Repository<Job>,
-+  ) {}
-+
-+  private normalizeKeywords(text: string) {
-+    const tokens = text
-+      .toLowerCase()
-+      .match(/[a-z0-9]+/g)
-+      ?.filter((token) => token.length >= 3) ?? [];
-+
-+    const frequencies = new Map<string, number>();
-+    for (const token of tokens) {
-+      frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
-+    }
-+
-+    return frequencies;
-+  }
-+
-+  private sortByFrequency(values: Map<string, number>, items: string[]) {
-+    return [...items].sort((a, b) => {
-+      const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
-+      if (delta !== 0) return delta;
-+      return a.localeCompare(b);
-+    });
-+  }
-+
-+  private buildBaselineText(sections: BaselineSection[]) {
-+    return sections
-+      .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
-+      .map((section) => section.content)
-+      .join('\n');
-+  }
-+
-+  async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
-+    const baselineId = payload.baselineId?.trim();
-+    if (!baselineId) {
-+      throw new BadRequestException('baselineId is required');
-+    }
-+
-+    const hasJobId = Boolean(payload.jobId?.trim());
-+    const hasJobDescription = Boolean(payload.jobDescription?.trim());
-+
-+    if (!hasJobId && !hasJobDescription) {
-+      throw new BadRequestException('jobId or jobDescription is required');
-+    }
-+
-+    const baseline = await this.baselineRepository.findOne({
-+      where: { id: baselineId, userId },
-+      relations: ['sections'],
-+      order: { sections: { order: 'ASC' } },
-+    });
-+
-+    if (!baseline) {
-+      throw new NotFoundException('Baseline not found');
-+    }
-+
-+    if (!baseline.sections?.length) {
-+      baseline.sections = await this.baselineSectionRepository.find({
-+        where: { baselineId: baseline.id },
-+        order: { order: 'ASC' },
-+      });
-+    }
-+
-+    const jobDescription = hasJobId
-+      ? (await this.jobRepository.findOne({
-+          where: { id: payload.jobId?.trim(), userId },
-+        }))?.rawDescription
-+      : payload.jobDescription?.trim();
-+
-+    if (!jobDescription) {
-+      throw new NotFoundException('Job not found');
-+    }
-+
-+    const baselineText = this.buildBaselineText(baseline.sections ?? []);
-+    const baselineKeywords = this.normalizeKeywords(baselineText);
-+    const jobKeywords = this.normalizeKeywords(jobDescription);
-+
-+    const baselineSet = new Set(baselineKeywords.keys());
-+    const jobSet = new Set(jobKeywords.keys());
-+
-+    const overlap = [...jobSet].filter((keyword) => baselineSet.has(keyword));
-+    const gaps = [...jobSet].filter((keyword) => !baselineSet.has(keyword));
-+
-+    const overlapSorted = this.sortByFrequency(jobKeywords, overlap);
-+    const gapsSorted = this.sortByFrequency(jobKeywords, gaps);
-+
-+    const total = jobSet.size;
-+    const matched = overlap.length;
-+    const score = total === 0 ? 0 : Math.round((matched / total) * 100);
-+
-+    const strengths = overlapSorted.slice(0, 8);
-+    const gapList = gapsSorted.slice(0, 8);
-+
-+    const summary =
-+      total === 0
-+        ? 'No keywords found in the job description.'
-+        : `Matched ${matched} of ${total} key terms from the job description.`;
-+
-+    return {
-+      ok: true,
-+      baselineId: baseline.id,
-+      score,
-+      strengths,
-+      gaps: gapList,
-+      summary,
-+    };
-+  }
-+}
 diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index b5ec4d1ac4de27fb95271321b4392504b7e76a7c..7bb000e6fa6c432bcc3226c08e37249beb976fb4 100644
+index 7bb000e6fa6c432bcc3226c08e37249beb976fb4..51f3cf3074d2cb0a0a40a88887531e4f3b79b6dc 100644
 --- a/apps/api/src/app.module.ts
 +++ b/apps/api/src/app.module.ts
-@@ -1,39 +1,41 @@
+@@ -1,41 +1,43 @@
  import { Module } from '@nestjs/common';
  import { ConfigModule, ConfigService } from '@nestjs/config';
  import { TypeOrmModule } from '@nestjs/typeorm';
  import { AppController } from './app.controller';
  import { AppService } from './app.service';
  import { AuthModule } from './auth/auth.module';
-+import { AnalysisModule } from './analysis/analysis.module';
+ import { AnalysisModule } from './analysis/analysis.module';
  import { BaselineModule } from './baseline/baseline.module';
++import { InterviewsModule } from './interviews/interviews.module';
  import { JobsModule } from './jobs/jobs.module';
  import { User } from './users/user.entity';
  import { UsersModule } from './users/users.module';
@@ -244,27 +37,383 @@ index b5ec4d1ac4de27fb95271321b4392504b7e76a7c..7bb000e6fa6c432bcc3226c08e37249b
      }),
      UsersModule,
      AuthModule,
-+    AnalysisModule,
+     AnalysisModule,
      BaselineModule,
++    InterviewsModule,
      JobsModule,
    ],
    controllers: [AppController],
    providers: [AppService],
  })
  export class AppModule {}
-diff --git a/apps/web/app/api/analyze/route.ts b/apps/web/app/api/analyze/route.ts
-index 98e478e35a100edb30fac05f28ceab66b4b3fd72..f95df692ad1df98b9f205342741067709396cee1 100644
---- a/apps/web/app/api/analyze/route.ts
-+++ b/apps/web/app/api/analyze/route.ts
-@@ -1,20 +1,34 @@
--import { NextResponse } from "next/server";
+diff --git a/apps/api/src/interviews/interview-response.entity.ts b/apps/api/src/interviews/interview-response.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..82a9e5951a053adef938b5a923220d6a9f5025cb
+--- /dev/null
++++ b/apps/api/src/interviews/interview-response.entity.ts
+@@ -0,0 +1,33 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  JoinColumn,
++  ManyToOne,
++  PrimaryGeneratedColumn,
++} from 'typeorm';
++import { InterviewSession } from './interview-session.entity';
++
++@Entity({ name: 'interview_responses' })
++export class InterviewResponse {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Column()
++  sessionId!: string;
++
++  @Column({ type: 'text' })
++  question!: string;
++
++  @Column({ type: 'text' })
++  response!: string;
++
++  @ManyToOne(() => InterviewSession, (session) => session.responses, {
++    onDelete: 'CASCADE',
++  })
++  @JoinColumn({ name: 'sessionId' })
++  session!: InterviewSession;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++}
+diff --git a/apps/api/src/interviews/interview-session.entity.ts b/apps/api/src/interviews/interview-session.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..76b7829f8999b1902bfa115c2050456356ce04e4
+--- /dev/null
++++ b/apps/api/src/interviews/interview-session.entity.ts
+@@ -0,0 +1,36 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  OneToMany,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++import { InterviewResponse } from './interview-response.entity';
++
++@Entity({ name: 'interview_sessions' })
++export class InterviewSession {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Column()
++  userId!: string;
++
++  @Column()
++  baselineId!: string;
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  jobId!: string | null;
++
++  @Column({ type: 'varchar', length: 64, default: 'active' })
++  status!: string;
++
++  @OneToMany(() => InterviewResponse, (response) => response.session)
++  responses!: InterviewResponse[];
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
+diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..afebd6e3f8d5c915d542f0570ffa9c4bde2b769e
+--- /dev/null
++++ b/apps/api/src/interviews/interviews.controller.ts
+@@ -0,0 +1,86 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Get,
++  Param,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import { Request } from 'express';
++import {
++  CreateInterviewResponseInput,
++  CreateInterviewSessionInput,
++  InterviewsService,
++} from './interviews.service';
++
++@Controller('interviews')
++@UseGuards(AuthGuard('jwt'))
++export class InterviewsController {
++  constructor(private readonly interviewsService: InterviewsService) {}
++
++  @Post()
++  async createSession(
++    @Body() body: Partial<CreateInterviewSessionInput>,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const baselineId = body.baselineId?.trim();
++
++    if (!baselineId) {
++      throw new BadRequestException('Baseline ID is required');
++    }
++
++    return this.interviewsService.createSession(userId, {
++      baselineId,
++      jobId: body.jobId,
++    });
++  }
++
++  @Post(':id/responses')
++  async addResponses(
++    @Param('id') id: string,
++    @Body()
++    body: {
++      responses?: CreateInterviewResponseInput[];
++    },
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const responses = body.responses?.filter(
++      (entry) => entry.question?.trim() && entry.response?.trim(),
++    );
++
++    if (!responses || responses.length === 0) {
++      throw new BadRequestException('Responses are required');
++    }
++
++    return this.interviewsService.addResponses(id, userId, responses);
++  }
++
++  @Get(':id')
++  async getSession(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewsService.getSessionWithResponses(id, userId);
++  }
++}
+diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..298f8f379d5566e140cd50aa0059837c08c8c962
+--- /dev/null
++++ b/apps/api/src/interviews/interviews.module.ts
+@@ -0,0 +1,13 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { InterviewResponse } from './interview-response.entity';
++import { InterviewSession } from './interview-session.entity';
++import { InterviewsController } from './interviews.controller';
++import { InterviewsService } from './interviews.service';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse])],
++  controllers: [InterviewsController],
++  providers: [InterviewsService],
++})
++export class InterviewsModule {}
+diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8cc545624f6cf907bed98794d65906c9997e2c39
+--- /dev/null
++++ b/apps/api/src/interviews/interviews.service.ts
+@@ -0,0 +1,79 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { InterviewResponse } from './interview-response.entity';
++import { InterviewSession } from './interview-session.entity';
++
++export type CreateInterviewSessionInput = {
++  baselineId: string;
++  jobId?: string | null;
++};
++
++export type CreateInterviewResponseInput = {
++  question: string;
++  response: string;
++};
++
++@Injectable()
++export class InterviewsService {
++  constructor(
++    @InjectRepository(InterviewSession)
++    private readonly sessionRepository: Repository<InterviewSession>,
++    @InjectRepository(InterviewResponse)
++    private readonly responseRepository: Repository<InterviewResponse>,
++  ) {}
++
++  async createSession(userId: string, payload: CreateInterviewSessionInput) {
++    const session = this.sessionRepository.create({
++      userId,
++      baselineId: payload.baselineId.trim(),
++      jobId: payload.jobId?.trim() || null,
++      status: 'active',
++    });
++
++    return this.sessionRepository.save(session);
++  }
++
++  async addResponses(
++    sessionId: string,
++    userId: string,
++    responses: CreateInterviewResponseInput[],
++  ) {
++    const session = await this.sessionRepository.findOne({
++      where: { id: sessionId, userId },
++    });
++
++    if (!session) {
++      throw new NotFoundException('Interview session not found');
++    }
++
++    const responseEntities = responses.map((entry) =>
++      this.responseRepository.create({
++        sessionId: session.id,
++        question: entry.question.trim(),
++        response: entry.response.trim(),
++      }),
++    );
++
++    await this.responseRepository.save(responseEntities);
++
++    return this.responseRepository.find({
++      where: { sessionId: session.id },
++      order: { createdAt: 'ASC' },
++    });
++  }
++
++  async getSessionWithResponses(sessionId: string, userId: string) {
++    const session = await this.sessionRepository.findOne({
++      where: { id: sessionId, userId },
++      relations: ['responses'],
++      order: { responses: { createdAt: 'ASC' } },
++    });
++
++    if (!session) {
++      throw new NotFoundException('Interview session not found');
++    }
++
++    return session;
++  }
++}
+diff --git a/apps/web/app/api/interviews/[id]/responses/route.ts b/apps/web/app/api/interviews/[id]/responses/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a43a2a997e44cb1d21c72590577e900b7e483134
+--- /dev/null
++++ b/apps/web/app/api/interviews/[id]/responses/route.ts
+@@ -0,0 +1,36 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
++
++export async function POST(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/interviews/${id}/responses`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/api/interviews/[id]/route.ts b/apps/web/app/api/interviews/[id]/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..af1a910a74527dde8c7009ffb36088956e84692c
+--- /dev/null
++++ b/apps/web/app/api/interviews/[id]/route.ts
+@@ -0,0 +1,33 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/api/interviews/route.ts b/apps/web/app/api/interviews/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a8dba7a747bcff5e8f865909be0860a5cc607a4b
+--- /dev/null
++++ b/apps/web/app/api/interviews/route.ts
+@@ -0,0 +1,32 @@
 +import { NextRequest, NextResponse } from "next/server";
 +
 +import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
- 
- export const runtime = "nodejs";
- 
--export async function POST(req: Request) {
++
 +export async function POST(req: NextRequest) {
 +  const baseUrl = getApiBaseUrl();
 +  const { token, error } = requireAuthToken(req);
@@ -280,28 +429,477 @@ index 98e478e35a100edb30fac05f28ceab66b4b3fd72..f95df692ad1df98b9f20534274106770
 +    return error;
 +  }
 +
-   const body = await req.json();
--  const baselineId = (body?.baselineId ?? "").toString();
--  const jobDescription = (body?.jobDescription ?? "").toString();
--
--  return NextResponse.json({
--    ok: true,
--    baselineId,
--    score: 82,
--    summary: "Mock API response. Real scoring will replace this endpoint next.",
--    debug: {
--      receivedChars: jobDescription.length
--    }
++  const body = await req.json();
 +
-+  const response = await fetch(`${baseUrl}/analysis`, {
++  const response = await fetch(`${baseUrl}/interviews`, {
 +    method: "POST",
 +    headers: {
 +      Authorization: `Bearer ${token}`,
 +      "Content-Type": "application/json",
 +    },
 +    body: JSON.stringify(body),
-   });
--}
- 
++  });
++
 +  return relayApiResponse(response);
 +}
+diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..b190642448c4d723ae2065c022b85d43745ce84b
+--- /dev/null
++++ b/apps/web/app/interviews/[id]/page.tsx
+@@ -0,0 +1,187 @@
++"use client";
++
++import { useEffect, useMemo, useState } from "react";
++import { useParams } from "next/navigation";
++
++import { InstrumentShell } from "../../ui/InstrumentShell";
++import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
++
++const QUESTIONS = [
++  "Walk me through the most relevant accomplishment in your baseline.",
++  "What would your first 30 days look like if you joined this team?",
++  "Which parts of the role feel like the biggest stretch for you?",
++];
++
++type InterviewResponse = {
++  id: string;
++  question: string;
++  response: string;
++};
++
++type InterviewSession = {
++  id: string;
++  baselineId: string;
++  jobId: string | null;
++  status: string;
++  responses?: InterviewResponse[];
++  createdAt: string;
++};
++
++export default function InterviewSessionPage() {
++  const params = useParams<{ id: string }>();
++  const sessionId = params?.id;
++  const [session, setSession] = useState<InterviewSession | null>(null);
++  const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
++  const [saving, setSaving] = useState(false);
++  const [message, setMessage] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    if (!sessionId) return;
++
++    const loadSession = async () => {
++      try {
++        const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
++
++        if (!response.ok) {
++          throw new Error("Unable to load interview session.");
++        }
++
++        const data = (await response.json()) as InterviewSession;
++        setSession(data);
++
++        if (data?.responses?.length) {
++          const responseMap = new Map(data.responses.map((item) => [item.question, item.response]));
++          setAnswers(QUESTIONS.map((question) => responseMap.get(question) ?? ""));
++        }
++      } catch (loadError) {
++        setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
++      }
++    };
++
++    loadSession();
++  }, [sessionId]);
++
++  const handleChange = (index: number, value: string) => {
++    setAnswers((prev) => {
++      const next = [...prev];
++      next[index] = value;
++      return next;
++    });
++  };
++
++  const populatedResponses = useMemo(() => {
++    return QUESTIONS.map((question, index) => ({
++      question,
++      response: answers[index]?.trim() ?? "",
++    })).filter((item) => item.response.length > 0);
++  }, [answers]);
++
++  const handleSave = async () => {
++    if (!sessionId) return;
++
++    if (populatedResponses.length === 0) {
++      setError("Add at least one response before saving.");
++      return;
++    }
++
++    setSaving(true);
++    setError(null);
++    setMessage(null);
++
++    try {
++      const response = await fetch(`/api/interviews/${sessionId}/responses`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ responses: populatedResponses }),
++      });
++
++      if (!response.ok) {
++        const payload = await response.json().catch(() => null);
++        const messageText = payload?.error ?? "Unable to save responses.";
++        throw new Error(messageText);
++      }
++
++      setMessage("Responses saved. You can revisit this page anytime.");
++    } catch (saveError) {
++      setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  return (
++    <InstrumentShell
++      kicker="Interview session"
++      title="Fit Review"
++      subtitle="Capture a few quick responses while the role context is fresh."
++    >
++      <div style={ttrLayout.panelsRow}>
++        <section style={{ ...ttrComponents.basePanel, flex: 1.2 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++            <span style={ttrTypography.subtleLabel}>Session details</span>
++            <h2 style={ttrTypography.h2}>Interview prompts</h2>
++          </div>
++
++          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
++            {QUESTIONS.map((question, index) => (
++              <div key={question} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
++                <label style={ttrComponents.fieldLabel}>{question}</label>
++                <textarea
++                  style={{ ...ttrComponents.textArea, minHeight: 120 }}
++                  value={answers[index] ?? ""}
++                  onChange={(event) => handleChange(index, event.target.value)}
++                />
++              </div>
++            ))}
++
++            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
++              <button
++                type="button"
++                onClick={handleSave}
++                disabled={saving}
++                style={{
++                  ...ttrComponents.primaryButton,
++                  opacity: saving ? 0.6 : 1,
++                  cursor: saving ? "not-allowed" : "pointer",
++                }}
++              >
++                {saving ? "Saving..." : "Save responses"}
++              </button>
++              <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
++                Session ID: {sessionId}
++              </span>
++            </div>
++
++            {message ? <div style={ttrComponents.successBox}>{message}</div> : null}
++            {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
++          </div>
++        </section>
++
++        <section style={{ ...ttrComponents.basePanel, flex: 0.8 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++            <span style={ttrTypography.subtleLabel}>Session</span>
++            <h2 style={ttrTypography.h2}>Overview</h2>
++          </div>
++
++          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
++            <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
++              Status: <strong>{session?.status ?? "loading"}</strong>
++            </div>
++            <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
++              Baseline: {session?.baselineId ?? "..."}
++            </div>
++            {session?.jobId ? (
++              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
++                Job: {session.jobId}
++              </div>
++            ) : null}
++            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
++              Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
++            </div>
++          </div>
++        </section>
++      </div>
++    </InstrumentShell>
++  );
++}
+diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
+index a0816b54a13bb645c4fc1aceaa68c7ceb70bacf4..5c36e0d8c6254e9c27f7ca2be5c3c8609a1475ab 100644
+--- a/apps/web/app/results/page.tsx
++++ b/apps/web/app/results/page.tsx
+@@ -1,31 +1,32 @@
+ // apps/web/app/results/page.tsx
+ "use client";
+ 
+ import type { CSSProperties } from "react";
+ import { useEffect, useMemo, useState } from "react";
+ import Link from "next/link";
++import { useRouter } from "next/navigation";
+ 
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
+ 
+ const STORAGE_KEY = "ttr:lastAnalysis";
+ 
+ function fitLabel(score: number | null) {
+   if (score === null) return "";
+   if (score >= 90) return "Strong fit";
+   if (score >= 75) return "Solid fit";
+   if (score >= 60) return "Mixed fit";
+   return "Weak fit";
+ }
+ 
+ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string } | null {
+   try {
+     const parsed = JSON.parse(raw) as unknown;
+ 
+     // New format: { result, savedAt }
+     if (
+       parsed &&
+       typeof parsed === "object" &&
+       "result" in parsed &&
+       "savedAt" in parsed &&
+@@ -86,71 +87,111 @@ const ScoreRing = ({ score }: { score: number }) => {
+           strokeDasharray={circumference}
+           strokeDashoffset={offset}
+           strokeLinecap="round"
+           style={{ transition: "stroke-dashoffset 600ms ease-out", filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))" }}
+         />
+       </svg>
+ 
+       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
+         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+           <div style={{ fontSize: 34, fontWeight: 900, color: "#fde68a", textShadow: "0 2px 14px rgba(0,0,0,0.35)" }}>
+             {Math.round(clamped)}
+           </div>
+           <div style={{ fontSize: 11, letterSpacing: 2.5, textTransform: "uppercase", color: "rgba(252, 211, 77, 0.8)" }}>
+             Fit score
+           </div>
+         </div>
+       </div>
+     </div>
+   );
+ };
+ 
+ export default function ResultsPage() {
+   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+ 
+   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
++  const [interviewError, setInterviewError] = useState<string | null>(null);
++  const [isCreatingInterview, setIsCreatingInterview] = useState(false);
++  const router = useRouter();
+ 
+   useEffect(() => {
+     try {
+       const raw = sessionStorage.getItem(STORAGE_KEY);
+       if (!raw) {
+         setStored(null);
+         return;
+       }
+ 
+       const parsed = safeParseStored(raw);
+       setStored(parsed);
+     } catch {
+       setStored(null);
+     }
+   }, []);
+ 
+   const score = stored?.result?.score ?? null;
+   const label = fitLabel(score);
+   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
+ 
+   const hasResult = score !== null;
++  const baselineId = stored?.result?.baselineId ?? null;
++
++  const handleCreateInterview = async () => {
++    if (!baselineId) {
++      setInterviewError("Save a baseline analysis first, then try again.");
++      return;
++    }
++
++    setInterviewError(null);
++    setIsCreatingInterview(true);
++
++    try {
++      const response = await fetch("/api/interviews", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ baselineId }),
++      });
++
++      if (!response.ok) {
++        const payload = await response.json().catch(() => null);
++        const message = payload?.error ?? "Unable to create interview session.";
++        throw new Error(message);
++      }
++
++      const session = (await response.json()) as { id?: string };
++
++      if (!session?.id) {
++        throw new Error("Interview session response was incomplete.");
++      }
++
++      router.push(`/interviews/${session.id}`);
++    } catch (error) {
++      setInterviewError(error instanceof Error ? error.message : "Unable to create interview session.");
++    } finally {
++      setIsCreatingInterview(false);
++    }
++  };
+ 
+   return (
+     <InstrumentShell
+       kicker="Output console"
+       title="Results"
+       subtitle="Review the most recent fit score, rationale, and the next actions. This is a staged UI shell for now."
+     >
+       <div style={ttrLayout.panelsRow}>
+         <section style={{ ...basePanelStyle, flex: 1.05 }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Snapshot</span>
+             <h2 style={ttrTypography.h2}>Latest analysis</h2>
+           </div>
+ 
+           <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(0,0,0,0.18)",
+                 padding: "12px 12px",
+               }}
+             >
+               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Status</div>
+@@ -160,50 +201,91 @@ export default function ResultsPage() {
+               <div style={{ marginTop: 10, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                 {hasResult ? (
+                   <>
+                     <ScoreRing score={score ?? 0} />
+                     <div style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 8 }}>
+                       <div style={{ fontSize: 14, fontWeight: 900, color: "#fde68a" }}>{label}</div>
+                       <div style={{ fontSize: 13, lineHeight: 1.6, color: "rgba(241,245,249,0.92)" }}>
+                         {stored?.result?.summary || "Summary will appear here as the analyzer output is refined."}
+                       </div>
+ 
+                       {stored?.result?.baselineId ? (
+                         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                           Baseline: {stored.result.baselineId}
+                         </div>
+                       ) : null}
+                     </div>
+                   </>
+                 ) : (
+                   <div style={{ fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
+                     No saved analysis found yet. Run Analyze once and then return here.
+                   </div>
+                 )}
+               </div>
+             </div>
+ 
++            <div
++              style={{
++                borderRadius: 12,
++                border: "1px solid rgba(251,191,36,0.2)",
++                background: "rgba(251,191,36,0.08)",
++                padding: "16px 14px",
++                display: "flex",
++                flexDirection: "column",
++                gap: 12,
++              }}
++            >
++              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++                <span style={ttrTypography.subtleLabel}>Fit review</span>
++                <p style={{ margin: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
++                  Ready to walk through your story? Capture quick interview notes while the analysis is fresh.
++                </p>
++              </div>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
++                <button
++                  type="button"
++                  onClick={handleCreateInterview}
++                  disabled={!hasResult || isCreatingInterview}
++                  style={{
++                    ...ttrComponents.primaryButton,
++                    opacity: !hasResult || isCreatingInterview ? 0.6 : 1,
++                    cursor: !hasResult || isCreatingInterview ? "not-allowed" : "pointer",
++                  }}
++                >
++                  {isCreatingInterview ? "Starting..." : "I think I’m qualified"}
++                </button>
++                {!hasResult ? (
++                  <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
++                    Run an analysis first to unlock interview prep.
++                  </span>
++                ) : null}
++              </div>
++              {interviewError ? (
++                <div style={ttrComponents.dangerBox}>{interviewError}</div>
++              ) : null}
++            </div>
++
+             <div
+               style={{
+                 border: "1px dashed rgba(251,191,36,0.35)",
+                 borderRadius: 14,
+                 padding: "16px 14px",
+                 background: "rgba(255,255,255,0.03)",
+               }}
+             >
+               <p
+                 style={{
+                   margin: 0,
+                   fontSize: 12,
+                   letterSpacing: 2.5,
+                   textTransform: "uppercase",
+                   color: "rgba(251,191,36,0.75)",
+                   fontWeight: 900,
+                 }}
+               >
+                 Coming soon
+               </p>
+               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
+                 Results will consolidate the score, strengths and gaps, actions, and export status in one place.
+               </p>
+             </div>
+ 
+@@ -300,26 +382,25 @@ export default function ResultsPage() {
+                 style={{
+                   borderRadius: 12,
+                   border: "1px solid rgba(255,255,255,0.08)",
+                   background: "rgba(0,0,0,0.18)",
+                   padding: "12px 12px",
+                 }}
+               >
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Quick links</div>
+                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                   <Link href="/analyze" style={ttrComponents.quietButton}>
+                     Run another analysis
+                   </Link>
+                   <Link href="/calibrate" style={ttrComponents.quietButton}>
+                     Open Calibrate
+                   </Link>
+                 </div>
+               </div>
+             ) : null}
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
+ 
+-

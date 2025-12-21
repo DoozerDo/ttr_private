@@ -4,6 +4,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
@@ -108,6 +109,9 @@ export default function ResultsPage() {
   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
+  const [isCreatingInterview, setIsCreatingInterview] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     try {
@@ -129,6 +133,43 @@ export default function ResultsPage() {
   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
 
   const hasResult = score !== null;
+  const baselineId = stored?.result?.baselineId ?? null;
+
+  const handleCreateInterview = async () => {
+    if (!baselineId) {
+      setInterviewError("Save a baseline analysis first, then try again.");
+      return;
+    }
+
+    setInterviewError(null);
+    setIsCreatingInterview(true);
+
+    try {
+      const response = await fetch("/api/interviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baselineId }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message = payload?.error ?? "Unable to create interview session.";
+        throw new Error(message);
+      }
+
+      const session = (await response.json()) as { id?: string };
+
+      if (!session?.id) {
+        throw new Error("Interview session response was incomplete.");
+      }
+
+      router.push(`/interviews/${session.id}`);
+    } catch (error) {
+      setInterviewError(error instanceof Error ? error.message : "Unable to create interview session.");
+    } finally {
+      setIsCreatingInterview(false);
+    }
+  };
 
   return (
     <InstrumentShell
@@ -180,6 +221,47 @@ export default function ResultsPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div
+              style={{
+                borderRadius: 12,
+                border: "1px solid rgba(251,191,36,0.2)",
+                background: "rgba(251,191,36,0.08)",
+                padding: "16px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={ttrTypography.subtleLabel}>Fit review</span>
+                <p style={{ margin: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
+                  Ready to walk through your story? Capture quick interview notes while the analysis is fresh.
+                </p>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={handleCreateInterview}
+                  disabled={!hasResult || isCreatingInterview}
+                  style={{
+                    ...ttrComponents.primaryButton,
+                    opacity: !hasResult || isCreatingInterview ? 0.6 : 1,
+                    cursor: !hasResult || isCreatingInterview ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {isCreatingInterview ? "Starting..." : "I think I’m qualified"}
+                </button>
+                {!hasResult ? (
+                  <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                    Run an analysis first to unlock interview prep.
+                  </span>
+                ) : null}
+              </div>
+              {interviewError ? (
+                <div style={ttrComponents.dangerBox}>{interviewError}</div>
+              ) : null}
             </div>
 
             <div
@@ -321,5 +403,4 @@ export default function ResultsPage() {
     </InstrumentShell>
   );
 }
-
 

@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { BaselineModule } from './baseline/baseline.module';
+import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     AnalysisModule,
     BaselineModule,
+    InterviewsModule,
     JobsModule,
   ],
   controllers: [AppController],
