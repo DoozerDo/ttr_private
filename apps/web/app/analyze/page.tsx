@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 
 import type { BaselineDto } from "../../lib/baselines";
+import type { JobDto } from "../../lib/jobs";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
 import type { AnalysisResult, StoredPayload } from "../lib/session";
@@ -122,6 +123,11 @@ export default function AnalyzePage() {
   const [baselineLoading, setBaselineLoading] = useState(true);
   const [baselineError, setBaselineError] = useState<string | null>(null);
 
+  const [jobs, setJobs] = useState<JobDto[]>([]);
+  const [jobId, setJobId] = useState("");
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
@@ -133,8 +139,10 @@ export default function AnalyzePage() {
 
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
 
-  const canAnalyze =
-    !loading && baselineId.trim().length > 0 && jobDescription.trim().length > 0;
+  const hasBaseline = baselineId.trim().length > 0;
+  const hasSelectedJob = jobId.trim().length > 0;
+  const hasJobDescription = jobDescription.trim().length > 0;
+  const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,6 +184,50 @@ export default function AnalyzePage() {
     };
 
     loadBaselines();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadJobs = async () => {
+      setJobsLoading(true);
+      setJobsError(null);
+
+      try {
+        const response = await fetch("/api/jobs", { cache: "no-store" });
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "Unable to load saved jobs.");
+        }
+
+        const data = (await response.json()) as JobDto[];
+        if (cancelled) return;
+
+        setJobs(data);
+
+        if (data.length === 0) {
+          setJobId("");
+          return;
+        }
+
+        setJobId((prev) => {
+          if (prev && data.some((job) => job.id === prev)) return prev;
+          return "";
+        });
+      } catch (loadError) {
+        if (cancelled) return;
+        setJobsError(loadError instanceof Error ? loadError.message : "Unable to load saved jobs.");
+        setJobs([]);
+        setJobId("");
+      } finally {
+        if (!cancelled) setJobsLoading(false);
+      }
+    };
+
+    loadJobs();
     return () => {
       cancelled = true;
     };
@@ -227,8 +279,8 @@ export default function AnalyzePage() {
   }, []);
 
   const handleAnalyze = async () => {
-    if (!baselineId.trim() || !jobDescription.trim()) {
-      setError("Please select a baseline and paste a job description.");
+    if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
+      setError("Please select a baseline and either choose a saved job or paste a description.");
       return;
     }
 
@@ -240,7 +292,9 @@ export default function AnalyzePage() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, jobDescription }),
+        body: JSON.stringify(
+          hasSelectedJob ? { baselineId, jobId } : { baselineId, jobDescription },
+        ),
       });
 
       if (!response.ok) {
@@ -374,8 +428,41 @@ export default function AnalyzePage() {
             </div>
 
             <div>
+              <label style={ttrComponents.fieldLabel} htmlFor="jobId">
+                Saved job posting (optional)
+              </label>
+
+              <select
+                id="jobId"
+                name="jobId"
+                value={jobId}
+                onChange={(event) => setJobId(event.target.value)}
+                style={ttrComponents.input}
+                disabled={jobsLoading || jobs.length === 0}
+              >
+                <option value="">Select a saved job</option>
+                {jobsLoading && <option value="">Loading saved jobs…</option>}
+                {!jobsLoading && jobs.length === 0 && <option value="">No saved jobs yet</option>}
+                {jobs.map((job) => (
+                  <option key={job.id} value={job.id}>
+                    {job.title || "Untitled role"}
+                    {job.company ? ` · ${job.company}` : ""}
+                  </option>
+                ))}
+              </select>
+
+              {jobsError ? (
+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{jobsError}</p>
+              ) : (
+                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                  Pick a previously saved job posting or paste a new description below.
+                </p>
+              )}
+            </div>
+
+            <div>
               <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
-                Job description
+                Paste a new job description
               </label>
 
               <textarea
@@ -394,7 +481,8 @@ export default function AnalyzePage() {
               />
 
               <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                We only send this content to the analyzer service for this check.
+                We only send this content to the analyzer service for this check. If you select a saved
+                job posting, we will use that instead.
               </p>
 
               <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
@@ -685,8 +773,6 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
-
-
 
 
 
