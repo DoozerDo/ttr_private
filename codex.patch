@@ -1,98 +1,106 @@
-diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
-index afebd6e3f8d5c915d542f0570ffa9c4bde2b769e..1bc72b8416860febc824b1d6f62696de0bd5e5d1 100644
---- a/apps/api/src/interviews/interviews.controller.ts
-+++ b/apps/api/src/interviews/interviews.controller.ts
-@@ -59,28 +59,28 @@ export class InterviewsController {
-       throw new BadRequestException('Invalid user context');
-     }
+diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
+index b190642448c4d723ae2065c022b85d43745ce84b..3951d2c56dce3059e614dc6f1a827d3b29795e91 100644
+--- a/apps/web/app/interviews/[id]/page.tsx
++++ b/apps/web/app/interviews/[id]/page.tsx
+@@ -1,75 +1,61 @@
+ "use client";
  
-     const responses = body.responses?.filter(
-       (entry) => entry.question?.trim() && entry.response?.trim(),
-     );
+ import { useEffect, useMemo, useState } from "react";
+ import { useParams } from "next/navigation";
  
-     if (!responses || responses.length === 0) {
-       throw new BadRequestException('Responses are required');
-     }
+ import { InstrumentShell } from "../../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
++import type { InterviewSessionDto } from "../../../lib/interviews";
  
-     return this.interviewsService.addResponses(id, userId, responses);
-   }
+ const QUESTIONS = [
+   "Walk me through the most relevant accomplishment in your baseline.",
+   "What would your first 30 days look like if you joined this team?",
+   "Which parts of the role feel like the biggest stretch for you?",
+ ];
  
-   @Get(':id')
-   async getSession(
-     @Param('id') id: string,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
+-type InterviewResponse = {
+-  id: string;
+-  question: string;
+-  response: string;
+-};
+-
+-type InterviewSession = {
+-  id: string;
+-  baselineId: string;
+-  jobId: string | null;
+-  status: string;
+-  responses?: InterviewResponse[];
+-  createdAt: string;
+-};
+-
+ export default function InterviewSessionPage() {
+   const params = useParams<{ id: string }>();
+   const sessionId = params?.id;
+-  const [session, setSession] = useState<InterviewSession | null>(null);
++  const [session, setSession] = useState<InterviewSessionDto | null>(null);
+   const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
+   const [saving, setSaving] = useState(false);
+   const [message, setMessage] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
  
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
+   useEffect(() => {
+     if (!sessionId) return;
  
--    return this.interviewsService.getSessionWithResponses(id, userId);
-+    return this.interviewsService.getSession(id, userId);
-   }
- }
-diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
-index 298f8f379d5566e140cd50aa0059837c08c8c962..039ca366310170e8e5e8eded76b6b0127dd8c622 100644
---- a/apps/api/src/interviews/interviews.module.ts
-+++ b/apps/api/src/interviews/interviews.module.ts
-@@ -1,13 +1,14 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { InterviewResponse } from './interview-response.entity';
- import { InterviewSession } from './interview-session.entity';
- import { InterviewsController } from './interviews.controller';
- import { InterviewsService } from './interviews.service';
+     const loadSession = async () => {
+       try {
+         const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
  
- @Module({
-   imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse])],
-   controllers: [InterviewsController],
-   providers: [InterviewsService],
-+  exports: [InterviewsService],
- })
- export class InterviewsModule {}
-diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
-index 8cc545624f6cf907bed98794d65906c9997e2c39..c917f89856e0fb03db30de1782742ebf155bb89b 100644
---- a/apps/api/src/interviews/interviews.service.ts
-+++ b/apps/api/src/interviews/interviews.service.ts
-@@ -41,39 +41,39 @@ export class InterviewsService {
-   ) {
-     const session = await this.sessionRepository.findOne({
-       where: { id: sessionId, userId },
+         if (!response.ok) {
+           throw new Error("Unable to load interview session.");
+         }
+ 
+-        const data = (await response.json()) as InterviewSession;
++        const data = (await response.json()) as InterviewSessionDto;
+         setSession(data);
+ 
+         if (data?.responses?.length) {
+           const responseMap = new Map(data.responses.map((item) => [item.question, item.response]));
+           setAnswers(QUESTIONS.map((question) => responseMap.get(question) ?? ""));
+         }
+       } catch (loadError) {
+         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
+       }
+     };
+ 
+     loadSession();
+   }, [sessionId]);
+ 
+   const handleChange = (index: number, value: string) => {
+     setAnswers((prev) => {
+       const next = [...prev];
+       next[index] = value;
+       return next;
      });
+   };
  
-     if (!session) {
-       throw new NotFoundException('Interview session not found');
-     }
- 
-     const responseEntities = responses.map((entry) =>
-       this.responseRepository.create({
-         sessionId: session.id,
-         question: entry.question.trim(),
-         response: entry.response.trim(),
-       }),
-     );
- 
-     await this.responseRepository.save(responseEntities);
- 
-     return this.responseRepository.find({
-       where: { sessionId: session.id },
-       order: { createdAt: 'ASC' },
-     });
-   }
- 
--  async getSessionWithResponses(sessionId: string, userId: string) {
-+  async getSession(sessionId: string, userId: string) {
-     const session = await this.sessionRepository.findOne({
-       where: { id: sessionId, userId },
-       relations: ['responses'],
-       order: { responses: { createdAt: 'ASC' } },
-     });
- 
-     if (!session) {
-       throw new NotFoundException('Interview session not found');
-     }
- 
-     return session;
-   }
- }
+   const populatedResponses = useMemo(() => {
+     return QUESTIONS.map((question, index) => ({
+       question,
+diff --git a/apps/web/lib/interviews.ts b/apps/web/lib/interviews.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cfed753a639f342273b5f61f717e88ddad53aa38
+--- /dev/null
++++ b/apps/web/lib/interviews.ts
+@@ -0,0 +1,17 @@
++export interface InterviewResponseDto {
++  id: string;
++  question: string;
++  response: string;
++  createdAt: string;
++  updatedAt: string;
++}
++
++export interface InterviewSessionDto {
++  id: string;
++  baselineId: string;
++  jobId: string | null;
++  status: string;
++  responses?: InterviewResponseDto[];
++  createdAt: string;
++  updatedAt: string;
++}

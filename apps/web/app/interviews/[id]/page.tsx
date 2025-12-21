@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 
 import { InstrumentShell } from "../../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
+import type { InterviewSessionDto } from "../../../lib/interviews";
 
 const QUESTIONS = [
   "Walk me through the most relevant accomplishment in your baseline.",
@@ -12,25 +13,10 @@ const QUESTIONS = [
   "Which parts of the role feel like the biggest stretch for you?",
 ];
 
-type InterviewResponse = {
-  id: string;
-  question: string;
-  response: string;
-};
-
-type InterviewSession = {
-  id: string;
-  baselineId: string;
-  jobId: string | null;
-  status: string;
-  responses?: InterviewResponse[];
-  createdAt: string;
-};
-
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
   const sessionId = params?.id;
-  const [session, setSession] = useState<InterviewSession | null>(null);
+  const [session, setSession] = useState<InterviewSessionDto | null>(null);
   const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -47,7 +33,7 @@ export default function InterviewSessionPage() {
           throw new Error("Unable to load interview session.");
         }
 
-        const data = (await response.json()) as InterviewSession;
+        const data = (await response.json()) as InterviewSessionDto;
         setSession(data);
 
         if (data?.responses?.length) {
