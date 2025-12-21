@@ -36,6 +36,11 @@ const NAV_ITEMS: NavItem[] = [
     description: "Run fit scoring",
   },
   {
+    href: "/jobs/new",
+    label: "Jobs",
+    description: "Add job postings",
+  },
+  {
     href: "/calibrate",
     label: "Calibrate",
     description: "Refine signal and weighting",
@@ -287,7 +292,6 @@ export function InstrumentPanelShell({
     </main>
   );
 }
-
 
 
 

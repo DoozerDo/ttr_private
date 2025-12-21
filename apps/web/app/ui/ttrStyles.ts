@@ -136,6 +136,29 @@ export const ttrComponents: Record<string, CSSProperties> = {
     outline: "none",
     boxShadow: ttrShadows.panelInset,
   },
+  textInput: {
+    width: "100%",
+    borderRadius: ttrRadii.input,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(0,0,0,0.25)",
+    color: ttrColors.textPrimary,
+    padding: "10px 12px",
+    outline: "none",
+    boxShadow: ttrShadows.panelInset,
+    fontSize: 13,
+  },
+  textArea: {
+    width: "100%",
+    borderRadius: ttrRadii.input,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(0,0,0,0.25)",
+    color: ttrColors.textPrimary,
+    padding: "10px 12px",
+    outline: "none",
+    boxShadow: ttrShadows.panelInset,
+    fontSize: 13,
+    resize: "vertical",
+  },
 
   chip: {
     display: "inline-flex",
@@ -158,6 +181,14 @@ export const ttrComponents: Record<string, CSSProperties> = {
     padding: "10px 12px",
     fontSize: 13,
   },
+  successBox: {
+    borderRadius: 12,
+    border: "1px solid rgba(74,222,128,0.35)",
+    background: "rgba(34,197,94,0.12)",
+    color: "rgba(187,247,208,0.95)",
+    padding: "10px 12px",
+    fontSize: 13,
+  },
 
   primaryButton: {
     display: "inline-flex",
@@ -172,6 +203,23 @@ export const ttrComponents: Record<string, CSSProperties> = {
     color: "#0f172a",
     boxShadow: ttrShadows.button,
     transition: "transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease",
+    userSelect: "none",
+    whiteSpace: "nowrap",
+  },
+  secondaryButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "10px 12px",
+    borderRadius: ttrRadii.button,
+    fontSize: 13,
+    fontWeight: 800,
+    textDecoration: "none",
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.05)",
+    color: "rgba(241,245,249,0.92)",
+    boxShadow: "0 12px 22px rgba(0,0,0,0.25)",
+    transition: "transform 160ms ease, box-shadow 160ms ease",
     userSelect: "none",
     whiteSpace: "nowrap",
   },
@@ -194,6 +242,5 @@ export const ttrComponents: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
   },
 };
-
 
 
