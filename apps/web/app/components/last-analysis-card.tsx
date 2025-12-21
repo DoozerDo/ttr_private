@@ -6,22 +6,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 
 import { ttrComponents } from "../ui/ttrStyles";
-
-type AnalysisResult = {
-  ok?: boolean;
-  baselineId?: string;
-  score: number;
-  summary?: string;
-  strengths?: string[];
-  gaps?: string[];
-  recommendedActions?: string[];
-  debug?: unknown;
-};
-
-type StoredPayload = {
-  result: AnalysisResult;
-  savedAt: string;
-};
+import type { StoredPayload } from "../lib/session";
 
 const STORAGE_KEY = "ttr:lastAnalysis";
 

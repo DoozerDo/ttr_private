@@ -7,22 +7,7 @@ import Link from "next/link";
 
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
-
-interface AnalysisResult {
-  ok?: boolean;
-  baselineId?: string;
-  score: number;
-  summary?: string;
-  strengths?: string[];
-  gaps?: string[];
-  recommendedActions?: string[];
-  debug?: unknown;
-}
-
-type StoredPayload = {
-  result: AnalysisResult;
-  savedAt: string;
-};
+import type { AnalysisResult, StoredPayload } from "../lib/session";
 
 const STORAGE_KEY = "ttr:lastAnalysis";
 
@@ -336,6 +321,5 @@ export default function ResultsPage() {
     </InstrumentShell>
   );
 }
-
 
 
