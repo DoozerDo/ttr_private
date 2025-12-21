@@ -81,6 +81,6 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.getSessionWithResponses(id, userId);
+    return this.interviewsService.getSession(id, userId);
   }
 }

@@ -9,5 +9,6 @@ import { InterviewsService } from './interviews.service';
   imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse])],
   controllers: [InterviewsController],
   providers: [InterviewsService],
+  exports: [InterviewsService],
 })
 export class InterviewsModule {}

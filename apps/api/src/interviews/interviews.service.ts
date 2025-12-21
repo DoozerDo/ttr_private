@@ -63,7 +63,7 @@ export class InterviewsService {
     });
   }
 
-  async getSessionWithResponses(sessionId: string, userId: string) {
+  async getSession(sessionId: string, userId: string) {
     const session = await this.sessionRepository.findOne({
       where: { id: sessionId, userId },
       relations: ['responses'],
