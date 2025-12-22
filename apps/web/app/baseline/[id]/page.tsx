@@ -5,25 +5,25 @@ import { notFound, redirect } from "next/navigation";
 import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
 import { formatDateTime } from "../../../lib/format-date";
 
-async function fetchBaseline(id: string, token: string): Promise<BaselineDto | null> {
-  const baseUrl = process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
+async function fetchBaseline(id: string): Promise<BaselineDto | null> {
+  try {
+    const response = await fetch(`/api/baselines/${id}`, {
+      cache: "no-store",
+    });
 
-  if (!baseUrl) {
+    if (response.status === 401) {
+      redirect("/auth/login");
+    }
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as BaselineDto;
+  } catch (error) {
+    console.error("Failed to fetch baseline", error);
     return null;
   }
-
-  const response = await fetch(`${baseUrl}/baselines/${id}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return (await response.json()) as BaselineDto;
 }
 
 const friendlyTitles: Record<string, string> = {
@@ -111,7 +111,7 @@ export default async function BaselineDetailPage({
     notFound();
   }
 
-  const baseline = await fetchBaseline(resolvedParams.id, token);
+  const baseline = await fetchBaseline(resolvedParams.id);
 
   if (!baseline) {
     notFound();

@@ -7,28 +7,25 @@ import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
 
-async function fetchBaselines(token: string): Promise<BaselineDto[]> {
-  const baseUrl =
-    process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
+async function fetchBaselines(): Promise<BaselineDto[]> {
+  try {
+    const res = await fetch("/api/baselines", {
+      cache: "no-store",
+    });
 
-  if (!baseUrl) return [];
+    if (res.status === 401) {
+      redirect("/auth/login");
+    }
 
-  const res = await fetch(`${baseUrl}/baselines`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
+    if (!res.ok) {
+      return [];
+    }
 
-  if (res.status === 401) {
-    redirect("/auth/login");
-  }
-
-  if (!res.ok) {
+    return (await res.json()) as BaselineDto[];
+  } catch (error) {
+    console.error("Failed to fetch baselines", error);
     return [];
   }
-
-  return (await res.json()) as BaselineDto[];
 }
 
 export default async function BaselinePage() {
@@ -39,7 +36,7 @@ export default async function BaselinePage() {
     redirect("/auth/login");
   }
 
-  const baselines = await fetchBaselines(token);
+  const baselines = await fetchBaselines();
 
   const rightSlot = (
     <Link
