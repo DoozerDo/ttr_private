@@ -2,9 +2,9 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
@@ -33,7 +33,10 @@ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string
       typeof (parsed as any).savedAt === "string"
     ) {
       const payload = parsed as StoredPayload;
-      if (payload?.result && typeof payload.result.score === "number") {
+      if (
+        payload?.result &&
+        (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
+      ) {
         return { result: payload.result, savedAt: payload.savedAt };
       }
     }
@@ -105,13 +108,15 @@ const ScoreRing = ({ score }: { score: number }) => {
   );
 };
 
-export default function ResultsPage() {
+function ResultsContent() {
   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [isCreatingInterview, setIsCreatingInterview] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const latestJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -128,12 +133,44 @@ export default function ResultsPage() {
     }
   }, []);
 
-  const score = stored?.result?.score ?? null;
+  useEffect(() => {
+    const jobId = searchParams.get("jobId") ?? stored?.result?.jobId;
+    if (!jobId || latestJobIdRef.current === jobId) return;
+
+    latestJobIdRef.current = jobId;
+    let cancelled = false;
+
+    const loadLatest = async () => {
+      try {
+        const response = await fetch(`/api/analysis/job/${jobId}/latest`, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as AnalysisResult;
+        if (cancelled) return;
+        const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        setStored(payload);
+      } catch {
+        // Ignore fetch errors; fall back to stored data.
+      }
+    };
+
+    loadLatest();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, stored?.result?.jobId]);
+
+  const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
   const label = fitLabel(score);
   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
 
   const hasResult = score !== null;
   const baselineId = stored?.result?.baselineId ?? null;
+  const verdict = stored?.result?.verdict ?? null;
+  const dimensionScores = stored?.result?.dimensionScores ?? null;
+  const strengths = stored?.result?.strengths ?? [];
+  const gaps = stored?.result?.gaps ?? [];
+  const complianceFlags = stored?.result?.complianceFlags ?? [];
 
   const handleCreateInterview = async () => {
     if (!baselineId) {
@@ -204,6 +241,11 @@ export default function ResultsPage() {
                     <ScoreRing score={score ?? 0} />
                     <div style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ fontSize: 14, fontWeight: 900, color: "#fde68a" }}>{label}</div>
+                      {verdict ? (
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(251,191,36,0.9)" }}>
+                          Verdict: {verdict}
+                        </div>
+                      ) : null}
                       <div style={{ fontSize: 13, lineHeight: 1.6, color: "rgba(241,245,249,0.92)" }}>
                         {stored?.result?.summary || "Summary will appear here as the analyzer output is refined."}
                       </div>
@@ -264,30 +306,94 @@ export default function ResultsPage() {
               ) : null}
             </div>
 
-            <div
-              style={{
-                border: "1px dashed rgba(251,191,36,0.35)",
-                borderRadius: 14,
-                padding: "16px 14px",
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
-              <p
+            {hasResult ? (
+              <div
                 style={{
-                  margin: 0,
-                  fontSize: 12,
-                  letterSpacing: 2.5,
-                  textTransform: "uppercase",
-                  color: "rgba(251,191,36,0.75)",
-                  fontWeight: 900,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(0,0,0,0.18)",
+                  padding: "14px 14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
                 }}
               >
-                Coming soon
-              </p>
-              <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
-                Results will consolidate the score, strengths and gaps, actions, and export status in one place.
-              </p>
-            </div>
+                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Fit breakdown</div>
+                {dimensionScores ? (
+                  <div style={{ display: "grid", gap: 8, fontSize: 13, color: "rgba(226,232,240,0.8)" }}>
+                    <div>Experience alignment: {dimensionScores.experienceAlignment}</div>
+                    <div>Leadership level: {dimensionScores.leadershipLevel}</div>
+                    <div>Technical platform fit: {dimensionScores.technicalPlatformFit}</div>
+                    <div>Industry and context: {dimensionScores.industryContext}</div>
+                    <div>Strategic vs tactical fit: {dimensionScores.strategicTacticalFit}</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>Dimension scores unavailable.</div>
+                )}
+              </div>
+            ) : null}
+
+            {hasResult ? (
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(0,0,0,0.18)",
+                  padding: "14px 14px",
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: "#fde68a" }}>Alignment strengths</div>
+                  {strengths.length ? (
+                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                      {strengths.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No strengths identified yet.</div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>Gaps to address</div>
+                  {gaps.length ? (
+                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                      {gaps.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {hasResult ? (
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(0,0,0,0.18)",
+                  padding: "14px 14px",
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
+                {complianceFlags.length ? (
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                    {complianceFlags.map((flag, index) => (
+                      <li key={`${flag}-${index}`}>{flag}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
+                )}
+              </div>
+            ) : null}
 
             <div
               style={{
@@ -404,3 +510,10 @@ export default function ResultsPage() {
   );
 }
 
+export default function ResultsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24, color: "rgba(226,232,240,0.8)" }}>Loading results…</div>}>
+      <ResultsContent />
+    </Suspense>
+  );
+}

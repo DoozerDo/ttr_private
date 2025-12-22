@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
-  const response = await fetch(`${baseUrl}/analysis`, {
+  const response = await fetch(`${baseUrl}/analysis/run`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

@@ -1,352 +1,32 @@
-diff --git a/apps/api/src/jobs/jd-normalization.spec.ts b/apps/api/src/jobs/jd-normalization.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..92b09ace836f6408c94d19df7076efe5e00587f6
---- /dev/null
-+++ b/apps/api/src/jobs/jd-normalization.spec.ts
-@@ -0,0 +1,71 @@
-+import { normalizeJobDescription } from './jd-normalization';
-+
-+describe('normalizeJobDescription', () => {
-+  it('extracts responsibilities and requirements by headings', () => {
-+    const text = `
-+Responsibilities
-+- Build product features
-+- Partner with design
-+
-+Requirements
-+- 5+ years experience
-+- Typescript proficiency
-+`;
-+
-+    const result = normalizeJobDescription(text);
-+
-+    expect(result.responsibilities).toEqual([
-+      'Build product features',
-+      'Partner with design',
-+    ]);
-+    expect(result.requirements).toEqual([
-+      '5+ years experience',
-+      'Typescript proficiency',
-+    ]);
-+  });
-+
-+  it('splits bullets without headings using fallback logic', () => {
-+    const text = `
-+About the team
-+- Collaborate across teams
-+- Own delivery timelines
-+- Familiar with React
-+- 3+ years of experience
-+`;
-+
-+    const result = normalizeJobDescription(text);
-+
-+    expect(result.responsibilities.length).toBeGreaterThan(0);
-+    expect(result.requirements.length).toBe(0);
-+  });
-+
-+  it('handles mixed bullets and paragraphs', () => {
-+    const text = `
-+Responsibilities
-+You will own the roadmap and align stakeholders.
-+- Build weekly status updates
-+- Drive customer interviews
-+`;
-+
-+    const result = normalizeJobDescription(text);
-+
-+    expect(result.responsibilities).toEqual([
-+      'Build weekly status updates',
-+      'Drive customer interviews',
-+      'You will own the roadmap and align stakeholders.',
-+    ]);
-+  });
-+
-+  it('deduplicates and caps items', () => {
-+    const text = `
-+Requirements
-+- Strong communication
-+- Strong communication
-+- Strong communication
-+`;
-+
-+    const result = normalizeJobDescription(text);
-+
-+    expect(result.requirements).toEqual(['Strong communication']);
-+  });
-+});
-diff --git a/apps/api/src/jobs/jd-normalization.ts b/apps/api/src/jobs/jd-normalization.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..a504479ea99db14b399cb724c25a1ea257ea5abf
---- /dev/null
-+++ b/apps/api/src/jobs/jd-normalization.ts
-@@ -0,0 +1,173 @@
-+const RESPONSIBILITY_HEADINGS = [
-+  'responsibilities',
-+  "what you'll do",
-+  'what you will do',
-+  'duties',
-+  'role',
-+  'the role',
-+  'your impact',
-+];
-+
-+const REQUIREMENT_HEADINGS = [
-+  'requirements',
-+  'qualifications',
-+  'what you bring',
-+  'skills',
-+  'experience',
-+  "what we're looking for",
-+  'what we are looking for',
-+];
-+
-+const BULLET_REGEX = /^([-*•]|\d+[.)])\s+/;
-+
-+const MIN_ITEM_LENGTH = 3;
-+const MAX_ITEMS = 40;
-+
-+const sentenceSplitRegex = /(?<=[.!?])\s+/;
-+
-+const normalizeHeadingText = (line: string) =>
-+  line
-+    .toLowerCase()
-+    .replace(/[:*]+/g, '')
-+    .replace(/\s+/g, ' ')
-+    .trim();
-+
-+const isHeading = (line: string, headings: string[]) => {
-+  const normalized = normalizeHeadingText(line);
-+  if (!normalized || normalized.length > 80) {
-+    return false;
-+  }
-+  return headings.some(
-+    (heading) =>
-+      normalized === heading ||
-+      normalized.startsWith(`${heading} `) ||
-+      normalized.includes(heading),
-+  );
-+};
-+
-+const isBulletLine = (line: string) => BULLET_REGEX.test(line);
-+
-+const stripBullet = (line: string) => line.replace(BULLET_REGEX, '').trim();
-+
-+const splitSentences = (lines: string[]) =>
-+  lines
-+    .flatMap((line) => line.split(sentenceSplitRegex))
-+    .map((item) => item.trim())
-+    .filter(Boolean);
-+
-+export const sanitizeListItems = (items: string[]) => {
-+  const seen = new Set<string>();
-+  const cleaned: string[] = [];
-+
-+  for (const item of items) {
-+    const trimmed = item.trim();
-+    if (!trimmed || trimmed.length < MIN_ITEM_LENGTH) {
-+      continue;
-+    }
-+    if (seen.has(trimmed)) {
-+      continue;
-+    }
-+    seen.add(trimmed);
-+    cleaned.push(trimmed);
-+    if (cleaned.length >= MAX_ITEMS) {
-+      break;
-+    }
-+  }
-+
-+  return cleaned;
-+};
-+
-+const extractItemsFromLines = (lines: string[]) => {
-+  const bulletItems = lines.filter(isBulletLine).map(stripBullet);
-+  const paragraphItems = splitSentences(lines.filter((line) => !isBulletLine(line)));
-+
-+  if (bulletItems.length === 0) {
-+    return sanitizeListItems(paragraphItems);
-+  }
-+
-+  if (paragraphItems.length > 0) {
-+    return sanitizeListItems([...bulletItems, ...paragraphItems]);
-+  }
-+
-+  return sanitizeListItems(bulletItems);
-+};
-+
-+export const normalizeJobDescription = (rawDescription: string) => {
-+  const lines = rawDescription
-+    .replace(/\r\n/g, '\n')
-+    .replace(/\r/g, '\n')
-+    .split('\n')
-+    .map((line) => line.trim())
-+    .filter(Boolean);
-+
-+  const sectionLines: Record<'responsibilities' | 'requirements', string[]> = {
-+    responsibilities: [],
-+    requirements: [],
-+  };
-+
-+  let activeSection: 'responsibilities' | 'requirements' | null = null;
-+
-+  for (const line of lines) {
-+    if (isHeading(line, RESPONSIBILITY_HEADINGS)) {
-+      activeSection = 'responsibilities';
-+      continue;
-+    }
-+    if (isHeading(line, REQUIREMENT_HEADINGS)) {
-+      activeSection = 'requirements';
-+      continue;
-+    }
-+    if (activeSection) {
-+      sectionLines[activeSection].push(line);
-+    }
-+  }
-+
-+  let responsibilities = extractItemsFromLines(sectionLines.responsibilities);
-+  let requirements = extractItemsFromLines(sectionLines.requirements);
-+
-+  if (responsibilities.length === 0 && requirements.length === 0) {
-+    const bulletItems = lines
-+      .map((line, index) => ({ line, index }))
-+      .filter(({ line }) => isBulletLine(line))
-+      .map(({ line, index }) => ({ item: stripBullet(line), index }));
-+
-+    const requirementKeywordIndex = lines.findIndex((line) =>
-+      REQUIREMENT_HEADINGS.some((heading) =>
-+        normalizeHeadingText(line).includes(heading),
-+      ),
-+    );
-+
-+    if (bulletItems.length > 0) {
-+      if (requirementKeywordIndex !== -1) {
-+        requirements = sanitizeListItems(
-+          bulletItems
-+            .filter(({ index }) => index >= requirementKeywordIndex)
-+            .map(({ item }) => item),
-+        );
-+        responsibilities = sanitizeListItems(
-+          bulletItems
-+            .filter(({ index }) => index < requirementKeywordIndex)
-+            .map(({ item }) => item),
-+        );
-+      } else {
-+        const cutoff = Math.floor(lines.length / 3);
-+        responsibilities = sanitizeListItems(
-+          bulletItems
-+            .filter(({ index }) => index >= cutoff)
-+            .map(({ item }) => item),
-+        );
-+        if (responsibilities.length === 0) {
-+          responsibilities = sanitizeListItems(
-+            bulletItems.map(({ item }) => item),
-+          );
-+        }
-+      }
-+    } else {
-+      responsibilities = sanitizeListItems(splitSentences(lines).slice(0, 8));
-+    }
-+  }
-+
-+  return {
-+    responsibilities,
-+    requirements,
-+  };
-+};
-diff --git a/apps/api/src/jobs/job.entity.ts b/apps/api/src/jobs/job.entity.ts
-index de11cf0c2eb3e048e6ff22f150849dd4ee7b54b2..63817fcee787b751c634ceabc4931b35545dc5cd 100644
---- a/apps/api/src/jobs/job.entity.ts
-+++ b/apps/api/src/jobs/job.entity.ts
-@@ -1,31 +1,55 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
- 
-+export enum JobIngestionMethod {
-+  PASTE = 'PASTE',
-+  URL = 'URL',
-+}
-+
- @Entity({ name: 'jobs' })
- export class Job {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Column()
-   userId!: string;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   title!: string | null;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   company!: string | null;
- 
-   @Column({ type: 'text' })
-   rawDescription!: string;
- 
-+  @Column({ type: 'varchar', length: 2048, nullable: true })
-+  sourceUrl!: string | null;
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  normalizedResponsibilities!: string[];
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  normalizedRequirements!: string[];
-+
-+  @Column({
-+    type: 'enum',
-+    enum: JobIngestionMethod,
-+    default: JobIngestionMethod.PASTE,
-+  })
-+  jdIngestionMethod!: JobIngestionMethod;
-+
-+  @Column({ type: 'timestamptz', nullable: true })
-+  jdParsedAt!: Date | null;
-+
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/jobs/jobs.controller.ts b/apps/api/src/jobs/jobs.controller.ts
-index 3acf33dd15674904b1e8d73e7cf29dd19974a761..197a061ff9a5c810da3f3596d630fe196e35c54a 100644
---- a/apps/api/src/jobs/jobs.controller.ts
-+++ b/apps/api/src/jobs/jobs.controller.ts
-@@ -1,65 +1,91 @@
+diff --git a/apps/api/src/analysis/analysis.controller.ts b/apps/api/src/analysis/analysis.controller.ts
+index dfa154dd64e11d0d30cdf39787b9625d1c6947f9..e1ff5243b39591350eb2f6acc7f24d63a94f5fe6 100644
+--- a/apps/api/src/analysis/analysis.controller.ts
++++ b/apps/api/src/analysis/analysis.controller.ts
+@@ -1,32 +1,63 @@
  import {
    BadRequestException,
    Body,
    Controller,
-   Get,
-   Param,
++  Get,
++  Param,
    Post,
    Req,
    UseGuards,
  } from '@nestjs/common';
  import { AuthGuard } from '@nestjs/passport';
- import { Request } from 'express';
--import { CreateJobInput, JobsService } from './jobs.service';
-+import {
-+  CreateJobInput,
-+  IngestJobDescriptionInput,
-+  JobsService,
-+} from './jobs.service';
-+import { JobIngestionMethod } from './job.entity';
+ import type { Request } from 'express';
+ import { AnalysisService } from './analysis.service';
+ import type { AnalysisRequest } from './analysis.service';
++import { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
  
- @Controller('jobs')
+ @Controller('analysis')
  @UseGuards(AuthGuard('jwt'))
- export class JobsController {
-   constructor(private readonly jobsService: JobsService) {}
+ export class AnalysisController {
+   constructor(private readonly analysisService: AnalysisService) {}
  
    @Post()
-   async createJob(
-     @Body() body: Partial<CreateJobInput>,
+   async analyze(
+     @Body() body: AnalysisRequest,
      @Req() request: Request & { user?: { id?: string } },
    ) {
      const userId = request.user?.id;
@@ -355,26 +35,12 @@ index 3acf33dd15674904b1e8d73e7cf29dd19974a761..197a061ff9a5c810da3f3596d630fe19
        throw new BadRequestException('Invalid user context');
      }
  
-     const rawDescription = body.rawDescription?.trim();
- 
-     if (!rawDescription) {
-       throw new BadRequestException('Job description is required');
-     }
- 
-     return this.jobsService.createJob(userId, {
-       title: body.title,
-       company: body.company,
-       rawDescription,
-+      sourceUrl: body.sourceUrl ?? null,
-+      responsibilities: body.responsibilities ?? undefined,
-+      requirements: body.requirements ?? undefined,
-+      jdIngestionMethod: body.jdIngestionMethod as JobIngestionMethod | undefined,
-+    });
-+  }
+     return this.analysisService.analyzeForUser(userId, body);
+   }
 +
-+  @Post('ingest')
-+  async ingestJobDescription(
-+    @Body() body: Partial<IngestJobDescriptionInput>,
++  @Post('run')
++  async runFitAssessment(
++    @Body() body: RunFitAssessmentDto,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -383,986 +49,1959 @@ index 3acf33dd15674904b1e8d73e7cf29dd19974a761..197a061ff9a5c810da3f3596d630fe19
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.jobsService.ingestJobDescription({
-+      pastedText: body.pastedText,
-+      url: body.url,
++    return this.analysisService.runFitAssessment(userId, body);
++  }
++
++  @Get('job/:jobId/latest')
++  async getLatestAssessment(
++    @Param('jobId') jobId: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.analysisService.getLatestAssessment(userId, jobId);
++  }
+ }
+diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
+index 516ed757de916937209d8ca3d10cf8f61035521e..06b76c0c9c28e55070835934918ba95ad517eb88 100644
+--- a/apps/api/src/analysis/analysis.module.ts
++++ b/apps/api/src/analysis/analysis.module.ts
+@@ -1,14 +1,18 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineSection } from '../baseline/baseline-section.entity';
+ import { Job } from '../jobs/job.entity';
++import { FitAssessment } from './fit-assessment.entity';
+ import { AnalysisController } from './analysis.controller';
+ import { AnalysisService } from './analysis.service';
++import { FitScoringService } from './fit-scoring.service';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, Job])],
++  imports: [
++    TypeOrmModule.forFeature([Baseline, BaselineSection, Job, FitAssessment]),
++  ],
+   controllers: [AnalysisController],
+-  providers: [AnalysisService],
++  providers: [AnalysisService, FitScoringService],
+ })
+ export class AnalysisModule {}
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+index b741cd18bf4380d35edc7f0aa9210c8f8083156b..ac863d0150e82ed46820057ab9eafd2f9373b017 100644
+--- a/apps/api/src/analysis/analysis.service.ts
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -1,94 +1,138 @@
+ import {
+   BadRequestException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
++import { createHash } from 'crypto';
+ import { Repository } from 'typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
+ import { Job } from '../jobs/job.entity';
++import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
++import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
++import { FitScoringService } from './fit-scoring.service';
+ 
+ export type AnalysisRequest = {
+   baselineId: string;
+   jobId?: string;
+   jobDescription?: string;
+ };
+ 
+ export type AnalysisResult = {
+   ok: boolean;
+   baselineId: string;
+   score: number;
+   strengths: string[];
+   gaps: string[];
+   summary: string;
+ };
+ 
+ @Injectable()
+ export class AnalysisService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
++    @InjectRepository(FitAssessment)
++    private readonly fitAssessmentRepository: Repository<FitAssessment>,
++    private readonly fitScoringService: FitScoringService,
+   ) {}
+ 
+   private normalizeKeywords(text: string) {
+     const tokens = text
+       .toLowerCase()
+       .match(/[a-z0-9]+/g)
+       ?.filter((token) => token.length >= 3) ?? [];
+ 
+     const frequencies = new Map<string, number>();
+     for (const token of tokens) {
+       frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+     }
+ 
+     return frequencies;
+   }
+ 
+   private sortByFrequency(values: Map<string, number>, items: string[]) {
+     return [...items].sort((a, b) => {
+       const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
+       if (delta !== 0) return delta;
+       return a.localeCompare(b);
      });
    }
  
-   @Get()
-   async listJobs(@Req() request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.jobsService.listJobsForUser(userId);
+   private buildBaselineText(sections: BaselineSection[]) {
+     return sections
+       .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
+       .map((section) => section.content)
+       .join('\n');
    }
  
-   @Get(':id')
-   async getJob(
-     @Param('id') id: string,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
++  private buildSummaryFromTerms(strengths: string[], gaps: string[]) {
++    if (!strengths.length && !gaps.length) {
++      return 'No keywords found in the job description.';
++    }
++    const total = strengths.length + gaps.length;
++    return `Matched ${strengths.length} of ${total} key terms from the job description.`;
++  }
++
++  private buildInputsHash(job: Job, baseline: Baseline) {
++    const sectionPayload =
++      baseline.sections?.map((section) => ({
++        type: section.sectionType ?? section.type,
++        content: section.content,
++        includePolicy: section.includePolicy,
++        order: section.order,
++      })) ?? [];
++
++    const payload = {
++      job: {
++        rawDescription: job.rawDescription,
++        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
++        normalizedRequirements: job.normalizedRequirements ?? [],
++        title: job.title ?? null,
++        company: job.company ?? null,
++      },
++      baseline: {
++        id: baseline.id,
++        version: baseline.version ?? null,
++        sections: sectionPayload,
++      },
++    };
++
++    return createHash('sha256')
++      .update(JSON.stringify(payload))
++      .digest('hex');
++  }
++
+   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
+     const baselineId = payload.baselineId?.trim();
+     if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
      }
  
-diff --git a/apps/api/src/jobs/jobs.service.spec.ts b/apps/api/src/jobs/jobs.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..ceb2116fb4bca3c6f7703b8e18b237041bafa03d
---- /dev/null
-+++ b/apps/api/src/jobs/jobs.service.spec.ts
-@@ -0,0 +1,38 @@
-+import { JobsService } from './jobs.service';
-+
-+describe('JobsService', () => {
-+  const createService = () =>
-+    new JobsService({ create: jest.fn(), save: jest.fn() } as never);
-+
-+  afterEach(() => {
-+    jest.restoreAllMocks();
-+  });
-+
-+  it('ingests job descriptions from a URL', async () => {
-+    const service = createService();
-+    const filler = 'A'.repeat(1100);
-+    const html = `
-+      <article>
-+        <h2>Responsibilities</h2>
-+        <ul><li>Build features</li></ul>
-+        <h2>Requirements</h2>
-+        <ul><li>5+ years</li></ul>
-+        <p>${filler}</p>
-+      </article>
-+    `;
-+
-+    global.fetch = jest.fn().mockResolvedValue({
-+      status: 200,
-+      headers: { get: () => null },
-+      arrayBuffer: async () => Buffer.from(html),
-+    } as never);
-+
-+    const result = await service.ingestJobDescription({
-+      url: 'https://example.com/job',
-+    });
-+
-+    expect(result.rawDescription.length).toBeGreaterThan(1000);
-+    expect(result.responsibilities).toContain('Build features');
-+    expect(result.requirements).toContain('5+ years');
-+  });
-+});
-diff --git a/apps/api/src/jobs/jobs.service.ts b/apps/api/src/jobs/jobs.service.ts
-index ec482c1d74c266b896d13ec0b7ece30cbb10eaf0..638538b24544f5aa6c8112a43683da5eb602f0f9 100644
---- a/apps/api/src/jobs/jobs.service.ts
-+++ b/apps/api/src/jobs/jobs.service.ts
-@@ -1,46 +1,329 @@
--import { Injectable, NotFoundException } from '@nestjs/common';
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
-+import { isIP } from 'node:net';
- import { Repository } from 'typeorm';
--import { Job } from './job.entity';
-+import { Job, JobIngestionMethod } from './job.entity';
-+import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
+     const hasJobId = Boolean(payload.jobId?.trim());
+     const hasJobDescription = Boolean(payload.jobDescription?.trim());
  
- export type CreateJobInput = {
-   title?: string | null;
-   company?: string | null;
-   rawDescription: string;
-+  sourceUrl?: string | null;
-+  responsibilities?: string[];
-+  requirements?: string[];
-+  jdIngestionMethod?: JobIngestionMethod;
- };
+     if (!hasJobId && !hasJobDescription) {
+       throw new BadRequestException('jobId or jobDescription is required');
+     }
  
-+export type IngestJobDescriptionInput = {
-+  pastedText?: string;
-+  url?: string;
-+};
-+
-+export type IngestJobDescriptionResult = {
-+  rawDescription: string;
-+  responsibilities: string[];
-+  requirements: string[];
-+};
-+
-+const MIN_DESCRIPTION_LENGTH = 1000;
-+const MAX_DESCRIPTION_LENGTH = 100000;
-+const MAX_HTML_BYTES = 1_000_000;
-+const FETCH_TIMEOUT_MS = 10_000;
-+const MAX_REDIRECTS = 4;
-+
- @Injectable()
- export class JobsService {
-   constructor(
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-   ) {}
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
  
-+  async ingestJobDescription(
-+    input: IngestJobDescriptionInput,
-+  ): Promise<IngestJobDescriptionResult> {
-+    const pastedText = input.pastedText?.trim();
-+    const url = input.url?.trim();
-+    const hasText = Boolean(pastedText);
-+    const hasUrl = Boolean(url);
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     if (!baseline.sections?.length) {
+       baseline.sections = await this.baselineSectionRepository.find({
+@@ -119,26 +163,186 @@ export class AnalysisService {
+ 
+     const overlapSorted = this.sortByFrequency(jobKeywords, overlap);
+     const gapsSorted = this.sortByFrequency(jobKeywords, gaps);
+ 
+     const total = jobSet.size;
+     const matched = overlap.length;
+     const score = total === 0 ? 0 : Math.round((matched / total) * 100);
+ 
+     const strengths = overlapSorted.slice(0, 8);
+     const gapList = gapsSorted.slice(0, 8);
+ 
+     const summary =
+       total === 0
+         ? 'No keywords found in the job description.'
+         : `Matched ${matched} of ${total} key terms from the job description.`;
+ 
+     return {
+       ok: true,
+       baselineId: baseline.id,
+       score,
+       strengths,
+       gaps: gapList,
+       summary,
+     };
+   }
 +
-+    if (hasText === hasUrl) {
-+      throw new BadRequestException('Provide exactly one of pastedText or url.');
++  async runFitAssessment(userId: string, payload: RunFitAssessmentDto) {
++    const baselineId = payload.baselineId?.trim();
++    const jobId = payload.jobId?.trim();
++
++    if (!baselineId || !jobId) {
++      throw new BadRequestException('baselineId and jobId are required');
 +    }
 +
-+    if (hasUrl) {
-+      const sanitizedUrl = this.validateUrl(url!);
-+      const html = await this.fetchHtml(sanitizedUrl);
-+      const extracted = this.normalizeRawDescription(extractTextFromHtml(html));
-+      this.validateDescriptionLength(extracted);
-+      const normalized = normalizeJobDescription(extracted);
++    if (payload.baselineVersion !== undefined) {
++      const version = Number(payload.baselineVersion);
++      if (!Number.isInteger(version) || version < 1) {
++        throw new BadRequestException('baselineVersion must be a positive integer');
++      }
++    }
++
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    if (!baseline.sections?.length) {
++      baseline.sections = await this.baselineSectionRepository.find({
++        where: { baselineId: baseline.id },
++        order: { order: 'ASC' },
++      });
++    }
++
++    const job = await this.jobRepository.findOne({
++      where: { id: jobId, userId },
++    });
++
++    if (!job) {
++      throw new NotFoundException('Job not found');
++    }
++
++    const includedSections =
++      baseline.sections?.filter(
++        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
++      ) ?? [];
++
++    const inputsHash = this.buildInputsHash(job, baseline);
++
++    const existing = await this.fitAssessmentRepository.findOne({
++      where: { userId, jobId, baselineId, inputsHash },
++      order: { createdAt: 'DESC' },
++    });
++
++    if (existing) {
++      const summary = this.buildSummaryFromTerms(
++        existing.strengths ?? [],
++        existing.gaps ?? [],
++      );
 +      return {
-+        rawDescription: extracted,
-+        responsibilities: normalized.responsibilities,
-+        requirements: normalized.requirements,
++        ok: true,
++        assessmentId: existing.id,
++        jobId: existing.jobId,
++        baselineId: existing.baselineId,
++        baselineVersion: existing.baselineVersion,
++        overallScore: existing.overallScore,
++        score: existing.overallScore,
++        verdict: existing.verdict,
++        dimensionScores: existing.dimensionScores,
++        strengths: existing.strengths,
++        gaps: existing.gaps,
++        complianceFlags: existing.complianceFlags,
++        summary,
++        createdAt: existing.createdAt,
 +      };
 +    }
 +
-+    const normalizedText = this.normalizeRawDescription(pastedText!);
-+    this.validateDescriptionLength(normalizedText);
-+    const normalized = normalizeJobDescription(normalizedText);
++    const scoring = this.fitScoringService.score({
++      job: {
++        rawDescription: job.rawDescription,
++        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
++        normalizedRequirements: job.normalizedRequirements ?? [],
++        title: job.title ?? null,
++        company: job.company ?? null,
++        sourceUrl: job.sourceUrl ?? null,
++      },
++      baseline: {
++        version: baseline.version ?? null,
++        sections: includedSections.map((section) => ({
++          type: section.sectionType ?? section.type,
++          content: section.content,
++        })),
++      },
++    });
++
++    const assessment = this.fitAssessmentRepository.create({
++      userId,
++      jobId,
++      baselineId: baseline.id,
++      baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
++      overallScore: scoring.overallScore,
++      verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
++      dimensionScores: scoring.dimensionScores,
++      strengths: scoring.strengths,
++      gaps: scoring.gaps,
++      complianceFlags: scoring.complianceFlags,
++      inputsHash,
++    });
++
++    const saved = await this.fitAssessmentRepository.save(assessment);
 +
 +    return {
-+      rawDescription: normalizedText,
-+      responsibilities: normalized.responsibilities,
-+      requirements: normalized.requirements,
++      ok: true,
++      assessmentId: saved.id,
++      jobId: saved.jobId,
++      baselineId: saved.baselineId,
++      baselineVersion: saved.baselineVersion,
++      overallScore: saved.overallScore,
++      score: saved.overallScore,
++      verdict: saved.verdict,
++      dimensionScores: saved.dimensionScores,
++      strengths: saved.strengths,
++      gaps: saved.gaps,
++      complianceFlags: saved.complianceFlags,
++      summary: scoring.summary,
++      createdAt: saved.createdAt,
 +    };
 +  }
 +
-   async createJob(userId: string, payload: CreateJobInput) {
-+    const rawDescription = this.normalizeRawDescription(payload.rawDescription);
-+    this.validateDescriptionLength(rawDescription);
-+
-+    const normalized = normalizeJobDescription(rawDescription);
-+    const responsibilities =
-+      payload.responsibilities && payload.responsibilities.length > 0
-+        ? sanitizeListItems(payload.responsibilities)
-+        : normalized.responsibilities;
-+    const requirements =
-+      payload.requirements && payload.requirements.length > 0
-+        ? sanitizeListItems(payload.requirements)
-+        : normalized.requirements;
-+
-+    const ingestionMethod =
-+      payload.jdIngestionMethod ?? JobIngestionMethod.PASTE;
-+
-+    if (
-+      ingestionMethod !== JobIngestionMethod.PASTE &&
-+      ingestionMethod !== JobIngestionMethod.URL
-+    ) {
-+      throw new BadRequestException('Invalid jdIngestionMethod value');
-+    }
-+
-+    const sourceUrl = payload.sourceUrl?.trim() || null;
-+    if (sourceUrl) {
-+      this.validateUrl(sourceUrl);
-+    }
-+    if (ingestionMethod === JobIngestionMethod.URL && !sourceUrl) {
-+      throw new BadRequestException('sourceUrl is required for URL ingestion.');
-+    }
-+
-     const job = this.jobRepository.create({
-       userId,
-       title: payload.title?.trim() || null,
-       company: payload.company?.trim() || null,
--      rawDescription: payload.rawDescription.trim(),
-+      rawDescription,
-+      sourceUrl,
-+      normalizedResponsibilities: responsibilities,
-+      normalizedRequirements: requirements,
-+      jdIngestionMethod: ingestionMethod,
-+      jdParsedAt: new Date(),
-     });
- 
-     return this.jobRepository.save(job);
-   }
- 
-   async listJobsForUser(userId: string) {
-     return this.jobRepository.find({
-       where: { userId },
-       order: { createdAt: 'DESC' },
-     });
-   }
- 
-   async getJobForUser(id: string, userId: string) {
-     const job = await this.jobRepository.findOne({ where: { id, userId } });
- 
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     return job;
-   }
-+
-+  private normalizeRawDescription(rawDescription: string) {
-+    const normalized = rawDescription
-+      .replace(/\r\n/g, '\n')
-+      .replace(/\r/g, '\n')
-+      .replace(/\t/g, ' ')
-+      .replace(/\u00a0/g, ' ')
-+      .split('\n')
-+      .map((line) => line.replace(/\s+/g, ' ').trim())
-+      .filter((line) => line.length > 0)
-+      .join('\n');
-+
-+    return normalized.trim();
-+  }
-+
-+  private validateDescriptionLength(description: string) {
-+    if (
-+      description.length < MIN_DESCRIPTION_LENGTH ||
-+      description.length > MAX_DESCRIPTION_LENGTH
-+    ) {
-+      throw new BadRequestException(
-+        'Job description must be between 1,000 and 100,000 characters.',
-+      );
-+    }
-+  }
-+
-+  private validateUrl(inputUrl: string) {
-+    let parsed: URL;
-+    try {
-+      parsed = new URL(inputUrl);
-+    } catch {
-+      throw new BadRequestException('Invalid URL provided.');
-+    }
-+
-+    if (!['http:', 'https:'].includes(parsed.protocol)) {
-+      throw new BadRequestException('Only http and https URLs are allowed.');
-+    }
-+
-+    const hostname = parsed.hostname.toLowerCase();
-+    if (hostname === 'localhost' || hostname.endsWith('.local')) {
-+      throw new BadRequestException('Private URLs are not allowed.');
-+    }
-+
-+    const ipVersion = isIP(hostname);
-+    if (ipVersion) {
-+      if (isPrivateIp(hostname)) {
-+        throw new BadRequestException('Private URLs are not allowed.');
-+      }
-+    }
-+
-+    return parsed.toString();
-+  }
-+
-+  private async fetchHtml(url: string) {
-+    const controller = new AbortController();
-+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-+
-+    try {
-+      const response = await fetchWithRedirects(url, {
-+        redirectLimit: MAX_REDIRECTS,
-+        signal: controller.signal,
-+      });
-+
-+      if (response.status < 200 || response.status >= 300) {
-+        throw new BadRequestException(
-+          'Could not retrieve job description from URL.',
-+        );
-+      }
-+
-+      const buffer = await response.arrayBuffer();
-+      if (buffer.byteLength > MAX_HTML_BYTES) {
-+        throw new BadRequestException('Job description response is too large.');
-+      }
-+
-+      return Buffer.from(buffer).toString('utf-8');
-+    } catch (error) {
-+      if (error instanceof BadRequestException) {
-+        throw error;
-+      }
-+      throw new BadRequestException(
-+        'Could not retrieve job description from URL.',
-+      );
-+    } finally {
-+      clearTimeout(timeout);
-+    }
-+  }
- }
-+
-+const fetchWithRedirects = async (
-+  url: string,
-+  options: { redirectLimit: number; signal: AbortSignal },
-+) => {
-+  let currentUrl = url;
-+  let redirects = 0;
-+
-+  while (true) {
-+    const response = await fetch(currentUrl, {
-+      redirect: 'manual',
-+      signal: options.signal,
++  async getLatestAssessment(userId: string, jobId: string) {
++    const assessment = await this.fitAssessmentRepository.findOne({
++      where: { userId, jobId },
++      order: { createdAt: 'DESC' },
 +    });
 +
-+    if (
-+      response.status >= 300 &&
-+      response.status < 400 &&
-+      response.headers.get('location')
-+    ) {
-+      if (redirects >= options.redirectLimit) {
-+        throw new BadRequestException('Too many redirects while fetching URL.');
-+      }
-+      const nextUrl = new URL(
-+        response.headers.get('location')!,
-+        currentUrl,
-+      ).toString();
-+      currentUrl = nextUrl;
-+      redirects += 1;
-+      continue;
++    if (!assessment) {
++      throw new NotFoundException('Fit assessment not found');
 +    }
 +
-+    return response;
++    const summary = this.buildSummaryFromTerms(
++      assessment.strengths ?? [],
++      assessment.gaps ?? [],
++    );
++
++    return {
++      ok: true,
++      assessmentId: assessment.id,
++      jobId: assessment.jobId,
++      baselineId: assessment.baselineId,
++      baselineVersion: assessment.baselineVersion,
++      overallScore: assessment.overallScore,
++      score: assessment.overallScore,
++      verdict: assessment.verdict,
++      dimensionScores: assessment.dimensionScores,
++      strengths: assessment.strengths,
++      gaps: assessment.gaps,
++      complianceFlags: assessment.complianceFlags,
++      summary,
++      createdAt: assessment.createdAt,
++    };
 +  }
+ }
+diff --git a/apps/api/src/analysis/dto/run-fit-assessment.dto.ts b/apps/api/src/analysis/dto/run-fit-assessment.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..455427b085d8c9236b583cbdcdb353faac6c6057
+--- /dev/null
++++ b/apps/api/src/analysis/dto/run-fit-assessment.dto.ts
+@@ -0,0 +1,7 @@
++export class RunFitAssessmentDto {
++  jobId!: string;
++
++  baselineId!: string;
++
++  baselineVersion?: number;
++}
+diff --git a/apps/api/src/analysis/fit-assessment.entity.ts b/apps/api/src/analysis/fit-assessment.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..342d9c9e32887c063fe88226fd29fbf0a2b5c41d
+--- /dev/null
++++ b/apps/api/src/analysis/fit-assessment.entity.ts
+@@ -0,0 +1,65 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  PrimaryGeneratedColumn,
++} from 'typeorm';
++
++export enum FitAssessmentVerdict {
++  APPLY = 'APPLY',
++  CONSIDER = 'CONSIDER',
++  SKIP = 'SKIP',
++}
++
++export type FitDimensionScores = {
++  experienceAlignment: number;
++  leadershipLevel: number;
++  technicalPlatformFit: number;
++  industryContext: number;
++  strategicTacticalFit: number;
 +};
 +
-+const isPrivateIp = (ipAddress: string) => {
-+  if (ipAddress.startsWith('10.')) return true;
-+  if (ipAddress.startsWith('127.')) return true;
-+  if (ipAddress.startsWith('169.254.')) return true;
-+  if (ipAddress.startsWith('192.168.')) return true;
-+  if (ipAddress.startsWith('0.')) return true;
++@Entity({ name: 'fit_assessments' })
++export class FitAssessment {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
 +
-+  const [first, second] = ipAddress.split('.').map(Number);
-+  if (first === 172 && second >= 16 && second <= 31) return true;
++  @Column()
++  userId!: string;
 +
-+  return false;
++  @Column()
++  jobId!: string;
++
++  @Column()
++  baselineId!: string;
++
++  @Column({ type: 'int', nullable: true })
++  baselineVersion!: number | null;
++
++  @Column({ type: 'int' })
++  overallScore!: number;
++
++  @Column({
++    type: 'enum',
++    enum: FitAssessmentVerdict,
++  })
++  verdict!: FitAssessmentVerdict;
++
++  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
++  dimensionScores!: FitDimensionScores;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  strengths!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  gaps!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  complianceFlags!: string[];
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  inputsHash!: string | null;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++}
+diff --git a/apps/api/src/analysis/fit-scoring.service.spec.ts b/apps/api/src/analysis/fit-scoring.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac19fcc651579cbd99935cb04c661c4cf4db9778
+--- /dev/null
++++ b/apps/api/src/analysis/fit-scoring.service.spec.ts
+@@ -0,0 +1,129 @@
++import { FitScoringService } from './fit-scoring.service';
++
++const buildInput = (overrides?: Partial<Parameters<FitScoringService['score']>[0]>) => ({
++  job: {
++    title: 'Senior Platform Engineer',
++    company: 'ExampleCo',
++    rawDescription:
++      'Lead platform initiatives, define strategy, and deliver cloud infrastructure using AWS and Kubernetes.',
++    normalizedResponsibilities: [
++      'Lead platform strategy and roadmap',
++      'Deliver cloud infrastructure on AWS and Kubernetes',
++    ],
++    normalizedRequirements: ['Experience with AWS, Kubernetes, Terraform, and CI CD pipelines'],
++    sourceUrl: 'https://example.com/jobs/role',
++  },
++  baseline: {
++    version: 2,
++    sections: [
++      {
++        type: 'EXPERIENCE',
++        content:
++          'Led cloud platform migrations, owned roadmap, and delivered Kubernetes clusters on AWS.',
++      },
++      {
++        type: 'SKILLS',
++        content: 'AWS, Kubernetes, Terraform, CI/CD, GitHub Actions',
++      },
++    ],
++  },
++  ...overrides,
++});
++
++describe('FitScoringService', () => {
++  const service = new FitScoringService();
++
++  it('returns strong technical platform fit when baseline matches', () => {
++    const result = service.score(buildInput());
++    expect(result.dimensionScores.technicalPlatformFit).toBeGreaterThanOrEqual(80);
++    expect(result.overallScore).toBeGreaterThan(70);
++  });
++
++  it('identifies gaps when technical tokens are missing', () => {
++    const result = service.score(
++      buildInput({
++        baseline: {
++          version: 1,
++          sections: [
++            {
++              type: 'EXPERIENCE',
++              content: 'Managed on-prem infrastructure and legacy systems.',
++            },
++          ],
++        },
++      }),
++    );
++
++    expect(result.dimensionScores.technicalPlatformFit).toBeLessThan(60);
++    expect(result.gaps).toEqual(expect.arrayContaining(['kubernetes']));
++  });
++
++  it('keeps industry context neutral when job has no industry cues', () => {
++    const result = service.score(
++      buildInput({
++        job: {
++          title: 'Platform Engineer',
++          company: 'ExampleCo',
++          rawDescription: 'Build scalable infrastructure and automate deployments.',
++          normalizedResponsibilities: ['Build scalable infrastructure and automate deployments'],
++          normalizedRequirements: ['Experience with automation and cloud platforms'],
++          sourceUrl: null,
++        },
++      }),
++    );
++
++    expect(result.dimensionScores.industryContext).toBe(60);
++  });
++
++  it('reduces strategic vs tactical score when orientations mismatch', () => {
++    const result = service.score(
++      buildInput({
++        job: {
++          title: 'Staff Platform Engineer',
++          company: 'ExampleCo',
++          rawDescription: 'Own strategy, vision, architecture, and roadmap for the platform team.',
++          normalizedResponsibilities: ['Define strategy, vision, and architecture roadmap'],
++          normalizedRequirements: ['Experience driving platform strategy'],
++          sourceUrl: null,
++        },
++        baseline: {
++          version: 1,
++          sections: [
++            {
++              type: 'EXPERIENCE',
++              content: 'Handled on-call rotations, incident response, patching, and runbooks.',
++            },
++          ],
++        },
++      }),
++    );
++
++    expect(result.dimensionScores.strategicTacticalFit).toBeLessThan(60);
++  });
++
++  it('reduces leadership level when leadership cues are missing in baseline', () => {
++    const result = service.score(
++      buildInput({
++        job: {
++          title: 'Engineering Lead',
++          company: 'ExampleCo',
++          rawDescription: 'Lead teams, mentor engineers, and manage stakeholders.',
++          normalizedResponsibilities: ['Lead and mentor teams', 'Manage stakeholder expectations'],
++          normalizedRequirements: ['Leadership experience required'],
++          sourceUrl: null,
++        },
++        baseline: {
++          version: 1,
++          sections: [
++            {
++              type: 'EXPERIENCE',
++              content: 'Individual contributor focused on coding tasks and tickets.',
++            },
++          ],
++        },
++      }),
++    );
++
++    expect(result.dimensionScores.leadershipLevel).toBeLessThan(60);
++  });
++});
+diff --git a/apps/api/src/analysis/fit-scoring.service.ts b/apps/api/src/analysis/fit-scoring.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1137a1798e9213905932c085af735726479c3631
+--- /dev/null
++++ b/apps/api/src/analysis/fit-scoring.service.ts
+@@ -0,0 +1,533 @@
++import { Injectable } from '@nestjs/common';
++import { FitAssessmentVerdict, FitDimensionScores } from './fit-assessment.entity';
++
++export type FitScoringInput = {
++  job: {
++    title?: string | null;
++    company?: string | null;
++    rawDescription: string;
++    normalizedResponsibilities: string[];
++    normalizedRequirements: string[];
++    sourceUrl?: string | null;
++  };
++  baseline: {
++    version?: number | null;
++    sections: Array<{ type?: string; content: string }>;
++  };
 +};
 +
-+const extractTextFromHtml = (html: string) => {
-+  const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-+  const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
-+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-+  let content = mainMatch?.[1] ?? articleMatch?.[1] ?? bodyMatch?.[1] ?? html;
++export type FitScoringResult = {
++  overallScore: number;
++  verdict: FitAssessmentVerdict;
++  dimensionScores: FitDimensionScores;
++  strengths: string[];
++  gaps: string[];
++  complianceFlags: string[];
++  summary: string;
++};
 +
-+  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
-+  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
-+  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-+  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-+  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
-+  content = content.replace(/<aside[\s\S]*?<\/aside>/gi, '');
++const STOPWORDS = new Set([
++  'a',
++  'an',
++  'and',
++  'are',
++  'as',
++  'at',
++  'be',
++  'by',
++  'for',
++  'from',
++  'has',
++  'have',
++  'in',
++  'is',
++  'it',
++  'its',
++  'of',
++  'on',
++  'or',
++  'our',
++  'that',
++  'the',
++  'their',
++  'they',
++  'this',
++  'to',
++  'we',
++  'with',
++  'will',
++  'you',
++  'your',
++]);
 +
-+  content = content.replace(/<li[^>]*>/gi, '\n- ');
-+  content = content.replace(/<\/li>/gi, '\n');
-+  content = content.replace(
-+    /<(br|p|div|section|article|h[1-6]|tr|td|ul|ol)[^>]*>/gi,
-+    '\n',
-+  );
-+  content = content.replace(/<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi, '\n');
++const LEADERSHIP_CUES = [
++  'lead',
++  'leader',
++  'leading',
++  'mentor',
++  'mentoring',
++  'manage',
++  'manager',
++  'management',
++  'stakeholder',
++  'roadmap',
++  'strategy',
++  'strategic',
++  'cross functional',
++  'ownership',
++  'program',
++  'drive',
++];
 +
-+  const text = content.replace(/<[^>]+>/g, '');
++const TECH_TOKENS = [
++  'aws',
++  'azure',
++  'gcp',
++  'kubernetes',
++  'k8s',
++  'docker',
++  'terraform',
++  'ansible',
++  'jenkins',
++  'github',
++  'gitlab',
++  'ci',
++  'cd',
++  'cicd',
++  'python',
++  'typescript',
++  'javascript',
++  'node',
++  'react',
++  'next',
++  'postgres',
++  'mysql',
++  'redis',
++  'kafka',
++  'spark',
++  'databricks',
++  'snowflake',
++  'linux',
++  'terraform',
++  'helm',
++  'prometheus',
++  'grafana',
++];
 +
-+  return decodeHtmlEntities(text)
-+    .split('\n')
-+    .map((line) => line.replace(/\s+/g, ' ').trim())
-+    .filter((line) => line.length > 0)
-+    .filter((line, index, array) => line !== array[index - 1])
++const TECH_PHRASES = [
++  'github actions',
++  'gitlab ci',
++  'ci cd',
++  'continuous integration',
++  'continuous delivery',
++  'lambda',
++  'cloudformation',
++  'cloud formation',
++  'ecs',
++  'eks',
++  'fargate',
++  's3',
++  'rds',
++  'bigquery',
++];
++
++const INDUSTRY_TERMS = [
++  'healthcare',
++  'health care',
++  'finance',
++  'financial',
++  'banking',
++  'retail',
++  'ecommerce',
++  'government',
++  'public sector',
++  'regulated',
++  'hipaa',
++  'soc2',
++  'pci',
++  'gdpr',
++  'fedramp',
++];
++
++const STRATEGIC_CUES = [
++  'strategy',
++  'strategic',
++  'roadmap',
++  'vision',
++  'okr',
++  'planning',
++  'architecture',
++  'architect',
++  'portfolio',
++  'stakeholder',
++  'business',
++];
++
++const TACTICAL_CUES = [
++  'tickets',
++  'break fix',
++  'on call',
++  'oncall',
++  'patching',
++  'runbook',
++  'incident',
++  'monitoring',
++  'support',
++  'operations',
++  'sprint',
++  'backlog',
++];
++
++const VERDICT_THRESHOLDS = {
++  APPLY: 80,
++  CONSIDER: 60,
++};
++
++const MIN_TEXT_LENGTH = 200;
++
++const normalizeText = (text: string) =>
++  text
++    .toLowerCase()
++    .replace(/[^a-z0-9\s]/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim();
++
++const tokenize = (text: string) => {
++  const normalized = normalizeText(text);
++  if (!normalized) return [];
++  return normalized
++    .split(' ')
++    .map((token) => token.trim())
++    .filter((token) => token.length >= 2 && !STOPWORDS.has(token));
++};
++
++const buildBigrams = (tokens: string[]) => {
++  const bigrams: string[] = [];
++  for (let i = 0; i < tokens.length - 1; i += 1) {
++    const first = tokens[i];
++    const second = tokens[i + 1];
++    if (first && second) {
++      bigrams.push(`${first} ${second}`);
++    }
++  }
++  return bigrams;
++};
++
++const toFrequencyMap = (tokens: string[]) => {
++  const freq = new Map<string, number>();
++  for (const token of tokens) {
++    freq.set(token, (freq.get(token) ?? 0) + 1);
++  }
++  return freq;
++};
++
++const mergeFrequency = (base: Map<string, number>, extra: Map<string, number>) => {
++  for (const [key, value] of extra.entries()) {
++    base.set(key, (base.get(key) ?? 0) + value);
++  }
++  return base;
++};
++
++const sortByFrequency = (freq: Map<string, number>) =>
++  [...freq.keys()].sort((a, b) => {
++    const delta = (freq.get(b) ?? 0) - (freq.get(a) ?? 0);
++    if (delta !== 0) return delta;
++    return a.localeCompare(b);
++  });
++
++const containsPhrase = (text: string, phrase: string) => {
++  if (!phrase.includes(' ')) return text.includes(phrase);
++  return text.includes(phrase);
++};
++
++const countCueMatches = (text: string, cues: string[]) => {
++  const normalized = normalizeText(text);
++  let count = 0;
++  for (const cue of cues) {
++    if (containsPhrase(normalized, cue)) count += 1;
++  }
++  return count;
++};
++
++const buildSectionText = (sections: FitScoringInput['baseline']['sections'], types: string[]) => {
++  return sections
++    .filter((section) => section.content)
++    .filter((section) =>
++      section.type ? types.includes(section.type.toUpperCase()) : false,
++    )
++    .map((section) => section.content)
 +    .join('\n');
 +};
 +
-+const decodeHtmlEntities = (input: string) => {
-+  const basicMap: Record<string, string> = {
-+    '&nbsp;': ' ',
-+    '&amp;': '&',
-+    '&lt;': '<',
-+    '&gt;': '>',
-+    '&quot;': '"',
-+    '&#39;': "'",
-+  };
-+
-+  let output = input.replace(
-+    /&(nbsp|amp|lt|gt|quot|#39);/g,
-+    (match) => basicMap[match] ?? match,
-+  );
-+
-+  output = output.replace(/&#(\d+);/g, (_, code) => {
-+    const value = Number(code);
-+    if (Number.isNaN(value)) return _;
-+    return String.fromCharCode(value);
-+  });
-+
-+  return output;
++const collectTokens = (texts: string[]) => {
++  const tokens: string[] = [];
++  for (const text of texts) {
++    tokens.push(...tokenize(text));
++  }
++  return tokens;
 +};
-diff --git a/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts b/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts
++
++const buildTermFrequencies = (texts: string[]) => {
++  const tokens = collectTokens(texts);
++  const bigrams = buildBigrams(tokens);
++  const freq = toFrequencyMap(tokens);
++  mergeFrequency(freq, toFrequencyMap(bigrams));
++  for (const term of TECH_TOKENS) {
++    if (freq.has(term)) {
++      freq.set(term, (freq.get(term) ?? 0) + 2);
++    }
++  }
++  for (const phrase of TECH_PHRASES) {
++    if (texts.some((text) => normalizeText(text).includes(phrase))) {
++      freq.set(phrase, (freq.get(phrase) ?? 0) + 2);
++    }
++  }
++  return freq;
++};
++
++const buildTermSet = (texts: string[]) => {
++  const tokens = collectTokens(texts);
++  const bigrams = buildBigrams(tokens);
++  return new Set([...tokens, ...bigrams]);
++};
++
++const extractTechTerms = (texts: string[]) => {
++  const normalizedText = texts.map((text) => normalizeText(text)).join(' ');
++  const found = new Set<string>();
++  for (const token of TECH_TOKENS) {
++    if (normalizedText.includes(token)) found.add(token);
++  }
++  for (const phrase of TECH_PHRASES) {
++    if (normalizedText.includes(phrase)) found.add(phrase);
++  }
++  return [...found];
++};
++
++const scoreOverlap = (terms: string[], baselineText: string) => {
++  if (terms.length === 0) return 0;
++  const baselineSet = buildTermSet([baselineText]);
++  const matched = terms.filter((term) => baselineSet.has(term));
++  return Math.round((matched.length / terms.length) * 100);
++};
++
++const scoreLeadership = (jobText: string, baselineText: string) => {
++  const jobCount = countCueMatches(jobText, LEADERSHIP_CUES);
++  if (jobCount === 0) return 60;
++  const baselineCount = countCueMatches(baselineText, LEADERSHIP_CUES);
++  const ratio = Math.min(baselineCount / jobCount, 1);
++  return Math.round(ratio * 100);
++};
++
++const scoreIndustry = (jobText: string, baselineText: string) => {
++  const jobCount = countCueMatches(jobText, INDUSTRY_TERMS);
++  if (jobCount === 0) return 60;
++  const baselineCount = countCueMatches(baselineText, INDUSTRY_TERMS);
++  const ratio = Math.min(baselineCount / jobCount, 1);
++  return Math.round(ratio * 100);
++};
++
++const scoreStrategicTactical = (jobText: string, baselineText: string) => {
++  const jobStrategic = countCueMatches(jobText, STRATEGIC_CUES);
++  const jobTactical = countCueMatches(jobText, TACTICAL_CUES);
++  const jobTotal = jobStrategic + jobTactical;
++  if (jobTotal === 0) return 60;
++
++  const baselineStrategic = countCueMatches(baselineText, STRATEGIC_CUES);
++  const baselineTactical = countCueMatches(baselineText, TACTICAL_CUES);
++  const baselineTotal = baselineStrategic + baselineTactical;
++  const jobOrientation = jobTotal === 0 ? 0 : (jobStrategic - jobTactical) / jobTotal;
++  const baselineOrientation =
++    baselineTotal === 0 ? 0 : (baselineStrategic - baselineTactical) / baselineTotal;
++  const diff = Math.abs(jobOrientation - baselineOrientation);
++  const score = Math.max(0, Math.min(100, Math.round((1 - diff / 2) * 100)));
++  return score;
++};
++
++const scoreTechnicalFit = (jobText: string, baselineText: string) => {
++  const terms = extractTechTerms([jobText]);
++  if (terms.length === 0) return 60;
++  const baselineSet = buildTermSet([baselineText]);
++  const matched = terms.filter((term) => baselineSet.has(term));
++  return Math.round((matched.length / terms.length) * 100);
++};
++
++const scoreExperienceAlignment = (
++  responsibilitiesText: string,
++  requirementsText: string,
++  baselineExperienceText: string,
++) => {
++  const responsibilitiesTerms = sortByFrequency(
++    buildTermFrequencies([responsibilitiesText]),
++  );
++  const requirementsTerms = sortByFrequency(buildTermFrequencies([requirementsText]));
++
++  const responsibilitiesScore = scoreOverlap(
++    responsibilitiesTerms,
++    baselineExperienceText,
++  );
++  const requirementsScore = scoreOverlap(requirementsTerms, baselineExperienceText);
++
++  if (responsibilitiesTerms.length > 0 && requirementsTerms.length > 0) {
++    return Math.round(responsibilitiesScore * 0.7 + requirementsScore * 0.3);
++  }
++
++  if (responsibilitiesTerms.length > 0) return responsibilitiesScore;
++  if (requirementsTerms.length > 0) return requirementsScore;
++  return 0;
++};
++
++const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
++
++const buildStrengthsAndGaps = (
++  requirementText: string,
++  responsibilityText: string,
++  fallbackText: string,
++  baselineText: string,
++) => {
++  const requirementFreq = buildTermFrequencies([requirementText]);
++  const responsibilityFreq = buildTermFrequencies([responsibilityText]);
++  const fallbackFreq = buildTermFrequencies([fallbackText]);
++
++  const hasRequirements = requirementFreq.size > 0;
++  const hasResponsibilities = responsibilityFreq.size > 0;
++
++  const prioritizedFreq = new Map<string, number>();
++  if (hasRequirements) mergeFrequency(prioritizedFreq, requirementFreq);
++  if (hasResponsibilities) mergeFrequency(prioritizedFreq, responsibilityFreq);
++  if (!hasRequirements && !hasResponsibilities) mergeFrequency(prioritizedFreq, fallbackFreq);
++
++  const sortedTerms = sortByFrequency(prioritizedFreq);
++  const baselineSet = buildTermSet([baselineText]);
++
++  const strengths: string[] = [];
++  const gaps: string[] = [];
++
++  for (const term of sortedTerms) {
++    if (strengths.length >= 10 && gaps.length >= 10) break;
++    if (baselineSet.has(term)) {
++      if (!strengths.includes(term) && strengths.length < 10) strengths.push(term);
++    } else if (!gaps.includes(term) && gaps.length < 10) {
++      gaps.push(term);
++    }
++  }
++
++  return { strengths: strengths.slice(0, 8), gaps: gaps.slice(0, 8) };
++};
++
++const buildSummary = (strengths: string[], gaps: string[]) => {
++  if (strengths.length === 0 && gaps.length === 0) {
++    return 'No keywords found in the job description.';
++  }
++  const total = strengths.length + gaps.length;
++  return `Matched ${strengths.length} of ${total} key terms from the job description.`;
++};
++
++const computeComplianceFlags = (
++  jobText: string,
++  baselineText: string,
++  sourceUrl?: string | null,
++) => {
++  const flags: string[] = [];
++
++  if (baselineText.trim().length < MIN_TEXT_LENGTH) {
++    flags.push('Baseline too short for reliable scoring');
++  }
++
++  if (jobText.trim().length < MIN_TEXT_LENGTH) {
++    flags.push('Job description too short for reliable scoring');
++  }
++
++  const normalizedJob = normalizeText(jobText);
++  const promptSignals = ['ignore previous instructions', 'system prompt', 'assistant', 'developer message'];
++  if (promptSignals.some((signal) => normalizedJob.includes(signal))) {
++    flags.push('Job description contains prompt-like content');
++  }
++
++  if (sourceUrl && !/^https?:\/\//i.test(sourceUrl)) {
++    flags.push('Suspicious job source URL');
++  }
++
++  return flags;
++};
++
++const buildVerdict = (overallScore: number) => {
++  if (overallScore >= VERDICT_THRESHOLDS.APPLY) return FitAssessmentVerdict.APPLY;
++  if (overallScore >= VERDICT_THRESHOLDS.CONSIDER) return FitAssessmentVerdict.CONSIDER;
++  return FitAssessmentVerdict.SKIP;
++};
++
++@Injectable()
++export class FitScoringService {
++  score(input: FitScoringInput): FitScoringResult {
++    const jobText = [
++      input.job.title ?? '',
++      input.job.company ?? '',
++      input.job.rawDescription,
++      ...input.job.normalizedResponsibilities,
++      ...input.job.normalizedRequirements,
++    ].join('\n');
++
++    const baselineText = input.baseline.sections.map((section) => section.content).join('\n');
++    const baselineSkillsText =
++      buildSectionText(input.baseline.sections, ['SKILLS']) || baselineText;
++    const baselineExperienceText =
++      buildSectionText(input.baseline.sections, ['EXPERIENCE', 'PROJECT', 'SUMMARY']) ||
++      baselineText;
++
++    const responsibilitiesText = input.job.normalizedResponsibilities.join('\n');
++    const requirementsText = input.job.normalizedRequirements.join('\n');
++
++    const experienceAlignment = scoreExperienceAlignment(
++      responsibilitiesText,
++      requirementsText,
++      baselineExperienceText,
++    );
++    const leadershipLevel = scoreLeadership(jobText, baselineText);
++    const technicalPlatformFit = scoreTechnicalFit(jobText, baselineSkillsText);
++    const industryContext = scoreIndustry(jobText, baselineText);
++    const strategicTacticalFit = scoreStrategicTactical(jobText, baselineExperienceText);
++
++    const dimensionScores: FitDimensionScores = {
++      experienceAlignment,
++      leadershipLevel,
++      technicalPlatformFit,
++      industryContext,
++      strategicTacticalFit,
++    };
++
++    const overallScore = clampScore(
++      experienceAlignment * 0.3 +
++        technicalPlatformFit * 0.25 +
++        leadershipLevel * 0.2 +
++        strategicTacticalFit * 0.15 +
++        industryContext * 0.1,
++    );
++
++    const { strengths, gaps } = buildStrengthsAndGaps(
++      requirementsText,
++      responsibilitiesText,
++      jobText,
++      baselineText,
++    );
++
++    const complianceFlags = computeComplianceFlags(
++      jobText,
++      baselineText,
++      input.job.sourceUrl,
++    );
++
++    return {
++      overallScore,
++      verdict: buildVerdict(overallScore),
++      dimensionScores,
++      strengths,
++      gaps,
++      complianceFlags,
++      summary: buildSummary(strengths, gaps),
++    };
++  }
++
++  buildComplianceFlags(jobText: string, baselineText: string, sourceUrl?: string | null) {
++    return computeComplianceFlags(jobText, baselineText, sourceUrl);
++  }
++}
+diff --git a/apps/api/src/migrations/1730000000000-FitAssessments.ts b/apps/api/src/migrations/1730000000000-FitAssessments.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..a1e2cb8228fb336ce8402ac556c98ef4fb4a8817
+index 0000000000000000000000000000000000000000..09e32909f3dba6be8591d409ce9c9bd39e1c587b
 --- /dev/null
-+++ b/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts
-@@ -0,0 +1,44 @@
++++ b/apps/api/src/migrations/1730000000000-FitAssessments.ts
+@@ -0,0 +1,54 @@
 +import { MigrationInterface, QueryRunner } from 'typeorm';
 +
-+export class JobDescriptionNormalization1722000000000
-+  implements MigrationInterface
-+{
-+  name = 'JobDescriptionNormalization1722000000000';
++export class FitAssessments1730000000000 implements MigrationInterface {
++  name = 'FitAssessments1730000000000';
 +
 +  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
 +    await queryRunner.query(
-+      `CREATE TYPE "jobs_jdIngestionMethod_enum" AS ENUM('PASTE', 'URL')`,
++      `CREATE TYPE "fit_assessments_verdict_enum" AS ENUM('APPLY', 'CONSIDER', 'SKIP')`,
 +    );
 +
 +    await queryRunner.query(
-+      `ALTER TABLE "jobs" ADD "sourceUrl" character varying(2048)`,
++      `CREATE TABLE "fit_assessments" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" uuid NOT NULL,
++        "jobId" uuid NOT NULL,
++        "baselineId" uuid NOT NULL,
++        "baselineVersion" integer,
++        "overallScore" integer NOT NULL,
++        "verdict" "fit_assessments_verdict_enum" NOT NULL,
++        "dimensionScores" jsonb NOT NULL DEFAULT '{}'::jsonb,
++        "strengths" jsonb NOT NULL DEFAULT '[]'::jsonb,
++        "gaps" jsonb NOT NULL DEFAULT '[]'::jsonb,
++        "complianceFlags" jsonb NOT NULL DEFAULT '[]'::jsonb,
++        "inputsHash" character varying(255),
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_fit_assessments_id" PRIMARY KEY ("id")
++      )`,
++    );
++
++    await queryRunner.query(
++      `CREATE INDEX "IDX_fit_assessments_userId" ON "fit_assessments" ("userId")`,
 +    );
 +    await queryRunner.query(
-+      `ALTER TABLE "jobs" ADD "normalizedResponsibilities" jsonb NOT NULL DEFAULT '[]'::jsonb`,
++      `CREATE INDEX "IDX_fit_assessments_jobId" ON "fit_assessments" ("jobId")`,
 +    );
 +    await queryRunner.query(
-+      `ALTER TABLE "jobs" ADD "normalizedRequirements" jsonb NOT NULL DEFAULT '[]'::jsonb`,
++      `CREATE INDEX "IDX_fit_assessments_baselineId" ON "fit_assessments" ("baselineId")`,
 +    );
 +    await queryRunner.query(
-+      `ALTER TABLE "jobs" ADD "jdIngestionMethod" "jobs_jdIngestionMethod_enum" NOT NULL DEFAULT 'PASTE'`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "jobs" ADD "jdParsedAt" TIMESTAMP WITH TIME ZONE`,
++      `CREATE INDEX "IDX_fit_assessments_createdAt" ON "fit_assessments" ("createdAt")`,
 +    );
 +  }
 +
 +  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "jobs" DROP COLUMN "jdParsedAt"`);
-+    await queryRunner.query(
-+      `ALTER TABLE "jobs" DROP COLUMN "jdIngestionMethod"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "jobs" DROP COLUMN "normalizedRequirements"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "jobs" DROP COLUMN "normalizedResponsibilities"`,
-+    );
-+    await queryRunner.query(`ALTER TABLE "jobs" DROP COLUMN "sourceUrl"`);
-+    await queryRunner.query(`DROP TYPE "jobs_jdIngestionMethod_enum"`);
++    await queryRunner.query(`DROP INDEX "IDX_fit_assessments_createdAt"`);
++    await queryRunner.query(`DROP INDEX "IDX_fit_assessments_baselineId"`);
++    await queryRunner.query(`DROP INDEX "IDX_fit_assessments_jobId"`);
++    await queryRunner.query(`DROP INDEX "IDX_fit_assessments_userId"`);
++    await queryRunner.query(`DROP TABLE "fit_assessments"`);
++    await queryRunner.query(`DROP TYPE "fit_assessments_verdict_enum"`);
 +  }
 +}
-diff --git a/apps/web/app/api/jobs/ingest/route.ts b/apps/web/app/api/jobs/ingest/route.ts
+diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
+index dc8fec4f22c04a1cfb8b277b7305027a91927237..51496ece80618764a3f6e9bb6196d4b16df0aa35 100644
+--- a/apps/web/app/analyze/page.tsx
++++ b/apps/web/app/analyze/page.tsx
+@@ -1,31 +1,32 @@
+ // apps/web/app/analyze/page.tsx
+ "use client";
+ 
+ import { useEffect, useMemo, useState } from "react";
+ import type { CSSProperties } from "react";
+ import Link from "next/link";
++import { useRouter } from "next/navigation";
+ 
+ import type { BaselineDto } from "../../lib/baselines";
+ import type { JobDto } from "../../lib/jobs";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
+ import { saveLastAnalysis } from "../lib/session";
+ 
+ type ApiStatus = "unknown" | "online" | "offline";
+ 
+ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
+   const radius = 72;
+   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
+   const clampedScore = Math.min(Math.max(score, 0), 100);
+   const offset = circumference * (1 - clampedScore / 100);
+   const gradientId = "scoreRingGradient";
+ 
+   return (
+     <div
+       style={{
+         position: "relative",
+         display: "flex",
+         height: 176,
+         width: 176,
+         alignItems: "center",
+@@ -116,50 +117,51 @@ function signalQuality(score: number | null) {
+   if (score >= 75) return { label: "Medium", color: "#f59e0b" };
+   return { label: "Low", color: "#f97316" };
+ }
+ 
+ export default function AnalyzePage() {
+   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+   const [baselineId, setBaselineId] = useState("");
+   const [baselineLoading, setBaselineLoading] = useState(true);
+   const [baselineError, setBaselineError] = useState<string | null>(null);
+ 
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobsLoading, setJobsLoading] = useState(true);
+   const [jobsError, setJobsError] = useState<string | null>(null);
+ 
+   const [jobDescription, setJobDescription] = useState("");
+   const [result, setResult] = useState<AnalysisResult | null>(null);
+ 
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [animatedScore, setAnimatedScore] = useState(0);
+   const [showRaw, setShowRaw] = useState(false);
+ 
+   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
++  const router = useRouter();
+ 
+   const hasBaseline = baselineId.trim().length > 0;
+   const hasSelectedJob = jobId.trim().length > 0;
+   const hasJobDescription = jobDescription.trim().length > 0;
+   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
+ 
+   useEffect(() => {
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineLoading(true);
+       setBaselineError(null);
+ 
+       try {
+         const response = await fetch("/api/baselines", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
+         }
+ 
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
+ 
+         setBaselines(data);
+ 
+@@ -267,68 +269,93 @@ export default function AnalyzePage() {
+       const online = (await probe("/api/status")) || (await probe("/api/health"));
+       if (cancelled) return;
+       setApiStatus(online ? "online" : "offline");
+     };
+ 
+     check();
+     const interval = setInterval(check, 10000);
+ 
+     return () => {
+       cancelled = true;
+       clearInterval(interval);
+     };
+   }, []);
+ 
+   const handleAnalyze = async () => {
+     if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
+       setError("Please select a baseline and either choose a saved job or paste a description.");
+       return;
+     }
+ 
+     setLoading(true);
+     setError(null);
+     setResult(null);
+ 
+     try {
++      let resolvedJobId = jobId;
++
++      if (!hasSelectedJob && hasJobDescription) {
++        const createResponse = await fetch("/api/jobs", {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ rawDescription: jobDescription }),
++        });
++
++        if (!createResponse.ok) {
++          const message = await createResponse.text();
++          throw new Error(message || "Unable to save this job description.");
++        }
++
++        const created = (await createResponse.json()) as { id?: string };
++        if (!created?.id) {
++          throw new Error("Job creation response was incomplete.");
++        }
++
++        resolvedJobId = created.id;
++        setJobId(created.id);
++      }
++
+       const response = await fetch("/api/analyze", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify(
+-          hasSelectedJob ? { baselineId, jobId } : { baselineId, jobDescription },
+-        ),
++        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
+       });
+ 
+       if (!response.ok) {
+         const message = await response.text();
+         throw new Error(message || "Unable to analyze this role right now.");
+       }
+ 
+       const data = (await response.json()) as AnalysisResult;
+       setResult(data);
+ 
+       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+       saveLastAnalysis(payload);
++
++      if (data.jobId) {
++        router.push(`/results?jobId=${data.jobId}`);
++      }
+     } catch (e) {
+       const message = e instanceof Error ? e.message : "Unexpected error";
+       setError(message);
+       setResult(null);
+     } finally {
+       setLoading(false);
+     }
+   };
+ 
+   const scoreLabel = fitLabel(result?.score ?? null);
+   const quality = signalQuality(result?.score ?? null);
+ 
+   const pillColor =
+     apiStatus === "online"
+       ? "rgba(74, 222, 128, 0.15)"
+       : apiStatus === "offline"
+         ? "rgba(248, 113, 113, 0.18)"
+         : "rgba(251, 191, 36, 0.18)";
+ 
+   const pillBorder =
+     apiStatus === "online"
+       ? "1px solid rgba(74, 222, 128, 0.6)"
+       : apiStatus === "offline"
+         ? "1px solid rgba(248, 113, 113, 0.7)"
+         : "1px solid rgba(251, 191, 36, 0.6)";
+@@ -754,26 +781,25 @@ export default function AnalyzePage() {
+                       marginTop: 6,
+                       padding: 12,
+                       borderRadius: 10,
+                       background: "rgba(0,0,0,0.35)",
+                       border: "1px solid rgba(255,255,255,0.05)",
+                       color: "#e2e8f0",
+                       fontSize: 12,
+                       whiteSpace: "pre-wrap",
+                       wordBreak: "break-word",
+                     }}
+                   >
+                     {JSON.stringify(result, null, 2)}
+                   </pre>
+                 ) : null}
+               </div>
+             )}
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
+ 
+ 
+ 
+-
+diff --git a/apps/web/app/api/analysis/job/[jobId]/latest/route.ts b/apps/web/app/api/analysis/job/[jobId]/latest/route.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..635bad23d9bed71dd8f683e3e42ad0f2bdf293b4
+index 0000000000000000000000000000000000000000..5f2646309405d36eaa57e86eaac6377b8652d464
 --- /dev/null
-+++ b/apps/web/app/api/jobs/ingest/route.ts
-@@ -0,0 +1,32 @@
++++ b/apps/web/app/api/analysis/job/[jobId]/latest/route.ts
+@@ -0,0 +1,30 @@
 +import { NextRequest, NextResponse } from "next/server";
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../../baselines/helpers";
 +
-+export async function POST(req: NextRequest) {
++export const runtime = "nodejs";
++
++export async function GET(
++  req: NextRequest,
++  { params }: { params: Promise<{ jobId: string }> },
++) {
 +  const baseUrl = getApiBaseUrl();
 +  const { token, error } = requireAuthToken(req);
++  const { jobId } = await params;
 +
 +  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
++    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
 +  }
 +
 +  if (!token) {
 +    return error;
 +  }
 +
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/jobs/ingest`, {
-+    method: "POST",
++  const response = await fetch(`${baseUrl}/analysis/job/${jobId}/latest`, {
 +    headers: {
 +      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
 +    },
-+    body: JSON.stringify(body),
 +  });
 +
 +  return relayApiResponse(response);
 +}
-diff --git a/apps/web/app/jobs/new/page.tsx b/apps/web/app/jobs/new/page.tsx
-index 0c6448694aaf2a5e0f91536291dc4d68f312717e..3b0895c24e0c45a76c88e91955a339226460ef7a 100644
---- a/apps/web/app/jobs/new/page.tsx
-+++ b/apps/web/app/jobs/new/page.tsx
-@@ -1,212 +1,440 @@
+diff --git a/apps/web/app/api/analyze/route.ts b/apps/web/app/api/analyze/route.ts
+index f95df692ad1df98b9f205342741067709396cee1..bba0b0ab5122e6e8e8efe20cced4aedec74483a8 100644
+--- a/apps/web/app/api/analyze/route.ts
++++ b/apps/web/app/api/analyze/route.ts
+@@ -1,34 +1,34 @@
+ import { NextRequest, NextResponse } from "next/server";
+ 
+ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+ 
+ export const runtime = "nodejs";
+ 
+ export async function POST(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+   const body = await req.json();
+ 
+-  const response = await fetch(`${baseUrl}/analysis`, {
++  const response = await fetch(`${baseUrl}/analysis/run`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
+ 
+   return relayApiResponse(response);
+ }
+diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
+index 5c36e0d8c6254e9c27f7ca2be5c3c8609a1475ab..99d0f0ee3440edfa927bf3fcc6e3dcea32cf60fa 100644
+--- a/apps/web/app/results/page.tsx
++++ b/apps/web/app/results/page.tsx
+@@ -1,61 +1,64 @@
+ // apps/web/app/results/page.tsx
  "use client";
  
- import { useEffect, useMemo, useState } from "react";
- import type { CSSProperties, FormEvent } from "react";
+ import type { CSSProperties } from "react";
+-import { useEffect, useMemo, useState } from "react";
++import { Suspense, useEffect, useMemo, useRef, useState } from "react";
  import Link from "next/link";
+-import { useRouter } from "next/navigation";
++import { useRouter, useSearchParams } from "next/navigation";
  
- import type { JobDto } from "../../../lib/jobs";
- import { InstrumentPanelShell } from "../../ui/InstrumentPanelShell";
- import { ttrComponents, ttrTypography } from "../../ui/ttrStyles";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
  
- const fieldStyle: CSSProperties = {
-   display: "flex",
-   flexDirection: "column",
-   gap: 8,
+ const STORAGE_KEY = "ttr:lastAnalysis";
+ 
+ function fitLabel(score: number | null) {
+   if (score === null) return "";
+   if (score >= 90) return "Strong fit";
+   if (score >= 75) return "Solid fit";
+   if (score >= 60) return "Mixed fit";
+   return "Weak fit";
+ }
+ 
+ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string } | null {
+   try {
+     const parsed = JSON.parse(raw) as unknown;
+ 
+     // New format: { result, savedAt }
+     if (
+       parsed &&
+       typeof parsed === "object" &&
+       "result" in parsed &&
+       "savedAt" in parsed &&
+       typeof (parsed as any).savedAt === "string"
+     ) {
+       const payload = parsed as StoredPayload;
+-      if (payload?.result && typeof payload.result.score === "number") {
++      if (
++        payload?.result &&
++        (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
++      ) {
+         return { result: payload.result, savedAt: payload.savedAt };
+       }
+     }
+ 
+     // Old format: AnalysisResult directly
+     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
+       return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
+     }
+ 
+     return null;
+   } catch {
+     return null;
+   }
+ }
+ 
+ function formatLastUpdated(iso: string) {
+   try {
+     const d = new Date(iso);
+     if (Number.isNaN(d.getTime())) return "Unknown";
+     return d.toLocaleString();
+   } catch {
+     return "Unknown";
+   }
+ }
+ 
+@@ -83,79 +86,113 @@ const ScoreRing = ({ score }: { score: number }) => {
+           r={radius}
+           stroke={`url(#${gradientId})`}
+           strokeWidth={14}
+           fill="none"
+           strokeDasharray={circumference}
+           strokeDashoffset={offset}
+           strokeLinecap="round"
+           style={{ transition: "stroke-dashoffset 600ms ease-out", filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))" }}
+         />
+       </svg>
+ 
+       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
+         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+           <div style={{ fontSize: 34, fontWeight: 900, color: "#fde68a", textShadow: "0 2px 14px rgba(0,0,0,0.35)" }}>
+             {Math.round(clamped)}
+           </div>
+           <div style={{ fontSize: 11, letterSpacing: 2.5, textTransform: "uppercase", color: "rgba(252, 211, 77, 0.8)" }}>
+             Fit score
+           </div>
+         </div>
+       </div>
+     </div>
+   );
  };
  
-+type IngestionMode = "PASTE" | "URL";
-+
-+type IngestPreview = {
-+  rawDescription: string;
-+  responsibilities: string[];
-+  requirements: string[];
-+};
-+
- export default function JobIngestionPage() {
-   const [jobs, setJobs] = useState<JobDto[]>([]);
-   const [title, setTitle] = useState("");
-   const [company, setCompany] = useState("");
-   const [rawDescription, setRawDescription] = useState("");
-+  const [url, setUrl] = useState("");
-+  const [ingestionMode, setIngestionMode] = useState<IngestionMode>("PASTE");
-+  const [preview, setPreview] = useState<IngestPreview | null>(null);
-+  const [isPreviewing, setIsPreviewing] = useState(false);
-   const [isSubmitting, setIsSubmitting] = useState(false);
-   const [error, setError] = useState<string | null>(null);
-   const [success, setSuccess] = useState<string | null>(null);
+-export default function ResultsPage() {
++function ResultsContent() {
+   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
  
-   const sortedJobs = useMemo(
-     () =>
-       [...jobs].sort(
-         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-       ),
-     [jobs],
-   );
+   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
+   const [interviewError, setInterviewError] = useState<string | null>(null);
+   const [isCreatingInterview, setIsCreatingInterview] = useState(false);
+   const router = useRouter();
++  const searchParams = useSearchParams();
++  const latestJobIdRef = useRef<string | null>(null);
  
    useEffect(() => {
-     let cancelled = false;
- 
-     const loadJobs = async () => {
-       try {
-         const response = await fetch("/api/jobs", { cache: "no-store" });
-         if (!response.ok) {
-           return;
-         }
- 
-         const data = (await response.json()) as JobDto[];
-         if (!cancelled) setJobs(data);
-       } catch {
-         if (!cancelled) setJobs([]);
+     try {
+       const raw = sessionStorage.getItem(STORAGE_KEY);
+       if (!raw) {
+         setStored(null);
+         return;
        }
-     };
  
-     loadJobs();
-     return () => {
-       cancelled = true;
-     };
+       const parsed = safeParseStored(raw);
+       setStored(parsed);
+     } catch {
+       setStored(null);
+     }
    }, []);
  
-+  const requestPreview = async (payload: { url?: string; pastedText?: string }, shouldSet = true) => {
-+    setIsPreviewing(true);
-+    setError(null);
-+    setSuccess(null);
+-  const score = stored?.result?.score ?? null;
++  useEffect(() => {
++    const jobId = searchParams.get("jobId") ?? stored?.result?.jobId;
++    if (!jobId || latestJobIdRef.current === jobId) return;
 +
-+    try {
-+      const response = await fetch("/api/jobs/ingest", {
-+        method: "POST",
-+        headers: {
-+          "Content-Type": "application/json",
-+        },
-+        body: JSON.stringify(payload),
-+      });
++    latestJobIdRef.current = jobId;
++    let cancelled = false;
 +
-+      const data = await response.json();
-+
-+      if (response.status === 401) {
-+        window.location.href = "/auth/login";
-+        return null;
++    const loadLatest = async () => {
++      try {
++        const response = await fetch(`/api/analysis/job/${jobId}/latest`, { cache: "no-store" });
++        if (!response.ok) return;
++        const data = (await response.json()) as AnalysisResult;
++        if (cancelled) return;
++        const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
++        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
++        setStored(payload);
++      } catch {
++        // Ignore fetch errors; fall back to stored data.
 +      }
++    };
 +
-+      if (!response.ok) {
-+        const message = data?.message || data?.error || "Unable to parse job description";
-+        setError(typeof message === "string" ? message : "Unable to parse job description");
-+        return null;
-+      }
++    loadLatest();
++    return () => {
++      cancelled = true;
++    };
++  }, [searchParams, stored?.result?.jobId]);
 +
-+      if (shouldSet) {
-+        setPreview(data as IngestPreview);
-+      }
-+
-+      return data as IngestPreview;
-+    } catch {
-+      setError("Unable to parse job description right now.");
-+      return null;
-+    } finally {
-+      setIsPreviewing(false);
-+    }
-+  };
-+
-+  const handlePreview = async () => {
-+    if (ingestionMode === "URL") {
-+      if (!url.trim()) {
-+        setError("Please add a job description URL before previewing.");
-+        return;
-+      }
-+      await requestPreview({ url: url.trim() });
-+      return;
-+    }
-+
-+    if (!rawDescription.trim()) {
-+      setError("Please paste a job description before previewing.");
-+      return;
-+    }
-+
-+    await requestPreview({ pastedText: rawDescription });
-+  };
-+
-   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-     event.preventDefault();
-     setError(null);
-     setSuccess(null);
++  const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
+   const label = fitLabel(score);
+   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
  
--    if (!rawDescription.trim()) {
--      setError("Please paste a job description before saving.");
-+    let previewPayload = preview;
-+    const trimmedUrl = url.trim();
-+
-+    if (ingestionMode === "URL") {
-+      if (!trimmedUrl) {
-+        setError("Please add a job description URL before saving.");
-+        return;
-+      }
-+      if (!previewPayload) {
-+        previewPayload = await requestPreview({ url: trimmedUrl }, false);
-+        if (!previewPayload) {
-+          return;
-+        }
-+      }
-+    } else {
-+      if (!rawDescription.trim()) {
-+        setError("Please paste a job description before saving.");
-+        return;
-+      }
-+    }
-+
-+    const finalRawDescription =
-+      ingestionMode === "URL"
-+        ? previewPayload?.rawDescription ?? ""
-+        : previewPayload?.rawDescription ?? rawDescription;
-+
-+    if (!finalRawDescription) {
-+      setError("Please provide a job description before saving.");
+   const hasResult = score !== null;
+   const baselineId = stored?.result?.baselineId ?? null;
++  const verdict = stored?.result?.verdict ?? null;
++  const dimensionScores = stored?.result?.dimensionScores ?? null;
++  const strengths = stored?.result?.strengths ?? [];
++  const gaps = stored?.result?.gaps ?? [];
++  const complianceFlags = stored?.result?.complianceFlags ?? [];
+ 
+   const handleCreateInterview = async () => {
+     if (!baselineId) {
+       setInterviewError("Save a baseline analysis first, then try again.");
        return;
      }
  
-     setIsSubmitting(true);
+     setInterviewError(null);
+     setIsCreatingInterview(true);
  
      try {
-       const response = await fetch("/api/jobs", {
+       const response = await fetch("/api/interviews", {
          method: "POST",
-         headers: {
-           "Content-Type": "application/json",
-         },
-         body: JSON.stringify({
-           title,
-           company,
--          rawDescription,
-+          rawDescription: finalRawDescription,
-+          sourceUrl: ingestionMode === "URL" ? trimmedUrl : null,
-+          responsibilities: previewPayload?.responsibilities,
-+          requirements: previewPayload?.requirements,
-+          jdIngestionMethod: ingestionMode,
-         }),
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ baselineId }),
        });
  
-       const data = await response.json();
- 
-       if (response.status === 401) {
-         window.location.href = "/auth/login";
-         return;
-       }
- 
        if (!response.ok) {
-         const message = data?.message || data?.error || "Unable to save job";
-         setError(typeof message === "string" ? message : "Unable to save job");
-         return;
+         const payload = await response.json().catch(() => null);
+         const message = payload?.error ?? "Unable to create interview session.";
+         throw new Error(message);
        }
  
-       setJobs((previous) => [data as JobDto, ...previous]);
-       setTitle("");
-       setCompany("");
-       setRawDescription("");
-+      setUrl("");
-+      setPreview(null);
-+      setIngestionMode("PASTE");
-       setSuccess("Job description saved. Ready to analyze fit.");
-     } catch {
-       setError("Unable to save job right now.");
-     } finally {
-       setIsSubmitting(false);
-     }
-   };
+       const session = (await response.json()) as { id?: string };
  
-   const rightSlot = (
-     <Link href="/analyze" style={ttrComponents.secondaryButton}>
-       Analyze a role
-     </Link>
-   );
+@@ -182,50 +219,55 @@ export default function ResultsPage() {
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Snapshot</span>
+             <h2 style={ttrTypography.h2}>Latest analysis</h2>
+           </div>
  
-   return (
-     <InstrumentPanelShell
-       kicker="Job ingestion"
-       title="Add a job description"
--      subtitle="Paste a job posting to prepare for fit scoring."
-+      subtitle="Paste a job posting or fetch it from a URL to prepare for fit scoring."
-       rightSlot={rightSlot}
-     >
-       <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
-         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-           <span style={ttrTypography.subtleLabel}>Job intake</span>
-           <h2 style={ttrTypography.h2}>Capture the posting</h2>
-           <p style={ttrTypography.bodyMuted}>
--            Paste the full job description. Title and company are optional but helpful for
--            organization later.
-+            Paste the full job description or fetch it from a URL. Title and company are optional
-+            but helpful for organization later.
-           </p>
-         </div>
+           <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(0,0,0,0.18)",
+                 padding: "12px 12px",
+               }}
+             >
+               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Status</div>
+                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>Last updated: {lastUpdated}</div>
+               </div>
  
-         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-+            {(["PASTE", "URL"] as const).map((mode) => (
-+              <label
-+                key={mode}
-+                style={{
+               <div style={{ marginTop: 10, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                 {hasResult ? (
+                   <>
+                     <ScoreRing score={score ?? 0} />
+                     <div style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 8 }}>
+                       <div style={{ fontSize: 14, fontWeight: 900, color: "#fde68a" }}>{label}</div>
++                      {verdict ? (
++                        <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(251,191,36,0.9)" }}>
++                          Verdict: {verdict}
++                        </div>
++                      ) : null}
+                       <div style={{ fontSize: 13, lineHeight: 1.6, color: "rgba(241,245,249,0.92)" }}>
+                         {stored?.result?.summary || "Summary will appear here as the analyzer output is refined."}
+                       </div>
+ 
+                       {stored?.result?.baselineId ? (
+                         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                           Baseline: {stored.result.baselineId}
+                         </div>
+                       ) : null}
+                     </div>
+                   </>
+                 ) : (
+                   <div style={{ fontSize: 13, color: "rgba(226,232,240,0.75)", lineHeight: 1.6 }}>
+                     No saved analysis found yet. Run Analyze once and then return here.
+                   </div>
+                 )}
+               </div>
+             </div>
+ 
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(251,191,36,0.2)",
+                 background: "rgba(251,191,36,0.08)",
+                 padding: "16px 14px",
+@@ -242,74 +284,138 @@ export default function ResultsPage() {
+               </div>
+               <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                 <button
+                   type="button"
+                   onClick={handleCreateInterview}
+                   disabled={!hasResult || isCreatingInterview}
+                   style={{
+                     ...ttrComponents.primaryButton,
+                     opacity: !hasResult || isCreatingInterview ? 0.6 : 1,
+                     cursor: !hasResult || isCreatingInterview ? "not-allowed" : "pointer",
+                   }}
+                 >
+                   {isCreatingInterview ? "Starting..." : "I think I’m qualified"}
+                 </button>
+                 {!hasResult ? (
+                   <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                     Run an analysis first to unlock interview prep.
+                   </span>
+                 ) : null}
+               </div>
+               {interviewError ? (
+                 <div style={ttrComponents.dangerBox}>{interviewError}</div>
+               ) : null}
+             </div>
+ 
+-            <div
+-              style={{
+-                border: "1px dashed rgba(251,191,36,0.35)",
+-                borderRadius: 14,
+-                padding: "16px 14px",
+-                background: "rgba(255,255,255,0.03)",
+-              }}
+-            >
+-              <p
++            {hasResult ? (
++              <div
+                 style={{
+-                  margin: 0,
+-                  fontSize: 12,
+-                  letterSpacing: 2.5,
+-                  textTransform: "uppercase",
+-                  color: "rgba(251,191,36,0.75)",
+-                  fontWeight: 900,
++                  borderRadius: 12,
++                  border: "1px solid rgba(255,255,255,0.08)",
++                  background: "rgba(0,0,0,0.18)",
++                  padding: "14px 14px",
 +                  display: "flex",
-+                  alignItems: "center",
-+                  gap: 6,
-+                  fontSize: 12,
-+                  textTransform: "uppercase",
-+                  letterSpacing: "0.08em",
-+                  color: ingestionMode === mode ? "rgba(248,250,252,0.95)" : "rgba(148,163,184,0.7)",
++                  flexDirection: "column",
++                  gap: 12,
+                 }}
+               >
+-                Coming soon
+-              </p>
+-              <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
+-                Results will consolidate the score, strengths and gaps, actions, and export status in one place.
+-              </p>
+-            </div>
++                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Fit breakdown</div>
++                {dimensionScores ? (
++                  <div style={{ display: "grid", gap: 8, fontSize: 13, color: "rgba(226,232,240,0.8)" }}>
++                    <div>Experience alignment: {dimensionScores.experienceAlignment}</div>
++                    <div>Leadership level: {dimensionScores.leadershipLevel}</div>
++                    <div>Technical platform fit: {dimensionScores.technicalPlatformFit}</div>
++                    <div>Industry and context: {dimensionScores.industryContext}</div>
++                    <div>Strategic vs tactical fit: {dimensionScores.strategicTacticalFit}</div>
++                  </div>
++                ) : (
++                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>Dimension scores unavailable.</div>
++                )}
++              </div>
++            ) : null}
++
++            {hasResult ? (
++              <div
++                style={{
++                  borderRadius: 12,
++                  border: "1px solid rgba(255,255,255,0.08)",
++                  background: "rgba(0,0,0,0.18)",
++                  padding: "14px 14px",
++                  display: "grid",
++                  gap: 12,
 +                }}
 +              >
-+                <input
-+                  type="radio"
-+                  name="ingestionMode"
-+                  value={mode}
-+                  checked={ingestionMode === mode}
-+                  onChange={() => {
-+                    setIngestionMode(mode);
-+                    setPreview(null);
-+                    setError(null);
-+                    setSuccess(null);
-+                  }}
-+                  disabled={isSubmitting || isPreviewing}
-+                />
-+                {mode === "PASTE" ? "Paste" : "URL"}
-+              </label>
-+            ))}
-+          </div>
-+
-           <div style={fieldStyle}>
-             <label style={ttrComponents.fieldLabel} htmlFor="jobTitle">
-               Job title (optional)
-             </label>
-             <input
-               id="jobTitle"
-               type="text"
-               value={title}
-               onChange={(event) => setTitle(event.target.value)}
-               placeholder="Senior Product Designer"
-               style={ttrComponents.textInput}
-               disabled={isSubmitting}
-             />
-           </div>
- 
-           <div style={fieldStyle}>
-             <label style={ttrComponents.fieldLabel} htmlFor="jobCompany">
-               Company (optional)
-             </label>
-             <input
-               id="jobCompany"
-               type="text"
-               value={company}
-               onChange={(event) => setCompany(event.target.value)}
-               placeholder="Acme Health"
-               style={ttrComponents.textInput}
-               disabled={isSubmitting}
-             />
-           </div>
- 
--          <div style={fieldStyle}>
--            <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
--              Job description
--            </label>
--            <textarea
--              id="jobDescription"
--              value={rawDescription}
--              onChange={(event) => setRawDescription(event.target.value)}
--              placeholder="Paste the full role description, requirements, and responsibilities."
--              style={{ ...ttrComponents.textArea, minHeight: 220 }}
--              disabled={isSubmitting}
--            />
--          </div>
-+          {ingestionMode === "URL" ? (
-+            <div style={fieldStyle}>
-+              <label style={ttrComponents.fieldLabel} htmlFor="jobUrl">
-+                Job description URL
-+              </label>
-+              <input
-+                id="jobUrl"
-+                type="url"
-+                value={url}
-+                onChange={(event) => {
-+                  setUrl(event.target.value);
-+                  setPreview(null);
-+                }}
-+                placeholder="https://company.com/jobs/role"
-+                style={ttrComponents.textInput}
-+                disabled={isSubmitting || isPreviewing}
-+              />
-+            </div>
-+          ) : (
-+            <div style={fieldStyle}>
-+              <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
-+                Job description
-+              </label>
-+              <textarea
-+                id="jobDescription"
-+                value={rawDescription}
-+                onChange={(event) => {
-+                  setRawDescription(event.target.value);
-+                  setPreview(null);
-+                }}
-+                placeholder="Paste the full role description, requirements, and responsibilities."
-+                style={{ ...ttrComponents.textArea, minHeight: 220 }}
-+                disabled={isSubmitting || isPreviewing}
-+              />
-+            </div>
-+          )}
-+
-+          <button
-+            type="button"
-+            onClick={handlePreview}
-+            disabled={isSubmitting || isPreviewing}
-+            style={{
-+              ...ttrComponents.secondaryButton,
-+              width: "fit-content",
-+              padding: "10px 14px",
-+              fontSize: 12,
-+              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
-+              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
-+            }}
-+          >
-+            {isPreviewing
-+              ? "Parsing..."
-+              : ingestionMode === "URL"
-+                ? "Fetch & preview"
-+                : "Preview parse"}
-+          </button>
- 
-           {error && <div style={ttrComponents.dangerBox}>{error}</div>}
-           {success && <div style={ttrComponents.successBox}>{success}</div>}
- 
-+          {preview && (
-+            <div style={{ ...ttrComponents.basePanel, padding: 14 }}>
-+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-+                <h3 style={{ ...ttrTypography.h3, margin: 0 }}>Parsed preview</h3>
-+                <details>
-+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
-+                    View extracted description
-+                  </summary>
-+                  <p style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
-+                    {preview.rawDescription}
-+                  </p>
-+                </details>
-+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-+                  <div>
-+                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
-+                      Responsibilities
-+                    </p>
-+                    {preview.responsibilities.length === 0 ? (
-+                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-+                        No responsibilities detected yet.
-+                      </p>
-+                    ) : (
-+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-+                        {preview.responsibilities.map((item) => (
-+                          <li key={item}>{item}</li>
-+                        ))}
-+                      </ul>
-+                    )}
-+                  </div>
-+                  <div>
-+                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
-+                      Requirements
-+                    </p>
-+                    {preview.requirements.length === 0 ? (
-+                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-+                        No requirements detected yet.
-+                      </p>
-+                    ) : (
-+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-+                        {preview.requirements.map((item) => (
-+                          <li key={item}>{item}</li>
-+                        ))}
-+                      </ul>
-+                    )}
-+                  </div>
++                <div>
++                  <div style={{ fontSize: 13, fontWeight: 900, color: "#fde68a" }}>Alignment strengths</div>
++                  {strengths.length ? (
++                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
++                      {strengths.map((item, index) => (
++                        <li key={`${item}-${index}`}>{item}</li>
++                      ))}
++                    </ul>
++                  ) : (
++                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No strengths identified yet.</div>
++                  )}
++                </div>
++                <div>
++                  <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>Gaps to address</div>
++                  {gaps.length ? (
++                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
++                      {gaps.map((item, index) => (
++                        <li key={`${item}-${index}`}>{item}</li>
++                      ))}
++                    </ul>
++                  ) : (
++                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
++                  )}
 +                </div>
 +              </div>
-+            </div>
-+          )}
++            ) : null}
 +
-           <button
-             type="submit"
--            disabled={isSubmitting}
-+            disabled={isSubmitting || isPreviewing}
-             style={{
-               ...ttrComponents.primaryButton,
-               width: "fit-content",
-               padding: "12px 14px",
-               fontSize: 13,
--              opacity: isSubmitting ? 0.7 : 1,
--              cursor: isSubmitting ? "not-allowed" : "pointer",
-+              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
-+              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
-             }}
-           >
-             {isSubmitting ? "Saving..." : "Save job description"}
-           </button>
-         </form>
-       </section>
++            {hasResult ? (
++              <div
++                style={{
++                  borderRadius: 12,
++                  border: "1px solid rgba(255,255,255,0.08)",
++                  background: "rgba(0,0,0,0.18)",
++                  padding: "14px 14px",
++                  display: "grid",
++                  gap: 8,
++                }}
++              >
++                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
++                {complianceFlags.length ? (
++                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
++                    {complianceFlags.map((flag, index) => (
++                      <li key={`${flag}-${index}`}>{flag}</li>
++                    ))}
++                  </ul>
++                ) : (
++                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
++                )}
++              </div>
++            ) : null}
  
-       <section style={{ ...ttrComponents.basePanel, padding: 18, marginTop: 18 }}>
-         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-           <span style={ttrTypography.subtleLabel}>Recent</span>
-           <h2 style={ttrTypography.h2}>Saved job postings</h2>
-           <p style={ttrTypography.bodyMuted}>Your latest job descriptions appear first.</p>
-         </div>
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(0,0,0,0.18)",
+                 padding: "12px 12px",
+               }}
+             >
+               <p style={{ margin: 0, fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Planned sections</p>
+               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap" }}>
+                 <span style={ttrComponents.chip}>Fit score and label</span>
+                 <span style={ttrComponents.chip}>Signals and gaps</span>
+                 <span style={ttrComponents.chip}>Recommended actions</span>
+                 <span style={ttrComponents.chip}>Exports and artifacts</span>
+               </div>
+             </div>
  
-         <div style={{ marginTop: 12 }}>
-           {sortedJobs.length === 0 ? (
-             <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-               No job descriptions saved yet.
-             </p>
-           ) : (
-             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-               {sortedJobs.map((job, index) => (
-                 <li
-                   key={job.id}
-                   style={{
-diff --git a/apps/web/lib/jobs.ts b/apps/web/lib/jobs.ts
-index d4357265bd87849080ee276048dff91698152208..e1e2e18c9bdeb1de2786972eceb9597447ddd7b1 100644
---- a/apps/web/lib/jobs.ts
-+++ b/apps/web/lib/jobs.ts
-@@ -1,9 +1,14 @@
- export interface JobDto {
-   id: string;
-   userId: string;
-   title: string | null;
-   company: string | null;
-   rawDescription: string;
-+  sourceUrl: string | null;
-+  normalizedResponsibilities: string[];
-+  normalizedRequirements: string[];
-+  jdIngestionMethod: "PASTE" | "URL";
-+  jdParsedAt: string | null;
-   createdAt: string;
-   updatedAt: string;
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(255,255,255,0.04)",
+                 padding: "10px 12px",
+                 display: "flex",
+@@ -382,25 +488,32 @@ export default function ResultsPage() {
+                 style={{
+                   borderRadius: 12,
+                   border: "1px solid rgba(255,255,255,0.08)",
+                   background: "rgba(0,0,0,0.18)",
+                   padding: "12px 12px",
+                 }}
+               >
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Quick links</div>
+                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                   <Link href="/analyze" style={ttrComponents.quietButton}>
+                     Run another analysis
+                   </Link>
+                   <Link href="/calibrate" style={ttrComponents.quietButton}>
+                     Open Calibrate
+                   </Link>
+                 </div>
+               </div>
+             ) : null}
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
+ 
++export default function ResultsPage() {
++  return (
++    <Suspense fallback={<div style={{ padding: 24, color: "rgba(226,232,240,0.8)" }}>Loading results…</div>}>
++      <ResultsContent />
++    </Suspense>
++  );
++}
+diff --git a/apps/web/lib/session.ts b/apps/web/lib/session.ts
+index 8cf3b58f4c8ca9e417d4e7e81711f09f9502bd67..51d869d136fa4736cb87100564ba94489b96cae6 100644
+--- a/apps/web/lib/session.ts
++++ b/apps/web/lib/session.ts
+@@ -1,22 +1,35 @@
+ export type AnalysisResult = {
+   ok?: boolean;
++  assessmentId?: string;
++  jobId?: string;
+   baselineId?: string;
++  baselineVersion?: number | null;
++  overallScore?: number;
+   score: number;
++  verdict?: "APPLY" | "CONSIDER" | "SKIP";
++  dimensionScores?: {
++    experienceAlignment: number;
++    leadershipLevel: number;
++    technicalPlatformFit: number;
++    industryContext: number;
++    strategicTacticalFit: number;
++  };
+   summary?: string;
+   strengths?: string[];
+   gaps?: string[];
++  complianceFlags?: string[];
+   recommendedActions?: string[];
+   debug?: unknown;
+ };
+ 
+ export type StoredPayload = {
+   result: AnalysisResult;
+   savedAt: string;
+ };
+ 
+ const STORAGE_KEY = "ttr:lastAnalysis";
+ 
+ export async function saveLastAnalysis(payload: StoredPayload) {
+   if (typeof window === "undefined") return;
+   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
  }

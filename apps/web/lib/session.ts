@@ -1,10 +1,23 @@
 export type AnalysisResult = {
   ok?: boolean;
+  assessmentId?: string;
+  jobId?: string;
   baselineId?: string;
+  baselineVersion?: number | null;
+  overallScore?: number;
   score: number;
+  verdict?: "APPLY" | "CONSIDER" | "SKIP";
+  dimensionScores?: {
+    experienceAlignment: number;
+    leadershipLevel: number;
+    technicalPlatformFit: number;
+    industryContext: number;
+    strategicTacticalFit: number;
+  };
   summary?: string;
   strengths?: string[];
   gaps?: string[];
+  complianceFlags?: string[];
   recommendedActions?: string[];
   debug?: unknown;
 };

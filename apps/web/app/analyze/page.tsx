@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import type { BaselineDto } from "../../lib/baselines";
 import type { JobDto } from "../../lib/jobs";
@@ -138,6 +139,7 @@ export default function AnalyzePage() {
   const [showRaw, setShowRaw] = useState(false);
 
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+  const router = useRouter();
 
   const hasBaseline = baselineId.trim().length > 0;
   const hasSelectedJob = jobId.trim().length > 0;
@@ -289,12 +291,33 @@ export default function AnalyzePage() {
     setResult(null);
 
     try {
+      let resolvedJobId = jobId;
+
+      if (!hasSelectedJob && hasJobDescription) {
+        const createResponse = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rawDescription: jobDescription }),
+        });
+
+        if (!createResponse.ok) {
+          const message = await createResponse.text();
+          throw new Error(message || "Unable to save this job description.");
+        }
+
+        const created = (await createResponse.json()) as { id?: string };
+        if (!created?.id) {
+          throw new Error("Job creation response was incomplete.");
+        }
+
+        resolvedJobId = created.id;
+        setJobId(created.id);
+      }
+
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          hasSelectedJob ? { baselineId, jobId } : { baselineId, jobDescription },
-        ),
+        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
       });
 
       if (!response.ok) {
@@ -307,6 +330,10 @@ export default function AnalyzePage() {
 
       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
       saveLastAnalysis(payload);
+
+      if (data.jobId) {
+        router.push(`/results?jobId=${data.jobId}`);
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unexpected error";
       setError(message);
@@ -773,7 +800,6 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
-
 
 
 
