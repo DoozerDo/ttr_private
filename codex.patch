@@ -1,106 +1,1368 @@
-diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
-index b190642448c4d723ae2065c022b85d43745ce84b..3951d2c56dce3059e614dc6f1a827d3b29795e91 100644
---- a/apps/web/app/interviews/[id]/page.tsx
-+++ b/apps/web/app/interviews/[id]/page.tsx
-@@ -1,75 +1,61 @@
+diff --git a/apps/api/src/jobs/jd-normalization.spec.ts b/apps/api/src/jobs/jd-normalization.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..92b09ace836f6408c94d19df7076efe5e00587f6
+--- /dev/null
++++ b/apps/api/src/jobs/jd-normalization.spec.ts
+@@ -0,0 +1,71 @@
++import { normalizeJobDescription } from './jd-normalization';
++
++describe('normalizeJobDescription', () => {
++  it('extracts responsibilities and requirements by headings', () => {
++    const text = `
++Responsibilities
++- Build product features
++- Partner with design
++
++Requirements
++- 5+ years experience
++- Typescript proficiency
++`;
++
++    const result = normalizeJobDescription(text);
++
++    expect(result.responsibilities).toEqual([
++      'Build product features',
++      'Partner with design',
++    ]);
++    expect(result.requirements).toEqual([
++      '5+ years experience',
++      'Typescript proficiency',
++    ]);
++  });
++
++  it('splits bullets without headings using fallback logic', () => {
++    const text = `
++About the team
++- Collaborate across teams
++- Own delivery timelines
++- Familiar with React
++- 3+ years of experience
++`;
++
++    const result = normalizeJobDescription(text);
++
++    expect(result.responsibilities.length).toBeGreaterThan(0);
++    expect(result.requirements.length).toBe(0);
++  });
++
++  it('handles mixed bullets and paragraphs', () => {
++    const text = `
++Responsibilities
++You will own the roadmap and align stakeholders.
++- Build weekly status updates
++- Drive customer interviews
++`;
++
++    const result = normalizeJobDescription(text);
++
++    expect(result.responsibilities).toEqual([
++      'Build weekly status updates',
++      'Drive customer interviews',
++      'You will own the roadmap and align stakeholders.',
++    ]);
++  });
++
++  it('deduplicates and caps items', () => {
++    const text = `
++Requirements
++- Strong communication
++- Strong communication
++- Strong communication
++`;
++
++    const result = normalizeJobDescription(text);
++
++    expect(result.requirements).toEqual(['Strong communication']);
++  });
++});
+diff --git a/apps/api/src/jobs/jd-normalization.ts b/apps/api/src/jobs/jd-normalization.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a504479ea99db14b399cb724c25a1ea257ea5abf
+--- /dev/null
++++ b/apps/api/src/jobs/jd-normalization.ts
+@@ -0,0 +1,173 @@
++const RESPONSIBILITY_HEADINGS = [
++  'responsibilities',
++  "what you'll do",
++  'what you will do',
++  'duties',
++  'role',
++  'the role',
++  'your impact',
++];
++
++const REQUIREMENT_HEADINGS = [
++  'requirements',
++  'qualifications',
++  'what you bring',
++  'skills',
++  'experience',
++  "what we're looking for",
++  'what we are looking for',
++];
++
++const BULLET_REGEX = /^([-*•]|\d+[.)])\s+/;
++
++const MIN_ITEM_LENGTH = 3;
++const MAX_ITEMS = 40;
++
++const sentenceSplitRegex = /(?<=[.!?])\s+/;
++
++const normalizeHeadingText = (line: string) =>
++  line
++    .toLowerCase()
++    .replace(/[:*]+/g, '')
++    .replace(/\s+/g, ' ')
++    .trim();
++
++const isHeading = (line: string, headings: string[]) => {
++  const normalized = normalizeHeadingText(line);
++  if (!normalized || normalized.length > 80) {
++    return false;
++  }
++  return headings.some(
++    (heading) =>
++      normalized === heading ||
++      normalized.startsWith(`${heading} `) ||
++      normalized.includes(heading),
++  );
++};
++
++const isBulletLine = (line: string) => BULLET_REGEX.test(line);
++
++const stripBullet = (line: string) => line.replace(BULLET_REGEX, '').trim();
++
++const splitSentences = (lines: string[]) =>
++  lines
++    .flatMap((line) => line.split(sentenceSplitRegex))
++    .map((item) => item.trim())
++    .filter(Boolean);
++
++export const sanitizeListItems = (items: string[]) => {
++  const seen = new Set<string>();
++  const cleaned: string[] = [];
++
++  for (const item of items) {
++    const trimmed = item.trim();
++    if (!trimmed || trimmed.length < MIN_ITEM_LENGTH) {
++      continue;
++    }
++    if (seen.has(trimmed)) {
++      continue;
++    }
++    seen.add(trimmed);
++    cleaned.push(trimmed);
++    if (cleaned.length >= MAX_ITEMS) {
++      break;
++    }
++  }
++
++  return cleaned;
++};
++
++const extractItemsFromLines = (lines: string[]) => {
++  const bulletItems = lines.filter(isBulletLine).map(stripBullet);
++  const paragraphItems = splitSentences(lines.filter((line) => !isBulletLine(line)));
++
++  if (bulletItems.length === 0) {
++    return sanitizeListItems(paragraphItems);
++  }
++
++  if (paragraphItems.length > 0) {
++    return sanitizeListItems([...bulletItems, ...paragraphItems]);
++  }
++
++  return sanitizeListItems(bulletItems);
++};
++
++export const normalizeJobDescription = (rawDescription: string) => {
++  const lines = rawDescription
++    .replace(/\r\n/g, '\n')
++    .replace(/\r/g, '\n')
++    .split('\n')
++    .map((line) => line.trim())
++    .filter(Boolean);
++
++  const sectionLines: Record<'responsibilities' | 'requirements', string[]> = {
++    responsibilities: [],
++    requirements: [],
++  };
++
++  let activeSection: 'responsibilities' | 'requirements' | null = null;
++
++  for (const line of lines) {
++    if (isHeading(line, RESPONSIBILITY_HEADINGS)) {
++      activeSection = 'responsibilities';
++      continue;
++    }
++    if (isHeading(line, REQUIREMENT_HEADINGS)) {
++      activeSection = 'requirements';
++      continue;
++    }
++    if (activeSection) {
++      sectionLines[activeSection].push(line);
++    }
++  }
++
++  let responsibilities = extractItemsFromLines(sectionLines.responsibilities);
++  let requirements = extractItemsFromLines(sectionLines.requirements);
++
++  if (responsibilities.length === 0 && requirements.length === 0) {
++    const bulletItems = lines
++      .map((line, index) => ({ line, index }))
++      .filter(({ line }) => isBulletLine(line))
++      .map(({ line, index }) => ({ item: stripBullet(line), index }));
++
++    const requirementKeywordIndex = lines.findIndex((line) =>
++      REQUIREMENT_HEADINGS.some((heading) =>
++        normalizeHeadingText(line).includes(heading),
++      ),
++    );
++
++    if (bulletItems.length > 0) {
++      if (requirementKeywordIndex !== -1) {
++        requirements = sanitizeListItems(
++          bulletItems
++            .filter(({ index }) => index >= requirementKeywordIndex)
++            .map(({ item }) => item),
++        );
++        responsibilities = sanitizeListItems(
++          bulletItems
++            .filter(({ index }) => index < requirementKeywordIndex)
++            .map(({ item }) => item),
++        );
++      } else {
++        const cutoff = Math.floor(lines.length / 3);
++        responsibilities = sanitizeListItems(
++          bulletItems
++            .filter(({ index }) => index >= cutoff)
++            .map(({ item }) => item),
++        );
++        if (responsibilities.length === 0) {
++          responsibilities = sanitizeListItems(
++            bulletItems.map(({ item }) => item),
++          );
++        }
++      }
++    } else {
++      responsibilities = sanitizeListItems(splitSentences(lines).slice(0, 8));
++    }
++  }
++
++  return {
++    responsibilities,
++    requirements,
++  };
++};
+diff --git a/apps/api/src/jobs/job.entity.ts b/apps/api/src/jobs/job.entity.ts
+index de11cf0c2eb3e048e6ff22f150849dd4ee7b54b2..63817fcee787b751c634ceabc4931b35545dc5cd 100644
+--- a/apps/api/src/jobs/job.entity.ts
++++ b/apps/api/src/jobs/job.entity.ts
+@@ -1,31 +1,55 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   PrimaryGeneratedColumn,
+   UpdateDateColumn,
+ } from 'typeorm';
+ 
++export enum JobIngestionMethod {
++  PASTE = 'PASTE',
++  URL = 'URL',
++}
++
+ @Entity({ name: 'jobs' })
+ export class Job {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Column()
+   userId!: string;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   title!: string | null;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   company!: string | null;
+ 
+   @Column({ type: 'text' })
+   rawDescription!: string;
+ 
++  @Column({ type: 'varchar', length: 2048, nullable: true })
++  sourceUrl!: string | null;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  normalizedResponsibilities!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  normalizedRequirements!: string[];
++
++  @Column({
++    type: 'enum',
++    enum: JobIngestionMethod,
++    default: JobIngestionMethod.PASTE,
++  })
++  jdIngestionMethod!: JobIngestionMethod;
++
++  @Column({ type: 'timestamptz', nullable: true })
++  jdParsedAt!: Date | null;
++
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
+ }
+diff --git a/apps/api/src/jobs/jobs.controller.ts b/apps/api/src/jobs/jobs.controller.ts
+index 3acf33dd15674904b1e8d73e7cf29dd19974a761..197a061ff9a5c810da3f3596d630fe196e35c54a 100644
+--- a/apps/api/src/jobs/jobs.controller.ts
++++ b/apps/api/src/jobs/jobs.controller.ts
+@@ -1,65 +1,91 @@
+ import {
+   BadRequestException,
+   Body,
+   Controller,
+   Get,
+   Param,
+   Post,
+   Req,
+   UseGuards,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import { Request } from 'express';
+-import { CreateJobInput, JobsService } from './jobs.service';
++import {
++  CreateJobInput,
++  IngestJobDescriptionInput,
++  JobsService,
++} from './jobs.service';
++import { JobIngestionMethod } from './job.entity';
+ 
+ @Controller('jobs')
+ @UseGuards(AuthGuard('jwt'))
+ export class JobsController {
+   constructor(private readonly jobsService: JobsService) {}
+ 
+   @Post()
+   async createJob(
+     @Body() body: Partial<CreateJobInput>,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     const rawDescription = body.rawDescription?.trim();
+ 
+     if (!rawDescription) {
+       throw new BadRequestException('Job description is required');
+     }
+ 
+     return this.jobsService.createJob(userId, {
+       title: body.title,
+       company: body.company,
+       rawDescription,
++      sourceUrl: body.sourceUrl ?? null,
++      responsibilities: body.responsibilities ?? undefined,
++      requirements: body.requirements ?? undefined,
++      jdIngestionMethod: body.jdIngestionMethod as JobIngestionMethod | undefined,
++    });
++  }
++
++  @Post('ingest')
++  async ingestJobDescription(
++    @Body() body: Partial<IngestJobDescriptionInput>,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.jobsService.ingestJobDescription({
++      pastedText: body.pastedText,
++      url: body.url,
+     });
+   }
+ 
+   @Get()
+   async listJobs(@Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.jobsService.listJobsForUser(userId);
+   }
+ 
+   @Get(':id')
+   async getJob(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+diff --git a/apps/api/src/jobs/jobs.service.spec.ts b/apps/api/src/jobs/jobs.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ceb2116fb4bca3c6f7703b8e18b237041bafa03d
+--- /dev/null
++++ b/apps/api/src/jobs/jobs.service.spec.ts
+@@ -0,0 +1,38 @@
++import { JobsService } from './jobs.service';
++
++describe('JobsService', () => {
++  const createService = () =>
++    new JobsService({ create: jest.fn(), save: jest.fn() } as never);
++
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  it('ingests job descriptions from a URL', async () => {
++    const service = createService();
++    const filler = 'A'.repeat(1100);
++    const html = `
++      <article>
++        <h2>Responsibilities</h2>
++        <ul><li>Build features</li></ul>
++        <h2>Requirements</h2>
++        <ul><li>5+ years</li></ul>
++        <p>${filler}</p>
++      </article>
++    `;
++
++    global.fetch = jest.fn().mockResolvedValue({
++      status: 200,
++      headers: { get: () => null },
++      arrayBuffer: async () => Buffer.from(html),
++    } as never);
++
++    const result = await service.ingestJobDescription({
++      url: 'https://example.com/job',
++    });
++
++    expect(result.rawDescription.length).toBeGreaterThan(1000);
++    expect(result.responsibilities).toContain('Build features');
++    expect(result.requirements).toContain('5+ years');
++  });
++});
+diff --git a/apps/api/src/jobs/jobs.service.ts b/apps/api/src/jobs/jobs.service.ts
+index ec482c1d74c266b896d13ec0b7ece30cbb10eaf0..638538b24544f5aa6c8112a43683da5eb602f0f9 100644
+--- a/apps/api/src/jobs/jobs.service.ts
++++ b/apps/api/src/jobs/jobs.service.ts
+@@ -1,46 +1,329 @@
+-import { Injectable, NotFoundException } from '@nestjs/common';
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
++import { isIP } from 'node:net';
+ import { Repository } from 'typeorm';
+-import { Job } from './job.entity';
++import { Job, JobIngestionMethod } from './job.entity';
++import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
+ 
+ export type CreateJobInput = {
+   title?: string | null;
+   company?: string | null;
+   rawDescription: string;
++  sourceUrl?: string | null;
++  responsibilities?: string[];
++  requirements?: string[];
++  jdIngestionMethod?: JobIngestionMethod;
+ };
+ 
++export type IngestJobDescriptionInput = {
++  pastedText?: string;
++  url?: string;
++};
++
++export type IngestJobDescriptionResult = {
++  rawDescription: string;
++  responsibilities: string[];
++  requirements: string[];
++};
++
++const MIN_DESCRIPTION_LENGTH = 1000;
++const MAX_DESCRIPTION_LENGTH = 100000;
++const MAX_HTML_BYTES = 1_000_000;
++const FETCH_TIMEOUT_MS = 10_000;
++const MAX_REDIRECTS = 4;
++
+ @Injectable()
+ export class JobsService {
+   constructor(
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+   ) {}
+ 
++  async ingestJobDescription(
++    input: IngestJobDescriptionInput,
++  ): Promise<IngestJobDescriptionResult> {
++    const pastedText = input.pastedText?.trim();
++    const url = input.url?.trim();
++    const hasText = Boolean(pastedText);
++    const hasUrl = Boolean(url);
++
++    if (hasText === hasUrl) {
++      throw new BadRequestException('Provide exactly one of pastedText or url.');
++    }
++
++    if (hasUrl) {
++      const sanitizedUrl = this.validateUrl(url!);
++      const html = await this.fetchHtml(sanitizedUrl);
++      const extracted = this.normalizeRawDescription(extractTextFromHtml(html));
++      this.validateDescriptionLength(extracted);
++      const normalized = normalizeJobDescription(extracted);
++      return {
++        rawDescription: extracted,
++        responsibilities: normalized.responsibilities,
++        requirements: normalized.requirements,
++      };
++    }
++
++    const normalizedText = this.normalizeRawDescription(pastedText!);
++    this.validateDescriptionLength(normalizedText);
++    const normalized = normalizeJobDescription(normalizedText);
++
++    return {
++      rawDescription: normalizedText,
++      responsibilities: normalized.responsibilities,
++      requirements: normalized.requirements,
++    };
++  }
++
+   async createJob(userId: string, payload: CreateJobInput) {
++    const rawDescription = this.normalizeRawDescription(payload.rawDescription);
++    this.validateDescriptionLength(rawDescription);
++
++    const normalized = normalizeJobDescription(rawDescription);
++    const responsibilities =
++      payload.responsibilities && payload.responsibilities.length > 0
++        ? sanitizeListItems(payload.responsibilities)
++        : normalized.responsibilities;
++    const requirements =
++      payload.requirements && payload.requirements.length > 0
++        ? sanitizeListItems(payload.requirements)
++        : normalized.requirements;
++
++    const ingestionMethod =
++      payload.jdIngestionMethod ?? JobIngestionMethod.PASTE;
++
++    if (
++      ingestionMethod !== JobIngestionMethod.PASTE &&
++      ingestionMethod !== JobIngestionMethod.URL
++    ) {
++      throw new BadRequestException('Invalid jdIngestionMethod value');
++    }
++
++    const sourceUrl = payload.sourceUrl?.trim() || null;
++    if (sourceUrl) {
++      this.validateUrl(sourceUrl);
++    }
++    if (ingestionMethod === JobIngestionMethod.URL && !sourceUrl) {
++      throw new BadRequestException('sourceUrl is required for URL ingestion.');
++    }
++
+     const job = this.jobRepository.create({
+       userId,
+       title: payload.title?.trim() || null,
+       company: payload.company?.trim() || null,
+-      rawDescription: payload.rawDescription.trim(),
++      rawDescription,
++      sourceUrl,
++      normalizedResponsibilities: responsibilities,
++      normalizedRequirements: requirements,
++      jdIngestionMethod: ingestionMethod,
++      jdParsedAt: new Date(),
+     });
+ 
+     return this.jobRepository.save(job);
+   }
+ 
+   async listJobsForUser(userId: string) {
+     return this.jobRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
+ 
+   async getJobForUser(id: string, userId: string) {
+     const job = await this.jobRepository.findOne({ where: { id, userId } });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     return job;
+   }
++
++  private normalizeRawDescription(rawDescription: string) {
++    const normalized = rawDescription
++      .replace(/\r\n/g, '\n')
++      .replace(/\r/g, '\n')
++      .replace(/\t/g, ' ')
++      .replace(/\u00a0/g, ' ')
++      .split('\n')
++      .map((line) => line.replace(/\s+/g, ' ').trim())
++      .filter((line) => line.length > 0)
++      .join('\n');
++
++    return normalized.trim();
++  }
++
++  private validateDescriptionLength(description: string) {
++    if (
++      description.length < MIN_DESCRIPTION_LENGTH ||
++      description.length > MAX_DESCRIPTION_LENGTH
++    ) {
++      throw new BadRequestException(
++        'Job description must be between 1,000 and 100,000 characters.',
++      );
++    }
++  }
++
++  private validateUrl(inputUrl: string) {
++    let parsed: URL;
++    try {
++      parsed = new URL(inputUrl);
++    } catch {
++      throw new BadRequestException('Invalid URL provided.');
++    }
++
++    if (!['http:', 'https:'].includes(parsed.protocol)) {
++      throw new BadRequestException('Only http and https URLs are allowed.');
++    }
++
++    const hostname = parsed.hostname.toLowerCase();
++    if (hostname === 'localhost' || hostname.endsWith('.local')) {
++      throw new BadRequestException('Private URLs are not allowed.');
++    }
++
++    const ipVersion = isIP(hostname);
++    if (ipVersion) {
++      if (isPrivateIp(hostname)) {
++        throw new BadRequestException('Private URLs are not allowed.');
++      }
++    }
++
++    return parsed.toString();
++  }
++
++  private async fetchHtml(url: string) {
++    const controller = new AbortController();
++    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
++
++    try {
++      const response = await fetchWithRedirects(url, {
++        redirectLimit: MAX_REDIRECTS,
++        signal: controller.signal,
++      });
++
++      if (response.status < 200 || response.status >= 300) {
++        throw new BadRequestException(
++          'Could not retrieve job description from URL.',
++        );
++      }
++
++      const buffer = await response.arrayBuffer();
++      if (buffer.byteLength > MAX_HTML_BYTES) {
++        throw new BadRequestException('Job description response is too large.');
++      }
++
++      return Buffer.from(buffer).toString('utf-8');
++    } catch (error) {
++      if (error instanceof BadRequestException) {
++        throw error;
++      }
++      throw new BadRequestException(
++        'Could not retrieve job description from URL.',
++      );
++    } finally {
++      clearTimeout(timeout);
++    }
++  }
+ }
++
++const fetchWithRedirects = async (
++  url: string,
++  options: { redirectLimit: number; signal: AbortSignal },
++) => {
++  let currentUrl = url;
++  let redirects = 0;
++
++  while (true) {
++    const response = await fetch(currentUrl, {
++      redirect: 'manual',
++      signal: options.signal,
++    });
++
++    if (
++      response.status >= 300 &&
++      response.status < 400 &&
++      response.headers.get('location')
++    ) {
++      if (redirects >= options.redirectLimit) {
++        throw new BadRequestException('Too many redirects while fetching URL.');
++      }
++      const nextUrl = new URL(
++        response.headers.get('location')!,
++        currentUrl,
++      ).toString();
++      currentUrl = nextUrl;
++      redirects += 1;
++      continue;
++    }
++
++    return response;
++  }
++};
++
++const isPrivateIp = (ipAddress: string) => {
++  if (ipAddress.startsWith('10.')) return true;
++  if (ipAddress.startsWith('127.')) return true;
++  if (ipAddress.startsWith('169.254.')) return true;
++  if (ipAddress.startsWith('192.168.')) return true;
++  if (ipAddress.startsWith('0.')) return true;
++
++  const [first, second] = ipAddress.split('.').map(Number);
++  if (first === 172 && second >= 16 && second <= 31) return true;
++
++  return false;
++};
++
++const extractTextFromHtml = (html: string) => {
++  const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
++  const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
++  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
++  let content = mainMatch?.[1] ?? articleMatch?.[1] ?? bodyMatch?.[1] ?? html;
++
++  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
++  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
++  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
++  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
++  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
++  content = content.replace(/<aside[\s\S]*?<\/aside>/gi, '');
++
++  content = content.replace(/<li[^>]*>/gi, '\n- ');
++  content = content.replace(/<\/li>/gi, '\n');
++  content = content.replace(
++    /<(br|p|div|section|article|h[1-6]|tr|td|ul|ol)[^>]*>/gi,
++    '\n',
++  );
++  content = content.replace(/<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi, '\n');
++
++  const text = content.replace(/<[^>]+>/g, '');
++
++  return decodeHtmlEntities(text)
++    .split('\n')
++    .map((line) => line.replace(/\s+/g, ' ').trim())
++    .filter((line) => line.length > 0)
++    .filter((line, index, array) => line !== array[index - 1])
++    .join('\n');
++};
++
++const decodeHtmlEntities = (input: string) => {
++  const basicMap: Record<string, string> = {
++    '&nbsp;': ' ',
++    '&amp;': '&',
++    '&lt;': '<',
++    '&gt;': '>',
++    '&quot;': '"',
++    '&#39;': "'",
++  };
++
++  let output = input.replace(
++    /&(nbsp|amp|lt|gt|quot|#39);/g,
++    (match) => basicMap[match] ?? match,
++  );
++
++  output = output.replace(/&#(\d+);/g, (_, code) => {
++    const value = Number(code);
++    if (Number.isNaN(value)) return _;
++    return String.fromCharCode(value);
++  });
++
++  return output;
++};
+diff --git a/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts b/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a1e2cb8228fb336ce8402ac556c98ef4fb4a8817
+--- /dev/null
++++ b/apps/api/src/migrations/1722000000000-JobDescriptionNormalization.ts
+@@ -0,0 +1,44 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class JobDescriptionNormalization1722000000000
++  implements MigrationInterface
++{
++  name = 'JobDescriptionNormalization1722000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `CREATE TYPE "jobs_jdIngestionMethod_enum" AS ENUM('PASTE', 'URL')`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "jobs" ADD "sourceUrl" character varying(2048)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" ADD "normalizedResponsibilities" jsonb NOT NULL DEFAULT '[]'::jsonb`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" ADD "normalizedRequirements" jsonb NOT NULL DEFAULT '[]'::jsonb`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" ADD "jdIngestionMethod" "jobs_jdIngestionMethod_enum" NOT NULL DEFAULT 'PASTE'`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" ADD "jdParsedAt" TIMESTAMP WITH TIME ZONE`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "jobs" DROP COLUMN "jdParsedAt"`);
++    await queryRunner.query(
++      `ALTER TABLE "jobs" DROP COLUMN "jdIngestionMethod"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" DROP COLUMN "normalizedRequirements"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "jobs" DROP COLUMN "normalizedResponsibilities"`,
++    );
++    await queryRunner.query(`ALTER TABLE "jobs" DROP COLUMN "sourceUrl"`);
++    await queryRunner.query(`DROP TYPE "jobs_jdIngestionMethod_enum"`);
++  }
++}
+diff --git a/apps/web/app/api/jobs/ingest/route.ts b/apps/web/app/api/jobs/ingest/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..635bad23d9bed71dd8f683e3e42ad0f2bdf293b4
+--- /dev/null
++++ b/apps/web/app/api/jobs/ingest/route.ts
+@@ -0,0 +1,32 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/jobs/ingest`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/jobs/new/page.tsx b/apps/web/app/jobs/new/page.tsx
+index 0c6448694aaf2a5e0f91536291dc4d68f312717e..3b0895c24e0c45a76c88e91955a339226460ef7a 100644
+--- a/apps/web/app/jobs/new/page.tsx
++++ b/apps/web/app/jobs/new/page.tsx
+@@ -1,212 +1,440 @@
  "use client";
  
  import { useEffect, useMemo, useState } from "react";
- import { useParams } from "next/navigation";
+ import type { CSSProperties, FormEvent } from "react";
+ import Link from "next/link";
  
- import { InstrumentShell } from "../../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
-+import type { InterviewSessionDto } from "../../../lib/interviews";
+ import type { JobDto } from "../../../lib/jobs";
+ import { InstrumentPanelShell } from "../../ui/InstrumentPanelShell";
+ import { ttrComponents, ttrTypography } from "../../ui/ttrStyles";
  
- const QUESTIONS = [
-   "Walk me through the most relevant accomplishment in your baseline.",
-   "What would your first 30 days look like if you joined this team?",
-   "Which parts of the role feel like the biggest stretch for you?",
- ];
+ const fieldStyle: CSSProperties = {
+   display: "flex",
+   flexDirection: "column",
+   gap: 8,
+ };
  
--type InterviewResponse = {
--  id: string;
--  question: string;
--  response: string;
--};
--
--type InterviewSession = {
--  id: string;
--  baselineId: string;
--  jobId: string | null;
--  status: string;
--  responses?: InterviewResponse[];
--  createdAt: string;
--};
--
- export default function InterviewSessionPage() {
-   const params = useParams<{ id: string }>();
-   const sessionId = params?.id;
--  const [session, setSession] = useState<InterviewSession | null>(null);
-+  const [session, setSession] = useState<InterviewSessionDto | null>(null);
-   const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
-   const [saving, setSaving] = useState(false);
-   const [message, setMessage] = useState<string | null>(null);
++type IngestionMode = "PASTE" | "URL";
++
++type IngestPreview = {
++  rawDescription: string;
++  responsibilities: string[];
++  requirements: string[];
++};
++
+ export default function JobIngestionPage() {
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [title, setTitle] = useState("");
+   const [company, setCompany] = useState("");
+   const [rawDescription, setRawDescription] = useState("");
++  const [url, setUrl] = useState("");
++  const [ingestionMode, setIngestionMode] = useState<IngestionMode>("PASTE");
++  const [preview, setPreview] = useState<IngestPreview | null>(null);
++  const [isPreviewing, setIsPreviewing] = useState(false);
+   const [isSubmitting, setIsSubmitting] = useState(false);
    const [error, setError] = useState<string | null>(null);
+   const [success, setSuccess] = useState<string | null>(null);
+ 
+   const sortedJobs = useMemo(
+     () =>
+       [...jobs].sort(
+         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+       ),
+     [jobs],
+   );
  
    useEffect(() => {
-     if (!sessionId) return;
+     let cancelled = false;
  
-     const loadSession = async () => {
+     const loadJobs = async () => {
        try {
-         const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
- 
+         const response = await fetch("/api/jobs", { cache: "no-store" });
          if (!response.ok) {
-           throw new Error("Unable to load interview session.");
+           return;
          }
  
--        const data = (await response.json()) as InterviewSession;
-+        const data = (await response.json()) as InterviewSessionDto;
-         setSession(data);
- 
-         if (data?.responses?.length) {
-           const responseMap = new Map(data.responses.map((item) => [item.question, item.response]));
-           setAnswers(QUESTIONS.map((question) => responseMap.get(question) ?? ""));
-         }
-       } catch (loadError) {
-         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
+         const data = (await response.json()) as JobDto[];
+         if (!cancelled) setJobs(data);
+       } catch {
+         if (!cancelled) setJobs([]);
        }
      };
  
-     loadSession();
-   }, [sessionId]);
+     loadJobs();
+     return () => {
+       cancelled = true;
+     };
+   }, []);
  
-   const handleChange = (index: number, value: string) => {
-     setAnswers((prev) => {
-       const next = [...prev];
-       next[index] = value;
-       return next;
-     });
++  const requestPreview = async (payload: { url?: string; pastedText?: string }, shouldSet = true) => {
++    setIsPreviewing(true);
++    setError(null);
++    setSuccess(null);
++
++    try {
++      const response = await fetch("/api/jobs/ingest", {
++        method: "POST",
++        headers: {
++          "Content-Type": "application/json",
++        },
++        body: JSON.stringify(payload),
++      });
++
++      const data = await response.json();
++
++      if (response.status === 401) {
++        window.location.href = "/auth/login";
++        return null;
++      }
++
++      if (!response.ok) {
++        const message = data?.message || data?.error || "Unable to parse job description";
++        setError(typeof message === "string" ? message : "Unable to parse job description");
++        return null;
++      }
++
++      if (shouldSet) {
++        setPreview(data as IngestPreview);
++      }
++
++      return data as IngestPreview;
++    } catch {
++      setError("Unable to parse job description right now.");
++      return null;
++    } finally {
++      setIsPreviewing(false);
++    }
++  };
++
++  const handlePreview = async () => {
++    if (ingestionMode === "URL") {
++      if (!url.trim()) {
++        setError("Please add a job description URL before previewing.");
++        return;
++      }
++      await requestPreview({ url: url.trim() });
++      return;
++    }
++
++    if (!rawDescription.trim()) {
++      setError("Please paste a job description before previewing.");
++      return;
++    }
++
++    await requestPreview({ pastedText: rawDescription });
++  };
++
+   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
+     setError(null);
+     setSuccess(null);
+ 
+-    if (!rawDescription.trim()) {
+-      setError("Please paste a job description before saving.");
++    let previewPayload = preview;
++    const trimmedUrl = url.trim();
++
++    if (ingestionMode === "URL") {
++      if (!trimmedUrl) {
++        setError("Please add a job description URL before saving.");
++        return;
++      }
++      if (!previewPayload) {
++        previewPayload = await requestPreview({ url: trimmedUrl }, false);
++        if (!previewPayload) {
++          return;
++        }
++      }
++    } else {
++      if (!rawDescription.trim()) {
++        setError("Please paste a job description before saving.");
++        return;
++      }
++    }
++
++    const finalRawDescription =
++      ingestionMode === "URL"
++        ? previewPayload?.rawDescription ?? ""
++        : previewPayload?.rawDescription ?? rawDescription;
++
++    if (!finalRawDescription) {
++      setError("Please provide a job description before saving.");
+       return;
+     }
+ 
+     setIsSubmitting(true);
+ 
+     try {
+       const response = await fetch("/api/jobs", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
+         },
+         body: JSON.stringify({
+           title,
+           company,
+-          rawDescription,
++          rawDescription: finalRawDescription,
++          sourceUrl: ingestionMode === "URL" ? trimmedUrl : null,
++          responsibilities: previewPayload?.responsibilities,
++          requirements: previewPayload?.requirements,
++          jdIngestionMethod: ingestionMode,
+         }),
+       });
+ 
+       const data = await response.json();
+ 
+       if (response.status === 401) {
+         window.location.href = "/auth/login";
+         return;
+       }
+ 
+       if (!response.ok) {
+         const message = data?.message || data?.error || "Unable to save job";
+         setError(typeof message === "string" ? message : "Unable to save job");
+         return;
+       }
+ 
+       setJobs((previous) => [data as JobDto, ...previous]);
+       setTitle("");
+       setCompany("");
+       setRawDescription("");
++      setUrl("");
++      setPreview(null);
++      setIngestionMode("PASTE");
+       setSuccess("Job description saved. Ready to analyze fit.");
+     } catch {
+       setError("Unable to save job right now.");
+     } finally {
+       setIsSubmitting(false);
+     }
    };
  
-   const populatedResponses = useMemo(() => {
-     return QUESTIONS.map((question, index) => ({
-       question,
-diff --git a/apps/web/lib/interviews.ts b/apps/web/lib/interviews.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..cfed753a639f342273b5f61f717e88ddad53aa38
---- /dev/null
-+++ b/apps/web/lib/interviews.ts
-@@ -0,0 +1,17 @@
-+export interface InterviewResponseDto {
-+  id: string;
-+  question: string;
-+  response: string;
-+  createdAt: string;
-+  updatedAt: string;
-+}
+   const rightSlot = (
+     <Link href="/analyze" style={ttrComponents.secondaryButton}>
+       Analyze a role
+     </Link>
+   );
+ 
+   return (
+     <InstrumentPanelShell
+       kicker="Job ingestion"
+       title="Add a job description"
+-      subtitle="Paste a job posting to prepare for fit scoring."
++      subtitle="Paste a job posting or fetch it from a URL to prepare for fit scoring."
+       rightSlot={rightSlot}
+     >
+       <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
+         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+           <span style={ttrTypography.subtleLabel}>Job intake</span>
+           <h2 style={ttrTypography.h2}>Capture the posting</h2>
+           <p style={ttrTypography.bodyMuted}>
+-            Paste the full job description. Title and company are optional but helpful for
+-            organization later.
++            Paste the full job description or fetch it from a URL. Title and company are optional
++            but helpful for organization later.
+           </p>
+         </div>
+ 
+         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
++          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
++            {(["PASTE", "URL"] as const).map((mode) => (
++              <label
++                key={mode}
++                style={{
++                  display: "flex",
++                  alignItems: "center",
++                  gap: 6,
++                  fontSize: 12,
++                  textTransform: "uppercase",
++                  letterSpacing: "0.08em",
++                  color: ingestionMode === mode ? "rgba(248,250,252,0.95)" : "rgba(148,163,184,0.7)",
++                }}
++              >
++                <input
++                  type="radio"
++                  name="ingestionMode"
++                  value={mode}
++                  checked={ingestionMode === mode}
++                  onChange={() => {
++                    setIngestionMode(mode);
++                    setPreview(null);
++                    setError(null);
++                    setSuccess(null);
++                  }}
++                  disabled={isSubmitting || isPreviewing}
++                />
++                {mode === "PASTE" ? "Paste" : "URL"}
++              </label>
++            ))}
++          </div>
 +
-+export interface InterviewSessionDto {
-+  id: string;
-+  baselineId: string;
-+  jobId: string | null;
-+  status: string;
-+  responses?: InterviewResponseDto[];
-+  createdAt: string;
-+  updatedAt: string;
-+}
+           <div style={fieldStyle}>
+             <label style={ttrComponents.fieldLabel} htmlFor="jobTitle">
+               Job title (optional)
+             </label>
+             <input
+               id="jobTitle"
+               type="text"
+               value={title}
+               onChange={(event) => setTitle(event.target.value)}
+               placeholder="Senior Product Designer"
+               style={ttrComponents.textInput}
+               disabled={isSubmitting}
+             />
+           </div>
+ 
+           <div style={fieldStyle}>
+             <label style={ttrComponents.fieldLabel} htmlFor="jobCompany">
+               Company (optional)
+             </label>
+             <input
+               id="jobCompany"
+               type="text"
+               value={company}
+               onChange={(event) => setCompany(event.target.value)}
+               placeholder="Acme Health"
+               style={ttrComponents.textInput}
+               disabled={isSubmitting}
+             />
+           </div>
+ 
+-          <div style={fieldStyle}>
+-            <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
+-              Job description
+-            </label>
+-            <textarea
+-              id="jobDescription"
+-              value={rawDescription}
+-              onChange={(event) => setRawDescription(event.target.value)}
+-              placeholder="Paste the full role description, requirements, and responsibilities."
+-              style={{ ...ttrComponents.textArea, minHeight: 220 }}
+-              disabled={isSubmitting}
+-            />
+-          </div>
++          {ingestionMode === "URL" ? (
++            <div style={fieldStyle}>
++              <label style={ttrComponents.fieldLabel} htmlFor="jobUrl">
++                Job description URL
++              </label>
++              <input
++                id="jobUrl"
++                type="url"
++                value={url}
++                onChange={(event) => {
++                  setUrl(event.target.value);
++                  setPreview(null);
++                }}
++                placeholder="https://company.com/jobs/role"
++                style={ttrComponents.textInput}
++                disabled={isSubmitting || isPreviewing}
++              />
++            </div>
++          ) : (
++            <div style={fieldStyle}>
++              <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
++                Job description
++              </label>
++              <textarea
++                id="jobDescription"
++                value={rawDescription}
++                onChange={(event) => {
++                  setRawDescription(event.target.value);
++                  setPreview(null);
++                }}
++                placeholder="Paste the full role description, requirements, and responsibilities."
++                style={{ ...ttrComponents.textArea, minHeight: 220 }}
++                disabled={isSubmitting || isPreviewing}
++              />
++            </div>
++          )}
++
++          <button
++            type="button"
++            onClick={handlePreview}
++            disabled={isSubmitting || isPreviewing}
++            style={{
++              ...ttrComponents.secondaryButton,
++              width: "fit-content",
++              padding: "10px 14px",
++              fontSize: 12,
++              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
++              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
++            }}
++          >
++            {isPreviewing
++              ? "Parsing..."
++              : ingestionMode === "URL"
++                ? "Fetch & preview"
++                : "Preview parse"}
++          </button>
+ 
+           {error && <div style={ttrComponents.dangerBox}>{error}</div>}
+           {success && <div style={ttrComponents.successBox}>{success}</div>}
+ 
++          {preview && (
++            <div style={{ ...ttrComponents.basePanel, padding: 14 }}>
++              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
++                <h3 style={{ ...ttrTypography.h3, margin: 0 }}>Parsed preview</h3>
++                <details>
++                  <summary style={{ cursor: "pointer", fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
++                    View extracted description
++                  </summary>
++                  <p style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
++                    {preview.rawDescription}
++                  </p>
++                </details>
++                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
++                  <div>
++                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
++                      Responsibilities
++                    </p>
++                    {preview.responsibilities.length === 0 ? (
++                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
++                        No responsibilities detected yet.
++                      </p>
++                    ) : (
++                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
++                        {preview.responsibilities.map((item) => (
++                          <li key={item}>{item}</li>
++                        ))}
++                      </ul>
++                    )}
++                  </div>
++                  <div>
++                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
++                      Requirements
++                    </p>
++                    {preview.requirements.length === 0 ? (
++                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
++                        No requirements detected yet.
++                      </p>
++                    ) : (
++                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
++                        {preview.requirements.map((item) => (
++                          <li key={item}>{item}</li>
++                        ))}
++                      </ul>
++                    )}
++                  </div>
++                </div>
++              </div>
++            </div>
++          )}
++
+           <button
+             type="submit"
+-            disabled={isSubmitting}
++            disabled={isSubmitting || isPreviewing}
+             style={{
+               ...ttrComponents.primaryButton,
+               width: "fit-content",
+               padding: "12px 14px",
+               fontSize: 13,
+-              opacity: isSubmitting ? 0.7 : 1,
+-              cursor: isSubmitting ? "not-allowed" : "pointer",
++              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
++              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
+             }}
+           >
+             {isSubmitting ? "Saving..." : "Save job description"}
+           </button>
+         </form>
+       </section>
+ 
+       <section style={{ ...ttrComponents.basePanel, padding: 18, marginTop: 18 }}>
+         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+           <span style={ttrTypography.subtleLabel}>Recent</span>
+           <h2 style={ttrTypography.h2}>Saved job postings</h2>
+           <p style={ttrTypography.bodyMuted}>Your latest job descriptions appear first.</p>
+         </div>
+ 
+         <div style={{ marginTop: 12 }}>
+           {sortedJobs.length === 0 ? (
+             <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+               No job descriptions saved yet.
+             </p>
+           ) : (
+             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+               {sortedJobs.map((job, index) => (
+                 <li
+                   key={job.id}
+                   style={{
+diff --git a/apps/web/lib/jobs.ts b/apps/web/lib/jobs.ts
+index d4357265bd87849080ee276048dff91698152208..e1e2e18c9bdeb1de2786972eceb9597447ddd7b1 100644
+--- a/apps/web/lib/jobs.ts
++++ b/apps/web/lib/jobs.ts
+@@ -1,9 +1,14 @@
+ export interface JobDto {
+   id: string;
+   userId: string;
+   title: string | null;
+   company: string | null;
+   rawDescription: string;
++  sourceUrl: string | null;
++  normalizedResponsibilities: string[];
++  normalizedRequirements: string[];
++  jdIngestionMethod: "PASTE" | "URL";
++  jdParsedAt: string | null;
+   createdAt: string;
+   updatedAt: string;
+ }

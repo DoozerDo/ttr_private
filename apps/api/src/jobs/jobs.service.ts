@@ -1,13 +1,36 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { isIP } from 'node:net';
 import { Repository } from 'typeorm';
-import { Job } from './job.entity';
+import { Job, JobIngestionMethod } from './job.entity';
+import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
 
 export type CreateJobInput = {
   title?: string | null;
   company?: string | null;
   rawDescription: string;
+  sourceUrl?: string | null;
+  responsibilities?: string[];
+  requirements?: string[];
+  jdIngestionMethod?: JobIngestionMethod;
 };
+
+export type IngestJobDescriptionInput = {
+  pastedText?: string;
+  url?: string;
+};
+
+export type IngestJobDescriptionResult = {
+  rawDescription: string;
+  responsibilities: string[];
+  requirements: string[];
+};
+
+const MIN_DESCRIPTION_LENGTH = 1000;
+const MAX_DESCRIPTION_LENGTH = 100000;
+const MAX_HTML_BYTES = 1_000_000;
+const FETCH_TIMEOUT_MS = 10_000;
+const MAX_REDIRECTS = 4;
 
 @Injectable()
 export class JobsService {
@@ -16,12 +39,84 @@ export class JobsService {
     private readonly jobRepository: Repository<Job>,
   ) {}
 
+  async ingestJobDescription(
+    input: IngestJobDescriptionInput,
+  ): Promise<IngestJobDescriptionResult> {
+    const pastedText = input.pastedText?.trim();
+    const url = input.url?.trim();
+    const hasText = Boolean(pastedText);
+    const hasUrl = Boolean(url);
+
+    if (hasText === hasUrl) {
+      throw new BadRequestException('Provide exactly one of pastedText or url.');
+    }
+
+    if (hasUrl) {
+      const sanitizedUrl = this.validateUrl(url!);
+      const html = await this.fetchHtml(sanitizedUrl);
+      const extracted = this.normalizeRawDescription(extractTextFromHtml(html));
+      this.validateDescriptionLength(extracted);
+      const normalized = normalizeJobDescription(extracted);
+      return {
+        rawDescription: extracted,
+        responsibilities: normalized.responsibilities,
+        requirements: normalized.requirements,
+      };
+    }
+
+    const normalizedText = this.normalizeRawDescription(pastedText!);
+    this.validateDescriptionLength(normalizedText);
+    const normalized = normalizeJobDescription(normalizedText);
+
+    return {
+      rawDescription: normalizedText,
+      responsibilities: normalized.responsibilities,
+      requirements: normalized.requirements,
+    };
+  }
+
   async createJob(userId: string, payload: CreateJobInput) {
+    const rawDescription = this.normalizeRawDescription(payload.rawDescription);
+    this.validateDescriptionLength(rawDescription);
+
+    const normalized = normalizeJobDescription(rawDescription);
+    const responsibilities =
+      payload.responsibilities && payload.responsibilities.length > 0
+        ? sanitizeListItems(payload.responsibilities)
+        : normalized.responsibilities;
+    const requirements =
+      payload.requirements && payload.requirements.length > 0
+        ? sanitizeListItems(payload.requirements)
+        : normalized.requirements;
+
+    const ingestionMethod =
+      payload.jdIngestionMethod ?? JobIngestionMethod.PASTE;
+
+    if (
+      ingestionMethod !== JobIngestionMethod.PASTE &&
+      ingestionMethod !== JobIngestionMethod.URL
+    ) {
+      throw new BadRequestException('Invalid jdIngestionMethod value');
+    }
+
+    const sourceUrl = payload.sourceUrl?.trim() || null;
+    if (sourceUrl) {
+      this.validateUrl(sourceUrl);
+    }
+    if (ingestionMethod === JobIngestionMethod.URL && !sourceUrl) {
+      throw new BadRequestException('sourceUrl is required for URL ingestion.');
+    }
+
     const job = this.jobRepository.create({
       userId,
       title: payload.title?.trim() || null,
       company: payload.company?.trim() || null,
-      rawDescription: payload.rawDescription.trim(),
+      rawDescription,
+      sourceUrl,
+      normalizedResponsibilities: responsibilities,
+      normalizedRequirements: requirements,
+      jdIngestionMethod: ingestionMethod,
+      jdParsedAt: new Date(),
     });
 
     return this.jobRepository.save(job);
@@ -43,4 +138,192 @@ export class JobsService {
 
     return job;
   }
+
+  private normalizeRawDescription(rawDescription: string) {
+    const normalized = rawDescription
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .split('\n')
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
+
+    return normalized.trim();
+  }
+
+  private validateDescriptionLength(description: string) {
+    if (
+      description.length < MIN_DESCRIPTION_LENGTH ||
+      description.length > MAX_DESCRIPTION_LENGTH
+    ) {
+      throw new BadRequestException(
+        'Job description must be between 1,000 and 100,000 characters.',
+      );
+    }
+  }
+
+  private validateUrl(inputUrl: string) {
+    let parsed: URL;
+    try {
+      parsed = new URL(inputUrl);
+    } catch {
+      throw new BadRequestException('Invalid URL provided.');
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new BadRequestException('Only http and https URLs are allowed.');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname.endsWith('.local')) {
+      throw new BadRequestException('Private URLs are not allowed.');
+    }
+
+    const ipVersion = isIP(hostname);
+    if (ipVersion) {
+      if (isPrivateIp(hostname)) {
+        throw new BadRequestException('Private URLs are not allowed.');
+      }
+    }
+
+    return parsed.toString();
+  }
+
+  private async fetchHtml(url: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetchWithRedirects(url, {
+        redirectLimit: MAX_REDIRECTS,
+        signal: controller.signal,
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        throw new BadRequestException(
+          'Could not retrieve job description from URL.',
+        );
+      }
+
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > MAX_HTML_BYTES) {
+        throw new BadRequestException('Job description response is too large.');
+      }
+
+      return Buffer.from(buffer).toString('utf-8');
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        'Could not retrieve job description from URL.',
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
 }
+
+const fetchWithRedirects = async (
+  url: string,
+  options: { redirectLimit: number; signal: AbortSignal },
+) => {
+  let currentUrl = url;
+  let redirects = 0;
+
+  while (true) {
+    const response = await fetch(currentUrl, {
+      redirect: 'manual',
+      signal: options.signal,
+    });
+
+    if (
+      response.status >= 300 &&
+      response.status < 400 &&
+      response.headers.get('location')
+    ) {
+      if (redirects >= options.redirectLimit) {
+        throw new BadRequestException('Too many redirects while fetching URL.');
+      }
+      const nextUrl = new URL(
+        response.headers.get('location')!,
+        currentUrl,
+      ).toString();
+      currentUrl = nextUrl;
+      redirects += 1;
+      continue;
+    }
+
+    return response;
+  }
+};
+
+const isPrivateIp = (ipAddress: string) => {
+  if (ipAddress.startsWith('10.')) return true;
+  if (ipAddress.startsWith('127.')) return true;
+  if (ipAddress.startsWith('169.254.')) return true;
+  if (ipAddress.startsWith('192.168.')) return true;
+  if (ipAddress.startsWith('0.')) return true;
+
+  const [first, second] = ipAddress.split('.').map(Number);
+  if (first === 172 && second >= 16 && second <= 31) return true;
+
+  return false;
+};
+
+const extractTextFromHtml = (html: string) => {
+  const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  let content = mainMatch?.[1] ?? articleMatch?.[1] ?? bodyMatch?.[1] ?? html;
+
+  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
+  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
+  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
+  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
+  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
+  content = content.replace(/<aside[\s\S]*?<\/aside>/gi, '');
+
+  content = content.replace(/<li[^>]*>/gi, '\n- ');
+  content = content.replace(/<\/li>/gi, '\n');
+  content = content.replace(
+    /<(br|p|div|section|article|h[1-6]|tr|td|ul|ol)[^>]*>/gi,
+    '\n',
+  );
+  content = content.replace(/<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi, '\n');
+
+  const text = content.replace(/<[^>]+>/g, '');
+
+  return decodeHtmlEntities(text)
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .filter((line, index, array) => line !== array[index - 1])
+    .join('\n');
+};
+
+const decodeHtmlEntities = (input: string) => {
+  const basicMap: Record<string, string> = {
+    '&nbsp;': ' ',
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+  };
+
+  let output = input.replace(
+    /&(nbsp|amp|lt|gt|quot|#39);/g,
+    (match) => basicMap[match] ?? match,
+  );
+
+  output = output.replace(/&#(\d+);/g, (_, code) => {
+    const value = Number(code);
+    if (Number.isNaN(value)) return _;
+    return String.fromCharCode(value);
+  });
+
+  return output;
+};

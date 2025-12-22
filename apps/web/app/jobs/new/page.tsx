@@ -14,11 +14,23 @@ const fieldStyle: CSSProperties = {
   gap: 8,
 };
 
+type IngestionMode = "PASTE" | "URL";
+
+type IngestPreview = {
+  rawDescription: string;
+  responsibilities: string[];
+  requirements: string[];
+};
+
 export default function JobIngestionPage() {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [rawDescription, setRawDescription] = useState("");
+  const [url, setUrl] = useState("");
+  const [ingestionMode, setIngestionMode] = useState<IngestionMode>("PASTE");
+  const [preview, setPreview] = useState<IngestPreview | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -54,13 +66,97 @@ export default function JobIngestionPage() {
     };
   }, []);
 
+  const requestPreview = async (payload: { url?: string; pastedText?: string }, shouldSet = true) => {
+    setIsPreviewing(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/jobs/ingest", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (response.status === 401) {
+        window.location.href = "/auth/login";
+        return null;
+      }
+
+      if (!response.ok) {
+        const message = data?.message || data?.error || "Unable to parse job description";
+        setError(typeof message === "string" ? message : "Unable to parse job description");
+        return null;
+      }
+
+      if (shouldSet) {
+        setPreview(data as IngestPreview);
+      }
+
+      return data as IngestPreview;
+    } catch {
+      setError("Unable to parse job description right now.");
+      return null;
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    if (ingestionMode === "URL") {
+      if (!url.trim()) {
+        setError("Please add a job description URL before previewing.");
+        return;
+      }
+      await requestPreview({ url: url.trim() });
+      return;
+    }
+
+    if (!rawDescription.trim()) {
+      setError("Please paste a job description before previewing.");
+      return;
+    }
+
+    await requestPreview({ pastedText: rawDescription });
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!rawDescription.trim()) {
-      setError("Please paste a job description before saving.");
+    let previewPayload = preview;
+    const trimmedUrl = url.trim();
+
+    if (ingestionMode === "URL") {
+      if (!trimmedUrl) {
+        setError("Please add a job description URL before saving.");
+        return;
+      }
+      if (!previewPayload) {
+        previewPayload = await requestPreview({ url: trimmedUrl }, false);
+        if (!previewPayload) {
+          return;
+        }
+      }
+    } else {
+      if (!rawDescription.trim()) {
+        setError("Please paste a job description before saving.");
+        return;
+      }
+    }
+
+    const finalRawDescription =
+      ingestionMode === "URL"
+        ? previewPayload?.rawDescription ?? ""
+        : previewPayload?.rawDescription ?? rawDescription;
+
+    if (!finalRawDescription) {
+      setError("Please provide a job description before saving.");
       return;
     }
 
@@ -75,7 +171,11 @@ export default function JobIngestionPage() {
         body: JSON.stringify({
           title,
           company,
-          rawDescription,
+          rawDescription: finalRawDescription,
+          sourceUrl: ingestionMode === "URL" ? trimmedUrl : null,
+          responsibilities: previewPayload?.responsibilities,
+          requirements: previewPayload?.requirements,
+          jdIngestionMethod: ingestionMode,
         }),
       });
 
@@ -96,6 +196,9 @@ export default function JobIngestionPage() {
       setTitle("");
       setCompany("");
       setRawDescription("");
+      setUrl("");
+      setPreview(null);
+      setIngestionMode("PASTE");
       setSuccess("Job description saved. Ready to analyze fit.");
     } catch {
       setError("Unable to save job right now.");
@@ -114,7 +217,7 @@ export default function JobIngestionPage() {
     <InstrumentPanelShell
       kicker="Job ingestion"
       title="Add a job description"
-      subtitle="Paste a job posting to prepare for fit scoring."
+      subtitle="Paste a job posting or fetch it from a URL to prepare for fit scoring."
       rightSlot={rightSlot}
     >
       <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
@@ -122,12 +225,44 @@ export default function JobIngestionPage() {
           <span style={ttrTypography.subtleLabel}>Job intake</span>
           <h2 style={ttrTypography.h2}>Capture the posting</h2>
           <p style={ttrTypography.bodyMuted}>
-            Paste the full job description. Title and company are optional but helpful for
-            organization later.
+            Paste the full job description or fetch it from a URL. Title and company are optional
+            but helpful for organization later.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {(["PASTE", "URL"] as const).map((mode) => (
+              <label
+                key={mode}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: ingestionMode === mode ? "rgba(248,250,252,0.95)" : "rgba(148,163,184,0.7)",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="ingestionMode"
+                  value={mode}
+                  checked={ingestionMode === mode}
+                  onChange={() => {
+                    setIngestionMode(mode);
+                    setPreview(null);
+                    setError(null);
+                    setSuccess(null);
+                  }}
+                  disabled={isSubmitting || isPreviewing}
+                />
+                {mode === "PASTE" ? "Paste" : "URL"}
+              </label>
+            ))}
+          </div>
+
           <div style={fieldStyle}>
             <label style={ttrComponents.fieldLabel} htmlFor="jobTitle">
               Job title (optional)
@@ -158,33 +293,126 @@ export default function JobIngestionPage() {
             />
           </div>
 
-          <div style={fieldStyle}>
-            <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
-              Job description
-            </label>
-            <textarea
-              id="jobDescription"
-              value={rawDescription}
-              onChange={(event) => setRawDescription(event.target.value)}
-              placeholder="Paste the full role description, requirements, and responsibilities."
-              style={{ ...ttrComponents.textArea, minHeight: 220 }}
-              disabled={isSubmitting}
-            />
-          </div>
+          {ingestionMode === "URL" ? (
+            <div style={fieldStyle}>
+              <label style={ttrComponents.fieldLabel} htmlFor="jobUrl">
+                Job description URL
+              </label>
+              <input
+                id="jobUrl"
+                type="url"
+                value={url}
+                onChange={(event) => {
+                  setUrl(event.target.value);
+                  setPreview(null);
+                }}
+                placeholder="https://company.com/jobs/role"
+                style={ttrComponents.textInput}
+                disabled={isSubmitting || isPreviewing}
+              />
+            </div>
+          ) : (
+            <div style={fieldStyle}>
+              <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
+                Job description
+              </label>
+              <textarea
+                id="jobDescription"
+                value={rawDescription}
+                onChange={(event) => {
+                  setRawDescription(event.target.value);
+                  setPreview(null);
+                }}
+                placeholder="Paste the full role description, requirements, and responsibilities."
+                style={{ ...ttrComponents.textArea, minHeight: 220 }}
+                disabled={isSubmitting || isPreviewing}
+              />
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handlePreview}
+            disabled={isSubmitting || isPreviewing}
+            style={{
+              ...ttrComponents.secondaryButton,
+              width: "fit-content",
+              padding: "10px 14px",
+              fontSize: 12,
+              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
+              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
+            }}
+          >
+            {isPreviewing
+              ? "Parsing..."
+              : ingestionMode === "URL"
+                ? "Fetch & preview"
+                : "Preview parse"}
+          </button>
 
           {error && <div style={ttrComponents.dangerBox}>{error}</div>}
           {success && <div style={ttrComponents.successBox}>{success}</div>}
 
+          {preview && (
+            <div style={{ ...ttrComponents.basePanel, padding: 14 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <h3 style={{ ...ttrTypography.h3, margin: 0 }}>Parsed preview</h3>
+                <details>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
+                    View extracted description
+                  </summary>
+                  <p style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                    {preview.rawDescription}
+                  </p>
+                </details>
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                  <div>
+                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
+                      Responsibilities
+                    </p>
+                    {preview.responsibilities.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                        No responsibilities detected yet.
+                      </p>
+                    ) : (
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                        {preview.responsibilities.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
+                      Requirements
+                    </p>
+                    {preview.requirements.length === 0 ? (
+                      <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                        No requirements detected yet.
+                      </p>
+                    ) : (
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                        {preview.requirements.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isPreviewing}
             style={{
               ...ttrComponents.primaryButton,
               width: "fit-content",
               padding: "12px 14px",
               fontSize: 13,
-              opacity: isSubmitting ? 0.7 : 1,
-              cursor: isSubmitting ? "not-allowed" : "pointer",
+              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
+              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
             }}
           >
             {isSubmitting ? "Saving..." : "Save job description"}

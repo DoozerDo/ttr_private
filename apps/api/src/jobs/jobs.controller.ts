@@ -10,7 +10,12 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
-import { CreateJobInput, JobsService } from './jobs.service';
+import {
+  CreateJobInput,
+  IngestJobDescriptionInput,
+  JobsService,
+} from './jobs.service';
+import { JobIngestionMethod } from './job.entity';
 
 @Controller('jobs')
 @UseGuards(AuthGuard('jwt'))
@@ -38,6 +43,27 @@ export class JobsController {
       title: body.title,
       company: body.company,
       rawDescription,
+      sourceUrl: body.sourceUrl ?? null,
+      responsibilities: body.responsibilities ?? undefined,
+      requirements: body.requirements ?? undefined,
+      jdIngestionMethod: body.jdIngestionMethod as JobIngestionMethod | undefined,
+    });
+  }
+
+  @Post('ingest')
+  async ingestJobDescription(
+    @Body() body: Partial<IngestJobDescriptionInput>,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.jobsService.ingestJobDescription({
+      pastedText: body.pastedText,
+      url: body.url,
     });
   }
 

@@ -6,6 +6,11 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+export enum JobIngestionMethod {
+  PASTE = 'PASTE',
+  URL = 'URL',
+}
+
 @Entity({ name: 'jobs' })
 export class Job {
   @PrimaryGeneratedColumn('uuid')
@@ -22,6 +27,25 @@ export class Job {
 
   @Column({ type: 'text' })
   rawDescription!: string;
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  sourceUrl!: string | null;
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  normalizedResponsibilities!: string[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  normalizedRequirements!: string[];
+
+  @Column({
+    type: 'enum',
+    enum: JobIngestionMethod,
+    default: JobIngestionMethod.PASTE,
+  })
+  jdIngestionMethod!: JobIngestionMethod;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  jdParsedAt!: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

@@ -4,6 +4,11 @@ export interface JobDto {
   title: string | null;
   company: string | null;
   rawDescription: string;
+  sourceUrl: string | null;
+  normalizedResponsibilities: string[];
+  normalizedRequirements: string[];
+  jdIngestionMethod: "PASTE" | "URL";
+  jdParsedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
