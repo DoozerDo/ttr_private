@@ -5,6 +5,12 @@ import { notFound, redirect } from "next/navigation";
 import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
 import { formatDateTime } from "../../../lib/format-date";
 
+type BaselineVersionDto = {
+  versionNumber: number;
+  fileHash: string;
+  createdAt: string;
+};
+
 async function fetchBaseline(id: string): Promise<BaselineDto | null> {
   try {
     const response = await fetch(`/api/baselines/${id}`, {
@@ -22,6 +28,30 @@ async function fetchBaseline(id: string): Promise<BaselineDto | null> {
     return (await response.json()) as BaselineDto;
   } catch (error) {
     console.error("Failed to fetch baseline", error);
+    return null;
+  }
+}
+
+async function fetchBaselineVersions(
+  id: string,
+): Promise<BaselineVersionDto[] | null> {
+  // VERIFY: ensure versions API returns expected shape
+  try {
+    const response = await fetch(`/api/baselines/${id}/versions`, {
+      cache: "no-store",
+    });
+
+    if (response.status === 401) {
+      redirect("/auth/login");
+    }
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as BaselineVersionDto[];
+  } catch (error) {
+    console.error("Failed to fetch baseline versions", error);
     return null;
   }
 }
@@ -112,6 +142,7 @@ export default async function BaselineDetailPage({
   }
 
   const baseline = await fetchBaseline(resolvedParams.id);
+  const versions = await fetchBaselineVersions(resolvedParams.id);
 
   if (!baseline) {
     notFound();
@@ -149,6 +180,31 @@ export default async function BaselineDetailPage({
             Back to baselines
           </Link>
         </div>
+
+        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
+          {versions && versions.length > 0 ? (
+            <ul className="space-y-2">
+              {versions.map((version) => (
+                <li
+                  key={version.versionNumber}
+                  className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+                >
+                  {/* VERIFY: confirm fields display correctly */}
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <span className="font-semibold">Version {version.versionNumber}</span>
+                    <span className="text-xs text-gray-600">
+                      {formatDateTime(version.createdAt)}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-700">File hash: {version.fileHash}</div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-700">No version history available.</p>
+          )}
+        </section>
 
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
