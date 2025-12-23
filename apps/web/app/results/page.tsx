@@ -129,27 +129,37 @@ const ScoreRing = ({ score }: { score: number }) => {
   );
 };
 
-const complianceExplanations: Record<string, string> = {
-  "Baseline too short for reliable scoring":
-    "We need more detail in the baseline to judge alignment confidently.",
-  "Job description too short for reliable scoring":
-    "The job post lacks detail, so the fit score may be noisy.",
-  "Job description contains prompt-like content":
-    "The job text looks like instructions to an AI rather than a real posting.",
-  "Suspicious job source URL": "The job link is not a valid http(s) URL and may be unsafe.",
-};
+type ComplianceEntry = { label: string; value?: string | number | boolean | null };
 
-function explainComplianceFlag(flag: string) {
-  return (
-    complianceExplanations[flag] ??
-    "We couldn’t map this flag yet—treat it as a caution and double-check the inputs."
-  );
+function normalizeComplianceFlags(complianceFlags: AnalysisResult["complianceFlags"]): ComplianceEntry[] {
+  if (!complianceFlags) return [];
+
+  if (Array.isArray(complianceFlags)) {
+    return complianceFlags
+      .map((flag) => {
+        if (typeof flag === "string") return { label: flag } satisfies ComplianceEntry;
+        if (flag && typeof flag === "object" && "label" in flag) {
+          const casted = flag as { label?: string; value?: unknown };
+          return casted.label ? { label: casted.label, value: casted.value as any } : null;
+        }
+        return null;
+      })
+      .filter((flag): flag is ComplianceEntry => Boolean(flag));
+  }
+
+  if (typeof complianceFlags === "object") {
+    return Object.entries(complianceFlags).map(([key, value]) => ({ label: key, value }));
+  }
+
+  return [];
 }
 
 function ResultsContent() {
   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
+  const [latestLoading, setLatestLoading] = useState(false);
+  const [latestError, setLatestError] = useState<string | null>(null);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [isCreatingInterview, setIsCreatingInterview] = useState(false);
   const router = useRouter();
@@ -179,16 +189,26 @@ function ResultsContent() {
     let cancelled = false;
 
     const loadLatest = async () => {
+      setLatestLoading(true);
+      setLatestError(null);
+
       try {
         const response = await fetch(`/api/analysis/job/${jobId}/latest`, { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          const message = payload?.error ?? "Unable to refresh the latest analysis.";
+          throw new Error(message);
+        }
         const data = (await response.json()) as AnalysisResult;
         if (cancelled) return;
         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
         setStored(payload);
-      } catch {
-        // Ignore fetch errors; fall back to stored data.
+      } catch (error) {
+        if (cancelled) return;
+        setLatestError(error instanceof Error ? error.message : "Unable to refresh the latest analysis.");
+      } finally {
+        if (!cancelled) setLatestLoading(false);
       }
     };
 
@@ -211,7 +231,12 @@ function ResultsContent() {
   const gaps = Array.isArray(rawGaps) ? rawGaps : [];
   const gapDetails = gaps.filter(isGapDetail);
   const gapStrings = gaps.filter((gap): gap is string => typeof gap === "string");
-  const complianceFlags = stored?.result?.complianceFlags ?? [];
+  const complianceEntries = useMemo(
+    () => normalizeComplianceFlags(stored?.result?.complianceFlags),
+    [stored?.result?.complianceFlags],
+  );
+  const showCompliancePanel =
+    hasResult && (complianceEntries.length > 0 || latestLoading || Boolean(latestError));
 
   const handleCreateInterview = async () => {
     if (!baselineId) {
@@ -223,10 +248,20 @@ function ResultsContent() {
     setIsCreatingInterview(true);
 
     try {
+      const interviewPayload: Record<string, unknown> = { baselineId };
+
+      if (stored?.result?.jobId) {
+        interviewPayload.jobId = stored.result.jobId;
+      }
+
+      if (stored?.result?.assessmentId) {
+        interviewPayload.assessmentId = stored.result.assessmentId;
+      }
+
       const response = await fetch("/api/interviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId }),
+        body: JSON.stringify(interviewPayload),
       });
 
       if (!response.ok) {
@@ -462,7 +497,7 @@ function ResultsContent() {
               </div>
             ) : null}
 
-            {hasResult ? (
+            {showCompliancePanel ? (
               <div
                 style={{
                   borderRadius: 12,
@@ -470,29 +505,30 @@ function ResultsContent() {
                   background: "rgba(0,0,0,0.18)",
                   padding: "14px 14px",
                   display: "grid",
-                  gap: 8,
+                  gap: 10,
                 }}
               >
-                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
-                {complianceFlags.length ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-                      {complianceFlags.map((flag, index) => (
-                        <li key={`${flag}-${index}`}>{flag}</li>
-                      ))}
-                    </ul>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(241,245,249,0.78)" }}>
-                        What this means
-                      </div>
-                      <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(226,232,240,0.9)" }}>
-                        {complianceFlags.map((flag, index) => (
-                          <li key={`${flag}-explanation-${index}`}>{explainComplianceFlag(flag)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ) : (
+                <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance</div>
+                {latestLoading ? (
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>Loading compliance details…</div>
+                ) : null}
+                {latestError ? (
+                  <div style={ttrComponents.dangerBox}>{latestError}</div>
+                ) : null}
+                {complianceEntries.length ? (
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                    {complianceEntries.map((flag, index) => (
+                      <li key={`${flag.label}-${index}`} style={{ display: "grid", gap: 2 }}>
+                        <span style={{ fontWeight: 800 }}>{flag.label}</span>
+                        {flag.value !== undefined ? (
+                          <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                            {String(flag.value)}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : latestLoading ? null : (
                   <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
                 )}
               </div>
@@ -625,4 +661,4 @@ export default function ResultsPage() {
 // - TypeScript build succeeds for Results page updates.
 // - Gaps render correctly for both string and object inputs.
 // - Linting passes for this file.
-// - Compliance flags show explanations with fallbacks for unknown values.
+// - Compliance flags surface keys/values with loading and error handling.

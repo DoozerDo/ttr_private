@@ -17,7 +17,11 @@ export type AnalysisResult = {
   summary?: string;
   strengths?: string[];
   gaps?: string[];
-  complianceFlags?: string[];
+  complianceFlags?:
+    | string[]
+    | {
+        [key: string]: string | number | boolean | null | undefined;
+      };
   recommendedActions?: string[];
   debug?: unknown;
 };

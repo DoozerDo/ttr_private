@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { Express } from 'express';
@@ -70,13 +74,12 @@ export class BaselineService {
     ];
   }
 
-  private async computeFileHash(filePath: string): Promise<string | null> {
+  private async computeFileHash(filePath: string): Promise<string> {
     try {
       const fileBuffer = await readFile(filePath);
       return createHash('sha256').update(fileBuffer).digest('hex');
     } catch {
-      // VERIFY: Decide whether a missing hash should block baseline persistence.
-      return null;
+      throw new BadRequestException('Unable to compute file hash');
     }
   }
 
@@ -86,6 +89,10 @@ export class BaselineService {
     parsedSections?: Partial<BaselineSection>[],
   ) {
     const fileHash = await this.computeFileHash(file.path);
+
+    if (!fileHash) {
+      throw new BadRequestException('Baseline file hash is required');
+    }
 
     return this.baselineRepository.manager.transaction(async (manager) => {
       const baseline = manager.create(Baseline, {
@@ -120,14 +127,15 @@ export class BaselineService {
       const versionRecord = manager.create(BaselineVersion, {
         baselineId: savedBaseline.id,
         versionNumber: nextVersionNumber,
-        // VERIFY: Hash storage is currently tied to the baseline hash field.
-        fileHash: fileHash ?? savedBaseline.hash,
+        fileHash,
         storagePath: savedBaseline.storagePath,
       });
 
-      await manager.save(versionRecord);
+      const savedVersion = await manager.save(versionRecord);
 
       savedBaseline.version = nextVersionNumber;
+
+      savedBaseline.versions = [savedVersion];
 
       return manager.save(savedBaseline);
     });
@@ -136,17 +144,25 @@ export class BaselineService {
   async listBaselinesForUser(userId: string) {
     return this.baselineRepository.find({
       where: { userId },
-      order: { createdAt: 'DESC' },
+      relations: ['versions'],
+      order: {
+        createdAt: 'DESC',
+        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
+      },
     });
   }
 
   async getBaselineByIdForUser(id: string, userId: string) {
     const baseline = await this.baselineRepository.findOne({
       where: { id, userId },
-      relations: ['sections'],
+      relations: ['sections', 'versions'],
       order: {
         sections: {
           order: 'ASC',
+        },
+        versions: {
+          versionNumber: 'DESC',
+          createdAt: 'DESC',
         },
       },
     });

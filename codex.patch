@@ -1,172 +1,226 @@
-diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index 6b8d6d3b1637424bfde860f1c76d8d252e342c7e..6492ea7bdc1f09f61893889dd95d93beb758f7a8 100644
---- a/apps/web/app/results/page.tsx
-+++ b/apps/web/app/results/page.tsx
-@@ -107,50 +107,67 @@ const ScoreRing = ({ score }: { score: number }) => {
-           r={radius}
-           stroke={`url(#${gradientId})`}
-           strokeWidth={14}
-           fill="none"
-           strokeDasharray={circumference}
-           strokeDashoffset={offset}
-           strokeLinecap="round"
-           style={{ transition: "stroke-dashoffset 600ms ease-out", filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))" }}
-         />
-       </svg>
+diff --git a/apps/api/src/baseline/baseline-version.entity.ts b/apps/api/src/baseline/baseline-version.entity.ts
+index 47da33c408e50c5552cb0de1d0e9cd8d96ca24f0..f03b2f3f3e42b7f45d714a82aa65f11f5669617e 100644
+--- a/apps/api/src/baseline/baseline-version.entity.ts
++++ b/apps/api/src/baseline/baseline-version.entity.ts
+@@ -6,32 +6,36 @@ import {
+   ManyToOne,
+   PrimaryGeneratedColumn,
+ } from 'typeorm';
+ import { Baseline } from './baseline.entity';
  
-       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
-         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-           <div style={{ fontSize: 34, fontWeight: 900, color: "#fde68a", textShadow: "0 2px 14px rgba(0,0,0,0.35)" }}>
-             {Math.round(clamped)}
-           </div>
-           <div style={{ fontSize: 11, letterSpacing: 2.5, textTransform: "uppercase", color: "rgba(252, 211, 77, 0.8)" }}>
-             Fit score
-           </div>
-         </div>
-       </div>
-     </div>
-   );
+ @Entity({ name: 'baseline_versions' })
+ export class BaselineVersion {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @ManyToOne(() => Baseline, (baseline) => baseline.versions, {
+     onDelete: 'CASCADE',
+   })
+   @JoinColumn({ name: 'baselineId' })
+   baseline!: Baseline;
+ 
+   @Column()
+   baselineId!: string;
+ 
+   @Column({ type: 'int' })
+   versionNumber!: number;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   fileHash!: string | null;
+ 
++  get hash(): string | null {
++    return this.fileHash;
++  }
++
+   // VERIFY: Confirm that the stored path matches the persisted upload location.
+   @Column({ type: 'varchar' })
+   storagePath!: string;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ }
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index 375ee9df1ded8eb4f3eaa3cd76f01ac68c12fcac..5d0786d9d3fee3d77f54bc3c9d0076e871e32faf 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -1,26 +1,30 @@
+-import { Injectable, NotFoundException } from '@nestjs/common';
++import {
++  BadRequestException,
++  Injectable,
++  NotFoundException,
++} from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import type { Express } from 'express';
+ import { createHash } from 'node:crypto';
+ import { readFile } from 'node:fs/promises';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+ import {
+   BaselineSection,
+   BaselineSectionType,
+   BaselineIncludePolicy,
+ } from './baseline-section.entity';
+ import { Baseline } from './baseline.entity';
+ import { BaselineParserService, ParsedSection } from './baseline-parser.service';
+ import { BaselineVersion } from './baseline-version.entity';
+ 
+ export type FileMetadata = {
+   originalname: string;
+   mimetype: string;
+   path: string;
  };
  
-+const complianceExplanations: Record<string, string> = {
-+  "Baseline too short for reliable scoring":
-+    "We need more detail in the baseline to judge alignment confidently.",
-+  "Job description too short for reliable scoring":
-+    "The job post lacks detail, so the fit score may be noisy.",
-+  "Job description contains prompt-like content":
-+    "The job text looks like instructions to an AI rather than a real posting.",
-+  "Suspicious job source URL": "The job link is not a valid http(s) URL and may be unsafe.",
-+};
-+
-+function explainComplianceFlag(flag: string) {
-+  return (
-+    complianceExplanations[flag] ??
-+    "We couldn’t map this flag yet—treat it as a caution and double-check the inputs."
-+  );
-+}
-+
- function ResultsContent() {
-   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+ @Injectable()
+ export class BaselineService {
+   constructor(
+     @InjectRepository(Baseline)
+@@ -48,128 +52,140 @@ export class BaselineService {
+     parsedSections: ParsedSection[],
+   ): Partial<BaselineSection>[] {
+     const sanitizedRaw = this.sanitizeSectionContent(rawText);
  
-   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
-   const [interviewError, setInterviewError] = useState<string | null>(null);
-   const [isCreatingInterview, setIsCreatingInterview] = useState(false);
-   const router = useRouter();
-   const searchParams = useSearchParams();
-   const latestJobIdRef = useRef<string | null>(null);
+     const structuredSections = parsedSections.map((section, index) => ({
+       sectionType: section.sectionType,
+       title: section.title,
+       content: this.sanitizeSectionContent(section.content),
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       // ensure RAW stays first; fall back to index if section.order is undefined
+       order: (section.order ?? index) + 1,
+     }));
  
-   useEffect(() => {
+     return [
+       {
+         sectionType: BaselineSectionType.RAW,
+         title: 'Raw',
+         content: sanitizedRaw,
+         includePolicy: BaselineIncludePolicy.NEVER,
+         order: 0,
+       },
+       ...structuredSections,
+     ];
+   }
+ 
+-  private async computeFileHash(filePath: string): Promise<string | null> {
++  private async computeFileHash(filePath: string): Promise<string> {
      try {
-       const raw = sessionStorage.getItem(STORAGE_KEY);
-       if (!raw) {
-         setStored(null);
-         return;
-       }
- 
-       const parsed = safeParseStored(raw);
-       setStored(parsed);
+       const fileBuffer = await readFile(filePath);
+       return createHash('sha256').update(fileBuffer).digest('hex');
      } catch {
-       setStored(null);
+-      // VERIFY: Decide whether a missing hash should block baseline persistence.
+-      return null;
++      throw new BadRequestException('Unable to compute file hash');
      }
-   }, []);
+   }
  
-@@ -436,55 +453,67 @@ function ResultsContent() {
-                             <li key={`${item}-${index}`}>{item}</li>
-                           ))}
-                         </ul>
-                       ) : null}
-                     </div>
-                   ) : (
-                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
-                   )}
-                 </div>
-               </div>
-             ) : null}
+   async createBaseline(
+     userId: string,
+     file: FileMetadata,
+     parsedSections?: Partial<BaselineSection>[],
+   ) {
+     const fileHash = await this.computeFileHash(file.path);
  
-             {hasResult ? (
-               <div
-                 style={{
-                   borderRadius: 12,
-                   border: "1px solid rgba(255,255,255,0.08)",
-                   background: "rgba(0,0,0,0.18)",
-                   padding: "14px 14px",
-                   display: "grid",
-                   gap: 8,
-                 }}
-               >
-                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
-                 {complianceFlags.length ? (
--                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
--                    {complianceFlags.map((flag, index) => (
--                      <li key={`${flag}-${index}`}>{flag}</li>
--                    ))}
--                  </ul>
-+                  <div style={{ display: "grid", gap: 10 }}>
-+                    <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-+                      {complianceFlags.map((flag, index) => (
-+                        <li key={`${flag}-${index}`}>{flag}</li>
-+                      ))}
-+                    </ul>
-+                    <div style={{ display: "grid", gap: 6 }}>
-+                      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(241,245,249,0.78)" }}>
-+                        What this means
-+                      </div>
-+                      <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(226,232,240,0.9)" }}>
-+                        {complianceFlags.map((flag, index) => (
-+                          <li key={`${flag}-explanation-${index}`}>{explainComplianceFlag(flag)}</li>
-+                        ))}
-+                      </ul>
-+                    </div>
-+                  </div>
-                 ) : (
-                   <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
-                 )}
-               </div>
-             ) : null}
++    if (!fileHash) {
++      throw new BadRequestException('Baseline file hash is required');
++    }
++
+     return this.baselineRepository.manager.transaction(async (manager) => {
+       const baseline = manager.create(Baseline, {
+         userId,
+         originalFilename: file.originalname,
+         mimeType: file.mimetype,
+         storagePath: file.path,
+         hash: fileHash,
+         sections:
+           parsedSections?.map((section, index) => ({
+             sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+             title: section.title ?? null,
+             content: this.sanitizeSectionContent(section.content),
+             includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+             order: section.order ?? index,
+           })) ?? [
+             {
+               sectionType: BaselineSectionType.OTHER,
+               title: null,
+               content: this.sanitizeSectionContent(),
+               includePolicy: BaselineIncludePolicy.OPTIONAL,
+               order: 0,
+             },
+           ],
+       });
  
-             <div
-               style={{
-                 borderRadius: 12,
-                 border: "1px solid rgba(255,255,255,0.08)",
-                 background: "rgba(0,0,0,0.18)",
-                 padding: "12px 12px",
-               }}
-             >
-               <p style={{ margin: 0, fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Planned sections</p>
-               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap" }}>
-                 <span style={ttrComponents.chip}>Fit score and label</span>
-                 <span style={ttrComponents.chip}>Signals and gaps</span>
-                 <span style={ttrComponents.chip}>Recommended actions</span>
-                 <span style={ttrComponents.chip}>Exports and artifacts</span>
-               </div>
-             </div>
+       const savedBaseline = await manager.save(baseline);
  
-             <div
-               style={{
-@@ -574,25 +603,26 @@ function ResultsContent() {
-                   <Link href="/calibrate" style={ttrComponents.quietButton}>
-                     Open Calibrate
-                   </Link>
-                 </div>
-               </div>
-             ) : null}
-           </div>
-         </section>
-       </div>
-     </InstrumentShell>
-   );
- }
+       // VERIFY: Persisting the initial version increments the current baseline version.
+       const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
  
- export default function ResultsPage() {
-   return (
-     <Suspense fallback={<div style={{ padding: 24, color: "rgba(226,232,240,0.8)" }}>Loading results…</div>}>
-       <ResultsContent />
-     </Suspense>
-   );
- }
+       const versionRecord = manager.create(BaselineVersion, {
+         baselineId: savedBaseline.id,
+         versionNumber: nextVersionNumber,
+-        // VERIFY: Hash storage is currently tied to the baseline hash field.
+-        fileHash: fileHash ?? savedBaseline.hash,
++        fileHash,
+         storagePath: savedBaseline.storagePath,
+       });
  
- // VERIFY:
- // - TypeScript build succeeds for Results page updates.
- // - Gaps render correctly for both string and object inputs.
- // - Linting passes for this file.
-+// - Compliance flags show explanations with fallbacks for unknown values.
+-      await manager.save(versionRecord);
++      const savedVersion = await manager.save(versionRecord);
+ 
+       savedBaseline.version = nextVersionNumber;
+ 
++      savedBaseline.versions = [savedVersion];
++
+       return manager.save(savedBaseline);
+     });
+   }
+ 
+   async listBaselinesForUser(userId: string) {
+     return this.baselineRepository.find({
+       where: { userId },
+-      order: { createdAt: 'DESC' },
++      relations: ['versions'],
++      order: {
++        createdAt: 'DESC',
++        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
++      },
+     });
+   }
+ 
+   async getBaselineByIdForUser(id: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id, userId },
+-      relations: ['sections'],
++      relations: ['sections', 'versions'],
+       order: {
+         sections: {
+           order: 'ASC',
+         },
++        versions: {
++          versionNumber: 'DESC',
++          createdAt: 'DESC',
++        },
+       },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     return baseline;
+   }
+ 
+   async buildSectionsFromFile(file: Express.Multer.File) {
+     const content = await this.baselineTextExtractor.extractText(file);
+     const parsedSections = this.baselineParser.parseBaseline(content);
+ 
+     return this.buildSections(content, parsedSections);
+   }
+ 
+   async reparseBaselineForUser(baselineId: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');

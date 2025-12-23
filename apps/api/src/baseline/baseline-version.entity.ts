@@ -28,6 +28,10 @@ export class BaselineVersion {
   @Column({ type: 'varchar', length: 255, nullable: true })
   fileHash!: string | null;
 
+  get hash(): string | null {
+    return this.fileHash;
+  }
+
   // VERIFY: Confirm that the stored path matches the persisted upload location.
   @Column({ type: 'varchar' })
   storagePath!: string;
