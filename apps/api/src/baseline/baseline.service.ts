@@ -189,4 +189,21 @@ export class BaselineService {
     baseline.sections = rebuiltSections as BaselineSection[];
     return this.baselineRepository.save(baseline);
   }
+
+  async listBaselineVersionsForUser(baselineId: string, userId: string) {
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      select: { id: true },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    // VERIFY: Confirm that descending order is the expected default for version history.
+    return this.baselineVersionRepository.find({
+      where: { baselineId },
+      order: { versionNumber: 'DESC', createdAt: 'DESC' },
+    });
+  }
 }

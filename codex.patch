@@ -1,405 +1,95 @@
-diff --git a/apps/api/src/baseline/baseline-version.entity.ts b/apps/api/src/baseline/baseline-version.entity.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..47da33c408e50c5552cb0de1d0e9cd8d96ca24f0
---- /dev/null
-+++ b/apps/api/src/baseline/baseline-version.entity.ts
-@@ -0,0 +1,37 @@
-+import {
-+  Column,
-+  CreateDateColumn,
-+  Entity,
-+  JoinColumn,
-+  ManyToOne,
-+  PrimaryGeneratedColumn,
-+} from 'typeorm';
-+import { Baseline } from './baseline.entity';
-+
-+@Entity({ name: 'baseline_versions' })
-+export class BaselineVersion {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @ManyToOne(() => Baseline, (baseline) => baseline.versions, {
-+    onDelete: 'CASCADE',
-+  })
-+  @JoinColumn({ name: 'baselineId' })
-+  baseline!: Baseline;
-+
-+  @Column()
-+  baselineId!: string;
-+
-+  @Column({ type: 'int' })
-+  versionNumber!: number;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  fileHash!: string | null;
-+
-+  // VERIFY: Confirm that the stored path matches the persisted upload location.
-+  @Column({ type: 'varchar' })
-+  storagePath!: string;
-+
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  createdAt!: Date;
-+}
-diff --git a/apps/api/src/baseline/baseline.entity.ts b/apps/api/src/baseline/baseline.entity.ts
-index 771806f08a6e5b96cbcb72e0aae3b4906080bfd0..b44bc7260de25b14868e1260cd2718a7eebdb083 100644
---- a/apps/api/src/baseline/baseline.entity.ts
-+++ b/apps/api/src/baseline/baseline.entity.ts
-@@ -1,44 +1,50 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   OneToMany,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
- import { BaselineSection } from './baseline-section.entity';
-+import { BaselineVersion } from './baseline-version.entity';
+diff --git a/apps/api/src/baseline/baseline.controller.ts b/apps/api/src/baseline/baseline.controller.ts
+index 7ae8cd78e68d1bc4b57d24d6cf9eb69113770e56..ba14b75c10389d4551399a040719f9d36e7fec0e 100644
+--- a/apps/api/src/baseline/baseline.controller.ts
++++ b/apps/api/src/baseline/baseline.controller.ts
+@@ -66,26 +66,41 @@ export class BaselineController {
  
- @Entity({ name: 'baselines' })
- export class Baseline {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
+   @Get()
+   async listBaselines(@Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
  
-   @Column()
-   userId!: string;
- 
--  @Column({ default: 1 })
-+  @Column({ default: 0 })
-   version!: number;
- 
-   @Column()
-   originalFilename!: string;
- 
-   @Column()
-   mimeType!: string;
- 
-   @Column()
-   storagePath!: string;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   hash!: string | null;
- 
-   @OneToMany(() => BaselineSection, (section) => section.baseline, {
-     cascade: true,
-   })
-   sections!: BaselineSection[];
- 
-+  @OneToMany(() => BaselineVersion, (version) => version.baseline, {
-+    cascade: true,
-+  })
-+  versions!: BaselineVersion[];
-+
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/baseline/baseline.module.ts b/apps/api/src/baseline/baseline.module.ts
-index 18b710bffd30e9a72f771f53ff0ea9a7fdf5e0e3..e5e4a9254a68e1169cbb279f5051cb5d6c742518 100644
---- a/apps/api/src/baseline/baseline.module.ts
-+++ b/apps/api/src/baseline/baseline.module.ts
-@@ -1,43 +1,44 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { MulterModule } from '@nestjs/platform-express';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { diskStorage } from 'multer';
- import { mkdirSync } from 'node:fs';
- import path from 'node:path';
- import { BaselineSection } from './baseline-section.entity';
- import { BaselineController } from './baseline.controller';
- import { Baseline } from './baseline.entity';
-+import { BaselineVersion } from './baseline-version.entity';
- import { BaselineService } from './baseline.service';
- import { BaselineTextExtractor } from './baseline-text-extractor.service';
- import { BaselineParserService } from './baseline-parser.service';
- 
- @Module({
-   imports: [
-     ConfigModule,
--    TypeOrmModule.forFeature([Baseline, BaselineSection]),
-+    TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion]),
-     MulterModule.registerAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         storage: diskStorage({
-           destination: (_req, _file, cb) => {
-             const uploadDir =
-               configService.get<string>('BASELINE_STORAGE_PATH') ??
-               path.join(process.cwd(), 'storage', 'baselines');
- 
-             mkdirSync(uploadDir, { recursive: true });
-             cb(null, uploadDir);
-           },
-           filename: (_req, file, cb) => {
-             const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-             const ext = path.extname(file.originalname) || '.bin';
-             cb(null, `${uniqueSuffix}${ext}`);
-           },
-         }),
-         fileFilter: (_req, file, cb) => {
-           const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
- 
-           if (!allowedMimes.includes(file.mimetype)) {
-             return cb(
-               new Error('Only PDF and DOCX uploads are supported for baselines'),
-diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
-index b0b78e7479bb3d455be8126cf0d28d23e80932f2..cb206c3324e668cb329ec6e5aa5310a1cf317ab2 100644
---- a/apps/api/src/baseline/baseline.service.ts
-+++ b/apps/api/src/baseline/baseline.service.ts
-@@ -1,122 +1,158 @@
- import { Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import type { Express } from 'express';
-+import { createHash } from 'node:crypto';
-+import { readFile } from 'node:fs/promises';
- import { BaselineTextExtractor } from './baseline-text-extractor.service';
- import {
-   BaselineSection,
-   BaselineSectionType,
-   BaselineIncludePolicy,
- } from './baseline-section.entity';
- import { Baseline } from './baseline.entity';
- import { BaselineParserService, ParsedSection } from './baseline-parser.service';
-+import { BaselineVersion } from './baseline-version.entity';
- 
- export type FileMetadata = {
-   originalname: string;
-   mimetype: string;
-   path: string;
- };
- 
- @Injectable()
- export class BaselineService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineSection)
-     private readonly baselineSectionRepository: Repository<BaselineSection>,
-+    @InjectRepository(BaselineVersion)
-+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     private readonly baselineTextExtractor: BaselineTextExtractor,
-     private readonly baselineParser: BaselineParserService,
-   ) {}
- 
-   private sanitizeSectionContent(content?: string | null) {
-     if (!content) {
-       return 'Uploaded file content';
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
      }
  
-     // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
-     // so we do not send invalid UTF-8 to Postgres.
-     return content.replace(/\u0000/g, '');
+     return this.baselineService.listBaselinesForUser(userId);
    }
  
-   private buildSections(
-     rawText: string,
-     parsedSections: ParsedSection[],
-   ): Partial<BaselineSection>[] {
-     const sanitizedRaw = this.sanitizeSectionContent(rawText);
- 
-     const structuredSections = parsedSections.map((section, index) => ({
-       sectionType: section.sectionType,
-       title: section.title,
-       content: this.sanitizeSectionContent(section.content),
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       // ensure RAW stays first; fall back to index if section.order is undefined
-       order: (section.order ?? index) + 1,
-     }));
- 
-     return [
-       {
-         sectionType: BaselineSectionType.RAW,
-         title: 'Raw',
-         content: sanitizedRaw,
-         includePolicy: BaselineIncludePolicy.NEVER,
-         order: 0,
-       },
-       ...structuredSections,
-     ];
-   }
- 
-+  private async computeFileHash(filePath: string): Promise<string | null> {
-+    try {
-+      const fileBuffer = await readFile(filePath);
-+      return createHash('sha256').update(fileBuffer).digest('hex');
-+    } catch {
-+      // VERIFY: Decide whether a missing hash should block baseline persistence.
-+      return null;
-+    }
-+  }
-+
-   async createBaseline(
-     userId: string,
-     file: FileMetadata,
-     parsedSections?: Partial<BaselineSection>[],
+   @Get(':id')
+   async getBaseline(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
    ) {
--    const baseline = this.baselineRepository.create({
--      userId,
--      originalFilename: file.originalname,
--      mimeType: file.mimetype,
--      storagePath: file.path,
--      hash: null,
--      sections:
--        parsedSections?.map((section, index) => ({
--          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
--          title: section.title ?? null,
--          content: this.sanitizeSectionContent(section.content),
--          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
--          order: section.order ?? index,
--        })) ?? [
--          {
--            sectionType: BaselineSectionType.OTHER,
--            title: null,
--            content: this.sanitizeSectionContent(),
--            includePolicy: BaselineIncludePolicy.OPTIONAL,
--            order: 0,
--          },
--        ],
-+    const fileHash = await this.computeFileHash(file.path);
-+
-+    return this.baselineRepository.manager.transaction(async (manager) => {
-+      const baseline = manager.create(Baseline, {
-+        userId,
-+        originalFilename: file.originalname,
-+        mimeType: file.mimetype,
-+        storagePath: file.path,
-+        hash: fileHash,
-+        sections:
-+          parsedSections?.map((section, index) => ({
-+            sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-+            title: section.title ?? null,
-+            content: this.sanitizeSectionContent(section.content),
-+            includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-+            order: section.order ?? index,
-+          })) ?? [
-+            {
-+              sectionType: BaselineSectionType.OTHER,
-+              title: null,
-+              content: this.sanitizeSectionContent(),
-+              includePolicy: BaselineIncludePolicy.OPTIONAL,
-+              order: 0,
-+            },
-+          ],
-+      });
-+
-+      const savedBaseline = await manager.save(baseline);
-+
-+      // VERIFY: Persisting the initial version increments the current baseline version.
-+      const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
-+
-+      const versionRecord = manager.create(BaselineVersion, {
-+        baselineId: savedBaseline.id,
-+        versionNumber: nextVersionNumber,
-+        // VERIFY: Hash storage is currently tied to the baseline hash field.
-+        fileHash: fileHash ?? savedBaseline.hash,
-+        storagePath: savedBaseline.storagePath,
-+      });
-+
-+      await manager.save(versionRecord);
-+
-+      savedBaseline.version = nextVersionNumber;
-+
-+      return manager.save(savedBaseline);
-     });
--
--    return this.baselineRepository.save(baseline);
-   }
+     const userId = request.user?.id;
  
-   async listBaselinesForUser(userId: string) {
-     return this.baselineRepository.find({
-       where: { userId },
-       order: { createdAt: 'DESC' },
-     });
-   }
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
  
-   async getBaselineByIdForUser(id: string, userId: string) {
+     return this.baselineService.getBaselineByIdForUser(id, userId);
+   }
++
++  @Get(':id/versions')
++  async listBaselineVersions(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
++    return this.baselineService.listBaselineVersionsForUser(id, userId);
++  }
+ }
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index cb206c3324e668cb329ec6e5aa5310a1cf317ab2..375ee9df1ded8eb4f3eaa3cd76f01ac68c12fcac 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -167,26 +167,43 @@ export class BaselineService {
+ 
+   async reparseBaselineForUser(baselineId: string, userId: string) {
      const baseline = await this.baselineRepository.findOne({
-       where: { id, userId },
+       where: { id: baselineId, userId },
        relations: ['sections'],
-       order: {
-         sections: {
-           order: 'ASC',
-         },
-       },
      });
  
      if (!baseline) {
        throw new NotFoundException('Baseline not found');
      }
  
-     return baseline;
-diff --git a/apps/api/src/migrations/1740000000000-BaselineVersions.ts b/apps/api/src/migrations/1740000000000-BaselineVersions.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..d493205251cbaf63e468145b93dbeae70d1a9b73
---- /dev/null
-+++ b/apps/api/src/migrations/1740000000000-BaselineVersions.ts
-@@ -0,0 +1,40 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
+     const rawSection =
+       baseline.sections.find(
+         (section) => section.sectionType === BaselineSectionType.RAW,
+       ) ?? baseline.sections[0];
+ 
+     const rawText = rawSection?.content ?? '';
+     const parsedSections = this.baselineParser.parseBaseline(rawText);
+     const rebuiltSections = this.buildSections(rawText, parsedSections);
+ 
+     await this.baselineSectionRepository.delete({ baselineId: baseline.id });
+ 
+     baseline.sections = rebuiltSections as BaselineSection[];
+     return this.baselineRepository.save(baseline);
+   }
 +
-+export class BaselineVersions1740000000000 implements MigrationInterface {
-+  name = 'BaselineVersions1740000000000';
++  async listBaselineVersionsForUser(baselineId: string, userId: string) {
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineId, userId },
++      select: { id: true },
++    });
 +
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
 +
-+    await queryRunner.query(
-+      `CREATE TABLE "baseline_versions" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "baselineId" uuid NOT NULL,
-+        "versionNumber" integer NOT NULL,
-+        "fileHash" character varying(255),
-+        "storagePath" character varying NOT NULL,
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_baseline_versions_id" PRIMARY KEY ("id"),
-+        CONSTRAINT "FK_baseline_versions_baselineId" FOREIGN KEY ("baselineId") REFERENCES "baselines"("id") ON DELETE CASCADE
-+      )`,
-+    );
-+
-+    // VERIFY: Confirm per-baseline uniqueness for version numbers is desired.
-+    await queryRunner.query(
-+      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_baseline_versions_baselineId_versionNumber" ON "baseline_versions" ("baselineId", "versionNumber")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX IF NOT EXISTS "IDX_baseline_versions_baselineId" ON "baseline_versions" ("baselineId")`,
-+    );
++    // VERIFY: Confirm that descending order is the expected default for version history.
++    return this.baselineVersionRepository.find({
++      where: { baselineId },
++      order: { versionNumber: 'DESC', createdAt: 'DESC' },
++    });
 +  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_baseline_versions_baselineId"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_baseline_versions_baselineId_versionNumber"`,
-+    );
-+    await queryRunner.query(`DROP TABLE "baseline_versions"`);
-+  }
-+}
-diff --git a/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts b/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..1d27a613b193b071770e627c2ea574dc0ddf16ab
---- /dev/null
-+++ b/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts
-@@ -0,0 +1,17 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class BaselineVersionDefault1740000000001 implements MigrationInterface {
-+  name = 'BaselineVersionDefault1740000000001';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "baselines" ALTER COLUMN "version" SET DEFAULT 0`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "baselines" ALTER COLUMN "version" SET DEFAULT 1`,
-+    );
-+  }
-+}
+ }
+

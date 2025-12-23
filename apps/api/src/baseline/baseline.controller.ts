@@ -88,4 +88,19 @@ export class BaselineController {
 
     return this.baselineService.getBaselineByIdForUser(id, userId);
   }
+
+  @Get(':id/versions')
+  async listBaselineVersions(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
+    return this.baselineService.listBaselineVersionsForUser(id, userId);
+  }
 }
