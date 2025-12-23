@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
 import type { AnalysisResult, StoredPayload } from "../lib/session";
+import { normalizeAnalysisResult } from "../lib/session";
 
 const STORAGE_KEY = "ttr:lastAnalysis";
 
@@ -37,13 +38,13 @@ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string
         payload?.result &&
         (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
       ) {
-        return { result: payload.result, savedAt: payload.savedAt };
+        return { result: normalizeAnalysisResult(payload.result), savedAt: payload.savedAt };
       }
     }
 
     // Old format: AnalysisResult directly
     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
-      return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
+      return { result: normalizeAnalysisResult(parsed as AnalysisResult), savedAt: new Date().toISOString() };
     }
 
     return null;
@@ -199,7 +200,8 @@ function ResultsContent() {
           const message = payload?.error ?? "Unable to refresh the latest analysis.";
           throw new Error(message);
         }
-        const data = (await response.json()) as AnalysisResult;
+        const raw = (await response.json()) as AnalysisResult;
+        const data = normalizeAnalysisResult(raw);
         if (cancelled) return;
         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

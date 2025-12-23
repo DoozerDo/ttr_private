@@ -11,7 +11,7 @@ import type { JobDto } from "../../lib/jobs";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
 import type { AnalysisResult, StoredPayload } from "../lib/session";
-import { saveLastAnalysis } from "../lib/session";
+import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
 
 type ApiStatus = "unknown" | "online" | "offline";
 
@@ -118,9 +118,16 @@ function signalQuality(score: number | null) {
   return { label: "Low", color: "#f97316" };
 }
 
+function latestVersionId(baseline?: BaselineDto) {
+  if (!baseline?.versions?.length) return "";
+  const sorted = [...baseline.versions].sort((a, b) => b.versionNumber - a.versionNumber);
+  return sorted[0]?.id ?? "";
+}
+
 export default function AnalyzePage() {
   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
   const [baselineId, setBaselineId] = useState("");
+  const [baselineVersionId, setBaselineVersionId] = useState("");
   const [baselineLoading, setBaselineLoading] = useState(true);
   const [baselineError, setBaselineError] = useState<string | null>(null);
 
@@ -141,7 +148,7 @@ export default function AnalyzePage() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
   const router = useRouter();
 
-  const hasBaseline = baselineId.trim().length > 0;
+  const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
   const hasSelectedJob = jobId.trim().length > 0;
   const hasJobDescription = jobDescription.trim().length > 0;
   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
@@ -172,6 +179,7 @@ export default function AnalyzePage() {
           });
         } else {
           setBaselineId("");
+          setBaselineVersionId("");
         }
       } catch (loadError) {
         if (cancelled) return;
@@ -180,6 +188,7 @@ export default function AnalyzePage() {
         );
         setBaselines([]);
         setBaselineId("");
+        setBaselineVersionId("");
       } finally {
         if (!cancelled) setBaselineLoading(false);
       }
@@ -190,6 +199,11 @@ export default function AnalyzePage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const selected = baselines.find((b) => b.id === baselineId);
+    setBaselineVersionId(latestVersionId(selected));
+  }, [baselineId, baselines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -314,10 +328,21 @@ export default function AnalyzePage() {
         setJobId(created.id);
       }
 
-      const response = await fetch("/api/analyze", {
+      if (!baselineVersionId) {
+        throw new Error("A baseline version is required to run Analyze.");
+      }
+
+      const requestJob: Record<string, unknown> = hasSelectedJob
+        ? { id: resolvedJobId }
+        : { raw_jd_text: jobDescription };
+
+      const response = await fetch("/api/fit-scores", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
+        body: JSON.stringify({
+          baseline_version_id: baselineVersionId,
+          job: requestJob,
+        }),
       });
 
       if (!response.ok) {
@@ -325,7 +350,9 @@ export default function AnalyzePage() {
         throw new Error(message || "Unable to analyze this role right now.");
       }
 
-      const data = (await response.json()) as AnalysisResult;
+      const raw = await response.json();
+      const data = normalizeAnalysisResult(raw);
+
       setResult(data);
 
       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
@@ -800,6 +827,3 @@ export default function AnalyzePage() {
     </InstrumentShell>
   );
 }
-
-
-

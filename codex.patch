@@ -1,487 +1,1356 @@
-diff --git a/apps/web/app/calibrate/page.tsx b/apps/web/app/calibrate/page.tsx
-index dd97f192b50e38d1d1b54c657223e6a18adcea80..97768f9e0cc03d849f069d76e8401c58526e426d 100644
---- a/apps/web/app/calibrate/page.tsx
-+++ b/apps/web/app/calibrate/page.tsx
-@@ -1,36 +1,37 @@
- // apps/web/app/calibrate/page.tsx
- "use client";
+diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
+index 800162b21b8344401deb7b47cf47aa2b574adc2e..827a094e36c5852e3c72dd2f7fbd1a291c29935d 100644
+--- a/apps/api/src/analysis/analysis.module.ts
++++ b/apps/api/src/analysis/analysis.module.ts
+@@ -1,20 +1,29 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineSection } from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { Job } from '../jobs/job.entity';
+ import { User } from '../users/user.entity';
+ import { FitAssessment } from './fit-assessment.entity';
+ import { AnalysisController } from './analysis.controller';
+ import { CalibrationController } from './calibration.controller';
++import { FitScoresController } from './fit-scores.controller';
+ import { AnalysisService } from './analysis.service';
+ import { FitScoringService } from './fit-scoring.service';
  
- import type { CSSProperties } from "react";
- import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
+ @Module({
+   imports: [
+-    TypeOrmModule.forFeature([Baseline, BaselineSection, Job, FitAssessment, User]),
++    TypeOrmModule.forFeature([
++      Baseline,
++      BaselineSection,
++      BaselineVersion,
++      Job,
++      FitAssessment,
++      User,
++    ]),
+   ],
+-  controllers: [AnalysisController, CalibrationController],
++  controllers: [AnalysisController, CalibrationController, FitScoresController],
+   providers: [AnalysisService, FitScoringService],
+ })
+ export class AnalysisModule {}
+diff --git a/apps/api/src/analysis/analysis.service.spec.ts b/apps/api/src/analysis/analysis.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..66e6fdcc43c2d75b29d786eef4c3e6e4bd5ac4c4
+--- /dev/null
++++ b/apps/api/src/analysis/analysis.service.spec.ts
+@@ -0,0 +1,143 @@
++import { Test } from '@nestjs/testing';
++import { getRepositoryToken } from '@nestjs/typeorm';
++import { Baseline } from '../baseline/baseline.entity';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++} from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { Job } from '../jobs/job.entity';
++import { User } from '../users/user.entity';
++import { AnalysisService } from './analysis.service';
++import { FitAssessment } from './fit-assessment.entity';
++import { FitScoringService } from './fit-scoring.service';
++
++describe('AnalysisService - fit scores contract', () => {
++  let service: AnalysisService;
++
++  const baselineVersion: Partial<BaselineVersion> = {
++    id: 'bv-1',
++    baselineId: 'b-1',
++    versionNumber: 2,
++    baseline: { id: 'b-1', userId: 'user-1' } as Baseline,
++  };
++
++  const baselineSections: BaselineSection[] = [
++    {
++      id: 's-1',
++      baselineId: 'b-1',
++      sectionType: 'EXPERIENCE' as any,
++      title: null,
++      content: 'Implemented distributed systems and led platform teams.',
++      includePolicy: BaselineIncludePolicy.OPTIONAL,
++      order: 0,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    } as BaselineSection,
++    {
++      id: 's-2',
++      baselineId: 'b-1',
++      sectionType: 'SKILLS' as any,
++      title: null,
++      content: 'AWS, Kubernetes, Terraform',
++      includePolicy: BaselineIncludePolicy.OPTIONAL,
++      order: 1,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    } as BaselineSection,
++  ];
++
++  const baseline: Baseline = {
++    id: 'b-1',
++    userId: 'user-1',
++    version: 2,
++    originalFilename: 'resume.pdf',
++    mimeType: 'application/pdf',
++    storagePath: '/tmp/resume.pdf',
++    hash: 'hash',
++    sections: baselineSections,
++    versions: [],
++    createdAt: new Date(),
++    updatedAt: new Date(),
++  };
++
++  beforeEach(async () => {
++    const module = await Test.createTestingModule({
++      providers: [
++        AnalysisService,
++        FitScoringService,
++        { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
++        {
++          provide: getRepositoryToken(BaselineSection),
++          useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
++        },
++        {
++          provide: getRepositoryToken(BaselineVersion),
++          useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
++        },
++        { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
++        {
++          provide: getRepositoryToken(FitAssessment),
++          useValue: {
++            create: jest.fn((payload) => payload),
++            save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
++          },
++        },
++        {
++          provide: getRepositoryToken(User),
++          useValue: {
++            findOne: jest.fn().mockResolvedValue({
++              id: 'user-1',
++              calibrationProfileName: null,
++              calibrationWeights: null,
++            }),
++          },
++        },
++      ],
++    }).compile();
++
++    service = module.get(AnalysisService);
++  });
++
++  it('rejects ambiguous JD inputs', async () => {
++    await expect(
++      service.scoreCompatibility('user-1', {
++        baseline_version_id: 'bv-1',
++        job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
++      }),
++    ).rejects.toThrowError(expect.objectContaining({ response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }) }) }));
++  });
++
++  it('rejects missing JD inputs', async () => {
++    await expect(
++      service.scoreCompatibility('user-1', { baseline_version_id: 'bv-1', job: {} }),
++    ).rejects.toThrowError(
++      expect.objectContaining({
++        response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }) }),
++      }),
++    );
++  });
++
++  it('returns a contract-compliant success response', async () => {
++    const result = await service.scoreCompatibility('user-1', {
++      baseline_version_id: 'bv-1',
++      job: { raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.' },
++    });
++
++    expect(result).toEqual(
++      expect.objectContaining({
++        fit_score: expect.any(Number),
++        overall_score: expect.any(Number),
++        verdict: expect.any(String),
++        breakdown: expect.objectContaining({
++          experience_alignment: expect.any(Number),
++          leadership_level: expect.any(Number),
++          technical_platform_fit: expect.any(Number),
++          industry_context: expect.any(Number),
++          strategic_vs_tactical: expect.any(Number),
++        }),
++      }),
++    );
++    expect(result.strengths).toBeDefined();
++  });
++});
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09a9412b3a 100644
+--- a/apps/api/src/analysis/analysis.service.ts
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -1,69 +1,115 @@
+ import {
+   BadRequestException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash } from 'crypto';
+ import { Repository } from 'typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { Job } from '../jobs/job.entity';
+ import { CalibrationWeights, User } from '../users/user.entity';
+ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
+ import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+ import {
+   DimensionWeightOverrides,
+   FitScoringService,
+ } from './fit-scoring.service';
  
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
- 
--type ProfileKey = "default" | "support-ops" | "leadership" | "strict" | "custom";
-+type BuiltInProfileKey = "default" | "support-ops" | "leadership" | "strict";
-+type ProfileKey = BuiltInProfileKey | string;
- 
- type CalibrationWeights = {
-   dimensionA: number;
-   dimensionB: number;
-   dimensionC: number;
-   dimensionD: number;
-   dimensionE: number;
+ export type AnalysisRequest = {
+   baselineId: string;
+   jobId?: string;
+   jobDescription?: string;
  };
  
- type Profile = {
-   key: ProfileKey;
-   label: string;
-   description: string;
-   sliders: {
-     roleScope: number;
-     domainFit: number;
-     platformFit: number;
+ export type AnalysisResult = {
+   ok: boolean;
+   baselineId: string;
+   score: number;
+   strengths: string[];
+   gaps: string[];
+   summary: string;
+ };
+ 
++type FitScoreJobInput = {
++  id?: string;
++  raw_jd_text?: string;
++  raw_jd?: string;
++  parsed_jd?: {
++    responsibilities?: string[];
++    requirements?: string[];
++  };
++};
++
++export type FitScoreRequest = {
++  job?: FitScoreJobInput;
++  baseline_version_id?: string;
++  selected_block_ids?: string[];
++};
++
++type FitScoreResponse = {
++  fit_score: number;
++  overall_score: number;
++  verdict: 'apply' | 'consider' | 'skip';
++  breakdown: {
++    experience_alignment: number;
++    leadership_level: number;
++    technical_platform_fit: number;
++    industry_context: number;
++    strategic_vs_tactical: number;
++  };
++  strengths?: string[];
++  gaps?: string[];
++  compliance_flags?: Array<{ code: string; message?: string }>;
++  audit_id?: string | null;
++  assessmentId?: string;
++  jobId?: string;
++  baselineId?: string;
++  baselineVersion?: number | null;
++  createdAt?: Date;
++  score?: number;
++  overallScore?: number;
++  dimensionScores?: FitAssessment['dimensionScores'];
++  complianceFlags?: FitAssessment['complianceFlags'];
++  summary?: string;
++};
++
+ @Injectable()
+ export class AnalysisService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
++    @InjectRepository(BaselineVersion)
++    private readonly baselineVersionRepository: Repository<BaselineVersion>,
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+     @InjectRepository(FitAssessment)
+     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+     @InjectRepository(User)
+     private readonly usersRepository: Repository<User>,
+     private readonly fitScoringService: FitScoringService,
+   ) {}
+ 
+   // VERIFY: Confirm default calibration values with product stakeholders.
+   private readonly defaultCalibration: {
+     profileName: string;
+     weights: CalibrationWeights;
+   } = {
+     profileName: 'default',
+     weights: {
+       dimensionA: 1,
+       dimensionB: 1,
+       dimensionC: 1,
+       dimensionD: 1,
+       dimensionE: 1,
+     },
    };
- };
  
- const PROFILES: Profile[] = [
-   {
-     key: "default",
-     label: "Default",
-     description: "Balanced weighting intended for most role evaluations.",
-@@ -39,213 +40,346 @@ const PROFILES: Profile[] = [
-   {
-     key: "support-ops",
-     label: "Support Operations",
-     description: "Prioritizes operational execution, tooling, and process rigor.",
-     sliders: { roleScope: 60, domainFit: 50, platformFit: 65 },
-   },
-   {
-     key: "leadership",
-     label: "Leadership Heavy",
-     description: "Weights scope, cross-functional leadership, and organizational impact more strongly.",
-     sliders: { roleScope: 75, domainFit: 55, platformFit: 40 },
-   },
-   {
-     key: "strict",
-     label: "Strict Match",
-     description: "Applies more conservative scoring with higher alignment requirements.",
-     sliders: { roleScope: 55, domainFit: 70, platformFit: 70 },
-   },
- ];
+   private normalizeKeywords(text: string) {
+@@ -115,103 +161,332 @@ export class AnalysisService {
+         includePolicy: section.includePolicy,
+         order: section.order,
+       })) ?? [];
  
- export default function CalibratePage() {
-   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+     const payload = {
+       job: {
+         rawDescription: job.rawDescription,
+         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+         normalizedRequirements: job.normalizedRequirements ?? [],
+         title: job.title ?? null,
+         company: job.company ?? null,
+       },
+       baseline: {
+         id: baseline.id,
+         version: baseline.version ?? null,
+         sections: sectionPayload,
+       },
+       calibration: dimensionWeights,
+     };
  
-   const [profileKey, setProfileKey] = useState<ProfileKey>("default");
-   const [profileName, setProfileName] = useState("default");
-+  const [customProfiles, setCustomProfiles] = useState<Profile[]>([]);
-   const [weights, setWeights] = useState<CalibrationWeights>({
-     dimensionA: PROFILES[0].sliders.roleScope,
-     dimensionB: PROFILES[0].sliders.domainFit,
-     dimensionC: PROFILES[0].sliders.platformFit,
-     dimensionD: 50,
-     dimensionE: 50,
-   });
-   const [status, setStatus] = useState<string | null>(null);
-   const [isSaving, setIsSaving] = useState(false);
+     return createHash('sha256')
+       .update(JSON.stringify(payload))
+       .digest('hex');
+   }
  
-   const isErrorStatus = status ? /fail|unable|incomplete/i.test(status) : false;
- 
-+  useEffect(() => {
-+    const cachedProfiles = window.localStorage.getItem("ttr-custom-calibration-profiles");
++  private coerceComplianceFlags(flags: string[] | undefined | null) {
++    if (!flags?.length) return undefined;
++    return flags.map((flag) => ({ code: flag, message: flag }));
++  }
 +
-+    if (cachedProfiles) {
-+      try {
-+        const parsed = JSON.parse(cachedProfiles) as Profile[];
-+        setCustomProfiles(parsed);
-+      } catch (error) {
-+        console.warn("Unable to parse cached calibration profiles", error);
-+      }
-+    }
-+  }, []);
++  private assertJobInput(job?: FitScoreJobInput) {
++    const rawText = job?.raw_jd_text ?? job?.raw_jd;
++    const hasRaw = Boolean(rawText?.trim());
++    const parsed = job?.parsed_jd;
++    const hasParsed = Boolean(
++      parsed &&
++        ((parsed.responsibilities && parsed.responsibilities.length > 0) ||
++          (parsed.requirements && parsed.requirements.length > 0)),
++    );
++    const hasId = Boolean(job?.id?.trim());
++    const providedCount = Number(hasRaw) + Number(hasParsed);
 +
-+  useEffect(() => {
-+    if (customProfiles.length === 0) {
-+      window.localStorage.removeItem("ttr-custom-calibration-profiles");
-+      return;
++    if (hasId && providedCount > 0) {
++      throw new BadRequestException({
++        error: { code: 'JD_INPUT_AMBIGUOUS', message: 'Provide either job.id or JD content, not both.' },
++      });
 +    }
 +
-+    window.localStorage.setItem("ttr-custom-calibration-profiles", JSON.stringify(customProfiles));
-+  }, [customProfiles]);
++    if (!hasId && providedCount === 0) {
++      throw new BadRequestException({
++        error: {
++          code: 'JD_INPUT_MISSING',
++          message: 'Provide exactly one of raw_jd_text (or raw_jd) or parsed_jd.',
++        },
++      });
++    }
 +
-+  const availableProfiles = useMemo(
-+    () => [...PROFILES, ...customProfiles],
-+    [customProfiles],
-+  );
++    if (providedCount > 1) {
++      throw new BadRequestException({
++        error: {
++          code: 'JD_INPUT_AMBIGUOUS',
++          message: 'Provide exactly one of raw_jd_text (or raw_jd) or parsed_jd.',
++        },
++      });
++    }
++  }
 +
-   const profile = useMemo(() => {
--    if (profileKey === "custom") {
--      return {
--        key: "custom",
--        label: profileName,
--        description: "Loaded calibration profile.",
--        sliders: {
--          // VERIFY: Align custom profile slider mapping with backend dimensions.
--          roleScope: weights.dimensionA,
--          domainFit: weights.dimensionB,
--          platformFit: weights.dimensionC,
--        },
--      } satisfies Profile;
-+    const matchedProfile = availableProfiles.find((p) => p.key === profileKey);
-+
-+    if (matchedProfile) {
-+      return matchedProfile;
+   async getCalibration(userId: string) {
+     const user = await this.usersRepository.findOne({ where: { id: userId } });
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
      }
  
--    return PROFILES.find((p) => p.key === profileKey) ?? PROFILES[0];
--  }, [profileKey, profileName, weights]);
+     const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
+     const weights =
+       user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
+ 
+     return { ok: true, profileName, weights };
+   }
+ 
+   async saveCalibration(
+     userId: string,
+     payload: { profileName?: string; weights?: CalibrationWeights | null },
+   ) {
+     const profileName = payload.profileName?.trim();
+ 
+     if (!profileName) {
+       throw new BadRequestException('profileName is required');
+     }
+ 
+     // VERIFY: Validate calibration weight ranges with data science.
+     if (!payload.weights) {
+       throw new BadRequestException('weights are required');
+     }
+ 
+     const user = await this.usersRepository.findOne({ where: { id: userId } });
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+     user.calibrationProfileName = profileName;
+     user.calibrationWeights = payload.weights;
+ 
+     await this.usersRepository.save(user);
+ 
+     return { ok: true, profileName, weights: payload.weights };
+   }
+ 
++  private buildJobPayloadFromParsed(job: FitScoreJobInput) {
++    const parsed = job.parsed_jd ?? {};
++    const responsibilities = parsed.responsibilities ?? [];
++    const requirements = parsed.requirements ?? [];
++    const synthesizedRaw = [...responsibilities, ...requirements].join('\n').trim();
++
 +    return {
-+      key: profileKey,
-+      label: profileName,
-+      description: "Loaded calibration profile.",
-+      sliders: {
-+        // VERIFY: Align custom profile slider mapping with backend dimensions.
-+        roleScope: weights.dimensionA,
-+        domainFit: weights.dimensionB,
-+        platformFit: weights.dimensionC,
++      title: null,
++      company: null,
++      rawDescription: job.raw_jd_text ?? job.raw_jd ?? synthesizedRaw,
++      normalizedResponsibilities: responsibilities,
++      normalizedRequirements: requirements,
++      sourceUrl: null,
++    };
++  }
++
+   private mapCalibrationToDimensionWeights(weights?: CalibrationWeights | null) {
+     return {
+       experienceAlignment: weights?.dimensionA ?? 1,
+       technicalPlatformFit: weights?.dimensionB ?? 1,
+       leadershipLevel: weights?.dimensionC ?? 1,
+       strategicTacticalFit: weights?.dimensionD ?? 1,
+       industryContext: weights?.dimensionE ?? 1,
+     } satisfies DimensionWeightOverrides;
+   }
+ 
++  private async loadBaselineForVersion(userId: string, baselineVersionId?: string) {
++    if (!baselineVersionId?.trim()) {
++      throw new BadRequestException('baseline_version_id is required');
++    }
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: baselineVersionId },
++      relations: ['baseline'],
++    });
++
++    if (!baselineVersion || !baselineVersion.baseline) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    if (baselineVersion.baseline.userId !== userId) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineVersion.baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    return { baseline, baselineVersion };
++  }
++
++  async scoreCompatibility(userId: string, payload: FitScoreRequest): Promise<FitScoreResponse> {
++    this.assertJobInput(payload.job);
++
++    const { baseline, baselineVersion } = await this.loadBaselineForVersion(
++      userId,
++      payload.baseline_version_id,
++    );
++
++    if (!baseline.sections?.length) {
++      baseline.sections = await this.baselineSectionRepository.find({
++        where: { baselineId: baseline.id },
++        order: { order: 'ASC' },
++      });
++    }
++
++    const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
++    const includedSections =
++      baseline.sections
++        ?.filter(
++          (section) =>
++            section.includePolicy !== BaselineIncludePolicy.NEVER &&
++            (!selectedBlockIds || selectedBlockIds.includes(section.id)),
++        )
++        .map((section) => ({
++          type: section.sectionType ?? section.type,
++          content: section.content,
++        })) ?? [];
++
++    const calibration = await this.getCalibration(userId);
++    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
++
++    const jobInput = payload.job ?? {};
++    const jobId = jobInput.id?.trim();
++
++    let job: Job | null = null;
++    let jobPayload: {
++      title: string | null;
++      company: string | null;
++      rawDescription: string;
++      normalizedResponsibilities: string[];
++      normalizedRequirements: string[];
++      sourceUrl: string | null;
++    };
++
++    if (jobId) {
++      job = await this.jobRepository.findOne({
++        where: { id: jobId, userId },
++      });
++
++      if (!job) {
++        throw new NotFoundException('Job not found');
++      }
++
++      jobPayload = {
++        title: job.title ?? null,
++        company: job.company ?? null,
++        rawDescription: job.rawDescription,
++        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
++        normalizedRequirements: job.normalizedRequirements ?? [],
++        sourceUrl: job.sourceUrl ?? null,
++      };
++    } else {
++      const rawText = jobInput.raw_jd_text ?? jobInput.raw_jd;
++      const hasParsed = jobInput.parsed_jd !== undefined;
++      jobPayload = hasParsed
++        ? this.buildJobPayloadFromParsed(jobInput)
++        : {
++            title: null,
++            company: null,
++            rawDescription: rawText ?? '',
++            normalizedResponsibilities: [],
++            normalizedRequirements: [],
++            sourceUrl: null,
++          };
++    }
++
++    const scoring = this.fitScoringService.score(
++      {
++        job: jobPayload,
++        baseline: {
++          version: baselineVersion.versionNumber ?? baseline.version ?? null,
++          sections: includedSections,
++        },
 +      },
-+    } satisfies Profile;
-+  }, [availableProfiles, profileKey, profileName, weights]);
++      dimensionWeights,
++    );
++
++    let savedAssessment: FitAssessment | null = null;
++
++    if (job) {
++      const assessment = this.fitAssessmentRepository.create({
++        userId,
++        jobId: job.id,
++        baselineId: baseline.id,
++        baselineVersion: baselineVersion.versionNumber ?? baseline.version ?? null,
++        overallScore: scoring.overallScore,
++        verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
++        dimensionScores: scoring.dimensionScores,
++        strengths: scoring.strengths,
++        gaps: scoring.gaps,
++        complianceFlags: scoring.complianceFlags,
++        inputsHash: null,
++      });
++
++      savedAssessment = await this.fitAssessmentRepository.save(assessment);
++    }
++
++    const breakdown = {
++      experience_alignment: scoring.dimensionScores.experienceAlignment,
++      leadership_level: scoring.dimensionScores.leadershipLevel,
++      technical_platform_fit: scoring.dimensionScores.technicalPlatformFit,
++      industry_context: scoring.dimensionScores.industryContext,
++      strategic_vs_tactical: scoring.dimensionScores.strategicTacticalFit,
++    };
++
++    return {
++      fit_score: scoring.overallScore,
++      overall_score: scoring.overallScore,
++      verdict: (scoring.verdict ?? FitAssessmentVerdict.CONSIDER).toLowerCase() as
++        | 'apply'
++        | 'consider'
++        | 'skip',
++      breakdown,
++      strengths: scoring.strengths,
++      gaps: scoring.gaps,
++      compliance_flags: this.coerceComplianceFlags(scoring.complianceFlags),
++      audit_id: savedAssessment?.id ?? null,
++      assessmentId: savedAssessment?.id,
++      jobId: savedAssessment?.jobId,
++      baselineId: savedAssessment?.baselineId,
++      baselineVersion: savedAssessment?.baselineVersion,
++      createdAt: savedAssessment?.createdAt,
++      score: scoring.overallScore,
++      overallScore: scoring.overallScore,
++      dimensionScores: scoring.dimensionScores,
++      complianceFlags: scoring.complianceFlags,
++      summary: scoring.summary,
++    };
++  }
++
+   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
+     const baselineId = payload.baselineId?.trim();
+     if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
+     }
+ 
+     const hasJobId = Boolean(payload.jobId?.trim());
+     const hasJobDescription = Boolean(payload.jobDescription?.trim());
+ 
+     if (!hasJobId && !hasJobDescription) {
+       throw new BadRequestException('jobId or jobDescription is required');
+     }
+ 
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     if (!baseline.sections?.length) {
+       baseline.sections = await this.baselineSectionRepository.find({
+diff --git a/apps/api/src/analysis/fit-scores.controller.ts b/apps/api/src/analysis/fit-scores.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..610d7c70f48e81331a11c2212e2103a3684f4ca6
+--- /dev/null
++++ b/apps/api/src/analysis/fit-scores.controller.ts
+@@ -0,0 +1,32 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import type { FitScoreRequest } from './analysis.service';
++import { AnalysisService } from './analysis.service';
++
++@Controller('fit-scores')
++@UseGuards(AuthGuard('jwt'))
++export class FitScoresController {
++  constructor(private readonly analysisService: AnalysisService) {}
++
++  @Post()
++  async score(
++    @Body() body: FitScoreRequest,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.analysisService.scoreCompatibility(userId, body);
++  }
++}
+diff --git a/apps/api/src/analysis/fit-scoring.service.spec.ts b/apps/api/src/analysis/fit-scoring.service.spec.ts
+index ac19fcc651579cbd99935cb04c661c4cf4db9778..7ab41df2052cf07bc3ce01bb1322453673aec992 100644
+--- a/apps/api/src/analysis/fit-scoring.service.spec.ts
++++ b/apps/api/src/analysis/fit-scoring.service.spec.ts
+@@ -104,26 +104,48 @@ describe('FitScoringService', () => {
+   it('reduces leadership level when leadership cues are missing in baseline', () => {
+     const result = service.score(
+       buildInput({
+         job: {
+           title: 'Engineering Lead',
+           company: 'ExampleCo',
+           rawDescription: 'Lead teams, mentor engineers, and manage stakeholders.',
+           normalizedResponsibilities: ['Lead and mentor teams', 'Manage stakeholder expectations'],
+           normalizedRequirements: ['Leadership experience required'],
+           sourceUrl: null,
+         },
+         baseline: {
+           version: 1,
+           sections: [
+             {
+               type: 'EXPERIENCE',
+               content: 'Individual contributor focused on coding tasks and tickets.',
+             },
+           ],
+         },
+       }),
+     );
+ 
+     expect(result.dimensionScores.leadershipLevel).toBeLessThan(60);
+   });
++
++  it('returns a complete response shape for compatibility scoring', () => {
++    const result = service.score(buildInput());
++
++    expect(result).toEqual(
++      expect.objectContaining({
++        overallScore: expect.any(Number),
++        verdict: expect.any(String),
++        dimensionScores: expect.objectContaining({
++          experienceAlignment: expect.any(Number),
++          leadershipLevel: expect.any(Number),
++          technicalPlatformFit: expect.any(Number),
++          industryContext: expect.any(Number),
++          strategicTacticalFit: expect.any(Number),
++        }),
++        strengths: expect.any(Array),
++        gaps: expect.any(Array),
++        complianceFlags: expect.any(Array),
++        summary: expect.any(String),
++      }),
++    );
++  });
+ });
+diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
+index 51496ece80618764a3f6e9bb6196d4b16df0aa35..ea85ec27b0bc2d4b5bbe9268a7ea794a70904fce 100644
+--- a/apps/web/app/analyze/page.tsx
++++ b/apps/web/app/analyze/page.tsx
+@@ -1,39 +1,39 @@
+ // apps/web/app/analyze/page.tsx
+ "use client";
+ 
+ import { useEffect, useMemo, useState } from "react";
+ import type { CSSProperties } from "react";
+ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ 
+ import type { BaselineDto } from "../../lib/baselines";
+ import type { JobDto } from "../../lib/jobs";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
+-import { saveLastAnalysis } from "../lib/session";
++import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
+ 
+ type ApiStatus = "unknown" | "online" | "offline";
+ 
+ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
+   const radius = 72;
+   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
+   const clampedScore = Math.min(Math.max(score, 0), 100);
+   const offset = circumference * (1 - clampedScore / 100);
+   const gradientId = "scoreRingGradient";
+ 
+   return (
+     <div
+       style={{
+         position: "relative",
+         display: "flex",
+         height: 176,
+         width: 176,
+         alignItems: "center",
+         justifyContent: "center",
+       }}
+     >
+       <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
+         <defs>
+           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+             <stop offset="0%" stopColor="#f59e0b" />
+@@ -96,123 +96,137 @@ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
+             color: "rgba(252, 211, 77, 0.8)",
+           }}
+         >
+           Fit score
+         </span>
+       </div>
+     </div>
+   );
+ };
+ 
+ function fitLabel(score: number | null) {
+   if (score === null) return "";
+   if (score >= 90) return "Strong fit";
+   if (score >= 75) return "Solid fit";
+   if (score >= 60) return "Mixed fit";
+   return "Weak fit";
+ }
+ 
+ function signalQuality(score: number | null) {
+   if (score === null) return { label: "n/a", color: "rgba(255,255,255,0.3)" };
+   if (score >= 90) return { label: "High", color: "#22c55e" };
+   if (score >= 75) return { label: "Medium", color: "#f59e0b" };
+   return { label: "Low", color: "#f97316" };
+ }
+ 
++function latestVersionId(baseline?: BaselineDto) {
++  if (!baseline?.versions?.length) return "";
++  const sorted = [...baseline.versions].sort((a, b) => b.versionNumber - a.versionNumber);
++  return sorted[0]?.id ?? "";
++}
++
+ export default function AnalyzePage() {
+   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+   const [baselineId, setBaselineId] = useState("");
++  const [baselineVersionId, setBaselineVersionId] = useState("");
+   const [baselineLoading, setBaselineLoading] = useState(true);
+   const [baselineError, setBaselineError] = useState<string | null>(null);
+ 
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobsLoading, setJobsLoading] = useState(true);
+   const [jobsError, setJobsError] = useState<string | null>(null);
+ 
+   const [jobDescription, setJobDescription] = useState("");
+   const [result, setResult] = useState<AnalysisResult | null>(null);
+ 
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [animatedScore, setAnimatedScore] = useState(0);
+   const [showRaw, setShowRaw] = useState(false);
+ 
+   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+   const router = useRouter();
+ 
+-  const hasBaseline = baselineId.trim().length > 0;
++  const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
+   const hasSelectedJob = jobId.trim().length > 0;
+   const hasJobDescription = jobDescription.trim().length > 0;
+   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
  
    useEffect(() => {
-     const fetchCalibration = async () => {
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineLoading(true);
+       setBaselineError(null);
+ 
        try {
-         const response = await fetch("/api/calibration", { cache: "no-store" });
- 
+         const response = await fetch("/api/baselines", { cache: "no-store" });
          if (!response.ok) {
-           setStatus("Unable to load calibration.");
-           return;
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
          }
  
-         const data = (await response.json()) as {
-           ok?: boolean;
-           profileName?: string;
-           weights?: CalibrationWeights;
-         };
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
  
-         if (!data?.ok || !data.profileName || !data.weights) {
-           setStatus("Calibration response was incomplete.");
-           return;
+         setBaselines(data);
+ 
+         if (data.length > 0) {
+           setBaselineId((prev) => {
+             if (prev && data.some((b) => b.id === prev)) return prev;
+             return data[0].id;
+           });
+         } else {
+           setBaselineId("");
++          setBaselineVersionId("");
          }
- 
--        setProfileName(data.profileName);
--        setProfileKey(
--          PROFILES.some((p) => p.key === data.profileName)
--            ? (data.profileName as ProfileKey)
--            : "custom",
--        );
--        setWeights(data.weights);
-+        const profileName = data.profileName;
-+        const weights = data.weights;
-+        const isBuiltIn = PROFILES.some((p) => p.key === profileName);
-+
-+        setProfileName(profileName);
-+        setProfileKey(profileName as ProfileKey);
-+        setWeights(weights);
-+        if (!isBuiltIn) {
-+          setCustomProfiles((current) => {
-+            if (current.some((p) => p.key === profileName)) {
-+              return current;
-+            }
-+
-+            return [
-+              ...current,
-+              {
-+                key: profileName,
-+                label: profileName,
-+                description: "Saved custom calibration profile.",
-+                sliders: {
-+                  roleScope: weights.dimensionA,
-+                  domainFit: weights.dimensionB,
-+                  platformFit: weights.dimensionC,
-+                },
-+              },
-+            ];
-+          });
-+        }
-         setStatus(null);
-       } catch (error) {
-         console.error("Failed to load calibration", error);
-         setStatus("Failed to load calibration.");
+       } catch (loadError) {
+         if (cancelled) return;
+         setBaselineError(
+           loadError instanceof Error ? loadError.message : "Unable to load baselines.",
+         );
+         setBaselines([]);
+         setBaselineId("");
++        setBaselineVersionId("");
+       } finally {
+         if (!cancelled) setBaselineLoading(false);
        }
      };
  
-     fetchCalibration();
+     loadBaselines();
+     return () => {
+       cancelled = true;
+     };
    }, []);
  
-   const applyProfile = (nextKey: ProfileKey) => {
-     setProfileKey(nextKey);
++  useEffect(() => {
++    const selected = baselines.find((b) => b.id === baselineId);
++    setBaselineVersionId(latestVersionId(selected));
++  }, [baselineId, baselines]);
++
+   useEffect(() => {
+     let cancelled = false;
  
--    if (nextKey === "custom") {
--      return;
--    }
--
--    const nextProfile = PROFILES.find((p) => p.key === nextKey);
-+    const nextProfile = availableProfiles.find((p) => p.key === nextKey);
+     const loadJobs = async () => {
+       setJobsLoading(true);
+       setJobsError(null);
  
-     if (!nextProfile) {
-       return;
-     }
+       try {
+         const response = await fetch("/api/jobs", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load saved jobs.");
+         }
  
--    setProfileName(nextProfile.key);
-+    const profileNameValue = PROFILES.some((p) => p.key === nextProfile.key)
-+      ? nextProfile.key
-+      : nextProfile.label;
-+    setProfileName(profileNameValue);
-     setWeights((current) => ({
-       dimensionA: nextProfile.sliders.roleScope,
-       dimensionB: nextProfile.sliders.domainFit,
-       dimensionC: nextProfile.sliders.platformFit,
-       // VERIFY: Keep untouched dimensions aligned with prior state when applying presets.
-       dimensionD: current.dimensionD,
-       dimensionE: current.dimensionE,
-     }));
-   };
+         const data = (await response.json()) as JobDto[];
+         if (cancelled) return;
  
--  const saveCalibration = async () => {
-+  const addOrUpdateCustomProfile = (name: string, currentWeights: CalibrationWeights) => {
-+    setCustomProfiles((profiles) => {
-+      const nextProfile: Profile = {
-+        key: name,
-+        label: name,
-+        description: "Saved custom calibration profile.",
-+        sliders: {
-+          roleScope: currentWeights.dimensionA,
-+          domainFit: currentWeights.dimensionB,
-+          platformFit: currentWeights.dimensionC,
-+        },
-+      };
-+
-+      if (profiles.some((p) => p.key === name)) {
-+        return profiles.map((p) => (p.key === name ? nextProfile : p));
-+      }
-+
-+      return [...profiles, nextProfile];
-+    });
-+  };
-+
-+  const removeCustomProfile = async (keyToRemove: ProfileKey) => {
-+    setCustomProfiles((profiles) => profiles.filter((p) => p.key !== keyToRemove));
-+
-+    if (profileKey === keyToRemove) {
-+      const defaultProfile = PROFILES.find((p) => p.key === "default");
-+
-+      if (defaultProfile) {
-+        setProfileName(defaultProfile.key);
-+        setProfileKey(defaultProfile.key);
-+        setWeights((current) => ({
-+          dimensionA: defaultProfile.sliders.roleScope,
-+          dimensionB: defaultProfile.sliders.domainFit,
-+          dimensionC: defaultProfile.sliders.platformFit,
-+          dimensionD: current.dimensionD,
-+          dimensionE: current.dimensionE,
-+        }));
-+
-+        // Persist reverting to default so the removed profile does not reload.
-+        await saveCalibration({
-+          profileNameOverride: defaultProfile.key,
-+          weightsOverride: {
-+            dimensionA: defaultProfile.sliders.roleScope,
-+            dimensionB: defaultProfile.sliders.domainFit,
-+            dimensionC: defaultProfile.sliders.platformFit,
-+            dimensionD: weights.dimensionD,
-+            dimensionE: weights.dimensionE,
-+          },
-+        });
-+      }
-+    }
-+
-+    setStatus("Custom profile removed.");
-+  };
-+
-+  const saveCalibration = async ({
-+    profileNameOverride,
-+    weightsOverride,
-+  }: {
-+    profileNameOverride?: string;
-+    weightsOverride?: CalibrationWeights;
-+  } = {}) => {
-     setIsSaving(true);
-     setStatus(null);
+         setJobs(data);
+ 
+         if (data.length === 0) {
+           setJobId("");
+           return;
+         }
+ 
+         setJobId((prev) => {
+@@ -292,62 +306,75 @@ export default function AnalyzePage() {
  
      try {
-+      const trimmedName = profileNameOverride ?? (profileName.trim() || profile.label || profile.key);
-+      setProfileName(trimmedName);
-+      const nextProfileKey: ProfileKey = PROFILES.some((p) => p.key === trimmedName)
-+        ? (trimmedName as BuiltInProfileKey)
-+        : trimmedName;
-+      setProfileKey(nextProfileKey);
+       let resolvedJobId = jobId;
+ 
+       if (!hasSelectedJob && hasJobDescription) {
+         const createResponse = await fetch("/api/jobs", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ rawDescription: jobDescription }),
+         });
+ 
+         if (!createResponse.ok) {
+           const message = await createResponse.text();
+           throw new Error(message || "Unable to save this job description.");
+         }
+ 
+         const created = (await createResponse.json()) as { id?: string };
+         if (!created?.id) {
+           throw new Error("Job creation response was incomplete.");
+         }
+ 
+         resolvedJobId = created.id;
+         setJobId(created.id);
+       }
+ 
+-      const response = await fetch("/api/analyze", {
++      if (!baselineVersionId) {
++        throw new Error("A baseline version is required to run Analyze.");
++      }
 +
-+      const weightsToSave = weightsOverride ?? weights;
++      const requestJob: Record<string, unknown> = hasSelectedJob
++        ? { id: resolvedJobId }
++        : { raw_jd_text: jobDescription };
 +
-       const response = await fetch("/api/calibration", {
++      const response = await fetch("/api/fit-scores", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({
--          profileName: profileName.trim() || profile.key,
--          weights,
-+          profileName: trimmedName,
-+          weights: weightsToSave,
-         }),
+-        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
++        body: JSON.stringify({
++          baseline_version_id: baselineVersionId,
++          job: requestJob,
++        }),
        });
  
        if (!response.ok) {
-         setStatus("Unable to save calibration.");
-         return;
+         const message = await response.text();
+         throw new Error(message || "Unable to analyze this role right now.");
        }
  
-+      if (!PROFILES.some((p) => p.key === trimmedName)) {
-+        addOrUpdateCustomProfile(trimmedName, weights);
-+      }
+-      const data = (await response.json()) as AnalysisResult;
++      const raw = await response.json();
++      const data = normalizeAnalysisResult(raw);
 +
-       setStatus("Calibration saved.");
-     } catch (error) {
-       console.error("Failed to save calibration", error);
-       setStatus("Failed to save calibration.");
+       setResult(data);
+ 
+       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+       saveLastAnalysis(payload);
+ 
+       if (data.jobId) {
+         router.push(`/results?jobId=${data.jobId}`);
+       }
+     } catch (e) {
+       const message = e instanceof Error ? e.message : "Unexpected error";
+       setError(message);
+       setResult(null);
      } finally {
-       setIsSaving(false);
+       setLoading(false);
      }
    };
  
-   return (
-     <InstrumentShell
-       kicker="Signal configuration"
-       title="Calibrate"
-       subtitle="Define how the analyzer should interpret and prioritize different signals."
-     >
-       <div style={ttrLayout.panelsRow}>
-         <section style={{ ...basePanelStyle, flex: 1.05 }}>
-           <div
-             style={{
-               display: "flex",
-               alignItems: "center",
-               justifyContent: "space-between",
-               gap: 12,
-             }}
-           >
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-               <span style={ttrTypography.subtleLabel}>Calibration</span>
-               <h2 style={ttrTypography.h2}>Profiles and weighting</h2>
-             </div>
-           </div>
+   const scoreLabel = fitLabel(result?.score ?? null);
+   const quality = signalQuality(result?.score ?? null);
  
-           <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
-             <div>
-               <label style={ttrComponents.fieldLabel} htmlFor="cal-profile">
-                 Calibration profile
-               </label>
- 
--              <select
--                id="cal-profile"
--                value={profileKey}
--                onChange={(e) => applyProfile(e.target.value as ProfileKey)}
--                style={ttrComponents.input}
--              >
--                {PROFILES.map((p) => (
--                  <option key={p.key} value={p.key}>
--                    {p.label}
--                  </option>
--                ))}
--                {profileKey === "custom" && (
--                  <option value="custom">Custom profile</option>
-+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-+                <select
-+                  id="cal-profile"
-+                  value={profileKey}
-+                  onChange={(e) => applyProfile(e.target.value as ProfileKey)}
-+                  style={{ ...ttrComponents.input, flex: 1 }}
-+                >
-+                  {availableProfiles.map((p) => (
-+                    <option key={p.key} value={p.key}>
-+                      {p.label}
-+                    </option>
-+                  ))}
-+                </select>
-+
-+                {!PROFILES.some((p) => p.key === profileKey) && (
-+                  <button
-+                    style={{ ...ttrComponents.quietButton, whiteSpace: "nowrap" }}
-+                    onClick={() => removeCustomProfile(profileKey)}
-+                    disabled={isSaving}
-+                  >
-+                    Delete
-+                  </button>
-                 )}
--              </select>
-+              </div>
- 
-               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                 {profile.description}
-               </p>
-             </div>
- 
-             <div style={{ display: "grid", gap: 12 }}>
-               <div>
-                 <label style={ttrComponents.fieldLabel}>Role scope weighting</label>
-                 <input
-                   type="range"
-                   min={0}
-                   max={100}
-                   value={weights.dimensionA}
-                   onChange={(e) =>
-                     setWeights((current) => ({
-                       ...current,
-                       dimensionA: Number(e.target.value),
-                     }))
-                   }
-                   style={{ width: "100%" }}
-                 />
-                 <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Intended to influence how strongly level, ownership, and scope alignment affect scoring.
-                 </p>
-@@ -325,51 +459,51 @@ export default function CalibratePage() {
-             <div
-               style={{
-                 borderRadius: 12,
-                 border: "1px solid rgba(255,255,255,0.08)",
-                 background: "rgba(255,255,255,0.04)",
-                 padding: "10px 12px",
-                 display: "flex",
-                 alignItems: "center",
-                 justifyContent: "space-between",
-                 gap: 12,
-                 flexWrap: "wrap",
-               }}
-             >
-               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                 <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
-                   Save calibration
-                 </div>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Persist the selected profile and weights for future analysis runs.
-                 </div>
-               </div>
- 
-               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                 <button
-                   style={ttrComponents.primaryButton}
--                  onClick={saveCalibration}
-+                  onClick={() => saveCalibration()}
-                   disabled={isSaving}
-                 >
-                   {isSaving ? "Saving..." : "Save calibration"}
-                 </button>
-                 <Link href="/analyze" style={ttrComponents.quietButton}>
-                   Back to Analyze
-                 </Link>
-               </div>
-             </div>
- 
-             {status && (
-               <div style={isErrorStatus ? ttrComponents.dangerBox : ttrComponents.successBox}>
-                 {status}
+   const pillColor =
+     apiStatus === "online"
+       ? "rgba(74, 222, 128, 0.15)"
+       : apiStatus === "offline"
+         ? "rgba(248, 113, 113, 0.18)"
+@@ -778,28 +805,25 @@ export default function AnalyzePage() {
+                   <pre
+                     style={{
+                       margin: 0,
+                       marginTop: 6,
+                       padding: 12,
+                       borderRadius: 10,
+                       background: "rgba(0,0,0,0.35)",
+                       border: "1px solid rgba(255,255,255,0.05)",
+                       color: "#e2e8f0",
+                       fontSize: 12,
+                       whiteSpace: "pre-wrap",
+                       wordBreak: "break-word",
+                     }}
+                   >
+                     {JSON.stringify(result, null, 2)}
+                   </pre>
+                 ) : null}
                </div>
              )}
            </div>
          </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
+-
+-
+-
+diff --git a/apps/web/app/api/fit-scores/route.ts b/apps/web/app/api/fit-scores/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cab8b77e841291859fba087156ab3a7d57fe39c3
+--- /dev/null
++++ b/apps/web/app/api/fit-scores/route.ts
+@@ -0,0 +1,31 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++
++export const runtime = "nodejs";
++
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/fit-scores`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
+index e177f47e6cb66d3790513d8f2e279ce13dbb512b..db588b435adee5a9bc6cae8cc9560e40002d8efb 100644
+--- a/apps/web/app/results/page.tsx
++++ b/apps/web/app/results/page.tsx
+@@ -1,71 +1,72 @@
+ // apps/web/app/results/page.tsx
+ "use client";
  
-         <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
-           <div
-             style={{
-               position: "absolute",
-               inset: 0,
-               background:
-                 "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
+ import type { CSSProperties } from "react";
+ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+ import Link from "next/link";
+ import { useRouter, useSearchParams } from "next/navigation";
+ 
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
++import { normalizeAnalysisResult } from "../lib/session";
+ 
+ const STORAGE_KEY = "ttr:lastAnalysis";
+ 
+ function fitLabel(score: number | null) {
+   if (score === null) return "";
+   if (score >= 90) return "Strong fit";
+   if (score >= 75) return "Solid fit";
+   if (score >= 60) return "Mixed fit";
+   return "Weak fit";
+ }
+ 
+ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string } | null {
+   try {
+     const parsed = JSON.parse(raw) as unknown;
+ 
+     // New format: { result, savedAt }
+     if (
+       parsed &&
+       typeof parsed === "object" &&
+       "result" in parsed &&
+       "savedAt" in parsed &&
+       typeof (parsed as any).savedAt === "string"
+     ) {
+       const payload = parsed as StoredPayload;
+       if (
+         payload?.result &&
+         (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
+       ) {
+-        return { result: payload.result, savedAt: payload.savedAt };
++        return { result: normalizeAnalysisResult(payload.result), savedAt: payload.savedAt };
+       }
+     }
+ 
+     // Old format: AnalysisResult directly
+     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
+-      return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
++      return { result: normalizeAnalysisResult(parsed as AnalysisResult), savedAt: new Date().toISOString() };
+     }
+ 
+     return null;
+   } catch {
+     return null;
+   }
+ }
+ 
+ type GapDetail = {
+   label?: string;
+   domain?: string;
+   confidence?: number;
+   jdExcerpt?: string;
+   baselineExcerpt?: string;
+ };
+ 
+ function isGapDetail(gap: unknown): gap is GapDetail {
+   return (
+     typeof gap === "object" &&
+     gap !== null &&
+     ("label" in gap || "domain" in gap || "confidence" in gap || "jdExcerpt" in gap || "baselineExcerpt" in gap)
+   );
+ }
+ 
+ function formatConfidence(confidence: number) {
+@@ -177,51 +178,52 @@ function ResultsContent() {
+       const parsed = safeParseStored(raw);
+       setStored(parsed);
+     } catch {
+       setStored(null);
+     }
+   }, []);
+ 
+   useEffect(() => {
+     const jobId = searchParams.get("jobId") ?? stored?.result?.jobId;
+     if (!jobId || latestJobIdRef.current === jobId) return;
+ 
+     latestJobIdRef.current = jobId;
+     let cancelled = false;
+ 
+     const loadLatest = async () => {
+       setLatestLoading(true);
+       setLatestError(null);
+ 
+       try {
+         const response = await fetch(`/api/analysis/job/${jobId}/latest`, { cache: "no-store" });
+         if (!response.ok) {
+           const payload = await response.json().catch(() => null);
+           const message = payload?.error ?? "Unable to refresh the latest analysis.";
+           throw new Error(message);
+         }
+-        const data = (await response.json()) as AnalysisResult;
++        const raw = (await response.json()) as AnalysisResult;
++        const data = normalizeAnalysisResult(raw);
+         if (cancelled) return;
+         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+         setStored(payload);
+       } catch (error) {
+         if (cancelled) return;
+         setLatestError(error instanceof Error ? error.message : "Unable to refresh the latest analysis.");
+       } finally {
+         if (!cancelled) setLatestLoading(false);
+       }
+     };
+ 
+     loadLatest();
+     return () => {
+       cancelled = true;
+     };
+   }, [searchParams, stored?.result?.jobId]);
+ 
+   const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
+   const label = fitLabel(score);
+   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
+ 
+   const hasResult = score !== null;
+   const baselineId = stored?.result?.baselineId ?? null;
+   const verdict = stored?.result?.verdict ?? null;
+diff --git a/apps/web/lib/baselines.ts b/apps/web/lib/baselines.ts
+index a0c93d39023de9a9327188a4fc3c45b268c0005e..e797031fa5d66f7d513adbf611c3cd85f152ec77 100644
+--- a/apps/web/lib/baselines.ts
++++ b/apps/web/lib/baselines.ts
+@@ -1,35 +1,45 @@
+ export type BaselineSectionType =
+   | "RAW"
+   | "SUMMARY"
+   | "EXPERIENCE"
+   | "PROJECT"
+   | "SKILLS"
+   | "EDUCATION"
+   | "OTHER";
+ 
+ export type BaselineIncludePolicy = "always" | "optional" | "never";
+ 
+ export interface BaselineSectionDto {
+   id: string;
+   baselineId: string;
+   sectionType: BaselineSectionType;
+   title: string | null;
+   content: string;
+   includePolicy: BaselineIncludePolicy;
+   order: number;
+   createdAt: string;
+   updatedAt: string;
+ }
+ 
++export interface BaselineVersionDto {
++  id: string;
++  baselineId: string;
++  versionNumber: number;
++  fileHash: string | null;
++  storagePath: string;
++  createdAt: string;
++}
++
+ export interface BaselineDto {
+   id: string;
+   userId: string;
+   version: number;
+   originalFilename: string;
+   mimeType: string;
+   storagePath: string;
+   hash: string | null;
+   createdAt: string;
+   updatedAt: string;
+   sections?: BaselineSectionDto[];
++  versions?: BaselineVersionDto[];
+ }
+diff --git a/apps/web/lib/session.ts b/apps/web/lib/session.ts
+index c1867c2c79949dc2f38131ebab88db9756df7f27..27cd091c0f76dcd6781e2ff42a2ad4ed27d4e2bb 100644
+--- a/apps/web/lib/session.ts
++++ b/apps/web/lib/session.ts
+@@ -1,39 +1,110 @@
+ export type AnalysisResult = {
+   ok?: boolean;
+   assessmentId?: string;
+   jobId?: string;
+   baselineId?: string;
+   baselineVersion?: number | null;
++  fit_score?: number;
++  overall_score?: number;
+   overallScore?: number;
+   score: number;
+   verdict?: "APPLY" | "CONSIDER" | "SKIP";
++  breakdown?: {
++    experience_alignment: number;
++    leadership_level: number;
++    technical_platform_fit: number;
++    industry_context: number;
++    strategic_vs_tactical: number;
++  };
+   dimensionScores?: {
+     experienceAlignment: number;
+     leadershipLevel: number;
+     technicalPlatformFit: number;
+     industryContext: number;
+     strategicTacticalFit: number;
+   };
+   summary?: string;
+   strengths?: string[];
+   gaps?: string[];
+   complianceFlags?:
+     | string[]
+     | {
+         [key: string]: string | number | boolean | null | undefined;
+       };
++  compliance_flags?: Array<{ code: string; message?: string | null }>;
+   recommendedActions?: string[];
+   debug?: unknown;
+ };
+ 
+ export type StoredPayload = {
+   result: AnalysisResult;
+   savedAt: string;
+ };
+ 
+ const STORAGE_KEY = "ttr:lastAnalysis";
+ 
+ export async function saveLastAnalysis(payload: StoredPayload) {
+   if (typeof window === "undefined") return;
+   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+ }
++
++export function normalizeAnalysisResult(raw: any): AnalysisResult {
++  const fitScore =
++    raw?.score ??
++    raw?.overallScore ??
++    raw?.overall_score ??
++    raw?.fit_score ??
++    null;
++
++  const breakdown =
++    raw?.breakdown && typeof raw.breakdown === "object"
++      ? raw.breakdown
++      : undefined;
++
++  const mappedDimensions =
++    raw?.dimensionScores ??
++    (breakdown
++      ? {
++          experienceAlignment: breakdown.experience_alignment,
++          leadershipLevel: breakdown.leadership_level,
++          technicalPlatformFit: breakdown.technical_platform_fit,
++          industryContext: breakdown.industry_context,
++          strategicTacticalFit: breakdown.strategic_vs_tactical,
++        }
++      : undefined);
++
++  const complianceFlags =
++    raw?.complianceFlags ??
++    raw?.compliance_flags?.map((flag: { code: string; message?: string }) =>
++      flag?.code ? flag.code : flag,
++    ) ??
++    undefined;
++
++  const verdict = raw?.verdict
++    ? String(raw.verdict).toUpperCase()
++    : raw?.verdict;
++
++  return {
++    ...raw,
++    verdict,
++    breakdown,
++    dimensionScores: mappedDimensions,
++    complianceFlags,
++    fit_score: raw?.fit_score,
++    overall_score: raw?.overall_score,
++    overallScore:
++      raw?.overallScore ??
++      raw?.overall_score ??
++      raw?.fit_score ??
++      raw?.score ??
++      undefined,
++    score:
++      typeof fitScore === "number"
++        ? fitScore
++        : typeof raw?.fit_score === "number"
++          ? raw.fit_score
++          : 0,
++    strengths: raw?.strengths ?? [],
++    gaps: raw?.gaps ?? [],
++  };
++}

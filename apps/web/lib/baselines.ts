@@ -21,6 +21,15 @@ export interface BaselineSectionDto {
   updatedAt: string;
 }
 
+export interface BaselineVersionDto {
+  id: string;
+  baselineId: string;
+  versionNumber: number;
+  fileHash: string | null;
+  storagePath: string;
+  createdAt: string;
+}
+
 export interface BaselineDto {
   id: string;
   userId: string;
@@ -32,4 +41,5 @@ export interface BaselineDto {
   createdAt: string;
   updatedAt: string;
   sections?: BaselineSectionDto[];
+  versions?: BaselineVersionDto[];
 }

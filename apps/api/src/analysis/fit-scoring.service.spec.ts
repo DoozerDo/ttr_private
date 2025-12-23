@@ -126,4 +126,26 @@ describe('FitScoringService', () => {
 
     expect(result.dimensionScores.leadershipLevel).toBeLessThan(60);
   });
+
+  it('returns a complete response shape for compatibility scoring', () => {
+    const result = service.score(buildInput());
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        overallScore: expect.any(Number),
+        verdict: expect.any(String),
+        dimensionScores: expect.objectContaining({
+          experienceAlignment: expect.any(Number),
+          leadershipLevel: expect.any(Number),
+          technicalPlatformFit: expect.any(Number),
+          industryContext: expect.any(Number),
+          strategicTacticalFit: expect.any(Number),
+        }),
+        strengths: expect.any(Array),
+        gaps: expect.any(Array),
+        complianceFlags: expect.any(Array),
+        summary: expect.any(String),
+      }),
+    );
+  });
 });
