@@ -15,7 +15,10 @@ import { Job } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
-import { FitScoringService } from './fit-scoring.service';
+import {
+  DimensionWeightOverrides,
+  FitScoringService,
+} from './fit-scoring.service';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -100,7 +103,11 @@ export class AnalysisService {
     return `Matched ${strengths.length} of ${total} key terms from the job description.`;
   }
 
-  private buildInputsHash(job: Job, baseline: Baseline) {
+  private buildInputsHash(
+    job: Job,
+    baseline: Baseline,
+    dimensionWeights: DimensionWeightOverrides,
+  ) {
     const sectionPayload =
       baseline.sections?.map((section) => ({
         type: section.sectionType ?? section.type,
@@ -122,6 +129,7 @@ export class AnalysisService {
         version: baseline.version ?? null,
         sections: sectionPayload,
       },
+      calibration: dimensionWeights,
     };
 
     return createHash('sha256')
@@ -170,6 +178,16 @@ export class AnalysisService {
     await this.usersRepository.save(user);
 
     return { ok: true, profileName, weights: payload.weights };
+  }
+
+  private mapCalibrationToDimensionWeights(weights?: CalibrationWeights | null) {
+    return {
+      experienceAlignment: weights?.dimensionA ?? 1,
+      technicalPlatformFit: weights?.dimensionB ?? 1,
+      leadershipLevel: weights?.dimensionC ?? 1,
+      strategicTacticalFit: weights?.dimensionD ?? 1,
+      industryContext: weights?.dimensionE ?? 1,
+    } satisfies DimensionWeightOverrides;
   }
 
   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
@@ -292,7 +310,11 @@ export class AnalysisService {
         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
       ) ?? [];
 
-    const inputsHash = this.buildInputsHash(job, baseline);
+    const calibration = await this.getCalibration(userId);
+
+    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
+
+    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
 
     const existing = await this.fitAssessmentRepository.findOne({
       where: { userId, jobId, baselineId, inputsHash },
@@ -322,23 +344,26 @@ export class AnalysisService {
       };
     }
 
-    const scoring = this.fitScoringService.score({
-      job: {
-        rawDescription: job.rawDescription,
-        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-        normalizedRequirements: job.normalizedRequirements ?? [],
-        title: job.title ?? null,
-        company: job.company ?? null,
-        sourceUrl: job.sourceUrl ?? null,
+    const scoring = this.fitScoringService.score(
+      {
+        job: {
+          rawDescription: job.rawDescription,
+          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+          normalizedRequirements: job.normalizedRequirements ?? [],
+          title: job.title ?? null,
+          company: job.company ?? null,
+          sourceUrl: job.sourceUrl ?? null,
+        },
+        baseline: {
+          version: baseline.version ?? null,
+          sections: includedSections.map((section) => ({
+            type: section.sectionType ?? section.type,
+            content: section.content,
+          })),
+        },
       },
-      baseline: {
-        version: baseline.version ?? null,
-        sections: includedSections.map((section) => ({
-          type: section.sectionType ?? section.type,
-          content: section.content,
-        })),
-      },
-    });
+      dimensionWeights,
+    );
 
     const assessment = this.fitAssessmentRepository.create({
       userId,
@@ -407,3 +432,7 @@ export class AnalysisService {
     };
   }
 }
+
+// VERIFY:
+// - Calibration weights are fetched per user and default to 1.0 for missing dimensions.
+// - Inputs hash incorporates calibration to avoid stale assessments.

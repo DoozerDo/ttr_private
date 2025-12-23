@@ -1,597 +1,545 @@
-diff --git a/apps/web/app/api/calibration/route.ts b/apps/web/app/api/calibration/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c7760750f801339990445503fd240fe835146571
---- /dev/null
-+++ b/apps/web/app/api/calibration/route.ts
-@@ -0,0 +1,58 @@
-+import { NextRequest, NextResponse } from "next/server";
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+index e195a606e2102470a1e02fea1af3c72ac50391c5..2107ccdc7e444e30849bb9c23543a8bddb472a72 100644
+--- a/apps/api/src/analysis/analysis.service.ts
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -1,43 +1,46 @@
+ import {
+   BadRequestException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash } from 'crypto';
+ import { Repository } from 'typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
+ import { Job } from '../jobs/job.entity';
+ import { CalibrationWeights, User } from '../users/user.entity';
+ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
+ import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+-import { FitScoringService } from './fit-scoring.service';
++import {
++  DimensionWeightOverrides,
++  FitScoringService,
++} from './fit-scoring.service';
+ 
+ export type AnalysisRequest = {
+   baselineId: string;
+   jobId?: string;
+   jobDescription?: string;
+ };
+ 
+ export type AnalysisResult = {
+   ok: boolean;
+   baselineId: string;
+   score: number;
+   strengths: string[];
+   gaps: string[];
+   summary: string;
+ };
+ 
+ @Injectable()
+ export class AnalysisService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+@@ -78,122 +81,137 @@ export class AnalysisService {
+   }
+ 
+   private sortByFrequency(values: Map<string, number>, items: string[]) {
+     return [...items].sort((a, b) => {
+       const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
+       if (delta !== 0) return delta;
+       return a.localeCompare(b);
+     });
+   }
+ 
+   private buildBaselineText(sections: BaselineSection[]) {
+     return sections
+       .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
+       .map((section) => section.content)
+       .join('\n');
+   }
+ 
+   private buildSummaryFromTerms(strengths: string[], gaps: string[]) {
+     if (!strengths.length && !gaps.length) {
+       return 'No keywords found in the job description.';
+     }
+     const total = strengths.length + gaps.length;
+     return `Matched ${strengths.length} of ${total} key terms from the job description.`;
+   }
+ 
+-  private buildInputsHash(job: Job, baseline: Baseline) {
++  private buildInputsHash(
++    job: Job,
++    baseline: Baseline,
++    dimensionWeights: DimensionWeightOverrides,
++  ) {
+     const sectionPayload =
+       baseline.sections?.map((section) => ({
+         type: section.sectionType ?? section.type,
+         content: section.content,
+         includePolicy: section.includePolicy,
+         order: section.order,
+       })) ?? [];
+ 
+     const payload = {
+       job: {
+         rawDescription: job.rawDescription,
+         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+         normalizedRequirements: job.normalizedRequirements ?? [],
+         title: job.title ?? null,
+         company: job.company ?? null,
+       },
+       baseline: {
+         id: baseline.id,
+         version: baseline.version ?? null,
+         sections: sectionPayload,
+       },
++      calibration: dimensionWeights,
+     };
+ 
+     return createHash('sha256')
+       .update(JSON.stringify(payload))
+       .digest('hex');
+   }
+ 
+   async getCalibration(userId: string) {
+     const user = await this.usersRepository.findOne({ where: { id: userId } });
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+     const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
+     const weights =
+       user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
+ 
+     return { ok: true, profileName, weights };
+   }
+ 
+   async saveCalibration(
+     userId: string,
+     payload: { profileName?: string; weights?: CalibrationWeights | null },
+   ) {
+     const profileName = payload.profileName?.trim();
+ 
+     if (!profileName) {
+       throw new BadRequestException('profileName is required');
+     }
+ 
+     // VERIFY: Validate calibration weight ranges with data science.
+     if (!payload.weights) {
+       throw new BadRequestException('weights are required');
+     }
+ 
+     const user = await this.usersRepository.findOne({ where: { id: userId } });
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+     user.calibrationProfileName = profileName;
+     user.calibrationWeights = payload.weights;
+ 
+     await this.usersRepository.save(user);
+ 
+     return { ok: true, profileName, weights: payload.weights };
+   }
+ 
++  private mapCalibrationToDimensionWeights(weights?: CalibrationWeights | null) {
++    return {
++      experienceAlignment: weights?.dimensionA ?? 1,
++      technicalPlatformFit: weights?.dimensionB ?? 1,
++      leadershipLevel: weights?.dimensionC ?? 1,
++      strategicTacticalFit: weights?.dimensionD ?? 1,
++      industryContext: weights?.dimensionE ?? 1,
++    } satisfies DimensionWeightOverrides;
++  }
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
+     const baselineId = payload.baselineId?.trim();
+     if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
+     }
+ 
+     const hasJobId = Boolean(payload.jobId?.trim());
+     const hasJobDescription = Boolean(payload.jobDescription?.trim());
+ 
+     if (!hasJobId && !hasJobDescription) {
+       throw new BadRequestException('jobId or jobDescription is required');
+     }
+ 
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     if (!baseline.sections?.length) {
+       baseline.sections = await this.baselineSectionRepository.find({
+@@ -270,97 +288,104 @@ export class AnalysisService {
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     if (!baseline.sections?.length) {
+       baseline.sections = await this.baselineSectionRepository.find({
+         where: { baselineId: baseline.id },
+         order: { order: 'ASC' },
+       });
+     }
+ 
+     const job = await this.jobRepository.findOne({
+       where: { id: jobId, userId },
+     });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     const includedSections =
+       baseline.sections?.filter(
+         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+       ) ?? [];
+ 
+-    const inputsHash = this.buildInputsHash(job, baseline);
++    const calibration = await this.getCalibration(userId);
 +
-+export async function GET(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
++    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
 +
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
++    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
+ 
+     const existing = await this.fitAssessmentRepository.findOne({
+       where: { userId, jobId, baselineId, inputsHash },
+       order: { createdAt: 'DESC' },
+     });
+ 
+     if (existing) {
+       const summary = this.buildSummaryFromTerms(
+         existing.strengths ?? [],
+         existing.gaps ?? [],
+       );
+       return {
+         ok: true,
+         assessmentId: existing.id,
+         jobId: existing.jobId,
+         baselineId: existing.baselineId,
+         baselineVersion: existing.baselineVersion,
+         overallScore: existing.overallScore,
+         score: existing.overallScore,
+         verdict: existing.verdict,
+         dimensionScores: existing.dimensionScores,
+         strengths: existing.strengths,
+         gaps: existing.gaps,
+         complianceFlags: existing.complianceFlags,
+         summary,
+         createdAt: existing.createdAt,
+       };
+     }
+ 
+-    const scoring = this.fitScoringService.score({
+-      job: {
+-        rawDescription: job.rawDescription,
+-        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+-        normalizedRequirements: job.normalizedRequirements ?? [],
+-        title: job.title ?? null,
+-        company: job.company ?? null,
+-        sourceUrl: job.sourceUrl ?? null,
++    const scoring = this.fitScoringService.score(
++      {
++        job: {
++          rawDescription: job.rawDescription,
++          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
++          normalizedRequirements: job.normalizedRequirements ?? [],
++          title: job.title ?? null,
++          company: job.company ?? null,
++          sourceUrl: job.sourceUrl ?? null,
++        },
++        baseline: {
++          version: baseline.version ?? null,
++          sections: includedSections.map((section) => ({
++            type: section.sectionType ?? section.type,
++            content: section.content,
++          })),
++        },
+       },
+-      baseline: {
+-        version: baseline.version ?? null,
+-        sections: includedSections.map((section) => ({
+-          type: section.sectionType ?? section.type,
+-          content: section.content,
+-        })),
+-      },
+-    });
++      dimensionWeights,
 +    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const response = await fetch(`${baseUrl}/calibration`, {
-+    method: "GET",
-+    cache: "no-store",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+    },
-+  });
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function POST(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/calibration`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
-+}
-diff --git a/apps/web/app/calibrate/page.tsx b/apps/web/app/calibrate/page.tsx
-index d39d30e51c601f78006a34839fbdcc95e20404a1..dd97f192b50e38d1d1b54c657223e6a18adcea80 100644
---- a/apps/web/app/calibrate/page.tsx
-+++ b/apps/web/app/calibrate/page.tsx
-@@ -1,336 +1,448 @@
- // apps/web/app/calibrate/page.tsx
- "use client";
  
- import type { CSSProperties } from "react";
--import { useMemo, useState } from "react";
-+import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
+     const assessment = this.fitAssessmentRepository.create({
+       userId,
+       jobId,
+       baselineId: baseline.id,
+       baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
+       overallScore: scoring.overallScore,
+       verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
+       dimensionScores: scoring.dimensionScores,
+       strengths: scoring.strengths,
+       gaps: scoring.gaps,
+       complianceFlags: scoring.complianceFlags,
+       inputsHash,
+     });
  
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+     const saved = await this.fitAssessmentRepository.save(assessment);
  
--type ProfileKey = "default" | "support-ops" | "leadership" | "strict";
-+type ProfileKey = "default" | "support-ops" | "leadership" | "strict" | "custom";
+     return {
+       ok: true,
+       assessmentId: saved.id,
+       jobId: saved.jobId,
+       baselineId: saved.baselineId,
+       baselineVersion: saved.baselineVersion,
+       overallScore: saved.overallScore,
+       score: saved.overallScore,
+@@ -385,25 +410,29 @@ export class AnalysisService {
+     }
+ 
+     const summary = this.buildSummaryFromTerms(
+       assessment.strengths ?? [],
+       assessment.gaps ?? [],
+     );
+ 
+     return {
+       ok: true,
+       assessmentId: assessment.id,
+       jobId: assessment.jobId,
+       baselineId: assessment.baselineId,
+       baselineVersion: assessment.baselineVersion,
+       overallScore: assessment.overallScore,
+       score: assessment.overallScore,
+       verdict: assessment.verdict,
+       dimensionScores: assessment.dimensionScores,
+       strengths: assessment.strengths,
+       gaps: assessment.gaps,
+       complianceFlags: assessment.complianceFlags,
+       summary,
+       createdAt: assessment.createdAt,
+     };
+   }
+ }
 +
-+type CalibrationWeights = {
-+  dimensionA: number;
-+  dimensionB: number;
-+  dimensionC: number;
-+  dimensionD: number;
-+  dimensionE: number;
-+};
++// VERIFY:
++// - Calibration weights are fetched per user and default to 1.0 for missing dimensions.
++// - Inputs hash incorporates calibration to avoid stale assessments.
+diff --git a/apps/api/src/analysis/fit-scoring.service.ts b/apps/api/src/analysis/fit-scoring.service.ts
+index 1137a1798e9213905932c085af735726479c3631..b2ec981e117d76333c00db43950ba65e8748bb5e 100644
+--- a/apps/api/src/analysis/fit-scoring.service.ts
++++ b/apps/api/src/analysis/fit-scoring.service.ts
+@@ -1,43 +1,45 @@
+ import { Injectable } from '@nestjs/common';
+ import { FitAssessmentVerdict, FitDimensionScores } from './fit-assessment.entity';
  
- type Profile = {
-   key: ProfileKey;
-   label: string;
-   description: string;
-   sliders: {
-     roleScope: number;
-     domainFit: number;
-     platformFit: number;
+ export type FitScoringInput = {
+   job: {
+     title?: string | null;
+     company?: string | null;
+     rawDescription: string;
+     normalizedResponsibilities: string[];
+     normalizedRequirements: string[];
+     sourceUrl?: string | null;
+   };
+   baseline: {
+     version?: number | null;
+     sections: Array<{ type?: string; content: string }>;
    };
  };
  
- const PROFILES: Profile[] = [
-   {
-     key: "default",
-     label: "Default",
-     description: "Balanced weighting intended for most role evaluations.",
-     sliders: { roleScope: 65, domainFit: 55, platformFit: 45 },
-   },
-   {
-     key: "support-ops",
-     label: "Support Operations",
-     description: "Prioritizes operational execution, tooling, and process rigor.",
-     sliders: { roleScope: 60, domainFit: 50, platformFit: 65 },
-   },
-   {
-     key: "leadership",
-     label: "Leadership Heavy",
-     description: "Weights scope, cross-functional leadership, and organizational impact more strongly.",
-     sliders: { roleScope: 75, domainFit: 55, platformFit: 40 },
-   },
-   {
-     key: "strict",
-     label: "Strict Match",
-     description: "Applies more conservative scoring with higher alignment requirements.",
-     sliders: { roleScope: 55, domainFit: 70, platformFit: 70 },
-   },
- ];
++export type DimensionWeightOverrides = Partial<Record<keyof FitDimensionScores, number>>;
++
+ export type FitScoringResult = {
+   overallScore: number;
+   verdict: FitAssessmentVerdict;
+   dimensionScores: FitDimensionScores;
+   strengths: string[];
+   gaps: string[];
+   complianceFlags: string[];
+   summary: string;
+ };
  
- export default function CalibratePage() {
-   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+ const STOPWORDS = new Set([
+   'a',
+   'an',
+   'and',
+   'are',
+   'as',
+   'at',
+   'be',
+   'by',
+   'for',
+   'from',
+   'has',
+   'have',
+   'in',
+   'is',
+@@ -436,98 +438,141 @@ const computeComplianceFlags = (
+   if (jobText.trim().length < MIN_TEXT_LENGTH) {
+     flags.push('Job description too short for reliable scoring');
+   }
  
-   const [profileKey, setProfileKey] = useState<ProfileKey>("default");
--  const [applyToAnalyze, setApplyToAnalyze] = useState(false);
-+  const [profileName, setProfileName] = useState("default");
-+  const [weights, setWeights] = useState<CalibrationWeights>({
-+    dimensionA: PROFILES[0].sliders.roleScope,
-+    dimensionB: PROFILES[0].sliders.domainFit,
-+    dimensionC: PROFILES[0].sliders.platformFit,
-+    dimensionD: 50,
-+    dimensionE: 50,
-+  });
-+  const [status, setStatus] = useState<string | null>(null);
-+  const [isSaving, setIsSaving] = useState(false);
+   const normalizedJob = normalizeText(jobText);
+   const promptSignals = ['ignore previous instructions', 'system prompt', 'assistant', 'developer message'];
+   if (promptSignals.some((signal) => normalizedJob.includes(signal))) {
+     flags.push('Job description contains prompt-like content');
+   }
  
--  const profile = useMemo(
--    () => PROFILES.find((p) => p.key === profileKey) ?? PROFILES[0],
--    [profileKey],
--  );
-+  const isErrorStatus = status ? /fail|unable|incomplete/i.test(status) : false;
-+
-+  const profile = useMemo(() => {
-+    if (profileKey === "custom") {
-+      return {
-+        key: "custom",
-+        label: profileName,
-+        description: "Loaded calibration profile.",
-+        sliders: {
-+          // VERIFY: Align custom profile slider mapping with backend dimensions.
-+          roleScope: weights.dimensionA,
-+          domainFit: weights.dimensionB,
-+          platformFit: weights.dimensionC,
-+        },
-+      } satisfies Profile;
-+    }
-+
-+    return PROFILES.find((p) => p.key === profileKey) ?? PROFILES[0];
-+  }, [profileKey, profileName, weights]);
-+
-+  useEffect(() => {
-+    const fetchCalibration = async () => {
-+      try {
-+        const response = await fetch("/api/calibration", { cache: "no-store" });
-+
-+        if (!response.ok) {
-+          setStatus("Unable to load calibration.");
-+          return;
-+        }
-+
-+        const data = (await response.json()) as {
-+          ok?: boolean;
-+          profileName?: string;
-+          weights?: CalibrationWeights;
-+        };
-+
-+        if (!data?.ok || !data.profileName || !data.weights) {
-+          setStatus("Calibration response was incomplete.");
-+          return;
-+        }
-+
-+        setProfileName(data.profileName);
-+        setProfileKey(
-+          PROFILES.some((p) => p.key === data.profileName)
-+            ? (data.profileName as ProfileKey)
-+            : "custom",
-+        );
-+        setWeights(data.weights);
-+        setStatus(null);
-+      } catch (error) {
-+        console.error("Failed to load calibration", error);
-+        setStatus("Failed to load calibration.");
-+      }
+   if (sourceUrl && !/^https?:\/\//i.test(sourceUrl)) {
+     flags.push('Suspicious job source URL');
+   }
+ 
+   return flags;
+ };
+ 
+ const buildVerdict = (overallScore: number) => {
+   if (overallScore >= VERDICT_THRESHOLDS.APPLY) return FitAssessmentVerdict.APPLY;
+   if (overallScore >= VERDICT_THRESHOLDS.CONSIDER) return FitAssessmentVerdict.CONSIDER;
+   return FitAssessmentVerdict.SKIP;
+ };
+ 
+ @Injectable()
+ export class FitScoringService {
+-  score(input: FitScoringInput): FitScoringResult {
++  score(
++    input: FitScoringInput,
++    dimensionWeights?: DimensionWeightOverrides | null,
++  ): FitScoringResult {
+     const jobText = [
+       input.job.title ?? '',
+       input.job.company ?? '',
+       input.job.rawDescription,
+       ...input.job.normalizedResponsibilities,
+       ...input.job.normalizedRequirements,
+     ].join('\n');
+ 
+     const baselineText = input.baseline.sections.map((section) => section.content).join('\n');
+     const baselineSkillsText =
+       buildSectionText(input.baseline.sections, ['SKILLS']) || baselineText;
+     const baselineExperienceText =
+       buildSectionText(input.baseline.sections, ['EXPERIENCE', 'PROJECT', 'SUMMARY']) ||
+       baselineText;
+ 
+     const responsibilitiesText = input.job.normalizedResponsibilities.join('\n');
+     const requirementsText = input.job.normalizedRequirements.join('\n');
+ 
+     const experienceAlignment = scoreExperienceAlignment(
+       responsibilitiesText,
+       requirementsText,
+       baselineExperienceText,
+     );
+     const leadershipLevel = scoreLeadership(jobText, baselineText);
+     const technicalPlatformFit = scoreTechnicalFit(jobText, baselineSkillsText);
+     const industryContext = scoreIndustry(jobText, baselineText);
+     const strategicTacticalFit = scoreStrategicTactical(jobText, baselineExperienceText);
+ 
+     const dimensionScores: FitDimensionScores = {
+       experienceAlignment,
+       leadershipLevel,
+       technicalPlatformFit,
+       industryContext,
+       strategicTacticalFit,
+     };
+ 
++    const defaultWeights: Record<keyof FitDimensionScores, number> = {
++      experienceAlignment: 0.3,
++      technicalPlatformFit: 0.25,
++      leadershipLevel: 0.2,
++      strategicTacticalFit: 0.15,
++      industryContext: 0.1,
 +    };
 +
-+    fetchCalibration();
-+  }, []);
++    const appliedWeights: Record<keyof FitDimensionScores, number> = {
++      experienceAlignment: dimensionWeights?.experienceAlignment ?? 1,
++      technicalPlatformFit: dimensionWeights?.technicalPlatformFit ?? 1,
++      leadershipLevel: dimensionWeights?.leadershipLevel ?? 1,
++      strategicTacticalFit: dimensionWeights?.strategicTacticalFit ?? 1,
++      industryContext: dimensionWeights?.industryContext ?? 1,
++    };
 +
-+  const applyProfile = (nextKey: ProfileKey) => {
-+    setProfileKey(nextKey);
++    const weightedDefaults = (Object.keys(defaultWeights) as Array<keyof FitDimensionScores>)
++      .map((key) => ({
++        key,
++        weight: defaultWeights[key] * appliedWeights[key],
++      }))
++      .reduce(
++        (acc, { key, weight }) => {
++          acc.total += weight;
++          acc.values[key] = weight;
++          return acc;
++        },
++        { total: 0, values: {} as Record<keyof FitDimensionScores, number> },
++      );
 +
-+    if (nextKey === "custom") {
-+      return;
-+    }
++    const normalizedTotal =
++      weightedDefaults.total > 0
++        ? weightedDefaults.total
++        : (Object.values(defaultWeights).reduce((sum, value) => sum + value, 0));
 +
-+    const nextProfile = PROFILES.find((p) => p.key === nextKey);
-+
-+    if (!nextProfile) {
-+      return;
-+    }
-+
-+    setProfileName(nextProfile.key);
-+    setWeights((current) => ({
-+      dimensionA: nextProfile.sliders.roleScope,
-+      dimensionB: nextProfile.sliders.domainFit,
-+      dimensionC: nextProfile.sliders.platformFit,
-+      // VERIFY: Keep untouched dimensions aligned with prior state when applying presets.
-+      dimensionD: current.dimensionD,
-+      dimensionE: current.dimensionE,
-+    }));
-+  };
-+
-+  const saveCalibration = async () => {
-+    setIsSaving(true);
-+    setStatus(null);
-+
-+    try {
-+      const response = await fetch("/api/calibration", {
-+        method: "POST",
-+        headers: { "Content-Type": "application/json" },
-+        body: JSON.stringify({
-+          profileName: profileName.trim() || profile.key,
-+          weights,
-+        }),
-+      });
-+
-+      if (!response.ok) {
-+        setStatus("Unable to save calibration.");
-+        return;
-+      }
-+
-+      setStatus("Calibration saved.");
-+    } catch (error) {
-+      console.error("Failed to save calibration", error);
-+      setStatus("Failed to save calibration.");
-+    } finally {
-+      setIsSaving(false);
-+    }
-+  };
+     const overallScore = clampScore(
+-      experienceAlignment * 0.3 +
+-        technicalPlatformFit * 0.25 +
+-        leadershipLevel * 0.2 +
+-        strategicTacticalFit * 0.15 +
+-        industryContext * 0.1,
++      (experienceAlignment * weightedDefaults.values.experienceAlignment +
++        technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
++        leadershipLevel * weightedDefaults.values.leadershipLevel +
++        strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
++        industryContext * weightedDefaults.values.industryContext) /
++        normalizedTotal,
+     );
  
-   return (
-     <InstrumentShell
-       kicker="Signal configuration"
-       title="Calibrate"
--      subtitle="Define how the analyzer should interpret and prioritize different signals. Configuration is preview-only for now."
-+      subtitle="Define how the analyzer should interpret and prioritize different signals."
-     >
-       <div style={ttrLayout.panelsRow}>
-         <section style={{ ...basePanelStyle, flex: 1.05 }}>
-           <div
-             style={{
-               display: "flex",
-               alignItems: "center",
-               justifyContent: "space-between",
-               gap: 12,
-             }}
-           >
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-               <span style={ttrTypography.subtleLabel}>Calibration</span>
-               <h2 style={ttrTypography.h2}>Profiles and weighting</h2>
-             </div>
--
--            <div
--              style={{
--                padding: "6px 10px",
--                borderRadius: 999,
--                fontSize: 12,
--                fontWeight: 700,
--                color: "rgba(226,232,240,0.65)",
--                border: "1px dashed rgba(255,255,255,0.18)",
--                background: "rgba(255,255,255,0.04)",
--              }}
--              title="Preview only"
--            >
--              Preview mode
--            </div>
-           </div>
+     const { strengths, gaps } = buildStrengthsAndGaps(
+       requirementsText,
+       responsibilitiesText,
+       jobText,
+       baselineText,
+     );
  
-           <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
-             <div>
-               <label style={ttrComponents.fieldLabel} htmlFor="cal-profile">
-                 Calibration profile
-               </label>
+     const complianceFlags = computeComplianceFlags(
+       jobText,
+       baselineText,
+       input.job.sourceUrl,
+     );
  
-               <select
-                 id="cal-profile"
-                 value={profileKey}
--                onChange={(e) => setProfileKey(e.target.value as ProfileKey)}
-+                onChange={(e) => applyProfile(e.target.value as ProfileKey)}
-                 style={ttrComponents.input}
-               >
-                 {PROFILES.map((p) => (
-                   <option key={p.key} value={p.key}>
-                     {p.label}
-                   </option>
-                 ))}
-+                {profileKey === "custom" && (
-+                  <option value="custom">Custom profile</option>
-+                )}
-               </select>
+     return {
+       overallScore,
+       verdict: buildVerdict(overallScore),
+       dimensionScores,
+       strengths,
+       gaps,
+       complianceFlags,
+       summary: buildSummary(strengths, gaps),
+     };
+   }
  
-               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                 {profile.description}
-               </p>
-             </div>
- 
--            <div
--              style={{
--                border: "1px dashed rgba(251,191,36,0.35)",
--                borderRadius: 14,
--                padding: "14px 14px",
--                background: "rgba(255,255,255,0.03)",
--              }}
--            >
--              <p
--                style={{
--                  margin: 0,
--                  fontSize: 12,
--                  letterSpacing: 2.5,
--                  textTransform: "uppercase",
--                  color: "rgba(251,191,36,0.75)",
--                  fontWeight: 800,
--                }}
--              >
--                Staged capability
--              </p>
--              <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
--                These controls define how calibration will work. They are visible now to establish intent, but are not yet
--                active or applied to analysis.
--              </p>
--            </div>
--
-             <div style={{ display: "grid", gap: 12 }}>
-               <div>
-                 <label style={ttrComponents.fieldLabel}>Role scope weighting</label>
-                 <input
-                   type="range"
-                   min={0}
-                   max={100}
--                  value={profile.sliders.roleScope}
--                  disabled
-+                  value={weights.dimensionA}
-+                  onChange={(e) =>
-+                    setWeights((current) => ({
-+                      ...current,
-+                      dimensionA: Number(e.target.value),
-+                    }))
-+                  }
-                   style={{ width: "100%" }}
-                 />
-                 <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Intended to influence how strongly level, ownership, and scope alignment affect scoring.
-                 </p>
-               </div>
- 
-               <div>
-                 <label style={ttrComponents.fieldLabel}>Domain fit weighting</label>
-                 <input
-                   type="range"
-                   min={0}
-                   max={100}
--                  value={profile.sliders.domainFit}
--                  disabled
-+                  value={weights.dimensionB}
-+                  onChange={(e) =>
-+                    setWeights((current) => ({
-+                      ...current,
-+                      dimensionB: Number(e.target.value),
-+                    }))
-+                  }
-                   style={{ width: "100%" }}
-                 />
-                 <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Intended to weight industry, market, and problem-space familiarity.
-                 </p>
-               </div>
- 
-               <div>
-                 <label style={ttrComponents.fieldLabel}>Platform fit weighting</label>
-                 <input
-                   type="range"
-                   min={0}
-                   max={100}
--                  value={profile.sliders.platformFit}
--                  disabled
-+                  value={weights.dimensionC}
-+                  onChange={(e) =>
-+                    setWeights((current) => ({
-+                      ...current,
-+                      dimensionC: Number(e.target.value),
-+                    }))
-+                  }
-                   style={{ width: "100%" }}
-                 />
-                 <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                   Intended to reflect tooling, systems, and platform alignment.
-                 </p>
-               </div>
-             </div>
- 
-             <div
-               style={{
-                 display: "flex",
-                 alignItems: "center",
-                 justifyContent: "space-between",
-                 gap: 12,
-                 padding: "10px 12px",
-                 borderRadius: 12,
-                 border: "1px solid rgba(255,255,255,0.08)",
-                 background: "rgba(0,0,0,0.18)",
-               }}
--              title="Not active yet"
-             >
-               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                 <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
--                  Apply to Analyze
-+                  Profile name
-                 </div>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
--                  When enabled, Analyze will use this calibration profile.
-+                  Saved calibrations are applied to future Analyze runs.
-                 </div>
-               </div>
- 
-               <input
--                type="checkbox"
--                checked={applyToAnalyze}
--                onChange={() => setApplyToAnalyze((prev) => !prev)}
--                disabled
--                style={{ width: 18, height: 18 }}
--                aria-label="Apply calibration to Analyze (not active yet)"
-+                type="text"
-+                value={profileName}
-+                onChange={(e) => setProfileName(e.target.value)}
-+                style={{ ...ttrComponents.input, maxWidth: 180 }}
-+                aria-label="Calibration profile name"
-               />
-             </div>
- 
-             <div
-               style={{
-                 borderRadius: 12,
-                 border: "1px solid rgba(255,255,255,0.08)",
-                 background: "rgba(255,255,255,0.04)",
-                 padding: "10px 12px",
-                 display: "flex",
-                 alignItems: "center",
-                 justifyContent: "space-between",
-                 gap: 12,
-                 flexWrap: "wrap",
-               }}
-             >
-               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                 <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
--                  Ready to score a role
-+                  Save calibration
-                 </div>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
--                  Return to Analyze to run a fit check. Calibration will be wired in later.
-+                  Persist the selected profile and weights for future analysis runs.
-                 </div>
-               </div>
- 
--              <Link href="/analyze" style={ttrComponents.quietButton}>
--                Back to Analyze
--              </Link>
-+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-+                <button
-+                  style={ttrComponents.primaryButton}
-+                  onClick={saveCalibration}
-+                  disabled={isSaving}
-+                >
-+                  {isSaving ? "Saving..." : "Save calibration"}
-+                </button>
-+                <Link href="/analyze" style={ttrComponents.quietButton}>
-+                  Back to Analyze
-+                </Link>
-+              </div>
-             </div>
-+
-+            {status && (
-+              <div style={isErrorStatus ? ttrComponents.dangerBox : ttrComponents.successBox}>
-+                {status}
-+              </div>
-+            )}
-           </div>
-         </section>
- 
-         <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
-           <div
-             style={{
-               position: "absolute",
-               inset: 0,
-               background:
-                 "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
-               pointerEvents: "none",
-             }}
-           />
- 
-           <div
-             style={{
-               position: "relative",
-               display: "flex",
-               alignItems: "center",
-               justifyContent: "space-between",
-               gap: 12,
-             }}
-           >
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
--              <span style={ttrTypography.subtleLabel}>Preview</span>
-+              <span style={ttrTypography.subtleLabel}>Calibration</span>
-               <h2 style={ttrTypography.h2}>Impact view</h2>
-             </div>
- 
-             <div
-               style={{
-                 padding: "6px 10px",
-                 borderRadius: 999,
-                 fontSize: 12,
-                 fontWeight: 700,
-                 color: "rgba(226,232,240,0.9)",
-                 border: "1px solid rgba(255,255,255,0.1)",
-                 background: "rgba(255,255,255,0.06)",
-               }}
-             >
--              Informational
-+              Live
-             </div>
-           </div>
- 
-           <div style={{ position: "relative", marginTop: 20 }}>
-             <div
-               style={{
-                 border: "1px dashed rgba(255,255,255,0.16)",
-                 borderRadius: 14,
-                 padding: "28px 18px",
-                 background: "rgba(255,255,255,0.03)",
-               }}
-             >
-               <p
-                 style={{
-                   margin: 0,
-                   fontSize: 12,
-                   letterSpacing: 2.5,
-                   textTransform: "uppercase",
-                   color: "rgba(226,232,240,0.65)",
-                   fontWeight: 800,
-                 }}
-               >
--                Planned behavior
-+                Current weighting
-               </p>
- 
-               <p style={{ marginTop: 10, marginBottom: 0, fontSize: 14, color: "rgba(241,245,249,0.9)" }}>
--                This panel will preview how calibration changes scoring outcomes before they are applied. For now, it
--                reflects the selected profile’s intent.
-+                Saved calibration weights will be applied when running Analyze. Adjust sliders to tune emphasis areas
-+                before saving.
-               </p>
- 
-               <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap" }}>
--                <span style={ttrComponents.chip}>Role scope: {profile.sliders.roleScope}</span>
--                <span style={ttrComponents.chip}>Domain fit: {profile.sliders.domainFit}</span>
--                <span style={ttrComponents.chip}>Platform fit: {profile.sliders.platformFit}</span>
-+                <span style={ttrComponents.chip}>Role scope: {weights.dimensionA}</span>
-+                <span style={ttrComponents.chip}>Domain fit: {weights.dimensionB}</span>
-+                <span style={ttrComponents.chip}>Platform fit: {weights.dimensionC}</span>
-               </div>
-             </div>
-           </div>
-         </section>
-       </div>
-     </InstrumentShell>
-   );
+   buildComplianceFlags(jobText: string, baselineText: string, sourceUrl?: string | null) {
+     return computeComplianceFlags(jobText, baselineText, sourceUrl);
+   }
  }
++
++// VERIFY:
++// - Weighted aggregation uses per-dimension overrides and defaults to 1.0 when absent.
++// - Verdict thresholds remain aligned with the weighted overall score.
+
  
 
 

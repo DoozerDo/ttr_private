@@ -16,6 +16,8 @@ export type FitScoringInput = {
   };
 };
 
+export type DimensionWeightOverrides = Partial<Record<keyof FitDimensionScores, number>>;
+
 export type FitScoringResult = {
   overallScore: number;
   verdict: FitAssessmentVerdict;
@@ -458,7 +460,10 @@ const buildVerdict = (overallScore: number) => {
 
 @Injectable()
 export class FitScoringService {
-  score(input: FitScoringInput): FitScoringResult {
+  score(
+    input: FitScoringInput,
+    dimensionWeights?: DimensionWeightOverrides | null,
+  ): FitScoringResult {
     const jobText = [
       input.job.title ?? '',
       input.job.company ?? '',
@@ -495,12 +500,48 @@ export class FitScoringService {
       strategicTacticalFit,
     };
 
+    const defaultWeights: Record<keyof FitDimensionScores, number> = {
+      experienceAlignment: 0.3,
+      technicalPlatformFit: 0.25,
+      leadershipLevel: 0.2,
+      strategicTacticalFit: 0.15,
+      industryContext: 0.1,
+    };
+
+    const appliedWeights: Record<keyof FitDimensionScores, number> = {
+      experienceAlignment: dimensionWeights?.experienceAlignment ?? 1,
+      technicalPlatformFit: dimensionWeights?.technicalPlatformFit ?? 1,
+      leadershipLevel: dimensionWeights?.leadershipLevel ?? 1,
+      strategicTacticalFit: dimensionWeights?.strategicTacticalFit ?? 1,
+      industryContext: dimensionWeights?.industryContext ?? 1,
+    };
+
+    const weightedDefaults = (Object.keys(defaultWeights) as Array<keyof FitDimensionScores>)
+      .map((key) => ({
+        key,
+        weight: defaultWeights[key] * appliedWeights[key],
+      }))
+      .reduce(
+        (acc, { key, weight }) => {
+          acc.total += weight;
+          acc.values[key] = weight;
+          return acc;
+        },
+        { total: 0, values: {} as Record<keyof FitDimensionScores, number> },
+      );
+
+    const normalizedTotal =
+      weightedDefaults.total > 0
+        ? weightedDefaults.total
+        : (Object.values(defaultWeights).reduce((sum, value) => sum + value, 0));
+
     const overallScore = clampScore(
-      experienceAlignment * 0.3 +
-        technicalPlatformFit * 0.25 +
-        leadershipLevel * 0.2 +
-        strategicTacticalFit * 0.15 +
-        industryContext * 0.1,
+      (experienceAlignment * weightedDefaults.values.experienceAlignment +
+        technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
+        leadershipLevel * weightedDefaults.values.leadershipLevel +
+        strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
+        industryContext * weightedDefaults.values.industryContext) /
+        normalizedTotal,
     );
 
     const { strengths, gaps } = buildStrengthsAndGaps(
@@ -531,3 +572,7 @@ export class FitScoringService {
     return computeComplianceFlags(jobText, baselineText, sourceUrl);
   }
 }
+
+// VERIFY:
+// - Weighted aggregation uses per-dimension overrides and defaults to 1.0 when absent.
+// - Verdict thresholds remain aligned with the weighted overall score.
