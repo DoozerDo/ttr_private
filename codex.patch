@@ -1,229 +1,180 @@
-diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index 51f3cf3074d2cb0a0a40a88887531e4f3b79b6dc..0407dca91a222cf74c71764c2dc4f4d3d7d6cbc3 100644
---- a/apps/api/src/app.module.ts
-+++ b/apps/api/src/app.module.ts
-@@ -1,43 +1,45 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { AppController } from './app.controller';
- import { AppService } from './app.service';
- import { AuthModule } from './auth/auth.module';
- import { AnalysisModule } from './analysis/analysis.module';
- import { BaselineModule } from './baseline/baseline.module';
- import { InterviewsModule } from './interviews/interviews.module';
- import { JobsModule } from './jobs/jobs.module';
-+import { ResumeModule } from './resume/resume.module';
- import { User } from './users/user.entity';
- import { UsersModule } from './users/users.module';
- 
- @Module({
-   imports: [
-     ConfigModule.forRoot({
-       isGlobal: true,
-       envFilePath: ['.env.development.local', '.env.local', '.env'],
-     }),
-     TypeOrmModule.forRootAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         type: 'postgres',
-         url:
-           configService.get<string>('DATABASE_URL') ??
-           'postgresql://postgres:postgres@db:5432/targetthisrole',
-         entities: [User],
-         synchronize: configService.get<string>('NODE_ENV') !== 'production',
-         autoLoadEntities: true,
-       }),
-     }),
-     UsersModule,
-     AuthModule,
-     AnalysisModule,
-     BaselineModule,
-     InterviewsModule,
-     JobsModule,
-+    ResumeModule,
-   ],
-   controllers: [AppController],
-   providers: [AppService],
- })
- export class AppModule {}
-diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
+diff --git a/scripts/SPEC_CONTRACT.md b/scripts/SPEC_CONTRACT.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..7463d3a351b9ca53e41ce7668004938ea898c898
+index 0000000000000000000000000000000000000000..3c371100c012b4b03457235d3dabdec1ece2a19c
 --- /dev/null
-+++ b/apps/api/src/resume/resume.controller.ts
-@@ -0,0 +1,41 @@
-+import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
-+import { ResumeService } from './resume.service';
++++ b/scripts/SPEC_CONTRACT.md
+@@ -0,0 +1,174 @@
++# SPEC CONTRACT — Frozen Reference
 +
-+@Controller('resume')
-+@UseGuards(AuthGuard('jwt'))
-+export class ResumeController {
-+  constructor(private readonly resumeService: ResumeService) {}
++## 1. Definitions and Scope Boundaries
++- **Baseline**: User-uploaded, parsed résumé source split into immutable content blocks (summary, experience, programs/projects, skills, education) with hash verification for integrity.
++- **Baseline Version**: A saved snapshot of a baseline with a cryptographic hash; new versions are created when validated additions or tag changes are applied.
++- **Block**: An individual baseline section entry (e.g., a single experience bullet or program) that can be tagged and ordered within a version.
++- **Include Tags**:
++  - **Always**: Block must be included in all tailored outputs for the selected baseline version.
++  - **Optional**: Block may be included/excluded based on generator selection or relevance.
++  - **Never**: Block is excluded from all tailored outputs and fit computations for the version.
++- **Compliance**: Enforcement layer preventing invented roles, companies, metrics, technologies, or scope inflation; validates timeframe and writing rules and records validation outcomes per artifact.
++- **Audit Trail**: Structured log of generation/scoring actions capturing inputs, baseline version hash, compliance results, and generated artifact identifiers for traceability.
++- **Export Artifact**: Generated user-facing files (DOCX/PDF) or structured CSV exports derived from verified content and stored in versioned storage.
++- **Out of Scope**: UI/UX layouts, payment/billing flows, Interview Toolkit, coach/enterprise features, SSO, and any scraping/auto-apply automation.
 +
-+  @Post('generate')
-+  async generate(
-+    @Body()
-+    body: {
-+      baselineId?: string;
-+      baselineVersionId?: string;
-+      jobId?: string;
-+    },
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
++## 2. API Contracts
++All endpoints require authenticated requests scoped to the resource owner. Timestamps are ISO-8601. IDs are UUIDs unless noted.
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    if (!body.baselineId) {
-+      throw new BadRequestException('baselineId is required');
-+    }
-+
-+    if (!body.baselineVersionId) {
-+      throw new BadRequestException('baselineVersionId is required');
-+    }
-+
-+    return this.resumeService.generateResume(userId, {
-+      baselineId: body.baselineId,
-+      baselineVersionId: body.baselineVersionId,
-+      jobId: body.jobId ?? null,
-+    });
-+  }
++### 2.1 Compatibility/Fit Scoring
++- **Request** `POST /api/fit-scores`
++```json
++{
++  "job": {"id": "...", "raw_jd": "...", "parsed_jd": {"responsibilities": [], "requirements": []}},
++  "baseline_version_id": "...",
++  "selected_block_ids": ["..."]
 +}
-diff --git a/apps/api/src/resume/resume.module.ts b/apps/api/src/resume/resume.module.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..5e2fb7a6e0466572ac88eb2d1186f4f528b46a3a
---- /dev/null
-+++ b/apps/api/src/resume/resume.module.ts
-@@ -0,0 +1,14 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { BaselineSection } from '../baseline/baseline-section.entity';
-+import { Baseline } from '../baseline/baseline.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ResumeController } from './resume.controller';
-+import { ResumeService } from './resume.service';
-+
-+@Module({
-+  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion])],
-+  controllers: [ResumeController],
-+  providers: [ResumeService],
-+})
-+export class ResumeModule {}
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..0736fa0cade364887df6560efffec5586af35cca
---- /dev/null
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -0,0 +1,67 @@
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
-+import { Baseline } from '../baseline/baseline.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+
-+export type GenerateResumeRequest = {
-+  baselineId: string;
-+  baselineVersionId: string;
-+  jobId?: string | null;
-+};
-+
-+@Injectable()
-+export class ResumeService {
-+  constructor(
-+    @InjectRepository(Baseline)
-+    private readonly baselineRepository: Repository<Baseline>,
-+    @InjectRepository(BaselineVersion)
-+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
-+  ) {}
-+
-+  async generateResume(userId: string, request: GenerateResumeRequest) {
-+    if (!request.baselineId) {
-+      throw new BadRequestException('baselineId is required');
-+    }
-+
-+    if (!request.baselineVersionId) {
-+      throw new BadRequestException('baselineVersionId is required');
-+    }
-+
-+    const baseline = await this.baselineRepository.findOne({
-+      where: { id: request.baselineId, userId },
-+      relations: ['sections'],
-+      order: { sections: { order: 'ASC' } },
-+    });
-+
-+    if (!baseline) {
-+      throw new NotFoundException('Baseline not found');
-+    }
-+
-+    const baselineVersion = await this.baselineVersionRepository.findOne({
-+      where: { id: request.baselineVersionId, baselineId: baseline.id },
-+    });
-+
-+    if (!baselineVersion) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    const sections = (baseline.sections ?? []).map((section) => ({
-+      id: section.id,
-+      type: section.sectionType,
-+      title: section.title,
-+      content: section.content,
-+      includePolicy: section.includePolicy,
-+      order: section.order,
-+      source: 'baseline',
-+    }));
-+
-+    return {
-+      ok: true,
-+      baselineId: baseline.id,
-+      baselineVersionId: baselineVersion.id,
-+      jobId: request.jobId ?? null,
-+      sections,
-+    };
-+  }
++```
++- **Response** `201`
++```json
++{
++  "fit_score": 0,
++  "verdict": "apply|consider|skip",
++  "breakdown": {
++    "experience_alignment": 0,
++    "leadership_level": 0,
++    "technical_platform_fit": 0,
++    "industry_context": 0,
++    "strategic_vs_tactical": 0
++  },
++  "compliance_flags": [{"code": "scope_inflation|missing_baseline_hash|unknown_company", "message": "..."}],
++  "audit_id": "..."
 +}
-diff --git a/apps/web/app/api/resume/route.ts b/apps/web/app/api/resume/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..5ad956090de7d431e9348045e8dae61019ef7c22
---- /dev/null
-+++ b/apps/web/app/api/resume/route.ts
-@@ -0,0 +1,32 @@
-+import { NextRequest, NextResponse } from "next/server";
++```
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
-+
-+export async function POST(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/resume/generate`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
++### 2.2 Baseline Block Tagging & Version Selection
++- **Request** `PATCH /api/baselines/:baselineId/blocks`
++```json
++{
++  "baseline_version_id": "...",
++  "blocks": [
++    {"id": "...", "include_tag": "always|optional|never", "order_index": 1}
++  ]
 +}
-
++```
++- **Response** `200`
++```json
++{
++  "baseline_version_id": "...",
++  "updated_blocks": [{"id": "...", "include_tag": "always", "order_index": 1}],
++  "new_version_id": "...", "hash": "..."
++}
++```
++
++### 2.3 Résumé Generation
++- **Request** `POST /api/resumes`
++```json
++{
++  "job_id": "...",
++  "baseline_version_id": "...",
++  "include_block_ids": ["..."],
++  "export_format": "docx|pdf"
++}
++```
++- **Status** `GET /api/resumes/:requestId`
++```json
++{"status": "pending|failed|ready", "compliance_flags": [...], "artifact_id": "..."}
++```
++- **Download** `GET /api/resumes/:requestId/download`
++Binary stream; headers include `X-Baseline-Hash` and `Content-Type` for requested format.
++
++### 2.4 Cover Letter Generation
++- **Request** `POST /api/cover-letters`
++```json
++{
++  "job_id": "...",
++  "baseline_version_id": "...",
++  "opening": "Dear Hiring Team,",
++  "export_format": "docx|pdf"
++}
++```
++- **Status** `GET /api/cover-letters/:requestId`
++```json
++{"status": "pending|failed|ready", "compliance_flags": [...], "artifact_id": "..."}
++```
++- **Download** `GET /api/cover-letters/:requestId/download`
++Binary stream with `X-Baseline-Hash` and `Content-Type` set.
++
++### 2.5 Application Log (Job Tracker)
++- **Create** `POST /api/applications`
++```json
++{
++  "job_id": "...",
++  "company": "...",
++  "title": "...",
++  "applied_date": "2025-01-30",
++  "stage": "applied|interviewing|offer|closed",
++  "fit_score": 88,
++  "notes": "..."
++}
++```
++- **List** `GET /api/applications?stage=&company=` → array of records.
++- **Update** `PATCH /api/applications/:id`
++```json
++{"stage": "interviewing", "notes": "...", "fit_score": 90}
++```
++- **Export** `GET /api/applications/export`
++Returns CSV artifact metadata `{ "artifact_id": "...", "url": "..." }` for download.
++
++### 2.6 Search Sets
++- **Create** `POST /api/search-sets`
++```json
++{
++  "title_patterns": ["Senior SRE", "Staff Reliability"],
++  "seniority": "senior|staff|principal",
++  "industry": ["fintech"],
++  "work_mode": "remote|hybrid|onsite",
++  "source_url": "https://..." 
++}
++```
++- **List/Update**: `GET /api/search-sets` → array; `PATCH /api/search-sets/:id` updates same fields.
++- **Run** `POST /api/search-sets/:id/run`
++```json
++{"limit": 10}
++```
++- **Run Response** `202`
++```json
++{
++  "results": [{"job_id": "...", "title": "...", "company": "...", "fit_score": 78, "verdict": "consider"}]
++}
++```
++
++### 2.7 Compliance/Audit & Export Storage
++- **Audit Log Create** `POST /api/audit`
++```json
++{
++  "action": "fit_score|resume_gen|cover_letter_gen|application_export",
++  "actor_id": "...",
++  "baseline_version_id": "...",
++  "artifact_id": "...",
++  "compliance_flags": [...]
++}
++```
++- **List** `GET /api/audit?artifact_id=&action=` → array with timestamps and actor ids.
++- **Storage**: Export artifacts stored in S3-compatible storage with object keys incorporating user id, artifact type, and baseline hash; responses surface time-limited URLs when downloads are not streamed directly.
++
++## 3. Validation Rules and Error Format
++- **Auth & Ownership**: All requests require authenticated user; resources must belong to requester. Cross-user access returns `403`.
++- **Baseline Requirements**: baseline_version_id must exist and match stored hash; blocks tagged `never` cannot be supplied to scoring or generators.
++- **Content Limits**: No invented companies, roles, metrics, technologies, or timeframe violations; cover letter opening is locked to “Dear Hiring Team,”.
++- **Request Validation**: Unknown enum values → `422`; missing required fields → `400`; unsupported export formats → `415`.
++- **Error Response** (pattern for all endpoints):
++```json
++{ "error": { "code": "bad_request|unauthorized|forbidden|not_found|conflict|unprocessable", "message": "...", "details": {} } }
++```
++
++## 4. Acceptance Criteria
++- **Compatibility Engine**: Produces 0–100 Fit Score with five-category breakdown and verdict aligned to JD and selected baseline version; compliance flags attached and audit logged.
++- **Baseline Tagging**: Blocks can be set to always/optional/never; updates yield a new baseline version and hash; ordering preserved.
++- **Résumé Generator**: Accepts baseline version and block selection; enforces compliance; generates DOCX/PDF with baseline hash headers; status and download endpoints work.
++- **Cover Letter Studio**: Honors locked opening and baseline-scoped content; generates one-page DOCX/PDF; exposes status and download with compliance visibility.
++- **Job Tracker**: Allows create/list/update of application records with stage, applied date, and Fit Score snapshot; CSV export available and audit logged.
++- **Search Sets**: Supports create/list/update and run; run returns up to requested limit of roles with Fit Score snapshot and verdict.
++- **Compliance/Audit**: Every generation/scoring/export action records audit entries with actor, baseline version hash, and flags; retrieval available by action or artifact.
++- **Export/Storage**: Artifacts stored in S3-compatible storage with user- and hash-aware keys; downloads stream binary or return time-limited URLs; headers expose baseline hash.
