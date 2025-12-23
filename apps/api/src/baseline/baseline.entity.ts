@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { BaselineSection } from './baseline-section.entity';
+import { BaselineVersion } from './baseline-version.entity';
 
 @Entity({ name: 'baselines' })
 export class Baseline {
@@ -16,7 +17,7 @@ export class Baseline {
   @Column()
   userId!: string;
 
-  @Column({ default: 1 })
+  @Column({ default: 0 })
   version!: number;
 
   @Column()
@@ -35,6 +36,11 @@ export class Baseline {
     cascade: true,
   })
   sections!: BaselineSection[];
+
+  @OneToMany(() => BaselineVersion, (version) => version.baseline, {
+    cascade: true,
+  })
+  versions!: BaselineVersion[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { Express } from 'express';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import {
   BaselineSection,
@@ -10,6 +12,7 @@ import {
 } from './baseline-section.entity';
 import { Baseline } from './baseline.entity';
 import { BaselineParserService, ParsedSection } from './baseline-parser.service';
+import { BaselineVersion } from './baseline-version.entity';
 
 export type FileMetadata = {
   originalname: string;
@@ -24,6 +27,8 @@ export class BaselineService {
     private readonly baselineRepository: Repository<Baseline>,
     @InjectRepository(BaselineSection)
     private readonly baselineSectionRepository: Repository<BaselineSection>,
+    @InjectRepository(BaselineVersion)
+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
     private readonly baselineTextExtractor: BaselineTextExtractor,
     private readonly baselineParser: BaselineParserService,
   ) {}
@@ -65,36 +70,67 @@ export class BaselineService {
     ];
   }
 
+  private async computeFileHash(filePath: string): Promise<string | null> {
+    try {
+      const fileBuffer = await readFile(filePath);
+      return createHash('sha256').update(fileBuffer).digest('hex');
+    } catch {
+      // VERIFY: Decide whether a missing hash should block baseline persistence.
+      return null;
+    }
+  }
+
   async createBaseline(
     userId: string,
     file: FileMetadata,
     parsedSections?: Partial<BaselineSection>[],
   ) {
-    const baseline = this.baselineRepository.create({
-      userId,
-      originalFilename: file.originalname,
-      mimeType: file.mimetype,
-      storagePath: file.path,
-      hash: null,
-      sections:
-        parsedSections?.map((section, index) => ({
-          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-          title: section.title ?? null,
-          content: this.sanitizeSectionContent(section.content),
-          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-          order: section.order ?? index,
-        })) ?? [
-          {
-            sectionType: BaselineSectionType.OTHER,
-            title: null,
-            content: this.sanitizeSectionContent(),
-            includePolicy: BaselineIncludePolicy.OPTIONAL,
-            order: 0,
-          },
-        ],
-    });
+    const fileHash = await this.computeFileHash(file.path);
 
-    return this.baselineRepository.save(baseline);
+    return this.baselineRepository.manager.transaction(async (manager) => {
+      const baseline = manager.create(Baseline, {
+        userId,
+        originalFilename: file.originalname,
+        mimeType: file.mimetype,
+        storagePath: file.path,
+        hash: fileHash,
+        sections:
+          parsedSections?.map((section, index) => ({
+            sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+            title: section.title ?? null,
+            content: this.sanitizeSectionContent(section.content),
+            includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+            order: section.order ?? index,
+          })) ?? [
+            {
+              sectionType: BaselineSectionType.OTHER,
+              title: null,
+              content: this.sanitizeSectionContent(),
+              includePolicy: BaselineIncludePolicy.OPTIONAL,
+              order: 0,
+            },
+          ],
+      });
+
+      const savedBaseline = await manager.save(baseline);
+
+      // VERIFY: Persisting the initial version increments the current baseline version.
+      const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
+
+      const versionRecord = manager.create(BaselineVersion, {
+        baselineId: savedBaseline.id,
+        versionNumber: nextVersionNumber,
+        // VERIFY: Hash storage is currently tied to the baseline hash field.
+        fileHash: fileHash ?? savedBaseline.hash,
+        storagePath: savedBaseline.storagePath,
+      });
+
+      await manager.save(versionRecord);
+
+      savedBaseline.version = nextVersionNumber;
+
+      return manager.save(savedBaseline);
+    });
   }
 
   async listBaselinesForUser(userId: string) {

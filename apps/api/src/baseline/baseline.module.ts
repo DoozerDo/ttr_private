@@ -8,6 +8,7 @@ import path from 'node:path';
 import { BaselineSection } from './baseline-section.entity';
 import { BaselineController } from './baseline.controller';
 import { Baseline } from './baseline.entity';
+import { BaselineVersion } from './baseline-version.entity';
 import { BaselineService } from './baseline.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import { BaselineParserService } from './baseline-parser.service';
@@ -15,7 +16,7 @@ import { BaselineParserService } from './baseline-parser.service';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([Baseline, BaselineSection]),
+    TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion]),
     MulterModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

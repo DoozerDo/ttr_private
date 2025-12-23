@@ -1,214 +1,405 @@
-diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
-index fd0428786cb7c3078c34b768fe52587dba7afa38..bd97f374e3bded80d8e780a2b600f54cde6e57e8 100644
---- a/apps/web/app/baseline/[id]/page.tsx
-+++ b/apps/web/app/baseline/[id]/page.tsx
-@@ -1,51 +1,51 @@
- import Link from "next/link";
- import { cookies } from "next/headers";
- import { notFound, redirect } from "next/navigation";
- 
- import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
- import { formatDateTime } from "../../../lib/format-date";
- 
--async function fetchBaseline(id: string, token: string): Promise<BaselineDto | null> {
--  const baseUrl = process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
--
--  if (!baseUrl) {
--    return null;
--  }
-+async function fetchBaseline(id: string): Promise<BaselineDto | null> {
-+  try {
-+    const response = await fetch(`/api/baselines/${id}`, {
-+      cache: "no-store",
-+    });
+diff --git a/apps/api/src/baseline/baseline-version.entity.ts b/apps/api/src/baseline/baseline-version.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..47da33c408e50c5552cb0de1d0e9cd8d96ca24f0
+--- /dev/null
++++ b/apps/api/src/baseline/baseline-version.entity.ts
+@@ -0,0 +1,37 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  JoinColumn,
++  ManyToOne,
++  PrimaryGeneratedColumn,
++} from 'typeorm';
++import { Baseline } from './baseline.entity';
 +
-+    if (response.status === 401) {
-+      redirect("/auth/login");
-+    }
++@Entity({ name: 'baseline_versions' })
++export class BaselineVersion {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @ManyToOne(() => Baseline, (baseline) => baseline.versions, {
++    onDelete: 'CASCADE',
++  })
++  @JoinColumn({ name: 'baselineId' })
++  baseline!: Baseline;
++
++  @Column()
++  baselineId!: string;
++
++  @Column({ type: 'int' })
++  versionNumber!: number;
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  fileHash!: string | null;
++
++  // VERIFY: Confirm that the stored path matches the persisted upload location.
++  @Column({ type: 'varchar' })
++  storagePath!: string;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++}
+diff --git a/apps/api/src/baseline/baseline.entity.ts b/apps/api/src/baseline/baseline.entity.ts
+index 771806f08a6e5b96cbcb72e0aae3b4906080bfd0..b44bc7260de25b14868e1260cd2718a7eebdb083 100644
+--- a/apps/api/src/baseline/baseline.entity.ts
++++ b/apps/api/src/baseline/baseline.entity.ts
+@@ -1,44 +1,50 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   OneToMany,
+   PrimaryGeneratedColumn,
+   UpdateDateColumn,
+ } from 'typeorm';
+ import { BaselineSection } from './baseline-section.entity';
++import { BaselineVersion } from './baseline-version.entity';
  
--  const response = await fetch(`${baseUrl}/baselines/${id}`, {
--    headers: {
--      Authorization: `Bearer ${token}`,
--    },
--    cache: "no-store",
--  });
-+    if (!response.ok) {
-+      return null;
-+    }
+ @Entity({ name: 'baselines' })
+ export class Baseline {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
  
--  if (!response.ok) {
-+    return (await response.json()) as BaselineDto;
-+  } catch (error) {
-+    console.error("Failed to fetch baseline", error);
-     return null;
-   }
--
--  return (await response.json()) as BaselineDto;
+   @Column()
+   userId!: string;
+ 
+-  @Column({ default: 1 })
++  @Column({ default: 0 })
+   version!: number;
+ 
+   @Column()
+   originalFilename!: string;
+ 
+   @Column()
+   mimeType!: string;
+ 
+   @Column()
+   storagePath!: string;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   hash!: string | null;
+ 
+   @OneToMany(() => BaselineSection, (section) => section.baseline, {
+     cascade: true,
+   })
+   sections!: BaselineSection[];
+ 
++  @OneToMany(() => BaselineVersion, (version) => version.baseline, {
++    cascade: true,
++  })
++  versions!: BaselineVersion[];
++
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
  }
+diff --git a/apps/api/src/baseline/baseline.module.ts b/apps/api/src/baseline/baseline.module.ts
+index 18b710bffd30e9a72f771f53ff0ea9a7fdf5e0e3..e5e4a9254a68e1169cbb279f5051cb5d6c742518 100644
+--- a/apps/api/src/baseline/baseline.module.ts
++++ b/apps/api/src/baseline/baseline.module.ts
+@@ -1,43 +1,44 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { MulterModule } from '@nestjs/platform-express';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { diskStorage } from 'multer';
+ import { mkdirSync } from 'node:fs';
+ import path from 'node:path';
+ import { BaselineSection } from './baseline-section.entity';
+ import { BaselineController } from './baseline.controller';
+ import { Baseline } from './baseline.entity';
++import { BaselineVersion } from './baseline-version.entity';
+ import { BaselineService } from './baseline.service';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+ import { BaselineParserService } from './baseline-parser.service';
  
- const friendlyTitles: Record<string, string> = {
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
-   OTHER: "Other",
-   RAW: "Raw",
+ @Module({
+   imports: [
+     ConfigModule,
+-    TypeOrmModule.forFeature([Baseline, BaselineSection]),
++    TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion]),
+     MulterModule.registerAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         storage: diskStorage({
+           destination: (_req, _file, cb) => {
+             const uploadDir =
+               configService.get<string>('BASELINE_STORAGE_PATH') ??
+               path.join(process.cwd(), 'storage', 'baselines');
+ 
+             mkdirSync(uploadDir, { recursive: true });
+             cb(null, uploadDir);
+           },
+           filename: (_req, file, cb) => {
+             const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+             const ext = path.extname(file.originalname) || '.bin';
+             cb(null, `${uniqueSuffix}${ext}`);
+           },
+         }),
+         fileFilter: (_req, file, cb) => {
+           const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+ 
+           if (!allowedMimes.includes(file.mimetype)) {
+             return cb(
+               new Error('Only PDF and DOCX uploads are supported for baselines'),
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index b0b78e7479bb3d455be8126cf0d28d23e80932f2..cb206c3324e668cb329ec6e5aa5310a1cf317ab2 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -1,122 +1,158 @@
+ import { Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import type { Express } from 'express';
++import { createHash } from 'node:crypto';
++import { readFile } from 'node:fs/promises';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+ import {
+   BaselineSection,
+   BaselineSectionType,
+   BaselineIncludePolicy,
+ } from './baseline-section.entity';
+ import { Baseline } from './baseline.entity';
+ import { BaselineParserService, ParsedSection } from './baseline-parser.service';
++import { BaselineVersion } from './baseline-version.entity';
+ 
+ export type FileMetadata = {
+   originalname: string;
+   mimetype: string;
+   path: string;
  };
  
- const displayOrder = [
-   "SUMMARY",
-   "EXPERIENCE",
-   "PROJECT",
-   "SKILLS",
-   "EDUCATION",
-   "OTHER",
-   "RAW",
- ];
+ @Injectable()
+ export class BaselineService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
++    @InjectRepository(BaselineVersion)
++    private readonly baselineVersionRepository: Repository<BaselineVersion>,
+     private readonly baselineTextExtractor: BaselineTextExtractor,
+     private readonly baselineParser: BaselineParserService,
+   ) {}
  
- function organizeSections(sections: BaselineSectionDto[]) {
-   const sorted = [...sections].sort((a, b) => a.order - b.order);
-   const grouped: Record<string, BaselineSectionDto[]> = {};
-@@ -89,51 +89,51 @@ function renderContentSections(groupedSections: Record<string, BaselineSectionDt
-             </pre>
-           </article>
-         ))}
-       </div>
-     </div>
-   ));
- }
+   private sanitizeSectionContent(content?: string | null) {
+     if (!content) {
+       return 'Uploaded file content';
+     }
  
- export default async function BaselineDetailPage({
-   params,
- }: {
-   params: Promise<{ id: string }>;
- }) {
-   const resolvedParams = await params;
-   const cookieStore = await cookies();
-   const token = cookieStore.get("auth_token")?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
+     // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
+     // so we do not send invalid UTF-8 to Postgres.
+     return content.replace(/\u0000/g, '');
    }
  
-   if (!resolvedParams?.id) {
-     notFound();
+   private buildSections(
+     rawText: string,
+     parsedSections: ParsedSection[],
+   ): Partial<BaselineSection>[] {
+     const sanitizedRaw = this.sanitizeSectionContent(rawText);
+ 
+     const structuredSections = parsedSections.map((section, index) => ({
+       sectionType: section.sectionType,
+       title: section.title,
+       content: this.sanitizeSectionContent(section.content),
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       // ensure RAW stays first; fall back to index if section.order is undefined
+       order: (section.order ?? index) + 1,
+     }));
+ 
+     return [
+       {
+         sectionType: BaselineSectionType.RAW,
+         title: 'Raw',
+         content: sanitizedRaw,
+         includePolicy: BaselineIncludePolicy.NEVER,
+         order: 0,
+       },
+       ...structuredSections,
+     ];
    }
  
--  const baseline = await fetchBaseline(resolvedParams.id, token);
-+  const baseline = await fetchBaseline(resolvedParams.id);
- 
-   if (!baseline) {
-     notFound();
-   }
- 
-   const groupedSections = organizeSections(baseline.sections ?? []);
-   const hasRenderableSections = Object.values(groupedSections).some(
-     (sections) => sections.length > 0,
-   );
- 
-   const fallbackContent =
-     !hasRenderableSections && baseline.sections?.[0]?.content
-       ? baseline.sections[0].content
-       : null;
- 
-   return (
-     <main className="min-h-screen bg-gray-50 px-4 py-8">
-       <div className="mx-auto flex max-w-5xl flex-col gap-6">
-         <div className="flex items-center justify-between">
-           <div className="space-y-2">
-             <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">
-               Baseline details
-             </p>
-             <h1 className="text-3xl font-bold text-gray-900">
-               {baseline.originalFilename}
-diff --git a/apps/web/app/baseline/page.tsx b/apps/web/app/baseline/page.tsx
-index 4770aab891f1af58f27b142d7ffd88c8fdfb9819..779794555ef7fa64295caa45f7e18e553c2a7e67 100644
---- a/apps/web/app/baseline/page.tsx
-+++ b/apps/web/app/baseline/page.tsx
-@@ -1,67 +1,64 @@
- import { cookies } from "next/headers";
- import { redirect } from "next/navigation";
- import Link from "next/link";
- 
- import type { BaselineDto } from "../../lib/baselines";
- import { BaselineDashboard } from "./baseline-dashboard";
- import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
- import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
- 
--async function fetchBaselines(token: string): Promise<BaselineDto[]> {
--  const baseUrl =
--    process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
--
--  if (!baseUrl) return [];
--
--  const res = await fetch(`${baseUrl}/baselines`, {
--    headers: {
--      Authorization: `Bearer ${token}`,
--    },
--    cache: "no-store",
--  });
--
--  if (res.status === 401) {
--    redirect("/auth/login");
--  }
--
--  if (!res.ok) {
-+async function fetchBaselines(): Promise<BaselineDto[]> {
-+  try {
-+    const res = await fetch("/api/baselines", {
-+      cache: "no-store",
-+    });
-+
-+    if (res.status === 401) {
-+      redirect("/auth/login");
++  private async computeFileHash(filePath: string): Promise<string | null> {
++    try {
++      const fileBuffer = await readFile(filePath);
++      return createHash('sha256').update(fileBuffer).digest('hex');
++    } catch {
++      // VERIFY: Decide whether a missing hash should block baseline persistence.
++      return null;
 +    }
++  }
 +
-+    if (!res.ok) {
-+      return [];
-+    }
+   async createBaseline(
+     userId: string,
+     file: FileMetadata,
+     parsedSections?: Partial<BaselineSection>[],
+   ) {
+-    const baseline = this.baselineRepository.create({
+-      userId,
+-      originalFilename: file.originalname,
+-      mimeType: file.mimetype,
+-      storagePath: file.path,
+-      hash: null,
+-      sections:
+-        parsedSections?.map((section, index) => ({
+-          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+-          title: section.title ?? null,
+-          content: this.sanitizeSectionContent(section.content),
+-          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+-          order: section.order ?? index,
+-        })) ?? [
+-          {
+-            sectionType: BaselineSectionType.OTHER,
+-            title: null,
+-            content: this.sanitizeSectionContent(),
+-            includePolicy: BaselineIncludePolicy.OPTIONAL,
+-            order: 0,
+-          },
+-        ],
++    const fileHash = await this.computeFileHash(file.path);
 +
-+    return (await res.json()) as BaselineDto[];
-+  } catch (error) {
-+    console.error("Failed to fetch baselines", error);
-     return [];
-   }
++    return this.baselineRepository.manager.transaction(async (manager) => {
++      const baseline = manager.create(Baseline, {
++        userId,
++        originalFilename: file.originalname,
++        mimeType: file.mimetype,
++        storagePath: file.path,
++        hash: fileHash,
++        sections:
++          parsedSections?.map((section, index) => ({
++            sectionType: section.sectionType ?? BaselineSectionType.OTHER,
++            title: section.title ?? null,
++            content: this.sanitizeSectionContent(section.content),
++            includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
++            order: section.order ?? index,
++          })) ?? [
++            {
++              sectionType: BaselineSectionType.OTHER,
++              title: null,
++              content: this.sanitizeSectionContent(),
++              includePolicy: BaselineIncludePolicy.OPTIONAL,
++              order: 0,
++            },
++          ],
++      });
++
++      const savedBaseline = await manager.save(baseline);
++
++      // VERIFY: Persisting the initial version increments the current baseline version.
++      const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
++
++      const versionRecord = manager.create(BaselineVersion, {
++        baselineId: savedBaseline.id,
++        versionNumber: nextVersionNumber,
++        // VERIFY: Hash storage is currently tied to the baseline hash field.
++        fileHash: fileHash ?? savedBaseline.hash,
++        storagePath: savedBaseline.storagePath,
++      });
++
++      await manager.save(versionRecord);
++
++      savedBaseline.version = nextVersionNumber;
++
++      return manager.save(savedBaseline);
+     });
 -
--  return (await res.json()) as BaselineDto[];
- }
- 
- export default async function BaselinePage() {
-   const cookieStore = await cookies();
-   const token = cookieStore.get("auth_token")?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
+-    return this.baselineRepository.save(baseline);
    }
  
--  const baselines = await fetchBaselines(token);
-+  const baselines = await fetchBaselines();
+   async listBaselinesForUser(userId: string) {
+     return this.baselineRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
  
-   const rightSlot = (
-     <Link
-       href="/analyze"
-       style={ttrComponents.secondaryButton}
-     >
-       Analyze a role
-     </Link>
-   );
+   async getBaselineByIdForUser(id: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id, userId },
+       relations: ['sections'],
+       order: {
+         sections: {
+           order: 'ASC',
+         },
+       },
+     });
  
-   return (
-     <InstrumentPanelShell
-       kicker="Baseline console"
-       title="Baseline library"
-       rightSlot={rightSlot}
-     >
-       <section style={ttrComponents.basePanel}>
-         <div
-           style={{
-             display: "flex",
-             flexDirection: "column",
-             gap: 14,
-             marginBottom: 18,
-           }}
-         >
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     return baseline;
+diff --git a/apps/api/src/migrations/1740000000000-BaselineVersions.ts b/apps/api/src/migrations/1740000000000-BaselineVersions.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d493205251cbaf63e468145b93dbeae70d1a9b73
+--- /dev/null
++++ b/apps/api/src/migrations/1740000000000-BaselineVersions.ts
+@@ -0,0 +1,40 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class BaselineVersions1740000000000 implements MigrationInterface {
++  name = 'BaselineVersions1740000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(
++      `CREATE TABLE "baseline_versions" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "baselineId" uuid NOT NULL,
++        "versionNumber" integer NOT NULL,
++        "fileHash" character varying(255),
++        "storagePath" character varying NOT NULL,
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_baseline_versions_id" PRIMARY KEY ("id"),
++        CONSTRAINT "FK_baseline_versions_baselineId" FOREIGN KEY ("baselineId") REFERENCES "baselines"("id") ON DELETE CASCADE
++      )`,
++    );
++
++    // VERIFY: Confirm per-baseline uniqueness for version numbers is desired.
++    await queryRunner.query(
++      `CREATE UNIQUE INDEX IF NOT EXISTS "IDX_baseline_versions_baselineId_versionNumber" ON "baseline_versions" ("baselineId", "versionNumber")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX IF NOT EXISTS "IDX_baseline_versions_baselineId" ON "baseline_versions" ("baselineId")`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_baseline_versions_baselineId"`,
++    );
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_baseline_versions_baselineId_versionNumber"`,
++    );
++    await queryRunner.query(`DROP TABLE "baseline_versions"`);
++  }
++}
+diff --git a/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts b/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1d27a613b193b071770e627c2ea574dc0ddf16ab
+--- /dev/null
++++ b/apps/api/src/migrations/1740000000001-BaselineVersionDefault.ts
+@@ -0,0 +1,17 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class BaselineVersionDefault1740000000001 implements MigrationInterface {
++  name = 'BaselineVersionDefault1740000000001';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "baselines" ALTER COLUMN "version" SET DEFAULT 0`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "baselines" ALTER COLUMN "version" SET DEFAULT 1`,
++    );
++  }
++}
