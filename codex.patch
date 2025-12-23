@@ -1,95 +1,42 @@
-diff --git a/apps/api/src/baseline/baseline.controller.ts b/apps/api/src/baseline/baseline.controller.ts
-index 7ae8cd78e68d1bc4b57d24d6cf9eb69113770e56..ba14b75c10389d4551399a040719f9d36e7fec0e 100644
---- a/apps/api/src/baseline/baseline.controller.ts
-+++ b/apps/api/src/baseline/baseline.controller.ts
-@@ -66,26 +66,41 @@ export class BaselineController {
- 
-   @Get()
-   async listBaselines(@Req() request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.baselineService.listBaselinesForUser(userId);
-   }
- 
-   @Get(':id')
-   async getBaseline(
-     @Param('id') id: string,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.baselineService.getBaselineByIdForUser(id, userId);
-   }
+diff --git a/apps/web/app/api/baselines/[id]/versions/route.ts b/apps/web/app/api/baselines/[id]/versions/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd9c712215f37723241737604761caf690275272
+--- /dev/null
++++ b/apps/web/app/api/baselines/[id]/versions/route.ts
+@@ -0,0 +1,35 @@
++import { NextRequest, NextResponse } from "next/server";
 +
-+  @Get(':id/versions')
-+  async listBaselineVersions(
-+    @Param('id') id: string,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
 +
-+    // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
-+    return this.baselineService.listBaselineVersionsForUser(id, userId);
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
 +  }
- }
-diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
-index cb206c3324e668cb329ec6e5aa5310a1cf317ab2..375ee9df1ded8eb4f3eaa3cd76f01ac68c12fcac 100644
---- a/apps/api/src/baseline/baseline.service.ts
-+++ b/apps/api/src/baseline/baseline.service.ts
-@@ -167,26 +167,43 @@ export class BaselineService {
- 
-   async reparseBaselineForUser(baselineId: string, userId: string) {
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       relations: ['sections'],
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     const rawSection =
-       baseline.sections.find(
-         (section) => section.sectionType === BaselineSectionType.RAW,
-       ) ?? baseline.sections[0];
- 
-     const rawText = rawSection?.content ?? '';
-     const parsedSections = this.baselineParser.parseBaseline(rawText);
-     const rebuiltSections = this.buildSections(rawText, parsedSections);
- 
-     await this.baselineSectionRepository.delete({ baselineId: baseline.id });
- 
-     baseline.sections = rebuiltSections as BaselineSection[];
-     return this.baselineRepository.save(baseline);
-   }
 +
-+  async listBaselineVersionsForUser(baselineId: string, userId: string) {
-+    const baseline = await this.baselineRepository.findOne({
-+      where: { id: baselineId, userId },
-+      select: { id: true },
-+    });
-+
-+    if (!baseline) {
-+      throw new NotFoundException('Baseline not found');
-+    }
-+
-+    // VERIFY: Confirm that descending order is the expected default for version history.
-+    return this.baselineVersionRepository.find({
-+      where: { baselineId },
-+      order: { versionNumber: 'DESC', createdAt: 'DESC' },
-+    });
++  if (!token) {
++    return error;
 +  }
- }
++
++  // VERIFY: Proxy path and method for baseline versions.
++  const response = await fetch(`${baseUrl}/baselines/${id}/versions`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
 
