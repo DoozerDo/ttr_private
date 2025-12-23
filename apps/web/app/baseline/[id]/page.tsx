@@ -2,14 +2,13 @@ import Link from "next/link";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
-import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
+import {
+  BaselineDto,
+  BaselineSectionDto,
+  BaselineVersionDto,
+} from "../../../lib/baselines";
 import { formatDateTime } from "../../../lib/format-date";
-
-type BaselineVersionDto = {
-  versionNumber: number;
-  fileHash: string;
-  createdAt: string;
-};
+import { BaselinePolicyEditor } from "./baseline-policy-editor";
 
 async function buildInternalApiUrl(path: string) {
   const headerList = await headers();
@@ -173,6 +172,10 @@ export default async function BaselineDetailPage({
     notFound();
   }
 
+  const sortedVersions =
+    versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
+  const latestVersionId = sortedVersions[0]?.id ?? "";
+
   const groupedSections = organizeSections(baseline.sections ?? []);
   const hasRenderableSections = Object.values(groupedSections).some(
     (sections) => sections.length > 0,
@@ -206,13 +209,19 @@ export default async function BaselineDetailPage({
           </Link>
         </div>
 
+        <BaselinePolicyEditor
+          baselineId={baseline.id}
+          versions={sortedVersions}
+          initialVersionId={latestVersionId}
+        />
+
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
-          {versions && versions.length > 0 ? (
+          {sortedVersions && sortedVersions.length > 0 ? (
             <ul className="space-y-2">
-              {versions.map((version) => (
+              {sortedVersions.map((version) => (
                 <li
-                  key={version.versionNumber}
+                  key={version.id}
                   className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
                 >
                   <div className="flex flex-wrap justify-between gap-2">
@@ -221,7 +230,7 @@ export default async function BaselineDetailPage({
                       {formatDateTime(version.createdAt)}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-700">File hash: {version.fileHash}</div>
+                  <div className="text-xs text-gray-700">Version hash: {version.fileHash}</div>
                 </li>
               ))}
             </ul>

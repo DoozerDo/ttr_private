@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
@@ -70,6 +71,10 @@ describe('AnalysisService - fit scores contract', () => {
         {
           provide: getRepositoryToken(BaselineSection),
           useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
+        },
+        {
+          provide: getRepositoryToken(BaselineBlockPolicy),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: getRepositoryToken(BaselineVersion),

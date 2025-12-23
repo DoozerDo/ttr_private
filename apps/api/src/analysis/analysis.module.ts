@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Job } from '../jobs/job.entity';
@@ -18,6 +19,7 @@ import { FitScoringService } from './fit-scoring.service';
       Baseline,
       BaselineSection,
       BaselineVersion,
+      BaselineBlockPolicy,
       Job,
       FitAssessment,
       User,

@@ -2,12 +2,15 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Patch,
   Param,
   Post,
+  Query,
   Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Body,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -102,5 +105,39 @@ export class BaselineController {
 
     // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
     return this.baselineService.listBaselineVersionsForUser(id, userId);
+  }
+
+  @Get(':id/blocks')
+  async listBaselineBlocks(
+    @Param('id') id: string,
+    @Query('baseline_version_id') baselineVersionId: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineService.listBlocksForBaselineVersion(
+      id,
+      baselineVersionId,
+      userId,
+    );
+  }
+
+  @Patch(':id/blocks')
+  async updateBaselineBlocks(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineService.updateBlockPolicies(userId, id, body);
   }
 }

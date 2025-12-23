@@ -1,193 +1,133 @@
 diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
-index 800162b21b8344401deb7b47cf47aa2b574adc2e..827a094e36c5852e3c72dd2f7fbd1a291c29935d 100644
+index 827a094e36c5852e3c72dd2f7fbd1a291c29935d..8ca6fafc54f853897ba965f873103835490ab965 100644
 --- a/apps/api/src/analysis/analysis.module.ts
 +++ b/apps/api/src/analysis/analysis.module.ts
-@@ -1,20 +1,29 @@
+@@ -1,29 +1,31 @@
  import { Module } from '@nestjs/common';
  import { TypeOrmModule } from '@nestjs/typeorm';
  import { Baseline } from '../baseline/baseline.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
  import { BaselineSection } from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
  import { Job } from '../jobs/job.entity';
  import { User } from '../users/user.entity';
  import { FitAssessment } from './fit-assessment.entity';
  import { AnalysisController } from './analysis.controller';
  import { CalibrationController } from './calibration.controller';
-+import { FitScoresController } from './fit-scores.controller';
+ import { FitScoresController } from './fit-scores.controller';
  import { AnalysisService } from './analysis.service';
  import { FitScoringService } from './fit-scoring.service';
  
  @Module({
    imports: [
--    TypeOrmModule.forFeature([Baseline, BaselineSection, Job, FitAssessment, User]),
-+    TypeOrmModule.forFeature([
-+      Baseline,
-+      BaselineSection,
-+      BaselineVersion,
-+      Job,
-+      FitAssessment,
-+      User,
-+    ]),
+     TypeOrmModule.forFeature([
+       Baseline,
+       BaselineSection,
+       BaselineVersion,
++      BaselineBlockPolicy,
+       Job,
+       FitAssessment,
+       User,
+     ]),
    ],
--  controllers: [AnalysisController, CalibrationController],
-+  controllers: [AnalysisController, CalibrationController, FitScoresController],
+   controllers: [AnalysisController, CalibrationController, FitScoresController],
    providers: [AnalysisService, FitScoringService],
  })
  export class AnalysisModule {}
 diff --git a/apps/api/src/analysis/analysis.service.spec.ts b/apps/api/src/analysis/analysis.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..66e6fdcc43c2d75b29d786eef4c3e6e4bd5ac4c4
---- /dev/null
+index 66e6fdcc43c2d75b29d786eef4c3e6e4bd5ac4c4..190b6173c30675ee8b190159bb09f105cd5bd676 100644
+--- a/apps/api/src/analysis/analysis.service.spec.ts
 +++ b/apps/api/src/analysis/analysis.service.spec.ts
-@@ -0,0 +1,143 @@
-+import { Test } from '@nestjs/testing';
-+import { getRepositoryToken } from '@nestjs/typeorm';
-+import { Baseline } from '../baseline/baseline.entity';
-+import {
-+  BaselineIncludePolicy,
-+  BaselineSection,
-+} from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { Job } from '../jobs/job.entity';
-+import { User } from '../users/user.entity';
-+import { AnalysisService } from './analysis.service';
-+import { FitAssessment } from './fit-assessment.entity';
-+import { FitScoringService } from './fit-scoring.service';
-+
-+describe('AnalysisService - fit scores contract', () => {
-+  let service: AnalysisService;
-+
-+  const baselineVersion: Partial<BaselineVersion> = {
-+    id: 'bv-1',
-+    baselineId: 'b-1',
-+    versionNumber: 2,
-+    baseline: { id: 'b-1', userId: 'user-1' } as Baseline,
-+  };
-+
-+  const baselineSections: BaselineSection[] = [
-+    {
-+      id: 's-1',
-+      baselineId: 'b-1',
-+      sectionType: 'EXPERIENCE' as any,
-+      title: null,
-+      content: 'Implemented distributed systems and led platform teams.',
-+      includePolicy: BaselineIncludePolicy.OPTIONAL,
-+      order: 0,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    } as BaselineSection,
-+    {
-+      id: 's-2',
-+      baselineId: 'b-1',
-+      sectionType: 'SKILLS' as any,
-+      title: null,
-+      content: 'AWS, Kubernetes, Terraform',
-+      includePolicy: BaselineIncludePolicy.OPTIONAL,
-+      order: 1,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    } as BaselineSection,
-+  ];
-+
-+  const baseline: Baseline = {
-+    id: 'b-1',
-+    userId: 'user-1',
-+    version: 2,
-+    originalFilename: 'resume.pdf',
-+    mimeType: 'application/pdf',
-+    storagePath: '/tmp/resume.pdf',
-+    hash: 'hash',
-+    sections: baselineSections,
-+    versions: [],
-+    createdAt: new Date(),
-+    updatedAt: new Date(),
-+  };
-+
-+  beforeEach(async () => {
-+    const module = await Test.createTestingModule({
-+      providers: [
-+        AnalysisService,
-+        FitScoringService,
-+        { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
+@@ -1,28 +1,29 @@
+ import { Test } from '@nestjs/testing';
+ import { getRepositoryToken } from '@nestjs/typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { Job } from '../jobs/job.entity';
+ import { User } from '../users/user.entity';
+ import { AnalysisService } from './analysis.service';
+ import { FitAssessment } from './fit-assessment.entity';
+ import { FitScoringService } from './fit-scoring.service';
+ 
+ describe('AnalysisService - fit scores contract', () => {
+   let service: AnalysisService;
+ 
+   const baselineVersion: Partial<BaselineVersion> = {
+     id: 'bv-1',
+     baselineId: 'b-1',
+     versionNumber: 2,
+     baseline: { id: 'b-1', userId: 'user-1' } as Baseline,
+   };
+ 
+   const baselineSections: BaselineSection[] = [
+     {
+       id: 's-1',
+       baselineId: 'b-1',
+@@ -49,50 +50,54 @@ describe('AnalysisService - fit scores contract', () => {
+ 
+   const baseline: Baseline = {
+     id: 'b-1',
+     userId: 'user-1',
+     version: 2,
+     originalFilename: 'resume.pdf',
+     mimeType: 'application/pdf',
+     storagePath: '/tmp/resume.pdf',
+     hash: 'hash',
+     sections: baselineSections,
+     versions: [],
+     createdAt: new Date(),
+     updatedAt: new Date(),
+   };
+ 
+   beforeEach(async () => {
+     const module = await Test.createTestingModule({
+       providers: [
+         AnalysisService,
+         FitScoringService,
+         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
+         {
+           provide: getRepositoryToken(BaselineSection),
+           useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
+         },
 +        {
-+          provide: getRepositoryToken(BaselineSection),
-+          useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
++          provide: getRepositoryToken(BaselineBlockPolicy),
++          useValue: { find: jest.fn().mockResolvedValue([]) },
 +        },
-+        {
-+          provide: getRepositoryToken(BaselineVersion),
-+          useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
-+        },
-+        { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
-+        {
-+          provide: getRepositoryToken(FitAssessment),
-+          useValue: {
-+            create: jest.fn((payload) => payload),
-+            save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
-+          },
-+        },
-+        {
-+          provide: getRepositoryToken(User),
-+          useValue: {
-+            findOne: jest.fn().mockResolvedValue({
-+              id: 'user-1',
-+              calibrationProfileName: null,
-+              calibrationWeights: null,
-+            }),
-+          },
-+        },
-+      ],
-+    }).compile();
-+
-+    service = module.get(AnalysisService);
-+  });
-+
-+  it('rejects ambiguous JD inputs', async () => {
-+    await expect(
-+      service.scoreCompatibility('user-1', {
-+        baseline_version_id: 'bv-1',
-+        job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
-+      }),
-+    ).rejects.toThrowError(expect.objectContaining({ response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }) }) }));
-+  });
-+
-+  it('rejects missing JD inputs', async () => {
-+    await expect(
-+      service.scoreCompatibility('user-1', { baseline_version_id: 'bv-1', job: {} }),
-+    ).rejects.toThrowError(
-+      expect.objectContaining({
-+        response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }) }),
-+      }),
-+    );
-+  });
-+
-+  it('returns a contract-compliant success response', async () => {
-+    const result = await service.scoreCompatibility('user-1', {
-+      baseline_version_id: 'bv-1',
-+      job: { raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.' },
-+    });
-+
-+    expect(result).toEqual(
-+      expect.objectContaining({
-+        fit_score: expect.any(Number),
-+        overall_score: expect.any(Number),
-+        verdict: expect.any(String),
-+        breakdown: expect.objectContaining({
-+          experience_alignment: expect.any(Number),
-+          leadership_level: expect.any(Number),
-+          technical_platform_fit: expect.any(Number),
-+          industry_context: expect.any(Number),
-+          strategic_vs_tactical: expect.any(Number),
-+        }),
-+      }),
-+    );
-+    expect(result.strengths).toBeDefined();
-+  });
-+});
+         {
+           provide: getRepositoryToken(BaselineVersion),
+           useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
+         },
+         { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
+         {
+           provide: getRepositoryToken(FitAssessment),
+           useValue: {
+             create: jest.fn((payload) => payload),
+             save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
+           },
+         },
+         {
+           provide: getRepositoryToken(User),
+           useValue: {
+             findOne: jest.fn().mockResolvedValue({
+               id: 'user-1',
+               calibrationProfileName: null,
+               calibrationWeights: null,
+             }),
+           },
+         },
+       ],
+     }).compile();
+ 
 diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09a9412b3a 100644
+index ce83b6af4faeaefa73c4a7d1ff07ca09a9412b3a..54541cd6d4494227e84ba97f1f9f803f14253cc6 100644
 --- a/apps/api/src/analysis/analysis.service.ts
 +++ b/apps/api/src/analysis/analysis.service.ts
-@@ -1,69 +1,115 @@
+@@ -1,38 +1,39 @@
  import {
    BadRequestException,
    Injectable,
@@ -201,7 +141,8 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
    BaselineIncludePolicy,
    BaselineSection,
  } from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
  import { Job } from '../jobs/job.entity';
  import { CalibrationWeights, User } from '../users/user.entity';
  import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
@@ -226,49 +167,25 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
    summary: string;
  };
  
-+type FitScoreJobInput = {
-+  id?: string;
-+  raw_jd_text?: string;
-+  raw_jd?: string;
-+  parsed_jd?: {
-+    responsibilities?: string[];
-+    requirements?: string[];
-+  };
-+};
-+
-+export type FitScoreRequest = {
-+  job?: FitScoreJobInput;
-+  baseline_version_id?: string;
-+  selected_block_ids?: string[];
-+};
-+
-+type FitScoreResponse = {
-+  fit_score: number;
-+  overall_score: number;
-+  verdict: 'apply' | 'consider' | 'skip';
-+  breakdown: {
-+    experience_alignment: number;
-+    leadership_level: number;
-+    technical_platform_fit: number;
-+    industry_context: number;
-+    strategic_vs_tactical: number;
-+  };
-+  strengths?: string[];
-+  gaps?: string[];
-+  compliance_flags?: Array<{ code: string; message?: string }>;
-+  audit_id?: string | null;
-+  assessmentId?: string;
-+  jobId?: string;
-+  baselineId?: string;
-+  baselineVersion?: number | null;
-+  createdAt?: Date;
-+  score?: number;
-+  overallScore?: number;
-+  dimensionScores?: FitAssessment['dimensionScores'];
-+  complianceFlags?: FitAssessment['complianceFlags'];
-+  summary?: string;
-+};
-+
+@@ -64,50 +65,52 @@ type FitScoreResponse = {
+     strategic_vs_tactical: number;
+   };
+   strengths?: string[];
+   gaps?: string[];
+   compliance_flags?: Array<{ code: string; message?: string }>;
+   audit_id?: string | null;
+   assessmentId?: string;
+   jobId?: string;
+   baselineId?: string;
+   baselineVersion?: number | null;
+   createdAt?: Date;
+   score?: number;
+   overallScore?: number;
+   dimensionScores?: FitAssessment['dimensionScores'];
+   complianceFlags?: FitAssessment['complianceFlags'];
+   summary?: string;
+ };
+ 
  @Injectable()
  export class AnalysisService {
    constructor(
@@ -276,8 +193,10 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
      private readonly baselineRepository: Repository<Baseline>,
      @InjectRepository(BaselineSection)
      private readonly baselineSectionRepository: Repository<BaselineSection>,
-+    @InjectRepository(BaselineVersion)
-+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
++    @InjectRepository(BaselineBlockPolicy)
++    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+     @InjectRepository(BaselineVersion)
+     private readonly baselineVersionRepository: Repository<BaselineVersion>,
      @InjectRepository(Job)
      private readonly jobRepository: Repository<Job>,
      @InjectRepository(FitAssessment)
@@ -301,135 +220,22 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
        dimensionE: 1,
      },
    };
+@@ -272,78 +275,114 @@ export class AnalysisService {
+     const parsed = job.parsed_jd ?? {};
+     const responsibilities = parsed.responsibilities ?? [];
+     const requirements = parsed.requirements ?? [];
+     const synthesizedRaw = [...responsibilities, ...requirements].join('\n').trim();
  
-   private normalizeKeywords(text: string) {
-@@ -115,103 +161,332 @@ export class AnalysisService {
-         includePolicy: section.includePolicy,
-         order: section.order,
-       })) ?? [];
- 
-     const payload = {
-       job: {
-         rawDescription: job.rawDescription,
-         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-         normalizedRequirements: job.normalizedRequirements ?? [],
-         title: job.title ?? null,
-         company: job.company ?? null,
-       },
-       baseline: {
-         id: baseline.id,
-         version: baseline.version ?? null,
-         sections: sectionPayload,
-       },
-       calibration: dimensionWeights,
+     return {
+       title: null,
+       company: null,
+       rawDescription: job.raw_jd_text ?? job.raw_jd ?? synthesizedRaw,
+       normalizedResponsibilities: responsibilities,
+       normalizedRequirements: requirements,
+       sourceUrl: null,
      };
- 
-     return createHash('sha256')
-       .update(JSON.stringify(payload))
-       .digest('hex');
    }
  
-+  private coerceComplianceFlags(flags: string[] | undefined | null) {
-+    if (!flags?.length) return undefined;
-+    return flags.map((flag) => ({ code: flag, message: flag }));
-+  }
-+
-+  private assertJobInput(job?: FitScoreJobInput) {
-+    const rawText = job?.raw_jd_text ?? job?.raw_jd;
-+    const hasRaw = Boolean(rawText?.trim());
-+    const parsed = job?.parsed_jd;
-+    const hasParsed = Boolean(
-+      parsed &&
-+        ((parsed.responsibilities && parsed.responsibilities.length > 0) ||
-+          (parsed.requirements && parsed.requirements.length > 0)),
-+    );
-+    const hasId = Boolean(job?.id?.trim());
-+    const providedCount = Number(hasRaw) + Number(hasParsed);
-+
-+    if (hasId && providedCount > 0) {
-+      throw new BadRequestException({
-+        error: { code: 'JD_INPUT_AMBIGUOUS', message: 'Provide either job.id or JD content, not both.' },
-+      });
-+    }
-+
-+    if (!hasId && providedCount === 0) {
-+      throw new BadRequestException({
-+        error: {
-+          code: 'JD_INPUT_MISSING',
-+          message: 'Provide exactly one of raw_jd_text (or raw_jd) or parsed_jd.',
-+        },
-+      });
-+    }
-+
-+    if (providedCount > 1) {
-+      throw new BadRequestException({
-+        error: {
-+          code: 'JD_INPUT_AMBIGUOUS',
-+          message: 'Provide exactly one of raw_jd_text (or raw_jd) or parsed_jd.',
-+        },
-+      });
-+    }
-+  }
-+
-   async getCalibration(userId: string) {
-     const user = await this.usersRepository.findOne({ where: { id: userId } });
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
-     const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
-     const weights =
-       user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
- 
-     return { ok: true, profileName, weights };
-   }
- 
-   async saveCalibration(
-     userId: string,
-     payload: { profileName?: string; weights?: CalibrationWeights | null },
-   ) {
-     const profileName = payload.profileName?.trim();
- 
-     if (!profileName) {
-       throw new BadRequestException('profileName is required');
-     }
- 
-     // VERIFY: Validate calibration weight ranges with data science.
-     if (!payload.weights) {
-       throw new BadRequestException('weights are required');
-     }
- 
-     const user = await this.usersRepository.findOne({ where: { id: userId } });
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
-     user.calibrationProfileName = profileName;
-     user.calibrationWeights = payload.weights;
- 
-     await this.usersRepository.save(user);
- 
-     return { ok: true, profileName, weights: payload.weights };
-   }
- 
-+  private buildJobPayloadFromParsed(job: FitScoreJobInput) {
-+    const parsed = job.parsed_jd ?? {};
-+    const responsibilities = parsed.responsibilities ?? [];
-+    const requirements = parsed.requirements ?? [];
-+    const synthesizedRaw = [...responsibilities, ...requirements].join('\n').trim();
-+
-+    return {
-+      title: null,
-+      company: null,
-+      rawDescription: job.raw_jd_text ?? job.raw_jd ?? synthesizedRaw,
-+      normalizedResponsibilities: responsibilities,
-+      normalizedRequirements: requirements,
-+      sourceUrl: null,
-+    };
-+  }
-+
    private mapCalibrationToDimensionWeights(weights?: CalibrationWeights | null) {
      return {
        experienceAlignment: weights?.dimensionA ?? 1,
@@ -440,192 +246,51 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
      } satisfies DimensionWeightOverrides;
    }
  
-+  private async loadBaselineForVersion(userId: string, baselineVersionId?: string) {
-+    if (!baselineVersionId?.trim()) {
-+      throw new BadRequestException('baseline_version_id is required');
++  private applyPoliciesToSections(
++    sections: BaselineSection[],
++    policies: BaselineBlockPolicy[],
++  ) {
++    if (!policies.length) {
++      return [...sections].sort((a, b) => a.order - b.order);
 +    }
 +
-+    const baselineVersion = await this.baselineVersionRepository.findOne({
-+      where: { id: baselineVersionId },
-+      relations: ['baseline'],
-+    });
-+
-+    if (!baselineVersion || !baselineVersion.baseline) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    if (baselineVersion.baseline.userId !== userId) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    const baseline = await this.baselineRepository.findOne({
-+      where: { id: baselineVersion.baselineId, userId },
-+      relations: ['sections'],
-+      order: { sections: { order: 'ASC' } },
-+    });
-+
-+    if (!baseline) {
-+      throw new NotFoundException('Baseline not found');
-+    }
-+
-+    return { baseline, baselineVersion };
-+  }
-+
-+  async scoreCompatibility(userId: string, payload: FitScoreRequest): Promise<FitScoreResponse> {
-+    this.assertJobInput(payload.job);
-+
-+    const { baseline, baselineVersion } = await this.loadBaselineForVersion(
-+      userId,
-+      payload.baseline_version_id,
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      policies.map((policy) => [policy.baselineSectionId, policy]),
 +    );
 +
-+    if (!baseline.sections?.length) {
-+      baseline.sections = await this.baselineSectionRepository.find({
-+        where: { baselineId: baseline.id },
-+        order: { order: 'ASC' },
-+      });
-+    }
-+
-+    const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
-+    const includedSections =
-+      baseline.sections
-+        ?.filter(
-+          (section) =>
-+            section.includePolicy !== BaselineIncludePolicy.NEVER &&
-+            (!selectedBlockIds || selectedBlockIds.includes(section.id)),
-+        )
-+        .map((section) => ({
-+          type: section.sectionType ?? section.type,
-+          content: section.content,
-+        })) ?? [];
-+
-+    const calibration = await this.getCalibration(userId);
-+    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-+
-+    const jobInput = payload.job ?? {};
-+    const jobId = jobInput.id?.trim();
-+
-+    let job: Job | null = null;
-+    let jobPayload: {
-+      title: string | null;
-+      company: string | null;
-+      rawDescription: string;
-+      normalizedResponsibilities: string[];
-+      normalizedRequirements: string[];
-+      sourceUrl: string | null;
-+    };
-+
-+    if (jobId) {
-+      job = await this.jobRepository.findOne({
-+        where: { id: jobId, userId },
-+      });
-+
-+      if (!job) {
-+        throw new NotFoundException('Job not found');
-+      }
-+
-+      jobPayload = {
-+        title: job.title ?? null,
-+        company: job.company ?? null,
-+        rawDescription: job.rawDescription,
-+        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-+        normalizedRequirements: job.normalizedRequirements ?? [],
-+        sourceUrl: job.sourceUrl ?? null,
-+      };
-+    } else {
-+      const rawText = jobInput.raw_jd_text ?? jobInput.raw_jd;
-+      const hasParsed = jobInput.parsed_jd !== undefined;
-+      jobPayload = hasParsed
-+        ? this.buildJobPayloadFromParsed(jobInput)
-+        : {
-+            title: null,
-+            company: null,
-+            rawDescription: rawText ?? '',
-+            normalizedResponsibilities: [],
-+            normalizedRequirements: [],
-+            sourceUrl: null,
-+          };
-+    }
-+
-+    const scoring = this.fitScoringService.score(
-+      {
-+        job: jobPayload,
-+        baseline: {
-+          version: baselineVersion.versionNumber ?? baseline.version ?? null,
-+          sections: includedSections,
-+        },
-+      },
-+      dimensionWeights,
-+    );
-+
-+    let savedAssessment: FitAssessment | null = null;
-+
-+    if (job) {
-+      const assessment = this.fitAssessmentRepository.create({
-+        userId,
-+        jobId: job.id,
-+        baselineId: baseline.id,
-+        baselineVersion: baselineVersion.versionNumber ?? baseline.version ?? null,
-+        overallScore: scoring.overallScore,
-+        verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
-+        dimensionScores: scoring.dimensionScores,
-+        strengths: scoring.strengths,
-+        gaps: scoring.gaps,
-+        complianceFlags: scoring.complianceFlags,
-+        inputsHash: null,
-+      });
-+
-+      savedAssessment = await this.fitAssessmentRepository.save(assessment);
-+    }
-+
-+    const breakdown = {
-+      experience_alignment: scoring.dimensionScores.experienceAlignment,
-+      leadership_level: scoring.dimensionScores.leadershipLevel,
-+      technical_platform_fit: scoring.dimensionScores.technicalPlatformFit,
-+      industry_context: scoring.dimensionScores.industryContext,
-+      strategic_vs_tactical: scoring.dimensionScores.strategicTacticalFit,
-+    };
-+
-+    return {
-+      fit_score: scoring.overallScore,
-+      overall_score: scoring.overallScore,
-+      verdict: (scoring.verdict ?? FitAssessmentVerdict.CONSIDER).toLowerCase() as
-+        | 'apply'
-+        | 'consider'
-+        | 'skip',
-+      breakdown,
-+      strengths: scoring.strengths,
-+      gaps: scoring.gaps,
-+      compliance_flags: this.coerceComplianceFlags(scoring.complianceFlags),
-+      audit_id: savedAssessment?.id ?? null,
-+      assessmentId: savedAssessment?.id,
-+      jobId: savedAssessment?.jobId,
-+      baselineId: savedAssessment?.baselineId,
-+      baselineVersion: savedAssessment?.baselineVersion,
-+      createdAt: savedAssessment?.createdAt,
-+      score: scoring.overallScore,
-+      overallScore: scoring.overallScore,
-+      dimensionScores: scoring.dimensionScores,
-+      complianceFlags: scoring.complianceFlags,
-+      summary: scoring.summary,
-+    };
++    return [...sections]
++      .map((section) => {
++        const policy = policyMap.get(section.id);
++        return {
++          ...section,
++          includePolicy: policy?.includePolicy ?? section.includePolicy,
++          order: policy?.order ?? section.order,
++          sectionType: section.sectionType ?? section.type,
++        } as BaselineSection;
++      })
++      .sort((a, b) => a.order - b.order);
 +  }
 +
-   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
-     const baselineId = payload.baselineId?.trim();
-     if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
+   private async loadBaselineForVersion(userId: string, baselineVersionId?: string) {
+     if (!baselineVersionId?.trim()) {
+       throw new BadRequestException('baseline_version_id is required');
      }
  
-     const hasJobId = Boolean(payload.jobId?.trim());
-     const hasJobDescription = Boolean(payload.jobDescription?.trim());
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: { id: baselineVersionId },
+       relations: ['baseline'],
+     });
  
-     if (!hasJobId && !hasJobDescription) {
-       throw new BadRequestException('jobId or jobDescription is required');
+     if (!baselineVersion || !baselineVersion.baseline) {
+       throw new NotFoundException('Baseline version not found');
+     }
+ 
+     if (baselineVersion.baseline.userId !== userId) {
+       throw new NotFoundException('Baseline version not found');
      }
  
      const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
+       where: { id: baselineVersion.baselineId, userId },
        relations: ['sections'],
        order: { sections: { order: 'ASC' } },
      });
@@ -634,35 +299,231 @@ index 2107ccdc7e444e30849bb9c23543a8bddb472a72..ce83b6af4faeaefa73c4a7d1ff07ca09
        throw new NotFoundException('Baseline not found');
      }
  
++    const policies = await this.baselineBlockPolicyRepository.find({
++      where: { baselineVersionId: baselineVersion.id },
++      relations: ['baselineSection'],
++      order: { order: 'ASC' },
++    });
++
++    baseline.sections = this.applyPoliciesToSections(
++      baseline.sections ?? [],
++      policies,
++    );
++
+     return { baseline, baselineVersion };
+   }
+ 
+   async scoreCompatibility(userId: string, payload: FitScoreRequest): Promise<FitScoreResponse> {
+     this.assertJobInput(payload.job);
+ 
+     const { baseline, baselineVersion } = await this.loadBaselineForVersion(
+       userId,
+       payload.baseline_version_id,
+     );
+ 
      if (!baseline.sections?.length) {
        baseline.sections = await this.baselineSectionRepository.find({
-diff --git a/apps/api/src/analysis/fit-scores.controller.ts b/apps/api/src/analysis/fit-scores.controller.ts
+         where: { baselineId: baseline.id },
+         order: { order: 'ASC' },
+       });
+     }
+ 
+     const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
+     const includedSections =
+       baseline.sections
+         ?.filter(
+           (section) =>
+             section.includePolicy !== BaselineIncludePolicy.NEVER &&
+             (!selectedBlockIds || selectedBlockIds.includes(section.id)),
+diff --git a/apps/api/src/baseline/baseline-block-policy.entity.ts b/apps/api/src/baseline/baseline-block-policy.entity.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..610d7c70f48e81331a11c2212e2103a3684f4ca6
+index 0000000000000000000000000000000000000000..2ea248a2cf107604658618d08dd522b870f4146b
 --- /dev/null
-+++ b/apps/api/src/analysis/fit-scores.controller.ts
-@@ -0,0 +1,32 @@
++++ b/apps/api/src/baseline/baseline-block-policy.entity.ts
+@@ -0,0 +1,56 @@
 +import {
-+  BadRequestException,
++  Column,
++  CreateDateColumn,
++  Entity,
++  JoinColumn,
++  ManyToOne,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++} from './baseline-section.entity';
++import { BaselineVersion } from './baseline-version.entity';
++
++@Entity({ name: 'baseline_block_policies' })
++export class BaselineBlockPolicy {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @ManyToOne(() => BaselineVersion, (version) => version.blockPolicies, {
++    onDelete: 'CASCADE',
++  })
++  @JoinColumn({ name: 'baselineVersionId' })
++  baselineVersion!: BaselineVersion;
++
++  @Column()
++  baselineVersionId!: string;
++
++  @ManyToOne(() => BaselineSection, { onDelete: 'CASCADE' })
++  @JoinColumn({ name: 'baselineSectionId' })
++  baselineSection!: BaselineSection;
++
++  @Column()
++  baselineSectionId!: string;
++
++  @Column({ type: 'varchar', default: BaselineIncludePolicy.OPTIONAL })
++  includePolicy!: BaselineIncludePolicy;
++
++  @Column({ name: 'orderIndex', type: 'int', default: 0 })
++  order!: number;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++
++  get orderIndex(): number {
++    return this.order;
++  }
++
++  set orderIndex(value: number) {
++    this.order = value;
++  }
++}
+diff --git a/apps/api/src/baseline/baseline-version.entity.ts b/apps/api/src/baseline/baseline-version.entity.ts
+index f03b2f3f3e42b7f45d714a82aa65f11f5669617e..6158d1c7ba91212ff99bb36e02d4855243a9e519 100644
+--- a/apps/api/src/baseline/baseline-version.entity.ts
++++ b/apps/api/src/baseline/baseline-version.entity.ts
+@@ -1,41 +1,48 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   JoinColumn,
+   ManyToOne,
++  OneToMany,
+   PrimaryGeneratedColumn,
+ } from 'typeorm';
+ import { Baseline } from './baseline.entity';
++import { BaselineBlockPolicy } from './baseline-block-policy.entity';
+ 
+ @Entity({ name: 'baseline_versions' })
+ export class BaselineVersion {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @ManyToOne(() => Baseline, (baseline) => baseline.versions, {
+     onDelete: 'CASCADE',
+   })
+   @JoinColumn({ name: 'baselineId' })
+   baseline!: Baseline;
+ 
+   @Column()
+   baselineId!: string;
+ 
+   @Column({ type: 'int' })
+   versionNumber!: number;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   fileHash!: string | null;
+ 
+   get hash(): string | null {
+     return this.fileHash;
+   }
+ 
++  @OneToMany(() => BaselineBlockPolicy, (policy) => policy.baselineVersion, {
++    cascade: true,
++  })
++  blockPolicies!: BaselineBlockPolicy[];
++
+   // VERIFY: Confirm that the stored path matches the persisted upload location.
+   @Column({ type: 'varchar' })
+   storagePath!: string;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ }
+diff --git a/apps/api/src/baseline/baseline.controller.ts b/apps/api/src/baseline/baseline.controller.ts
+index ba14b75c10389d4551399a040719f9d36e7fec0e..91a6d4d2ea8873b5a4d3a1f8fa1c033dc1e607e9 100644
+--- a/apps/api/src/baseline/baseline.controller.ts
++++ b/apps/api/src/baseline/baseline.controller.ts
+@@ -1,35 +1,38 @@
+ import {
+   BadRequestException,
+   Controller,
+   Get,
++  Patch,
+   Param,
+   Post,
++  Query,
+   Req,
+   UploadedFile,
+   UseGuards,
+   UseInterceptors,
 +  Body,
-+  Controller,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
-+import type { FitScoreRequest } from './analysis.service';
-+import { AnalysisService } from './analysis.service';
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import { FileInterceptor } from '@nestjs/platform-express';
+ import { Request, Express } from 'express';
+ import { BaselineService } from './baseline.service';
+ 
+ @Controller('baselines')
+ @UseGuards(AuthGuard('jwt'))
+ export class BaselineController {
+   constructor(private readonly baselineService: BaselineService) {}
+ 
+   @Post()
+   @UseInterceptors(FileInterceptor('file'))
+   async uploadBaseline(
+     @UploadedFile() file: Express.Multer.File | undefined,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     if (!file) {
+       throw new BadRequestException('No file uploaded');
+     }
+ 
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+@@ -81,26 +84,60 @@ export class BaselineController {
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.baselineService.getBaselineByIdForUser(id, userId);
+   }
+ 
+   @Get(':id/versions')
+   async listBaselineVersions(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
+     return this.baselineService.listBaselineVersionsForUser(id, userId);
+   }
 +
-+@Controller('fit-scores')
-+@UseGuards(AuthGuard('jwt'))
-+export class FitScoresController {
-+  constructor(private readonly analysisService: AnalysisService) {}
-+
-+  @Post()
-+  async score(
-+    @Body() body: FitScoreRequest,
++  @Get(':id/blocks')
++  async listBaselineBlocks(
++    @Param('id') id: string,
++    @Query('baseline_version_id') baselineVersionId: string,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -671,372 +532,1173 @@ index 0000000000000000000000000000000000000000..610d7c70f48e81331a11c2212e2103a3
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.analysisService.scoreCompatibility(userId, body);
-+  }
-+}
-diff --git a/apps/api/src/analysis/fit-scoring.service.spec.ts b/apps/api/src/analysis/fit-scoring.service.spec.ts
-index ac19fcc651579cbd99935cb04c661c4cf4db9778..7ab41df2052cf07bc3ce01bb1322453673aec992 100644
---- a/apps/api/src/analysis/fit-scoring.service.spec.ts
-+++ b/apps/api/src/analysis/fit-scoring.service.spec.ts
-@@ -104,26 +104,48 @@ describe('FitScoringService', () => {
-   it('reduces leadership level when leadership cues are missing in baseline', () => {
-     const result = service.score(
-       buildInput({
-         job: {
-           title: 'Engineering Lead',
-           company: 'ExampleCo',
-           rawDescription: 'Lead teams, mentor engineers, and manage stakeholders.',
-           normalizedResponsibilities: ['Lead and mentor teams', 'Manage stakeholder expectations'],
-           normalizedRequirements: ['Leadership experience required'],
-           sourceUrl: null,
-         },
-         baseline: {
-           version: 1,
-           sections: [
-             {
-               type: 'EXPERIENCE',
-               content: 'Individual contributor focused on coding tasks and tickets.',
-             },
-           ],
-         },
-       }),
-     );
- 
-     expect(result.dimensionScores.leadershipLevel).toBeLessThan(60);
-   });
-+
-+  it('returns a complete response shape for compatibility scoring', () => {
-+    const result = service.score(buildInput());
-+
-+    expect(result).toEqual(
-+      expect.objectContaining({
-+        overallScore: expect.any(Number),
-+        verdict: expect.any(String),
-+        dimensionScores: expect.objectContaining({
-+          experienceAlignment: expect.any(Number),
-+          leadershipLevel: expect.any(Number),
-+          technicalPlatformFit: expect.any(Number),
-+          industryContext: expect.any(Number),
-+          strategicTacticalFit: expect.any(Number),
-+        }),
-+        strengths: expect.any(Array),
-+        gaps: expect.any(Array),
-+        complianceFlags: expect.any(Array),
-+        summary: expect.any(String),
-+      }),
++    return this.baselineService.listBlocksForBaselineVersion(
++      id,
++      baselineVersionId,
++      userId,
 +    );
-+  });
- });
-diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
-index 51496ece80618764a3f6e9bb6196d4b16df0aa35..ea85ec27b0bc2d4b5bbe9268a7ea794a70904fce 100644
---- a/apps/web/app/analyze/page.tsx
-+++ b/apps/web/app/analyze/page.tsx
-@@ -1,39 +1,39 @@
- // apps/web/app/analyze/page.tsx
- "use client";
- 
- import { useEffect, useMemo, useState } from "react";
- import type { CSSProperties } from "react";
- import Link from "next/link";
- import { useRouter } from "next/navigation";
- 
- import type { BaselineDto } from "../../lib/baselines";
- import type { JobDto } from "../../lib/jobs";
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
- import type { AnalysisResult, StoredPayload } from "../lib/session";
--import { saveLastAnalysis } from "../lib/session";
-+import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
- 
- type ApiStatus = "unknown" | "online" | "offline";
- 
- const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
-   const radius = 72;
-   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
-   const clampedScore = Math.min(Math.max(score, 0), 100);
-   const offset = circumference * (1 - clampedScore / 100);
-   const gradientId = "scoreRingGradient";
- 
-   return (
-     <div
-       style={{
-         position: "relative",
-         display: "flex",
-         height: 176,
-         width: 176,
-         alignItems: "center",
-         justifyContent: "center",
-       }}
-     >
-       <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
-         <defs>
-           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-             <stop offset="0%" stopColor="#f59e0b" />
-@@ -96,123 +96,137 @@ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
-             color: "rgba(252, 211, 77, 0.8)",
-           }}
-         >
-           Fit score
-         </span>
-       </div>
-     </div>
-   );
- };
- 
- function fitLabel(score: number | null) {
-   if (score === null) return "";
-   if (score >= 90) return "Strong fit";
-   if (score >= 75) return "Solid fit";
-   if (score >= 60) return "Mixed fit";
-   return "Weak fit";
- }
- 
- function signalQuality(score: number | null) {
-   if (score === null) return { label: "n/a", color: "rgba(255,255,255,0.3)" };
-   if (score >= 90) return { label: "High", color: "#22c55e" };
-   if (score >= 75) return { label: "Medium", color: "#f59e0b" };
-   return { label: "Low", color: "#f97316" };
- }
- 
-+function latestVersionId(baseline?: BaselineDto) {
-+  if (!baseline?.versions?.length) return "";
-+  const sorted = [...baseline.versions].sort((a, b) => b.versionNumber - a.versionNumber);
-+  return sorted[0]?.id ?? "";
-+}
++  }
 +
- export default function AnalyzePage() {
-   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
-   const [baselineId, setBaselineId] = useState("");
-+  const [baselineVersionId, setBaselineVersionId] = useState("");
-   const [baselineLoading, setBaselineLoading] = useState(true);
-   const [baselineError, setBaselineError] = useState<string | null>(null);
- 
-   const [jobs, setJobs] = useState<JobDto[]>([]);
-   const [jobId, setJobId] = useState("");
-   const [jobsLoading, setJobsLoading] = useState(true);
-   const [jobsError, setJobsError] = useState<string | null>(null);
- 
-   const [jobDescription, setJobDescription] = useState("");
-   const [result, setResult] = useState<AnalysisResult | null>(null);
- 
-   const [loading, setLoading] = useState(false);
-   const [error, setError] = useState<string | null>(null);
- 
-   const [animatedScore, setAnimatedScore] = useState(0);
-   const [showRaw, setShowRaw] = useState(false);
- 
-   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
-   const router = useRouter();
- 
--  const hasBaseline = baselineId.trim().length > 0;
-+  const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
-   const hasSelectedJob = jobId.trim().length > 0;
-   const hasJobDescription = jobDescription.trim().length > 0;
-   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const loadBaselines = async () => {
-       setBaselineLoading(true);
-       setBaselineError(null);
- 
-       try {
-         const response = await fetch("/api/baselines", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load baselines.");
-         }
- 
-         const data = (await response.json()) as BaselineDto[];
-         if (cancelled) return;
- 
-         setBaselines(data);
- 
-         if (data.length > 0) {
-           setBaselineId((prev) => {
-             if (prev && data.some((b) => b.id === prev)) return prev;
-             return data[0].id;
-           });
-         } else {
-           setBaselineId("");
-+          setBaselineVersionId("");
-         }
-       } catch (loadError) {
-         if (cancelled) return;
-         setBaselineError(
-           loadError instanceof Error ? loadError.message : "Unable to load baselines.",
-         );
-         setBaselines([]);
-         setBaselineId("");
-+        setBaselineVersionId("");
-       } finally {
-         if (!cancelled) setBaselineLoading(false);
-       }
-     };
- 
-     loadBaselines();
-     return () => {
-       cancelled = true;
-     };
-   }, []);
- 
-+  useEffect(() => {
-+    const selected = baselines.find((b) => b.id === baselineId);
-+    setBaselineVersionId(latestVersionId(selected));
-+  }, [baselineId, baselines]);
++  @Patch(':id/blocks')
++  async updateBaselineBlocks(
++    @Param('id') id: string,
++    @Body() body: any,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
 +
-   useEffect(() => {
-     let cancelled = false;
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.baselineService.updateBlockPolicies(userId, id, body);
++  }
+ }
+diff --git a/apps/api/src/baseline/baseline.module.ts b/apps/api/src/baseline/baseline.module.ts
+index e5e4a9254a68e1169cbb279f5051cb5d6c742518..49c400947b68040903f7ac46a3685283ad4db6d3 100644
+--- a/apps/api/src/baseline/baseline.module.ts
++++ b/apps/api/src/baseline/baseline.module.ts
+@@ -1,44 +1,50 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { MulterModule } from '@nestjs/platform-express';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { diskStorage } from 'multer';
+ import { mkdirSync } from 'node:fs';
+ import path from 'node:path';
+ import { BaselineSection } from './baseline-section.entity';
+ import { BaselineController } from './baseline.controller';
+ import { Baseline } from './baseline.entity';
+ import { BaselineVersion } from './baseline-version.entity';
+ import { BaselineService } from './baseline.service';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+ import { BaselineParserService } from './baseline-parser.service';
++import { BaselineBlockPolicy } from './baseline-block-policy.entity';
  
-     const loadJobs = async () => {
-       setJobsLoading(true);
-       setJobsError(null);
+ @Module({
+   imports: [
+     ConfigModule,
+-    TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion]),
++    TypeOrmModule.forFeature([
++      Baseline,
++      BaselineSection,
++      BaselineVersion,
++      BaselineBlockPolicy,
++    ]),
+     MulterModule.registerAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         storage: diskStorage({
+           destination: (_req, _file, cb) => {
+             const uploadDir =
+               configService.get<string>('BASELINE_STORAGE_PATH') ??
+               path.join(process.cwd(), 'storage', 'baselines');
  
-       try {
-         const response = await fetch("/api/jobs", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load saved jobs.");
-         }
+             mkdirSync(uploadDir, { recursive: true });
+             cb(null, uploadDir);
+           },
+           filename: (_req, file, cb) => {
+             const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+             const ext = path.extname(file.originalname) || '.bin';
+             cb(null, `${uniqueSuffix}${ext}`);
+           },
+         }),
+         fileFilter: (_req, file, cb) => {
+           const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
  
-         const data = (await response.json()) as JobDto[];
-         if (cancelled) return;
- 
-         setJobs(data);
- 
-         if (data.length === 0) {
-           setJobId("");
-           return;
-         }
- 
-         setJobId((prev) => {
-@@ -292,62 +306,75 @@ export default function AnalyzePage() {
- 
-     try {
-       let resolvedJobId = jobId;
- 
-       if (!hasSelectedJob && hasJobDescription) {
-         const createResponse = await fetch("/api/jobs", {
-           method: "POST",
-           headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ rawDescription: jobDescription }),
-         });
- 
-         if (!createResponse.ok) {
-           const message = await createResponse.text();
-           throw new Error(message || "Unable to save this job description.");
-         }
- 
-         const created = (await createResponse.json()) as { id?: string };
-         if (!created?.id) {
-           throw new Error("Job creation response was incomplete.");
-         }
- 
-         resolvedJobId = created.id;
-         setJobId(created.id);
-       }
- 
--      const response = await fetch("/api/analyze", {
-+      if (!baselineVersionId) {
-+        throw new Error("A baseline version is required to run Analyze.");
+           if (!allowedMimes.includes(file.mimetype)) {
+             return cb(
+               new Error('Only PDF and DOCX uploads are supported for baselines'),
+diff --git a/apps/api/src/baseline/baseline.service.spec.ts b/apps/api/src/baseline/baseline.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9825eb80d39bfa52a5bc4fa6aaacd6dfcd45931e
+--- /dev/null
++++ b/apps/api/src/baseline/baseline.service.spec.ts
+@@ -0,0 +1,162 @@
++import { ConflictException } from '@nestjs/common';
++import { Test } from '@nestjs/testing';
++import { getRepositoryToken } from '@nestjs/typeorm';
++import { BaselineBlockPolicy } from './baseline-block-policy.entity';
++import { Baseline } from './baseline.entity';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++  BaselineSectionType,
++} from './baseline-section.entity';
++import { BaselineVersion } from './baseline-version.entity';
++import { BaselineParserService } from './baseline-parser.service';
++import { BaselineService } from './baseline.service';
++import { BaselineTextExtractor } from './baseline-text-extractor.service';
++
++describe('BaselineService - block policies', () => {
++  let service: BaselineService;
++  let baselineRepository: any;
++  let baselineVersionRepository: any;
++  let baselineSectionRepository: any;
++  let baselineBlockPolicyRepository: any;
++
++  const sections: BaselineSection[] = [
++    {
++      id: 's-1',
++      baselineId: 'b-1',
++      sectionType: BaselineSectionType.EXPERIENCE as any,
++      title: null,
++      content: 'Did important work.',
++      includePolicy: BaselineIncludePolicy.OPTIONAL,
++      order: 0,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    } as BaselineSection,
++    {
++      id: 's-2',
++      baselineId: 'b-1',
++      sectionType: BaselineSectionType.SKILLS as any,
++      title: null,
++      content: 'Typescript, leadership',
++      includePolicy: BaselineIncludePolicy.OPTIONAL,
++      order: 1,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    } as BaselineSection,
++  ];
++
++  const baseline: Baseline = {
++    id: 'b-1',
++    userId: 'user-1',
++    version: 1,
++    originalFilename: 'resume.pdf',
++    mimeType: 'application/pdf',
++    storagePath: '/tmp/resume.pdf',
++    hash: 'hash',
++    sections,
++    versions: [],
++    createdAt: new Date(),
++    updatedAt: new Date(),
++  } as Baseline;
++
++  const baselineVersion: BaselineVersion = {
++    id: 'v-1',
++    baselineId: 'b-1',
++    versionNumber: 1,
++    fileHash: 'hash-1',
++    storagePath: '/tmp/resume.pdf',
++    baseline,
++    createdAt: new Date(),
++  } as BaselineVersion;
++
++  const transactionManager = {
++    create: jest.fn((_: any, payload: any) => payload),
++    save: jest.fn(async (payload: any) => {
++      if (Array.isArray(payload)) {
++        return payload.map((item: any, index: number) => ({
++          ...item,
++          id: item.id ?? `generated-${index}`,
++        }));
 +      }
 +
-+      const requestJob: Record<string, unknown> = hasSelectedJob
-+        ? { id: resolvedJobId }
-+        : { raw_jd_text: jobDescription };
++      return {
++        ...payload,
++        id: payload.id ?? 'generated-id',
++      };
++    }),
++    delete: jest.fn(),
++  };
 +
-+      const response = await fetch("/api/fit-scores", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
--        body: JSON.stringify({ baselineId, jobId: resolvedJobId }),
-+        body: JSON.stringify({
-+          baseline_version_id: baselineVersionId,
-+          job: requestJob,
-+        }),
++  beforeEach(async () => {
++    baselineRepository = {
++      findOne: jest.fn(({ where }: any) =>
++        where.userId === baseline.userId && where.id === baseline.id
++          ? baseline
++          : null,
++      ),
++      manager: { transaction: jest.fn(async (cb: any) => cb(transactionManager)) },
++      save: jest.fn(),
++    };
++
++    baselineVersionRepository = {
++      findOne: jest.fn(async ({ where }: any) => {
++        if (where?.id && where.id !== baselineVersion.id) return null;
++        if (where?.baselineId && where.baselineId !== baseline.id) return null;
++        return baselineVersion;
++      }),
++      find: jest.fn(),
++      save: jest.fn(async (value: any) => value),
++    };
++
++    baselineSectionRepository = {
++      find: jest.fn().mockResolvedValue(sections),
++    };
++
++    baselineBlockPolicyRepository = {
++      find: jest.fn().mockResolvedValue([]),
++    };
++
++    const module = await Test.createTestingModule({
++      providers: [
++        BaselineService,
++        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
++        { provide: getRepositoryToken(BaselineSection), useValue: baselineSectionRepository },
++        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
++        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: baselineBlockPolicyRepository },
++        { provide: BaselineTextExtractor, useValue: { extractText: jest.fn() } },
++        { provide: BaselineParserService, useValue: { parseBaseline: jest.fn() } },
++      ],
++    }).compile();
++
++    service = module.get(BaselineService);
++  });
++
++  it('enforces ownership when listing blocks', async () => {
++    await expect(
++      service.listBlocksForBaselineVersion('b-1', 'v-1', 'other-user'),
++    ).rejects.toThrow('Baseline not found');
++  });
++
++  it('rejects invalid include_tag values', async () => {
++    await expect(
++      service.updateBlockPolicies('user-1', 'b-1', {
++        baseline_version_id: 'v-1',
++        baseline_version_hash: 'hash-1',
++        blocks: [{ id: 's-1', include_tag: 'sometimes' as any }],
++      }),
++    ).rejects.toThrow('Invalid include_tag value');
++  });
++
++  it('surfaces 409 conflicts when hashes are stale', async () => {
++    await expect(
++      service.updateBlockPolicies('user-1', 'b-1', {
++        baseline_version_id: 'v-1',
++        baseline_version_hash: 'stale',
++        blocks: [
++          { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
++          { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
++        ],
++      }),
++    ).rejects.toThrow(ConflictException);
++  });
++});
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index 5d0786d9d3fee3d77f54bc3c9d0076e871e32faf..048b10528f443512f6dc0f4eeeee11cb7f2cf4cd 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -1,225 +1,646 @@
+ import {
+   BadRequestException,
++  ConflictException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import type { Express } from 'express';
+ import { createHash } from 'node:crypto';
+ import { readFile } from 'node:fs/promises';
+ import { BaselineTextExtractor } from './baseline-text-extractor.service';
+ import {
+   BaselineSection,
+   BaselineSectionType,
+   BaselineIncludePolicy,
+ } from './baseline-section.entity';
+ import { Baseline } from './baseline.entity';
+ import { BaselineParserService, ParsedSection } from './baseline-parser.service';
+ import { BaselineVersion } from './baseline-version.entity';
++import { BaselineBlockPolicy } from './baseline-block-policy.entity';
+ 
+ export type FileMetadata = {
+   originalname: string;
+   mimetype: string;
+   path: string;
+ };
+ 
++type BaselineBlockUpdate = {
++  id: string;
++  include_tag: BaselineIncludePolicy;
++  order_index?: number;
++};
++
++type BaselineBlocksResponse = {
++  baseline_version_id: string;
++  baseline_version_hash: string | null;
++  blocks: Array<{
++    id: string;
++    section_type: BaselineSectionType;
++    title: string | null;
++    content: string;
++    include_tag: BaselineIncludePolicy;
++    order_index: number;
++  }>;
++};
++
++type PolicyState = {
++  baselineSectionId: string;
++  includePolicy: BaselineIncludePolicy;
++  order: number;
++};
++
+ @Injectable()
+ export class BaselineService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
+     @InjectRepository(BaselineVersion)
+     private readonly baselineVersionRepository: Repository<BaselineVersion>,
++    @InjectRepository(BaselineBlockPolicy)
++    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+     private readonly baselineTextExtractor: BaselineTextExtractor,
+     private readonly baselineParser: BaselineParserService,
+   ) {}
+ 
+   private sanitizeSectionContent(content?: string | null) {
+     if (!content) {
+       return 'Uploaded file content';
+     }
+ 
+     // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
+     // so we do not send invalid UTF-8 to Postgres.
+     return content.replace(/\u0000/g, '');
+   }
+ 
+   private buildSections(
+     rawText: string,
+     parsedSections: ParsedSection[],
+   ): Partial<BaselineSection>[] {
+     const sanitizedRaw = this.sanitizeSectionContent(rawText);
+ 
+     const structuredSections = parsedSections.map((section, index) => ({
+       sectionType: section.sectionType,
+       title: section.title,
+       content: this.sanitizeSectionContent(section.content),
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       // ensure RAW stays first; fall back to index if section.order is undefined
+       order: (section.order ?? index) + 1,
+     }));
+ 
+     return [
+       {
+         sectionType: BaselineSectionType.RAW,
+         title: 'Raw',
+         content: sanitizedRaw,
+         includePolicy: BaselineIncludePolicy.NEVER,
+         order: 0,
+       },
+       ...structuredSections,
+     ];
+   }
+ 
+   private async computeFileHash(filePath: string): Promise<string> {
+     try {
+       const fileBuffer = await readFile(filePath);
+       return createHash('sha256').update(fileBuffer).digest('hex');
+     } catch {
+       throw new BadRequestException('Unable to compute file hash');
+     }
+   }
+ 
++  private buildVersionHash(baselineHash: string | null, policies: PolicyState[]) {
++    const normalized = [...policies]
++      .map((policy) => ({
++        id: policy.baselineSectionId,
++        includePolicy: policy.includePolicy,
++        order: policy.order,
++      }))
++      .sort((a, b) => {
++        const delta = a.id.localeCompare(b.id);
++        if (delta !== 0) return delta;
++        return a.order - b.order;
++      });
++
++    return createHash('sha256')
++      .update(JSON.stringify({ baselineHash: baselineHash ?? null, policies: normalized }))
++      .digest('hex');
++  }
++
++  private applyPoliciesToSections(
++    sections: BaselineSection[],
++    policies: BaselineBlockPolicy[],
++  ) {
++    if (!policies.length) {
++      return [...sections].sort((a, b) => a.order - b.order);
++    }
++
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      policies.map((policy) => [policy.baselineSectionId, policy]),
++    );
++
++    return [...sections]
++      .map((section) => {
++        const policy = policyMap.get(section.id);
++        return {
++          ...section,
++          includePolicy: policy?.includePolicy ?? section.includePolicy,
++          order: policy?.order ?? section.order,
++          sectionType: section.sectionType ?? section.type,
++        } as BaselineSection;
++      })
++      .sort((a, b) => a.order - b.order);
++  }
++
++  private async getBaselineWithSections(baselineId: string, userId: string) {
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    if (!baseline.sections?.length) {
++      baseline.sections = await this.baselineSectionRepository.find({
++        where: { baselineId },
++        order: { order: 'ASC' },
++      });
++    }
++
++    return baseline;
++  }
++
++  private async getLatestVersionForBaseline(baselineId: string) {
++    return this.baselineVersionRepository.findOne({
++      where: { baselineId },
++      order: { versionNumber: 'DESC', createdAt: 'DESC' },
++    });
++  }
++
++  private normalizePoliciesFromSections(sections: BaselineSection[]): PolicyState[] {
++    return sections.map((section, index) => ({
++      baselineSectionId: section.id,
++      includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
++      order: section.order ?? index,
++    }));
++  }
++
++  private raiseConflict(currentVersion: BaselineVersion, hash?: string | null): never {
++    throw new ConflictException({
++      error: {
++        code: 'BASELINE_VERSION_CONFLICT',
++        message: 'Baseline version is out of date.',
++        details: {
++          baseline_version_id: currentVersion.id,
++          baseline_version_hash: hash ?? currentVersion.fileHash,
++        },
++      },
++    });
++  }
++
+   async createBaseline(
+     userId: string,
+     file: FileMetadata,
+     parsedSections?: Partial<BaselineSection>[],
+   ) {
+     const fileHash = await this.computeFileHash(file.path);
+ 
+     if (!fileHash) {
+       throw new BadRequestException('Baseline file hash is required');
+     }
+ 
+     return this.baselineRepository.manager.transaction(async (manager) => {
+       const baseline = manager.create(Baseline, {
+         userId,
+         originalFilename: file.originalname,
+         mimeType: file.mimetype,
+         storagePath: file.path,
+         hash: fileHash,
+         sections:
+           parsedSections?.map((section, index) => ({
+             sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+             title: section.title ?? null,
+             content: this.sanitizeSectionContent(section.content),
+             includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+             order: section.order ?? index,
+           })) ?? [
+             {
+               sectionType: BaselineSectionType.OTHER,
+               title: null,
+               content: this.sanitizeSectionContent(),
+               includePolicy: BaselineIncludePolicy.OPTIONAL,
+               order: 0,
+             },
+           ],
        });
  
-       if (!response.ok) {
-         const message = await response.text();
-         throw new Error(message || "Unable to analyze this role right now.");
-       }
+       const savedBaseline = await manager.save(baseline);
  
--      const data = (await response.json()) as AnalysisResult;
-+      const raw = await response.json();
-+      const data = normalizeAnalysisResult(raw);
+       // VERIFY: Persisting the initial version increments the current baseline version.
+       const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
+ 
++      const policyState = this.normalizePoliciesFromSections(
++        savedBaseline.sections ?? [],
++      );
++      const versionHash = this.buildVersionHash(fileHash, policyState);
 +
-       setResult(data);
+       const versionRecord = manager.create(BaselineVersion, {
+         baselineId: savedBaseline.id,
+         versionNumber: nextVersionNumber,
+-        fileHash,
++        fileHash: versionHash,
+         storagePath: savedBaseline.storagePath,
+       });
  
-       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-       saveLastAnalysis(payload);
+       const savedVersion = await manager.save(versionRecord);
  
-       if (data.jobId) {
-         router.push(`/results?jobId=${data.jobId}`);
-       }
-     } catch (e) {
-       const message = e instanceof Error ? e.message : "Unexpected error";
-       setError(message);
-       setResult(null);
-     } finally {
-       setLoading(false);
+-      savedBaseline.version = nextVersionNumber;
++      const policyEntities = policyState.map((policy) =>
++        manager.create(BaselineBlockPolicy, {
++          baselineVersionId: savedVersion.id,
++          baselineSectionId: policy.baselineSectionId,
++          includePolicy: policy.includePolicy,
++          order: policy.order,
++        }),
++      );
++
++      await manager.save(policyEntities);
+ 
++      savedBaseline.version = nextVersionNumber;
+       savedBaseline.versions = [savedVersion];
+ 
+       return manager.save(savedBaseline);
+     });
+   }
+ 
+   async listBaselinesForUser(userId: string) {
+     return this.baselineRepository.find({
+       where: { userId },
+       relations: ['versions'],
+       order: {
+         createdAt: 'DESC',
+         versions: { versionNumber: 'DESC', createdAt: 'DESC' },
+       },
+     });
+   }
+ 
+   async getBaselineByIdForUser(id: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id, userId },
+       relations: ['sections', 'versions'],
+       order: {
+         sections: {
+           order: 'ASC',
+         },
+         versions: {
+           versionNumber: 'DESC',
+           createdAt: 'DESC',
+         },
+       },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
      }
-   };
  
-   const scoreLabel = fitLabel(result?.score ?? null);
-   const quality = signalQuality(result?.score ?? null);
++    const latestVersion =
++      baseline.versions?.[0] ?? (await this.getLatestVersionForBaseline(baseline.id));
++
++    if (latestVersion) {
++      const policies = await this.baselineBlockPolicyRepository.find({
++        where: { baselineVersionId: latestVersion.id },
++        relations: ['baselineSection'],
++        order: { order: 'ASC' },
++      });
++
++      baseline.sections = this.applyPoliciesToSections(
++        baseline.sections ?? [],
++        policies,
++      );
++    }
++
+     return baseline;
+   }
  
-   const pillColor =
-     apiStatus === "online"
-       ? "rgba(74, 222, 128, 0.15)"
-       : apiStatus === "offline"
-         ? "rgba(248, 113, 113, 0.18)"
-@@ -778,28 +805,25 @@ export default function AnalyzePage() {
-                   <pre
-                     style={{
-                       margin: 0,
-                       marginTop: 6,
-                       padding: 12,
-                       borderRadius: 10,
-                       background: "rgba(0,0,0,0.35)",
-                       border: "1px solid rgba(255,255,255,0.05)",
-                       color: "#e2e8f0",
-                       fontSize: 12,
-                       whiteSpace: "pre-wrap",
-                       wordBreak: "break-word",
-                     }}
-                   >
-                     {JSON.stringify(result, null, 2)}
-                   </pre>
-                 ) : null}
-               </div>
-             )}
-           </div>
-         </section>
-       </div>
-     </InstrumentShell>
-   );
+   async buildSectionsFromFile(file: Express.Multer.File) {
+     const content = await this.baselineTextExtractor.extractText(file);
+     const parsedSections = this.baselineParser.parseBaseline(content);
+ 
+     return this.buildSections(content, parsedSections);
+   }
+ 
+   async reparseBaselineForUser(baselineId: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     const rawSection =
+       baseline.sections.find(
+         (section) => section.sectionType === BaselineSectionType.RAW,
+       ) ?? baseline.sections[0];
+ 
+     const rawText = rawSection?.content ?? '';
+     const parsedSections = this.baselineParser.parseBaseline(rawText);
+     const rebuiltSections = this.buildSections(rawText, parsedSections);
+ 
+-    await this.baselineSectionRepository.delete({ baselineId: baseline.id });
++    return this.baselineRepository.manager.transaction(async (manager) => {
++      await manager.delete(BaselineSection, { baselineId: baseline.id });
++
++      const rebuiltEntities = rebuiltSections.map((section, index) =>
++        manager.create(BaselineSection, {
++          ...section,
++          baselineId: baseline.id,
++          order: section.order ?? index,
++        }),
++      );
++
++      await manager.save(rebuiltEntities);
++
++      baseline.sections = rebuiltEntities as BaselineSection[];
++
++      const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
++      const nextVersionNumber =
++        (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
++      const policyState = this.normalizePoliciesFromSections(baseline.sections);
++      const versionHash = this.buildVersionHash(baseline.hash, policyState);
++
++      const versionRecord = manager.create(BaselineVersion, {
++        baselineId: baseline.id,
++        versionNumber: nextVersionNumber,
++        fileHash: versionHash,
++        storagePath: baseline.storagePath,
++      });
++
++      const savedVersion = await manager.save(versionRecord);
++
++      const policyEntities = policyState.map((policy) =>
++        manager.create(BaselineBlockPolicy, {
++          baselineVersionId: savedVersion.id,
++          baselineSectionId: policy.baselineSectionId,
++          includePolicy: policy.includePolicy,
++          order: policy.order,
++        }),
++      );
+ 
+-    baseline.sections = rebuiltSections as BaselineSection[];
+-    return this.baselineRepository.save(baseline);
++      await manager.save(policyEntities);
++
++      baseline.version = nextVersionNumber;
++      baseline.versions = [savedVersion];
++
++      return manager.save(baseline);
++    });
+   }
+ 
+   async listBaselineVersionsForUser(baselineId: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       select: { id: true },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     // VERIFY: Confirm that descending order is the expected default for version history.
+     return this.baselineVersionRepository.find({
+       where: { baselineId },
+       order: { versionNumber: 'DESC', createdAt: 'DESC' },
+     });
+   }
++
++  async listBlocksForBaselineVersion(
++    baselineId: string,
++    baselineVersionId: string,
++    userId: string,
++  ): Promise<BaselineBlocksResponse> {
++    if (!baselineVersionId?.trim()) {
++      throw new BadRequestException('baseline_version_id is required');
++    }
++
++    const baseline = await this.getBaselineWithSections(baselineId, userId);
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: baselineVersionId, baselineId: baseline.id },
++    });
++
++    if (!baselineVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const policies = await this.baselineBlockPolicyRepository.find({
++      where: { baselineVersionId },
++      relations: ['baselineSection'],
++      order: { order: 'ASC' },
++    });
++
++    const sections = this.applyPoliciesToSections(
++      baseline.sections ?? [],
++      policies,
++    );
++
++    const policyState = this.normalizePoliciesFromSections(sections);
++    const versionHash =
++      baselineVersion.fileHash ?? this.buildVersionHash(baseline.hash, policyState);
++
++    if (!baselineVersion.fileHash && versionHash) {
++      baselineVersion.fileHash = versionHash;
++      await this.baselineVersionRepository.save(baselineVersion);
++    }
++
++    return {
++      baseline_version_id: baselineVersion.id,
++      baseline_version_hash: versionHash ?? null,
++      blocks: sections.map((section) => ({
++        id: section.id,
++        section_type: section.sectionType ?? BaselineSectionType.OTHER,
++        title: section.title ?? null,
++        content: section.content,
++        include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
++        order_index: section.order,
++      })),
++    };
++  }
++
++  async updateBlockPolicies(
++    userId: string,
++    baselineId: string,
++    payload: {
++      baseline_version_id?: string;
++      baseline_version_hash?: string;
++      blocks?: BaselineBlockUpdate[];
++    },
++  ) {
++    const baselineVersionId = payload?.baseline_version_id?.trim();
++    const baselineVersionHash = payload?.baseline_version_hash?.trim();
++    const blocks = payload?.blocks ?? [];
++
++    if (!baselineVersionId) {
++      throw new BadRequestException('baseline_version_id is required');
++    }
++
++    if (!baselineVersionHash) {
++      throw new BadRequestException('baseline_version_hash is required');
++    }
++
++    if (!Array.isArray(blocks) || blocks.length === 0) {
++      throw new BadRequestException('blocks are required');
++    }
++
++    const baseline = await this.getBaselineWithSections(baselineId, userId);
++
++    const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
++
++    if (!latestVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const requestedVersion = await this.baselineVersionRepository.findOne({
++      where: { id: baselineVersionId, baselineId: baseline.id },
++    });
++
++    if (!requestedVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const validPolicies = new Set<BaselineIncludePolicy>([
++      BaselineIncludePolicy.ALWAYS,
++      BaselineIncludePolicy.OPTIONAL,
++      BaselineIncludePolicy.NEVER,
++    ]);
++
++    for (const block of blocks) {
++      if (!validPolicies.has(block.include_tag)) {
++        throw new BadRequestException('Invalid include_tag value');
++      }
++    }
++
++    const sections = baseline.sections?.length
++      ? baseline.sections
++      : await this.baselineSectionRepository.find({
++          where: { baselineId: baseline.id },
++          order: { order: 'ASC' },
++        });
++
++    const sectionMap = new Map(sections.map((section) => [section.id, section]));
++
++    const updateMap = new Map<string, BaselineBlockUpdate>(
++      blocks.map((block) => [block.id, block]),
++    );
++
++    for (const blockId of updateMap.keys()) {
++      if (!sectionMap.has(blockId)) {
++        throw new NotFoundException('Baseline block not found');
++      }
++    }
++
++    const existingPolicies = await this.baselineBlockPolicyRepository.find({
++      where: { baselineVersionId: latestVersion.id },
++      order: { order: 'ASC' },
++    });
++
++    const currentPolicyState: PolicyState[] =
++      existingPolicies.length > 0
++        ? existingPolicies.map((policy) => ({
++            baselineSectionId: policy.baselineSectionId,
++            includePolicy: policy.includePolicy,
++            order: policy.order,
++          }))
++        : this.normalizePoliciesFromSections(sections);
++
++    const currentVersionHash =
++      latestVersion.fileHash ?? this.buildVersionHash(baseline.hash, currentPolicyState);
++
++    if (requestedVersion.id !== latestVersion.id) {
++      this.raiseConflict(latestVersion, currentVersionHash);
++    }
++
++    if (baselineVersionHash !== (currentVersionHash ?? '')) {
++      this.raiseConflict(latestVersion, currentVersionHash);
++    }
++
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      existingPolicies.map((policy) => [policy.baselineSectionId, policy]),
++    );
++
++    const nextPolicies: PolicyState[] = sections.map((section, index) => {
++      const incoming = updateMap.get(section.id);
++      const currentPolicy = policyMap.get(section.id);
++
++      return {
++        baselineSectionId: section.id,
++        includePolicy:
++          incoming?.include_tag ??
++          currentPolicy?.includePolicy ??
++          section.includePolicy ??
++          BaselineIncludePolicy.OPTIONAL,
++        order:
++          incoming?.order_index ??
++          currentPolicy?.order ??
++          section.order ??
++          index,
++      };
++    });
++
++    const newVersionHash = this.buildVersionHash(baseline.hash, nextPolicies);
++    const nextVersionNumber =
++      (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
++
++    return this.baselineRepository.manager.transaction(async (manager) => {
++      const newVersion = manager.create(BaselineVersion, {
++        baselineId: baseline.id,
++        versionNumber: nextVersionNumber,
++        fileHash: newVersionHash,
++        storagePath: baseline.storagePath,
++      });
++
++      const savedVersion = await manager.save(newVersion);
++
++      const policyEntities = nextPolicies.map((policy) =>
++        manager.create(BaselineBlockPolicy, {
++          baselineVersionId: savedVersion.id,
++          baselineSectionId: policy.baselineSectionId,
++          includePolicy: policy.includePolicy,
++          order: policy.order,
++        }),
++      );
++
++      await manager.save(policyEntities);
++
++      baseline.version = nextVersionNumber;
++      baseline.sections = sections.map((section) => {
++        const applied = nextPolicies.find(
++          (policy) => policy.baselineSectionId === section.id,
++        );
++
++        return {
++          ...section,
++          includePolicy: applied?.includePolicy ?? section.includePolicy,
++          order: applied?.order ?? section.order,
++        } as BaselineSection;
++      });
++
++      await manager.save(baseline.sections);
++      await manager.save(baseline);
++
++      return {
++        baseline_version_id: baselineVersionId,
++        updated_blocks: nextPolicies.map((policy) => ({
++          id: policy.baselineSectionId,
++          include_tag: policy.includePolicy,
++          order_index: policy.order,
++        })),
++        new_version_id: savedVersion.id,
++        hash: savedVersion.fileHash,
++      };
++    });
++  }
  }
--
--
--
-diff --git a/apps/web/app/api/fit-scores/route.ts b/apps/web/app/api/fit-scores/route.ts
+diff --git a/apps/api/src/migrations/1750000000000-BaselineBlockPolicies.ts b/apps/api/src/migrations/1750000000000-BaselineBlockPolicies.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..cab8b77e841291859fba087156ab3a7d57fe39c3
+index 0000000000000000000000000000000000000000..38a03ff69c6600a45820c411d6ba00c2c1d89cf3
 --- /dev/null
-+++ b/apps/web/app/api/fit-scores/route.ts
-@@ -0,0 +1,31 @@
++++ b/apps/api/src/migrations/1750000000000-BaselineBlockPolicies.ts
+@@ -0,0 +1,50 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class BaselineBlockPolicies1750000000000 implements MigrationInterface {
++  name = 'BaselineBlockPolicies1750000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(`
++      CREATE TABLE "baseline_block_policies" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "baselineVersionId" uuid NOT NULL,
++        "baselineSectionId" uuid NOT NULL,
++        "includePolicy" character varying NOT NULL DEFAULT 'optional',
++        "orderIndex" integer NOT NULL DEFAULT 0,
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_baseline_block_policies_id" PRIMARY KEY ("id"),
++        CONSTRAINT "FK_baseline_block_policies_version" FOREIGN KEY ("baselineVersionId") REFERENCES "baseline_versions"("id") ON DELETE CASCADE,
++        CONSTRAINT "FK_baseline_block_policies_section" FOREIGN KEY ("baselineSectionId") REFERENCES "baseline_sections"("id") ON DELETE CASCADE
++      )
++    `);
++
++    await queryRunner.query(
++      `CREATE INDEX IF NOT EXISTS "IDX_baseline_block_policies_version" ON "baseline_block_policies" ("baselineVersionId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX IF NOT EXISTS "IDX_baseline_block_policies_section" ON "baseline_block_policies" ("baselineSectionId")`,
++    );
++
++    await queryRunner.query(`
++      INSERT INTO "baseline_block_policies" (
++        "id", "baselineVersionId", "baselineSectionId", "includePolicy", "orderIndex", "createdAt", "updatedAt"
++      )
++      SELECT gen_random_uuid(), bv."id", bs."id", bs."includePolicy", bs."orderIndex", NOW(), NOW()
++      FROM "baseline_versions" bv
++      INNER JOIN "baseline_sections" bs ON bs."baselineId" = bv."baselineId"
++      WHERE NOT EXISTS (
++        SELECT 1 FROM "baseline_block_policies" existing
++        WHERE existing."baselineVersionId" = bv."id" AND existing."baselineSectionId" = bs."id"
++      )
++    `);
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_block_policies_section"`);
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_block_policies_version"`);
++    await queryRunner.query(`DROP TABLE "baseline_block_policies"`);
++  }
++}
+diff --git a/apps/api/src/resume/resume.module.ts b/apps/api/src/resume/resume.module.ts
+index 5e2fb7a6e0466572ac88eb2d1186f4f528b46a3a..4d7e8a65fbbbe6b419d0ec3129850c88de274905 100644
+--- a/apps/api/src/resume/resume.module.ts
++++ b/apps/api/src/resume/resume.module.ts
+@@ -1,14 +1,22 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+ import { BaselineSection } from '../baseline/baseline-section.entity';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { ResumeController } from './resume.controller';
+ import { ResumeService } from './resume.service';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion])],
++  imports: [
++    TypeOrmModule.forFeature([
++      Baseline,
++      BaselineSection,
++      BaselineVersion,
++      BaselineBlockPolicy,
++    ]),
++  ],
+   controllers: [ResumeController],
+   providers: [ResumeService],
+ })
+ export class ResumeModule {}
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index 0736fa0cade364887df6560efffec5586af35cca..e41589b1798b5c78d44cc6022635d952f2ac4f81 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -1,67 +1,110 @@
+ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+ import { Baseline } from '../baseline/baseline.entity';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++} from '../baseline/baseline-section.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+ 
+ export type GenerateResumeRequest = {
+   baselineId: string;
+   baselineVersionId: string;
+   jobId?: string | null;
+ };
+ 
+ @Injectable()
+ export class ResumeService {
+   constructor(
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineVersion)
+     private readonly baselineVersionRepository: Repository<BaselineVersion>,
++    @InjectRepository(BaselineBlockPolicy)
++    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+   ) {}
+ 
++  private applyPoliciesToSections(
++    sections: BaselineSection[],
++    policies: BaselineBlockPolicy[],
++  ) {
++    if (!policies.length) {
++      return [...sections].sort((a, b) => a.order - b.order);
++    }
++
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      policies.map((policy) => [policy.baselineSectionId, policy]),
++    );
++
++    return [...sections]
++      .map((section) => {
++        const policy = policyMap.get(section.id);
++        return {
++          ...section,
++          includePolicy: policy?.includePolicy ?? section.includePolicy,
++          order: policy?.order ?? section.order,
++          sectionType: section.sectionType ?? section.type,
++        } as BaselineSection;
++      })
++      .sort((a, b) => a.order - b.order);
++  }
++
+   async generateResume(userId: string, request: GenerateResumeRequest) {
+     if (!request.baselineId) {
+       throw new BadRequestException('baselineId is required');
+     }
+ 
+     if (!request.baselineVersionId) {
+       throw new BadRequestException('baselineVersionId is required');
+     }
+ 
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: request.baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: { id: request.baselineVersionId, baselineId: baseline.id },
+     });
+ 
+     if (!baselineVersion) {
+       throw new NotFoundException('Baseline version not found');
+     }
+ 
+-    const sections = (baseline.sections ?? []).map((section) => ({
++    const policies = await this.baselineBlockPolicyRepository.find({
++      where: { baselineVersionId: baselineVersion.id },
++      relations: ['baselineSection'],
++      order: { order: 'ASC' },
++    });
++
++    const sectionsWithPolicies = this.applyPoliciesToSections(
++      baseline.sections ?? [],
++      policies,
++    );
++
++    const sections = sectionsWithPolicies.map((section) => ({
+       id: section.id,
+       type: section.sectionType,
+       title: section.title,
+       content: section.content,
+-      includePolicy: section.includePolicy,
++      includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       order: section.order,
+       source: 'baseline',
+     }));
+ 
+     return {
+       ok: true,
+       baselineId: baseline.id,
+       baselineVersionId: baselineVersion.id,
+       jobId: request.jobId ?? null,
+       sections,
+     };
+   }
+ }
+diff --git a/apps/web/app/api/baselines/[id]/blocks/route.ts b/apps/web/app/api/baselines/[id]/blocks/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..aaea951587eadf995454c2080dc6d8cf86ba6afb
+--- /dev/null
++++ b/apps/web/app/api/baselines/[id]/blocks/route.ts
+@@ -0,0 +1,77 @@
 +import { NextRequest, NextResponse } from "next/server";
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 +
-+export const runtime = "nodejs";
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++  const baselineVersionId = req.nextUrl.searchParams.get("baseline_version_id");
 +
-+export async function POST(req: NextRequest) {
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  if (!baselineVersionId) {
++    return NextResponse.json(
++      { error: "baseline_version_id is required" },
++      { status: 400 },
++    );
++  }
++
++  const response = await fetch(
++    `${baseUrl}/baselines/${id}/blocks?baseline_version_id=${baselineVersionId}`,
++    {
++      method: "GET",
++      cache: "no-store",
++      headers: {
++        Authorization: `Bearer ${token}`,
++      },
++    },
++  );
++
++  return relayApiResponse(response);
++}
++
++export async function PATCH(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
 +  const baseUrl = getApiBaseUrl();
 +  const { token, error } = requireAuthToken(req);
 +
 +  if (!baseUrl) {
-+    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
 +  }
 +
 +  if (!token) {
@@ -1045,8 +1707,8 @@ index 0000000000000000000000000000000000000000..cab8b77e841291859fba087156ab3a7d
 +
 +  const body = await req.json();
 +
-+  const response = await fetch(`${baseUrl}/fit-scores`, {
-+    method: "POST",
++  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
++    method: "PATCH",
 +    headers: {
 +      Authorization: `Bearer ${token}`,
 +      "Content-Type": "application/json",
@@ -1056,176 +1718,491 @@ index 0000000000000000000000000000000000000000..cab8b77e841291859fba087156ab3a7d
 +
 +  return relayApiResponse(response);
 +}
-diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index e177f47e6cb66d3790513d8f2e279ce13dbb512b..db588b435adee5a9bc6cae8cc9560e40002d8efb 100644
---- a/apps/web/app/results/page.tsx
-+++ b/apps/web/app/results/page.tsx
-@@ -1,71 +1,72 @@
- // apps/web/app/results/page.tsx
- "use client";
- 
- import type { CSSProperties } from "react";
- import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+diff --git a/apps/web/app/baseline/[id]/baseline-policy-editor.tsx b/apps/web/app/baseline/[id]/baseline-policy-editor.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..1c504bc167fd37a6ef64e0e8d7a2a4783de59eae
+--- /dev/null
++++ b/apps/web/app/baseline/[id]/baseline-policy-editor.tsx
+@@ -0,0 +1,300 @@
++"use client";
++
++import { useEffect, useMemo, useState } from "react";
++
++import {
++  BaselineBlockDto,
++  BaselineIncludePolicy,
++  BaselineVersionDto,
++} from "../../../lib/baselines";
++
++type BaselinePolicyEditorProps = {
++  baselineId: string;
++  versions: BaselineVersionDto[];
++  initialVersionId: string;
++};
++
++const includeTagOptions: Array<{ value: BaselineIncludePolicy; label: string }> = [
++  { value: "always", label: "Always" },
++  { value: "optional", label: "Optional" },
++  { value: "never", label: "Never" },
++];
++
++export function BaselinePolicyEditor({
++  baselineId,
++  versions,
++  initialVersionId,
++}: BaselinePolicyEditorProps) {
++  const [versionOptions, setVersionOptions] = useState<BaselineVersionDto[]>(versions);
++  const [selectedVersionId, setSelectedVersionId] = useState(initialVersionId);
++  const [versionHash, setVersionHash] = useState("");
++  const [blocks, setBlocks] = useState<BaselineBlockDto[]>([]);
++  const [loading, setLoading] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [success, setSuccess] = useState(false);
++
++  const sortedVersions = useMemo(
++    () =>
++      [...versionOptions].sort(
++        (a, b) => (b.versionNumber ?? 0) - (a.versionNumber ?? 0),
++      ),
++    [versionOptions],
++  );
++
++  useEffect(() => {
++    if (selectedVersionId) {
++      void loadBlocks(selectedVersionId);
++    }
++  }, [selectedVersionId]);
++
++  async function loadBlocks(versionId: string) {
++    setLoading(true);
++    setError(null);
++    setSuccess(false);
++
++    try {
++      const response = await fetch(
++        `/api/baselines/${baselineId}/blocks?baseline_version_id=${versionId}`,
++        { cache: "no-store" },
++      );
++      const data = await response.json();
++
++      if (!response.ok) {
++        throw new Error(
++          data?.error?.message || data?.error || "Unable to load blocks.",
++        );
++      }
++
++      setBlocks((data?.blocks as BaselineBlockDto[]) ?? []);
++      setVersionHash(data?.baseline_version_hash ?? "");
++      setSelectedVersionId(data?.baseline_version_id ?? versionId);
++    } catch (loadError) {
++      setError(
++        loadError instanceof Error
++          ? loadError.message
++          : "Unable to load baseline blocks right now.",
++      );
++      setBlocks([]);
++    } finally {
++      setLoading(false);
++    }
++  }
++
++  async function refreshVersions() {
++    try {
++      const response = await fetch(`/api/baselines/${baselineId}/versions`, {
++        cache: "no-store",
++      });
++
++      if (!response.ok) return versionOptions;
++
++      const payload = (await response.json()) as BaselineVersionDto[];
++      setVersionOptions(payload);
++      return payload;
++    } catch {
++      return versionOptions;
++    }
++  }
++
++  function updateBlockPolicy(blockId: string, include_tag: BaselineIncludePolicy) {
++    setBlocks((current) =>
++      current.map((block) =>
++        block.id === blockId
++          ? {
++              ...block,
++              include_tag,
++            }
++          : block,
++      ),
++    );
++    setSuccess(false);
++    setError(null);
++  }
++
++  async function savePolicies() {
++    if (!selectedVersionId) {
++      setError("Select a baseline version before saving.");
++      return;
++    }
++
++    setSaving(true);
++    setError(null);
++    setSuccess(false);
++
++    const payload = {
++      baseline_version_id: selectedVersionId,
++      baseline_version_hash: versionHash,
++      blocks: blocks.map((block) => ({
++        id: block.id,
++        include_tag: block.include_tag,
++        order_index: block.order_index,
++      })),
++    };
++
++    try {
++      const response = await fetch(`/api/baselines/${baselineId}/blocks`, {
++        method: "PATCH",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify(payload),
++      });
++
++      const data = await response.json();
++
++      if (!response.ok) {
++        if (response.status === 409 && data?.error?.details) {
++          const details = data.error.details;
++          setError("This baseline was updated elsewhere. Reloaded the latest version.");
++          if (details?.baseline_version_id) {
++            setSelectedVersionId(details.baseline_version_id);
++            setVersionHash(details.baseline_version_hash ?? "");
++            await loadBlocks(details.baseline_version_id);
++          }
++          return;
++        }
++
++        throw new Error(
++          data?.error?.message || data?.error || "Unable to save block policies.",
++        );
++      }
++
++      const newVersionId = data?.new_version_id ?? selectedVersionId;
++      setVersionHash(data?.hash ?? versionHash);
++      setSelectedVersionId(newVersionId);
++      await refreshVersions();
++      await loadBlocks(newVersionId);
++      setSuccess(true);
++    } catch (saveError) {
++      setError(
++        saveError instanceof Error
++          ? saveError.message
++          : "Unable to save block policies.",
++      );
++    } finally {
++      setSaving(false);
++    }
++  }
++
++  const selectedVersionLabel = useMemo(() => {
++    const match = sortedVersions.find((v) => v.id === selectedVersionId);
++    return match ? `v${match.versionNumber}` : "";
++  }, [selectedVersionId, sortedVersions]);
++
++  return (
++    <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
++      <div className="flex flex-wrap items-center justify-between gap-4">
++        <div className="space-y-1">
++          <h2 className="text-xl font-semibold text-gray-900">Block policies</h2>
++          <p className="text-sm text-gray-700">
++            Control whether each block should always be included, remain optional, or never be used
++            for this baseline version.
++          </p>
++        </div>
++        <div className="flex flex-wrap items-center gap-3">
++          <label className="text-sm font-semibold text-gray-800" htmlFor="baselineVersionId">
++            Version
++          </label>
++          <select
++            id="baselineVersionId"
++            name="baselineVersionId"
++            value={selectedVersionId}
++            onChange={(event) => setSelectedVersionId(event.target.value)}
++            className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm"
++            disabled={loading || saving || sortedVersions.length === 0}
++          >
++            {sortedVersions.length === 0 && <option value="">No versions available</option>}
++            {sortedVersions.map((version) => (
++              <option key={version.id} value={version.id}>
++                Version {version.versionNumber}
++              </option>
++            ))}
++          </select>
++          <button
++            type="button"
++            onClick={savePolicies}
++            disabled={saving || loading || blocks.length === 0}
++            className={`rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm ${
++              saving || loading || blocks.length === 0
++                ? "bg-gray-400"
++                : "bg-blue-600 hover:bg-blue-700"
++            }`}
++          >
++            {saving ? "Saving..." : "Save policies"}
++          </button>
++        </div>
++      </div>
++
++      {versionHash && (
++        <p className="text-xs text-gray-600">
++          Version hash {selectedVersionLabel ? `${selectedVersionLabel}: ` : ""}
++          <span className="font-mono text-gray-800">{versionHash}</span>
++        </p>
++      )}
++
++      {error && (
++        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
++          {error}
++        </div>
++      )}
++
++      {success && (
++        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
++          Block policies saved for {selectedVersionLabel || "this version"}.
++        </div>
++      )}
++
++      {loading ? (
++        <p className="text-sm text-gray-700">Loading blocks...</p>
++      ) : blocks.length === 0 ? (
++        <p className="text-sm text-gray-700">No blocks available for this baseline.</p>
++      ) : (
++        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
++          {blocks
++            .slice()
++            .sort((a, b) => a.order_index - b.order_index)
++            .map((block) => (
++              <article
++                key={block.id}
++                className="flex h-full flex-col justify-between rounded-md border border-gray-100 bg-gray-50 p-4 shadow-sm"
++              >
++                <div className="space-y-2">
++                  <div className="flex items-center justify-between">
++                    <span className="rounded-full bg-gray-200 px-2 py-1 text-xs font-semibold uppercase text-gray-800">
++                      {block.section_type}
++                    </span>
++                    <div className="flex gap-2">
++                      {includeTagOptions.map((option) => {
++                        const isActive = block.include_tag === option.value;
++                        return (
++                          <button
++                            key={option.value}
++                            type="button"
++                            onClick={() => updateBlockPolicy(block.id, option.value)}
++                            disabled={saving}
++                            className={`rounded-full px-3 py-1 text-xs font-semibold shadow-sm transition ${
++                              isActive
++                                ? "bg-blue-600 text-white"
++                                : "bg-white text-gray-800 hover:bg-gray-100"
++                            }`}
++                          >
++                            {option.label}
++                          </button>
++                        );
++                      })}
++                    </div>
++                  </div>
++                  <p className="text-sm font-semibold text-gray-900">
++                    {block.title || "Untitled block"}
++                  </p>
++                  <p className="line-clamp-4 whitespace-pre-wrap text-sm text-gray-800">
++                    {block.content}
++                  </p>
++                </div>
++                <p className="mt-3 text-xs text-gray-600">Order: {block.order_index}</p>
++              </article>
++            ))}
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
+index a565b517d0482101196bb7852dcc2f321b9ac8ec..5a83a2179d48fe8ee4b212b31d58dff0b6392b7e 100644
+--- a/apps/web/app/baseline/[id]/page.tsx
++++ b/apps/web/app/baseline/[id]/page.tsx
+@@ -1,37 +1,36 @@
  import Link from "next/link";
- import { useRouter, useSearchParams } from "next/navigation";
+ import { cookies, headers } from "next/headers";
+ import { notFound, redirect } from "next/navigation";
  
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
- import type { AnalysisResult, StoredPayload } from "../lib/session";
-+import { normalizeAnalysisResult } from "../lib/session";
+-import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
++import {
++  BaselineDto,
++  BaselineSectionDto,
++  BaselineVersionDto,
++} from "../../../lib/baselines";
+ import { formatDateTime } from "../../../lib/format-date";
+-
+-type BaselineVersionDto = {
+-  versionNumber: number;
+-  fileHash: string;
+-  createdAt: string;
+-};
++import { BaselinePolicyEditor } from "./baseline-policy-editor";
  
- const STORAGE_KEY = "ttr:lastAnalysis";
+ async function buildInternalApiUrl(path: string) {
+   const headerList = await headers();
+   const protocol = headerList.get("x-forwarded-proto") ?? "http";
+   const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
  
- function fitLabel(score: number | null) {
-   if (score === null) return "";
-   if (score >= 90) return "Strong fit";
-   if (score >= 75) return "Solid fit";
-   if (score >= 60) return "Mixed fit";
-   return "Weak fit";
+   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+ 
+   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
  }
  
- function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string } | null {
-   try {
-     const parsed = JSON.parse(raw) as unknown;
+ async function buildInternalFetchOptions(): Promise<RequestInit> {
+   const headerList = await headers();
+   const cookieHeader = headerList.get("cookie");
  
-     // New format: { result, savedAt }
-     if (
-       parsed &&
-       typeof parsed === "object" &&
-       "result" in parsed &&
-       "savedAt" in parsed &&
-       typeof (parsed as any).savedAt === "string"
-     ) {
-       const payload = parsed as StoredPayload;
-       if (
-         payload?.result &&
-         (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
-       ) {
--        return { result: payload.result, savedAt: payload.savedAt };
-+        return { result: normalizeAnalysisResult(payload.result), savedAt: payload.savedAt };
-       }
-     }
+   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
  
-     // Old format: AnalysisResult directly
-     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
--      return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
-+      return { result: normalizeAnalysisResult(parsed as AnalysisResult), savedAt: new Date().toISOString() };
-     }
+   return {
+     cache: "no-store",
+     credentials: "include",
+     headers: headersInit,
+   };
+ }
  
-     return null;
-   } catch {
-     return null;
+@@ -151,99 +150,109 @@ function renderContentSections(groupedSections: Record<string, BaselineSectionDt
+ 
+ export default async function BaselineDetailPage({
+   params,
+ }: {
+   params: Promise<{ id: string }>;
+ }) {
+   const resolvedParams = await params;
+   const cookieStore = await cookies();
+   const token = cookieStore.get("auth_token")?.value;
+ 
+   if (!token) {
+     redirect("/auth/login");
    }
- }
  
- type GapDetail = {
-   label?: string;
-   domain?: string;
-   confidence?: number;
-   jdExcerpt?: string;
-   baselineExcerpt?: string;
- };
+   if (!resolvedParams?.id) {
+     notFound();
+   }
  
- function isGapDetail(gap: unknown): gap is GapDetail {
-   return (
-     typeof gap === "object" &&
-     gap !== null &&
-     ("label" in gap || "domain" in gap || "confidence" in gap || "jdExcerpt" in gap || "baselineExcerpt" in gap)
+   const baseline = await fetchBaseline(resolvedParams.id);
+   const versions = await fetchBaselineVersions(resolvedParams.id);
+ 
+   if (!baseline) {
+     notFound();
+   }
+ 
++  const sortedVersions =
++    versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
++  const latestVersionId = sortedVersions[0]?.id ?? "";
++
+   const groupedSections = organizeSections(baseline.sections ?? []);
+   const hasRenderableSections = Object.values(groupedSections).some(
+     (sections) => sections.length > 0,
    );
- }
  
- function formatConfidence(confidence: number) {
-@@ -177,51 +178,52 @@ function ResultsContent() {
-       const parsed = safeParseStored(raw);
-       setStored(parsed);
-     } catch {
-       setStored(null);
-     }
-   }, []);
+   const fallbackContent =
+     !hasRenderableSections && baseline.sections?.[0]?.content
+       ? baseline.sections[0].content
+       : null;
  
-   useEffect(() => {
-     const jobId = searchParams.get("jobId") ?? stored?.result?.jobId;
-     if (!jobId || latestJobIdRef.current === jobId) return;
+   return (
+     <main className="min-h-screen bg-gray-50 px-4 py-8">
+       <div className="mx-auto flex max-w-5xl flex-col gap-6">
+         <div className="flex items-center justify-between">
+           <div className="space-y-2">
+             <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">
+               Baseline details
+             </p>
+             <h1 className="text-3xl font-bold text-gray-900">
+               {baseline.originalFilename}
+             </h1>
+             <p className="text-sm text-gray-700">
+               Uploaded {formatDateTime(baseline.createdAt)}
+             </p>
+           </div>
+           <Link
+             href="/baseline"
+             className="text-sm font-semibold text-blue-600 hover:underline"
+           >
+             Back to baselines
+           </Link>
+         </div>
  
-     latestJobIdRef.current = jobId;
-     let cancelled = false;
++        <BaselinePolicyEditor
++          baselineId={baseline.id}
++          versions={sortedVersions}
++          initialVersionId={latestVersionId}
++        />
++
+         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+           <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
+-          {versions && versions.length > 0 ? (
++          {sortedVersions && sortedVersions.length > 0 ? (
+             <ul className="space-y-2">
+-              {versions.map((version) => (
++              {sortedVersions.map((version) => (
+                 <li
+-                  key={version.versionNumber}
++                  key={version.id}
+                   className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+                 >
+                   <div className="flex flex-wrap justify-between gap-2">
+                     <span className="font-semibold">Version {version.versionNumber}</span>
+                     <span className="text-xs text-gray-600">
+                       {formatDateTime(version.createdAt)}
+                     </span>
+                   </div>
+-                  <div className="text-xs text-gray-700">File hash: {version.fileHash}</div>
++                  <div className="text-xs text-gray-700">Version hash: {version.fileHash}</div>
+                 </li>
+               ))}
+             </ul>
+           ) : (
+             <p className="text-sm text-gray-700">No version history available.</p>
+           )}
+         </section>
  
-     const loadLatest = async () => {
-       setLatestLoading(true);
-       setLatestError(null);
- 
-       try {
-         const response = await fetch(`/api/analysis/job/${jobId}/latest`, { cache: "no-store" });
-         if (!response.ok) {
-           const payload = await response.json().catch(() => null);
-           const message = payload?.error ?? "Unable to refresh the latest analysis.";
-           throw new Error(message);
-         }
--        const data = (await response.json()) as AnalysisResult;
-+        const raw = (await response.json()) as AnalysisResult;
-+        const data = normalizeAnalysisResult(raw);
-         if (cancelled) return;
-         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-         setStored(payload);
-       } catch (error) {
-         if (cancelled) return;
-         setLatestError(error instanceof Error ? error.message : "Unable to refresh the latest analysis.");
-       } finally {
-         if (!cancelled) setLatestLoading(false);
-       }
-     };
- 
-     loadLatest();
-     return () => {
-       cancelled = true;
-     };
-   }, [searchParams, stored?.result?.jobId]);
- 
-   const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
-   const label = fitLabel(score);
-   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
- 
-   const hasResult = score !== null;
-   const baselineId = stored?.result?.baselineId ?? null;
-   const verdict = stored?.result?.verdict ?? null;
+         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
+           {!hasRenderableSections && !fallbackContent ? (
+             <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
+           ) : (
+             <div className="space-y-6">
+               {hasRenderableSections && renderContentSections(groupedSections)}
+               {!hasRenderableSections && fallbackContent ? (
+                 <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
+                   <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+                     {fallbackContent}
+                   </pre>
+                 </article>
+               ) : null}
+             </div>
+           )}
+         </section>
 diff --git a/apps/web/lib/baselines.ts b/apps/web/lib/baselines.ts
-index a0c93d39023de9a9327188a4fc3c45b268c0005e..e797031fa5d66f7d513adbf611c3cd85f152ec77 100644
+index e797031fa5d66f7d513adbf611c3cd85f152ec77..83c1164b438e6f2d28af780bf0377dc3d5ecd278 100644
 --- a/apps/web/lib/baselines.ts
 +++ b/apps/web/lib/baselines.ts
-@@ -1,35 +1,45 @@
- export type BaselineSectionType =
-   | "RAW"
-   | "SUMMARY"
-   | "EXPERIENCE"
-   | "PROJECT"
-   | "SKILLS"
-   | "EDUCATION"
-   | "OTHER";
- 
- export type BaselineIncludePolicy = "always" | "optional" | "never";
- 
- export interface BaselineSectionDto {
-   id: string;
-   baselineId: string;
-   sectionType: BaselineSectionType;
-   title: string | null;
-   content: string;
-   includePolicy: BaselineIncludePolicy;
-   order: number;
-   createdAt: string;
+@@ -21,25 +21,40 @@ export interface BaselineSectionDto {
    updatedAt: string;
  }
  
-+export interface BaselineVersionDto {
-+  id: string;
-+  baselineId: string;
-+  versionNumber: number;
-+  fileHash: string | null;
-+  storagePath: string;
-+  createdAt: string;
-+}
-+
+ export interface BaselineVersionDto {
+   id: string;
+   baselineId: string;
+   versionNumber: number;
+   fileHash: string | null;
+   storagePath: string;
+   createdAt: string;
+ }
+ 
  export interface BaselineDto {
    id: string;
    userId: string;
@@ -1237,120 +2214,20 @@ index a0c93d39023de9a9327188a4fc3c45b268c0005e..e797031fa5d66f7d513adbf611c3cd85
    createdAt: string;
    updatedAt: string;
    sections?: BaselineSectionDto[];
-+  versions?: BaselineVersionDto[];
- }
-diff --git a/apps/web/lib/session.ts b/apps/web/lib/session.ts
-index c1867c2c79949dc2f38131ebab88db9756df7f27..27cd091c0f76dcd6781e2ff42a2ad4ed27d4e2bb 100644
---- a/apps/web/lib/session.ts
-+++ b/apps/web/lib/session.ts
-@@ -1,39 +1,110 @@
- export type AnalysisResult = {
-   ok?: boolean;
-   assessmentId?: string;
-   jobId?: string;
-   baselineId?: string;
-   baselineVersion?: number | null;
-+  fit_score?: number;
-+  overall_score?: number;
-   overallScore?: number;
-   score: number;
-   verdict?: "APPLY" | "CONSIDER" | "SKIP";
-+  breakdown?: {
-+    experience_alignment: number;
-+    leadership_level: number;
-+    technical_platform_fit: number;
-+    industry_context: number;
-+    strategic_vs_tactical: number;
-+  };
-   dimensionScores?: {
-     experienceAlignment: number;
-     leadershipLevel: number;
-     technicalPlatformFit: number;
-     industryContext: number;
-     strategicTacticalFit: number;
-   };
-   summary?: string;
-   strengths?: string[];
-   gaps?: string[];
-   complianceFlags?:
-     | string[]
-     | {
-         [key: string]: string | number | boolean | null | undefined;
-       };
-+  compliance_flags?: Array<{ code: string; message?: string | null }>;
-   recommendedActions?: string[];
-   debug?: unknown;
- };
- 
- export type StoredPayload = {
-   result: AnalysisResult;
-   savedAt: string;
- };
- 
- const STORAGE_KEY = "ttr:lastAnalysis";
- 
- export async function saveLastAnalysis(payload: StoredPayload) {
-   if (typeof window === "undefined") return;
-   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+   versions?: BaselineVersionDto[];
  }
 +
-+export function normalizeAnalysisResult(raw: any): AnalysisResult {
-+  const fitScore =
-+    raw?.score ??
-+    raw?.overallScore ??
-+    raw?.overall_score ??
-+    raw?.fit_score ??
-+    null;
++export interface BaselineBlockDto {
++  id: string;
++  section_type: BaselineSectionType;
++  title: string | null;
++  content: string;
++  include_tag: BaselineIncludePolicy;
++  order_index: number;
++}
 +
-+  const breakdown =
-+    raw?.breakdown && typeof raw.breakdown === "object"
-+      ? raw.breakdown
-+      : undefined;
-+
-+  const mappedDimensions =
-+    raw?.dimensionScores ??
-+    (breakdown
-+      ? {
-+          experienceAlignment: breakdown.experience_alignment,
-+          leadershipLevel: breakdown.leadership_level,
-+          technicalPlatformFit: breakdown.technical_platform_fit,
-+          industryContext: breakdown.industry_context,
-+          strategicTacticalFit: breakdown.strategic_vs_tactical,
-+        }
-+      : undefined);
-+
-+  const complianceFlags =
-+    raw?.complianceFlags ??
-+    raw?.compliance_flags?.map((flag: { code: string; message?: string }) =>
-+      flag?.code ? flag.code : flag,
-+    ) ??
-+    undefined;
-+
-+  const verdict = raw?.verdict
-+    ? String(raw.verdict).toUpperCase()
-+    : raw?.verdict;
-+
-+  return {
-+    ...raw,
-+    verdict,
-+    breakdown,
-+    dimensionScores: mappedDimensions,
-+    complianceFlags,
-+    fit_score: raw?.fit_score,
-+    overall_score: raw?.overall_score,
-+    overallScore:
-+      raw?.overallScore ??
-+      raw?.overall_score ??
-+      raw?.fit_score ??
-+      raw?.score ??
-+      undefined,
-+    score:
-+      typeof fitScore === "number"
-+        ? fitScore
-+        : typeof raw?.fit_score === "number"
-+          ? raw.fit_score
-+          : 0,
-+    strengths: raw?.strengths ?? [],
-+    gaps: raw?.gaps ?? [],
-+  };
++export interface BaselineBlockPolicyResponse {
++  baseline_version_id: string;
++  baseline_version_hash: string | null;
++  blocks: BaselineBlockDto[];
 +}

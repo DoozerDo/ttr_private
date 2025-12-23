@@ -43,3 +43,18 @@ export interface BaselineDto {
   sections?: BaselineSectionDto[];
   versions?: BaselineVersionDto[];
 }
+
+export interface BaselineBlockDto {
+  id: string;
+  section_type: BaselineSectionType;
+  title: string | null;
+  content: string;
+  include_tag: BaselineIncludePolicy;
+  order_index: number;
+}
+
+export interface BaselineBlockPolicyResponse {
+  baseline_version_id: string;
+  baseline_version_hash: string | null;
+  blocks: BaselineBlockDto[];
+}

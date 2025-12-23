@@ -4,9 +4,11 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Baseline } from './baseline.entity';
+import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 
 @Entity({ name: 'baseline_versions' })
 export class BaselineVersion {
@@ -31,6 +33,11 @@ export class BaselineVersion {
   get hash(): string | null {
     return this.fileHash;
   }
+
+  @OneToMany(() => BaselineBlockPolicy, (policy) => policy.baselineVersion, {
+    cascade: true,
+  })
+  blockPolicies!: BaselineBlockPolicy[];
 
   // VERIFY: Confirm that the stored path matches the persisted upload location.
   @Column({ type: 'varchar' })

@@ -12,11 +12,17 @@ import { BaselineVersion } from './baseline-version.entity';
 import { BaselineService } from './baseline.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import { BaselineParserService } from './baseline-parser.service';
+import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion]),
+    TypeOrmModule.forFeature([
+      Baseline,
+      BaselineSection,
+      BaselineVersion,
+      BaselineBlockPolicy,
+    ]),
     MulterModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

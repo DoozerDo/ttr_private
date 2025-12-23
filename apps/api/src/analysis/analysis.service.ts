@@ -11,6 +11,7 @@ import {
   BaselineIncludePolicy,
   BaselineSection,
 } from '../baseline/baseline-section.entity';
+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Job } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
@@ -86,6 +87,8 @@ export class AnalysisService {
     private readonly baselineRepository: Repository<Baseline>,
     @InjectRepository(BaselineSection)
     private readonly baselineSectionRepository: Repository<BaselineSection>,
+    @InjectRepository(BaselineBlockPolicy)
+    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(BaselineVersion)
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(Job)
@@ -294,6 +297,31 @@ export class AnalysisService {
     } satisfies DimensionWeightOverrides;
   }
 
+  private applyPoliciesToSections(
+    sections: BaselineSection[],
+    policies: BaselineBlockPolicy[],
+  ) {
+    if (!policies.length) {
+      return [...sections].sort((a, b) => a.order - b.order);
+    }
+
+    const policyMap = new Map<string, BaselineBlockPolicy>(
+      policies.map((policy) => [policy.baselineSectionId, policy]),
+    );
+
+    return [...sections]
+      .map((section) => {
+        const policy = policyMap.get(section.id);
+        return {
+          ...section,
+          includePolicy: policy?.includePolicy ?? section.includePolicy,
+          order: policy?.order ?? section.order,
+          sectionType: section.sectionType ?? section.type,
+        } as BaselineSection;
+      })
+      .sort((a, b) => a.order - b.order);
+  }
+
   private async loadBaselineForVersion(userId: string, baselineVersionId?: string) {
     if (!baselineVersionId?.trim()) {
       throw new BadRequestException('baseline_version_id is required');
@@ -321,6 +349,17 @@ export class AnalysisService {
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
     }
+
+    const policies = await this.baselineBlockPolicyRepository.find({
+      where: { baselineVersionId: baselineVersion.id },
+      relations: ['baselineSection'],
+      order: { order: 'ASC' },
+    });
+
+    baseline.sections = this.applyPoliciesToSections(
+      baseline.sections ?? [],
+      policies,
+    );
 
     return { baseline, baselineVersion };
   }
