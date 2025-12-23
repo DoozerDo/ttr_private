@@ -129,6 +129,23 @@ const ScoreRing = ({ score }: { score: number }) => {
   );
 };
 
+const complianceExplanations: Record<string, string> = {
+  "Baseline too short for reliable scoring":
+    "We need more detail in the baseline to judge alignment confidently.",
+  "Job description too short for reliable scoring":
+    "The job post lacks detail, so the fit score may be noisy.",
+  "Job description contains prompt-like content":
+    "The job text looks like instructions to an AI rather than a real posting.",
+  "Suspicious job source URL": "The job link is not a valid http(s) URL and may be unsafe.",
+};
+
+function explainComplianceFlag(flag: string) {
+  return (
+    complianceExplanations[flag] ??
+    "We couldn’t map this flag yet—treat it as a caution and double-check the inputs."
+  );
+}
+
 function ResultsContent() {
   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
@@ -458,11 +475,23 @@ function ResultsContent() {
               >
                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
                 {complianceFlags.length ? (
-                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-                    {complianceFlags.map((flag, index) => (
-                      <li key={`${flag}-${index}`}>{flag}</li>
-                    ))}
-                  </ul>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                      {complianceFlags.map((flag, index) => (
+                        <li key={`${flag}-${index}`}>{flag}</li>
+                      ))}
+                    </ul>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(241,245,249,0.78)" }}>
+                        What this means
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(226,232,240,0.9)" }}>
+                        {complianceFlags.map((flag, index) => (
+                          <li key={`${flag}-explanation-${index}`}>{explainComplianceFlag(flag)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
                 )}
@@ -596,3 +625,4 @@ export default function ResultsPage() {
 // - TypeScript build succeeds for Results page updates.
 // - Gaps render correctly for both string and object inputs.
 // - Linting passes for this file.
+// - Compliance flags show explanations with fallbacks for unknown values.

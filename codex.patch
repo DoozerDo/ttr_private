@@ -1,220 +1,81 @@
 diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index 99d0f0ee3440edfa927bf3fcc6e3dcea32cf60fa..6b8d6d3b1637424bfde860f1c76d8d252e342c7e 100644
+index 6b8d6d3b1637424bfde860f1c76d8d252e342c7e..6492ea7bdc1f09f61893889dd95d93beb758f7a8 100644
 --- a/apps/web/app/results/page.tsx
 +++ b/apps/web/app/results/page.tsx
-@@ -30,50 +30,71 @@ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string
-       typeof parsed === "object" &&
-       "result" in parsed &&
-       "savedAt" in parsed &&
-       typeof (parsed as any).savedAt === "string"
-     ) {
-       const payload = parsed as StoredPayload;
-       if (
-         payload?.result &&
-         (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
-       ) {
-         return { result: payload.result, savedAt: payload.savedAt };
-       }
-     }
+@@ -107,50 +107,67 @@ const ScoreRing = ({ score }: { score: number }) => {
+           r={radius}
+           stroke={`url(#${gradientId})`}
+           strokeWidth={14}
+           fill="none"
+           strokeDasharray={circumference}
+           strokeDashoffset={offset}
+           strokeLinecap="round"
+           style={{ transition: "stroke-dashoffset 600ms ease-out", filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))" }}
+         />
+       </svg>
  
-     // Old format: AnalysisResult directly
-     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
-       return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
-     }
+       <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center" }}>
+         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+           <div style={{ fontSize: 34, fontWeight: 900, color: "#fde68a", textShadow: "0 2px 14px rgba(0,0,0,0.35)" }}>
+             {Math.round(clamped)}
+           </div>
+           <div style={{ fontSize: 11, letterSpacing: 2.5, textTransform: "uppercase", color: "rgba(252, 211, 77, 0.8)" }}>
+             Fit score
+           </div>
+         </div>
+       </div>
+     </div>
+   );
+ };
  
-     return null;
-   } catch {
-     return null;
-   }
- }
- 
-+type GapDetail = {
-+  label?: string;
-+  domain?: string;
-+  confidence?: number;
-+  jdExcerpt?: string;
-+  baselineExcerpt?: string;
++const complianceExplanations: Record<string, string> = {
++  "Baseline too short for reliable scoring":
++    "We need more detail in the baseline to judge alignment confidently.",
++  "Job description too short for reliable scoring":
++    "The job post lacks detail, so the fit score may be noisy.",
++  "Job description contains prompt-like content":
++    "The job text looks like instructions to an AI rather than a real posting.",
++  "Suspicious job source URL": "The job link is not a valid http(s) URL and may be unsafe.",
 +};
 +
-+function isGapDetail(gap: unknown): gap is GapDetail {
++function explainComplianceFlag(flag: string) {
 +  return (
-+    typeof gap === "object" &&
-+    gap !== null &&
-+    ("label" in gap || "domain" in gap || "confidence" in gap || "jdExcerpt" in gap || "baselineExcerpt" in gap)
++    complianceExplanations[flag] ??
++    "We couldn’t map this flag yet—treat it as a caution and double-check the inputs."
 +  );
 +}
 +
-+function formatConfidence(confidence: number) {
-+  const normalized = confidence <= 1 ? confidence * 100 : confidence;
-+  return `${Math.round(normalized)}%`;
-+}
-+
- function formatLastUpdated(iso: string) {
-   try {
-     const d = new Date(iso);
-     if (Number.isNaN(d.getTime())) return "Unknown";
-     return d.toLocaleString();
-   } catch {
-     return "Unknown";
-   }
- }
+ function ResultsContent() {
+   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
  
- const ScoreRing = ({ score }: { score: number }) => {
-   const radius = 64;
-   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
-   const clamped = Math.min(Math.max(score, 0), 100);
-   const offset = circumference * (1 - clamped / 100);
-   const gradientId = "resultsScoreGradient";
+   const [stored, setStored] = useState<{ result: AnalysisResult; savedAt: string } | null>(null);
+   const [interviewError, setInterviewError] = useState<string | null>(null);
+   const [isCreatingInterview, setIsCreatingInterview] = useState(false);
+   const router = useRouter();
+   const searchParams = useSearchParams();
+   const latestJobIdRef = useRef<string | null>(null);
  
-   return (
-     <div style={{ position: "relative", width: 160, height: 160, display: "grid", placeItems: "center" }}>
-       <svg viewBox="0 0 200 200" style={{ width: "100%", height: "100%" }}>
-         <defs>
-           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-             <stop offset="0%" stopColor="#f59e0b" />
-             <stop offset="50%" stopColor="#fbbf24" />
-             <stop offset="100%" stopColor="#f97316" />
-@@ -147,51 +168,54 @@ function ResultsContent() {
-         const data = (await response.json()) as AnalysisResult;
-         if (cancelled) return;
-         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-         setStored(payload);
-       } catch {
-         // Ignore fetch errors; fall back to stored data.
-       }
-     };
- 
-     loadLatest();
-     return () => {
-       cancelled = true;
-     };
-   }, [searchParams, stored?.result?.jobId]);
- 
-   const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
-   const label = fitLabel(score);
-   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
- 
-   const hasResult = score !== null;
-   const baselineId = stored?.result?.baselineId ?? null;
-   const verdict = stored?.result?.verdict ?? null;
-   const dimensionScores = stored?.result?.dimensionScores ?? null;
-   const strengths = stored?.result?.strengths ?? [];
--  const gaps = stored?.result?.gaps ?? [];
-+  const rawGaps = (stored?.result?.gaps as unknown) ?? [];
-+  const gaps = Array.isArray(rawGaps) ? rawGaps : [];
-+  const gapDetails = gaps.filter(isGapDetail);
-+  const gapStrings = gaps.filter((gap): gap is string => typeof gap === "string");
-   const complianceFlags = stored?.result?.complianceFlags ?? [];
- 
-   const handleCreateInterview = async () => {
-     if (!baselineId) {
-       setInterviewError("Save a baseline analysis first, then try again.");
-       return;
-     }
- 
-     setInterviewError(null);
-     setIsCreatingInterview(true);
- 
+   useEffect(() => {
      try {
-       const response = await fetch("/api/interviews", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({ baselineId }),
-       });
- 
-       if (!response.ok) {
-         const payload = await response.json().catch(() => null);
-         const message = payload?.error ?? "Unable to create interview session.";
-         throw new Error(message);
+       const raw = sessionStorage.getItem(STORAGE_KEY);
+       if (!raw) {
+         setStored(null);
+         return;
        }
  
-       const session = (await response.json()) as { id?: string };
-@@ -337,55 +361,105 @@ function ResultsContent() {
-               <div
-                 style={{
-                   borderRadius: 12,
-                   border: "1px solid rgba(255,255,255,0.08)",
-                   background: "rgba(0,0,0,0.18)",
-                   padding: "14px 14px",
-                   display: "grid",
-                   gap: 12,
-                 }}
-               >
-                 <div>
-                   <div style={{ fontSize: 13, fontWeight: 900, color: "#fde68a" }}>Alignment strengths</div>
-                   {strengths.length ? (
-                     <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-                       {strengths.map((item, index) => (
-                         <li key={`${item}-${index}`}>{item}</li>
-                       ))}
-                     </ul>
-                   ) : (
-                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No strengths identified yet.</div>
-                   )}
-                 </div>
-                 <div>
-                   <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>Gaps to address</div>
-                   {gaps.length ? (
--                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
--                      {gaps.map((item, index) => (
--                        <li key={`${item}-${index}`}>{item}</li>
-+                    <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
-+                      {gapDetails.map((gap, index) => (
-+                        <div
-+                          key={`${gap.label ?? gap.domain ?? "gap"}-${index}`}
-+                          style={{
-+                            border: "1px solid rgba(255,255,255,0.08)",
-+                            background: "rgba(255,255,255,0.03)",
-+                            borderRadius: 10,
-+                            padding: "10px 12px",
-+                            display: "grid",
-+                            gap: 6,
-+                          }}
-+                        >
-+                          <div
-+                            style={{
-+                              display: "flex",
-+                              justifyContent: "space-between",
-+                              gap: 10,
-+                              alignItems: "baseline",
-+                              flexWrap: "wrap",
-+                            }}
-+                          >
-+                            <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>
-+                              {gap.label ?? "Gap"}
-+                            </div>
-+                            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", display: "flex", gap: 12 }}>
-+                              {gap.domain ? <span>Domain: {gap.domain}</span> : null}
-+                              {typeof gap.confidence === "number" ? (
-+                                <span>Confidence: {formatConfidence(gap.confidence)}</span>
-+                              ) : null}
-+                            </div>
-+                          </div>
-+                          {gap.jdExcerpt ? (
-+                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
-+                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>JD Excerpt</div>
-+                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.jdExcerpt}</div>
-+                            </div>
-+                          ) : null}
-+                          {gap.baselineExcerpt ? (
-+                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
-+                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>Baseline Excerpt</div>
-+                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.baselineExcerpt}</div>
-+                            </div>
-+                          ) : null}
-+                        </div>
-                       ))}
--                    </ul>
-+
-+                      {gapStrings.length ? (
-+                        <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-+                          {gapStrings.map((item, index) => (
-+                            <li key={`${item}-${index}`}>{item}</li>
-+                          ))}
-+                        </ul>
-+                      ) : null}
-+                    </div>
+       const parsed = safeParseStored(raw);
+       setStored(parsed);
+     } catch {
+       setStored(null);
+     }
+   }, []);
+ 
+@@ -436,55 +453,67 @@ function ResultsContent() {
+                             <li key={`${item}-${index}`}>{item}</li>
+                           ))}
+                         </ul>
+                       ) : null}
+                     </div>
                    ) : (
                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
                    )}
@@ -235,17 +96,54 @@ index 99d0f0ee3440edfa927bf3fcc6e3dcea32cf60fa..6b8d6d3b1637424bfde860f1c76d8d25
                >
                  <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
                  {complianceFlags.length ? (
-                   <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-                     {complianceFlags.map((flag, index) => (
-                       <li key={`${flag}-${index}`}>{flag}</li>
-                     ))}
-                   </ul>
-@@ -495,25 +569,30 @@ function ResultsContent() {
-                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Quick links</div>
-                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                   <Link href="/analyze" style={ttrComponents.quietButton}>
-                     Run another analysis
-                   </Link>
+-                  <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+-                    {complianceFlags.map((flag, index) => (
+-                      <li key={`${flag}-${index}`}>{flag}</li>
+-                    ))}
+-                  </ul>
++                  <div style={{ display: "grid", gap: 10 }}>
++                    <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
++                      {complianceFlags.map((flag, index) => (
++                        <li key={`${flag}-${index}`}>{flag}</li>
++                      ))}
++                    </ul>
++                    <div style={{ display: "grid", gap: 6 }}>
++                      <div style={{ fontSize: 12, fontWeight: 800, color: "rgba(241,245,249,0.78)" }}>
++                        What this means
++                      </div>
++                      <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(226,232,240,0.9)" }}>
++                        {complianceFlags.map((flag, index) => (
++                          <li key={`${flag}-explanation-${index}`}>{explainComplianceFlag(flag)}</li>
++                        ))}
++                      </ul>
++                    </div>
++                  </div>
+                 ) : (
+                   <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No compliance flags.</div>
+                 )}
+               </div>
+             ) : null}
+ 
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(0,0,0,0.18)",
+                 padding: "12px 12px",
+               }}
+             >
+               <p style={{ margin: 0, fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Planned sections</p>
+               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap" }}>
+                 <span style={ttrComponents.chip}>Fit score and label</span>
+                 <span style={ttrComponents.chip}>Signals and gaps</span>
+                 <span style={ttrComponents.chip}>Recommended actions</span>
+                 <span style={ttrComponents.chip}>Exports and artifacts</span>
+               </div>
+             </div>
+ 
+             <div
+               style={{
+@@ -574,25 +603,26 @@ function ResultsContent() {
                    <Link href="/calibrate" style={ttrComponents.quietButton}>
                      Open Calibrate
                    </Link>
@@ -266,16 +164,9 @@ index 99d0f0ee3440edfa927bf3fcc6e3dcea32cf60fa..6b8d6d3b1637424bfde860f1c76d8d25
      </Suspense>
    );
  }
-+
-+// VERIFY:
-+// - TypeScript build succeeds for Results page updates.
-+// - Gaps render correctly for both string and object inputs.
-+// - Linting passes for this file.
-
-
  
-
-
-
-
-
+ // VERIFY:
+ // - TypeScript build succeeds for Results page updates.
+ // - Gaps render correctly for both string and object inputs.
+ // - Linting passes for this file.
++// - Compliance flags show explanations with fallbacks for unknown values.
