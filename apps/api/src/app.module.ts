@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { BaselineModule } from './baseline/baseline.module';
+import { ComplianceModule } from './compliance/compliance.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ResumeModule } from './resume/resume.module';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     AnalysisModule,
     BaselineModule,
+    ComplianceModule,
     InterviewsModule,
     JobsModule,
     ResumeModule,

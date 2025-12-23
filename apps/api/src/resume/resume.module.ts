@@ -4,6 +4,8 @@ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceModule } from '../compliance/compliance.module';
+import { Job } from '../jobs/job.entity';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -14,7 +16,9 @@ import { ResumeService } from './resume.service';
       BaselineSection,
       BaselineVersion,
       BaselineBlockPolicy,
+      Job,
     ]),
+    ComplianceModule,
   ],
   controllers: [ResumeController],
   providers: [ResumeService],

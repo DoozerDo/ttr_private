@@ -1,5 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { Baseline } from '../baseline/baseline.entity';
@@ -8,6 +14,9 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceAction } from '../compliance/compliance.types';
+import { Job } from '../jobs/job.entity';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -24,6 +33,9 @@ export class ResumeService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+    @InjectRepository(Job)
+    private readonly jobsRepository: Repository<Job>,
+    private readonly complianceService: ComplianceService,
   ) {}
 
   private applyPoliciesToSections(
@@ -99,12 +111,50 @@ export class ResumeService {
       source: 'baseline',
     }));
 
+    const job = request.jobId
+      ? await this.jobsRepository.findOne({
+          where: { id: request.jobId, userId },
+        })
+      : null;
+
+    if (request.jobId && !job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const outputHash = createHash('sha256')
+      .update(JSON.stringify(sections))
+      .digest('hex');
+
+    const { complianceFlags, blocked, audit } =
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: userId,
+        baselineVersion,
+        job,
+        outputHash,
+        scopeInflationDetected: sections.some(
+          (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
+        ),
+      });
+
+    if (blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'unprocessable',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: complianceFlags },
+        },
+      });
+    }
+
     return {
       ok: true,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
       jobId: request.jobId ?? null,
       sections,
+      compliance_flags: complianceFlags,
+      audit_id: audit.id,
     };
   }
 }
