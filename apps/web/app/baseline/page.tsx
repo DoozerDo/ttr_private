@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -7,11 +7,36 @@ import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
 
+async function buildInternalApiUrl(path: string) {
+  const headerList = await headers();
+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+  const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+
+  const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+
+  return new URL(path, baseUrl ?? "http://localhost:3000").toString();
+}
+
+async function buildInternalFetchOptions(): Promise<RequestInit> {
+  const headerList = await headers();
+  const cookieHeader = headerList.get("cookie");
+
+  const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
+
+  return {
+    cache: "no-store",
+    credentials: "include",
+    headers: headersInit,
+  };
+}
+
 async function fetchBaselines(): Promise<BaselineDto[]> {
   try {
-    const res = await fetch("/api/baselines", {
-      cache: "no-store",
-    });
+    const res = await fetch(
+      await buildInternalApiUrl("/api/baselines"),
+      await buildInternalFetchOptions(),
+    );
 
     if (res.status === 401) {
       redirect("/auth/login");

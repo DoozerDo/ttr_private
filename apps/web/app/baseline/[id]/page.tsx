@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
@@ -11,11 +11,36 @@ type BaselineVersionDto = {
   createdAt: string;
 };
 
+async function buildInternalApiUrl(path: string) {
+  const headerList = await headers();
+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+  const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+
+  const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+
+  return new URL(path, baseUrl ?? "http://localhost:3000").toString();
+}
+
+async function buildInternalFetchOptions(): Promise<RequestInit> {
+  const headerList = await headers();
+  const cookieHeader = headerList.get("cookie");
+
+  const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
+
+  return {
+    cache: "no-store",
+    credentials: "include",
+    headers: headersInit,
+  };
+}
+
 async function fetchBaseline(id: string): Promise<BaselineDto | null> {
   try {
-    const response = await fetch(`/api/baselines/${id}`, {
-      cache: "no-store",
-    });
+    const response = await fetch(
+      await buildInternalApiUrl(`/api/baselines/${id}`),
+      await buildInternalFetchOptions(),
+    );
 
     if (response.status === 401) {
       redirect("/auth/login");
@@ -35,11 +60,11 @@ async function fetchBaseline(id: string): Promise<BaselineDto | null> {
 async function fetchBaselineVersions(
   id: string,
 ): Promise<BaselineVersionDto[] | null> {
-  // VERIFY: ensure versions API returns expected shape
   try {
-    const response = await fetch(`/api/baselines/${id}/versions`, {
-      cache: "no-store",
-    });
+    const response = await fetch(
+      await buildInternalApiUrl(`/api/baselines/${id}/versions`),
+      await buildInternalFetchOptions(),
+    );
 
     if (response.status === 401) {
       redirect("/auth/login");
@@ -190,7 +215,6 @@ export default async function BaselineDetailPage({
                   key={version.versionNumber}
                   className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
                 >
-                  {/* VERIFY: confirm fields display correctly */}
                   <div className="flex flex-wrap justify-between gap-2">
                     <span className="font-semibold">Version {version.versionNumber}</span>
                     <span className="text-xs text-gray-600">
