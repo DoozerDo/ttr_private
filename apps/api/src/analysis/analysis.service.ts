@@ -12,6 +12,7 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { Job } from '../jobs/job.entity';
+import { CalibrationWeights, User } from '../users/user.entity';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import { FitScoringService } from './fit-scoring.service';
@@ -42,8 +43,25 @@ export class AnalysisService {
     private readonly jobRepository: Repository<Job>,
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
     private readonly fitScoringService: FitScoringService,
   ) {}
+
+  // VERIFY: Confirm default calibration values with product stakeholders.
+  private readonly defaultCalibration: {
+    profileName: string;
+    weights: CalibrationWeights;
+  } = {
+    profileName: 'default',
+    weights: {
+      dimensionA: 1,
+      dimensionB: 1,
+      dimensionC: 1,
+      dimensionD: 1,
+      dimensionE: 1,
+    },
+  };
 
   private normalizeKeywords(text: string) {
     const tokens = text
@@ -109,6 +127,49 @@ export class AnalysisService {
     return createHash('sha256')
       .update(JSON.stringify(payload))
       .digest('hex');
+  }
+
+  async getCalibration(userId: string) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
+    const weights =
+      user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
+
+    return { ok: true, profileName, weights };
+  }
+
+  async saveCalibration(
+    userId: string,
+    payload: { profileName?: string; weights?: CalibrationWeights | null },
+  ) {
+    const profileName = payload.profileName?.trim();
+
+    if (!profileName) {
+      throw new BadRequestException('profileName is required');
+    }
+
+    // VERIFY: Validate calibration weight ranges with data science.
+    if (!payload.weights) {
+      throw new BadRequestException('weights are required');
+    }
+
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.calibrationProfileName = profileName;
+    user.calibrationWeights = payload.weights;
+
+    await this.usersRepository.save(user);
+
+    return { ok: true, profileName, weights: payload.weights };
   }
 
   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {

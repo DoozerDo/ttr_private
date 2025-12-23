@@ -1,121 +1,275 @@
-diff --git a/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts b/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..13cd6914b9059347db9912d1f74cc4560cb92a9b
---- /dev/null
-+++ b/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts
-@@ -0,0 +1,26 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class UserCalibrationProfile1750000000000
-+  implements MigrationInterface
-+{
-+  name = 'UserCalibrationProfile1750000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "calibrationProfileName" character varying(255)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "calibrationWeights" jsonb`,
-+    );
-+    // VERIFY: Confirm null defaults cover existing users without calibration data.
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "users" DROP COLUMN "calibrationWeights"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" DROP COLUMN "calibrationProfileName"`,
-+    );
-+  }
-+}
-diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
-index 1ae5ce4597704db1378ce1838317321432f139fc..2e731eb4f37d9e6e187e506c1dbdadf721e0274a 100644
---- a/apps/api/src/users/user.entity.ts
-+++ b/apps/api/src/users/user.entity.ts
-@@ -1,27 +1,44 @@
+diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
+index 06b76c0c9c28e55070835934918ba95ad517eb88..800162b21b8344401deb7b47cf47aa2b574adc2e 100644
+--- a/apps/api/src/analysis/analysis.module.ts
++++ b/apps/api/src/analysis/analysis.module.ts
+@@ -1,18 +1,20 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineSection } from '../baseline/baseline-section.entity';
+ import { Job } from '../jobs/job.entity';
++import { User } from '../users/user.entity';
+ import { FitAssessment } from './fit-assessment.entity';
+ import { AnalysisController } from './analysis.controller';
++import { CalibrationController } from './calibration.controller';
+ import { AnalysisService } from './analysis.service';
+ import { FitScoringService } from './fit-scoring.service';
+ 
+ @Module({
+   imports: [
+-    TypeOrmModule.forFeature([Baseline, BaselineSection, Job, FitAssessment]),
++    TypeOrmModule.forFeature([Baseline, BaselineSection, Job, FitAssessment, User]),
+   ],
+-  controllers: [AnalysisController],
++  controllers: [AnalysisController, CalibrationController],
+   providers: [AnalysisService, FitScoringService],
+ })
+ export class AnalysisModule {}
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+index ac863d0150e82ed46820057ab9eafd2f9373b017..e195a606e2102470a1e02fea1af3c72ac50391c5 100644
+--- a/apps/api/src/analysis/analysis.service.ts
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -1,72 +1,90 @@
  import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   Index,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
- 
-+export type CalibrationWeights = {
-+  dimensionA: number;
-+  dimensionB: number;
-+  dimensionC: number;
-+  dimensionD: number;
-+  dimensionE: number;
-+};
-+
-+// VERIFY: Confirm calibration dimension labels and structure.
-+
- @Entity({ name: 'users' })
- export class User {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Index({ unique: true })
-   @Column({ unique: true })
-   email!: string;
- 
-   @Column()
-   passwordHash!: string;
- 
-+  @Column({ type: 'character varying', length: 255, nullable: true })
-+  calibrationProfileName!: string | null;
-+
-+  // VERIFY: Ensure null defaults are acceptable for calibration weights.
-+  @Column({ type: 'jsonb', nullable: true })
-+  calibrationWeights!: CalibrationWeights | null;
-+
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
-index 85586d3c85982a3ce6c5b009d7f87522848d189a..7b73e3bfa1a5608d99abf2c62aae2aff76fe4932 100644
---- a/apps/api/src/users/users.service.ts
-+++ b/apps/api/src/users/users.service.ts
-@@ -1,25 +1,31 @@
- import { Injectable } from '@nestjs/common';
+   BadRequestException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
  import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash } from 'crypto';
  import { Repository } from 'typeorm';
- import { User } from './user.entity';
+ import { Baseline } from '../baseline/baseline.entity';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
+ import { Job } from '../jobs/job.entity';
++import { CalibrationWeights, User } from '../users/user.entity';
+ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
+ import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+ import { FitScoringService } from './fit-scoring.service';
+ 
+ export type AnalysisRequest = {
+   baselineId: string;
+   jobId?: string;
+   jobDescription?: string;
+ };
+ 
+ export type AnalysisResult = {
+   ok: boolean;
+   baselineId: string;
+   score: number;
+   strengths: string[];
+   gaps: string[];
+   summary: string;
+ };
  
  @Injectable()
- export class UsersService {
+ export class AnalysisService {
    constructor(
-     @InjectRepository(User)
-     private readonly usersRepository: Repository<User>,
+     @InjectRepository(Baseline)
+     private readonly baselineRepository: Repository<Baseline>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+     @InjectRepository(FitAssessment)
+     private readonly fitAssessmentRepository: Repository<FitAssessment>,
++    @InjectRepository(User)
++    private readonly usersRepository: Repository<User>,
+     private readonly fitScoringService: FitScoringService,
    ) {}
  
-   async create(email: string, passwordHash: string): Promise<User> {
--    const user = this.usersRepository.create({ email, passwordHash });
-+    const user = this.usersRepository.create({
-+      email,
-+      passwordHash,
-+      // VERIFY: Confirm null calibration defaults are desired on signup.
-+      calibrationProfileName: null,
-+      calibrationWeights: null,
-+    });
-     return this.usersRepository.save(user);
++  // VERIFY: Confirm default calibration values with product stakeholders.
++  private readonly defaultCalibration: {
++    profileName: string;
++    weights: CalibrationWeights;
++  } = {
++    profileName: 'default',
++    weights: {
++      dimensionA: 1,
++      dimensionB: 1,
++      dimensionC: 1,
++      dimensionD: 1,
++      dimensionE: 1,
++    },
++  };
++
+   private normalizeKeywords(text: string) {
+     const tokens = text
+       .toLowerCase()
+       .match(/[a-z0-9]+/g)
+       ?.filter((token) => token.length >= 3) ?? [];
+ 
+     const frequencies = new Map<string, number>();
+     for (const token of tokens) {
+       frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+     }
+ 
+     return frequencies;
    }
  
-   findByEmail(email: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { email } });
+   private sortByFrequency(values: Map<string, number>, items: string[]) {
+     return [...items].sort((a, b) => {
+       const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
+       if (delta !== 0) return delta;
+       return a.localeCompare(b);
+     });
    }
  
-   findById(id: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { id } });
+   private buildBaselineText(sections: BaselineSection[]) {
+     return sections
+       .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
+@@ -89,50 +107,93 @@ export class AnalysisService {
+         content: section.content,
+         includePolicy: section.includePolicy,
+         order: section.order,
+       })) ?? [];
+ 
+     const payload = {
+       job: {
+         rawDescription: job.rawDescription,
+         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+         normalizedRequirements: job.normalizedRequirements ?? [],
+         title: job.title ?? null,
+         company: job.company ?? null,
+       },
+       baseline: {
+         id: baseline.id,
+         version: baseline.version ?? null,
+         sections: sectionPayload,
+       },
+     };
+ 
+     return createHash('sha256')
+       .update(JSON.stringify(payload))
+       .digest('hex');
    }
- }
+ 
++  async getCalibration(userId: string) {
++    const user = await this.usersRepository.findOne({ where: { id: userId } });
++
++    if (!user) {
++      throw new NotFoundException('User not found');
++    }
++
++    const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
++    const weights =
++      user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
++
++    return { ok: true, profileName, weights };
++  }
++
++  async saveCalibration(
++    userId: string,
++    payload: { profileName?: string; weights?: CalibrationWeights | null },
++  ) {
++    const profileName = payload.profileName?.trim();
++
++    if (!profileName) {
++      throw new BadRequestException('profileName is required');
++    }
++
++    // VERIFY: Validate calibration weight ranges with data science.
++    if (!payload.weights) {
++      throw new BadRequestException('weights are required');
++    }
++
++    const user = await this.usersRepository.findOne({ where: { id: userId } });
++
++    if (!user) {
++      throw new NotFoundException('User not found');
++    }
++
++    user.calibrationProfileName = profileName;
++    user.calibrationWeights = payload.weights;
++
++    await this.usersRepository.save(user);
++
++    return { ok: true, profileName, weights: payload.weights };
++  }
++
+   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
+     const baselineId = payload.baselineId?.trim();
+     if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
+     }
+ 
+     const hasJobId = Boolean(payload.jobId?.trim());
+     const hasJobDescription = Boolean(payload.jobDescription?.trim());
+ 
+     if (!hasJobId && !hasJobDescription) {
+       throw new BadRequestException('jobId or jobDescription is required');
+     }
+ 
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     if (!baseline.sections?.length) {
+       baseline.sections = await this.baselineSectionRepository.find({
+diff --git a/apps/api/src/analysis/calibration.controller.ts b/apps/api/src/analysis/calibration.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..337f626be39d57231407458a5d4309802a38819b
+--- /dev/null
++++ b/apps/api/src/analysis/calibration.controller.ts
+@@ -0,0 +1,36 @@
++import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { CalibrationDto } from './dto/calibration.dto';
++import { AnalysisService } from './analysis.service';
++
++@Controller('calibration')
++@UseGuards(AuthGuard('jwt'))
++export class CalibrationController {
++  constructor(private readonly analysisService: AnalysisService) {}
++
++  @Get()
++  async getCalibration(@Req() request: Request & { user?: { id?: string } }) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.analysisService.getCalibration(userId);
++  }
++
++  @Post()
++  async saveCalibration(
++    @Body() body: CalibrationDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.analysisService.saveCalibration(userId, body);
++  }
++}
+diff --git a/apps/api/src/analysis/dto/calibration.dto.ts b/apps/api/src/analysis/dto/calibration.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a563ebdfe83c46758d30e5f6f4bcf80cc06c285
+--- /dev/null
++++ b/apps/api/src/analysis/dto/calibration.dto.ts
+@@ -0,0 +1,7 @@
++import { CalibrationWeights } from '../../users/user.entity';
++
++export class CalibrationDto {
++  profileName!: string;
++
++  weights!: CalibrationWeights;
++}
+
 
 
 
