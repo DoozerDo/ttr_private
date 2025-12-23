@@ -1,544 +1,277 @@
-diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-index e195a606e2102470a1e02fea1af3c72ac50391c5..2107ccdc7e444e30849bb9c23543a8bddb472a72 100644
---- a/apps/api/src/analysis/analysis.service.ts
-+++ b/apps/api/src/analysis/analysis.service.ts
-@@ -1,43 +1,46 @@
- import {
-   BadRequestException,
-   Injectable,
-   NotFoundException,
- } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { Job } from '../jobs/job.entity';
- import { CalibrationWeights, User } from '../users/user.entity';
- import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
- import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
--import { FitScoringService } from './fit-scoring.service';
-+import {
-+  DimensionWeightOverrides,
-+  FitScoringService,
-+} from './fit-scoring.service';
- 
- export type AnalysisRequest = {
-   baselineId: string;
-   jobId?: string;
-   jobDescription?: string;
- };
- 
- export type AnalysisResult = {
-   ok: boolean;
-   baselineId: string;
-   score: number;
-   strengths: string[];
-   gaps: string[];
-   summary: string;
- };
- 
- @Injectable()
- export class AnalysisService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineSection)
-     private readonly baselineSectionRepository: Repository<BaselineSection>,
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-@@ -78,122 +81,137 @@ export class AnalysisService {
-   }
- 
-   private sortByFrequency(values: Map<string, number>, items: string[]) {
-     return [...items].sort((a, b) => {
-       const delta = (values.get(b) ?? 0) - (values.get(a) ?? 0);
-       if (delta !== 0) return delta;
-       return a.localeCompare(b);
-     });
-   }
- 
-   private buildBaselineText(sections: BaselineSection[]) {
-     return sections
-       .filter((section) => section.includePolicy !== BaselineIncludePolicy.NEVER)
-       .map((section) => section.content)
-       .join('\n');
-   }
- 
-   private buildSummaryFromTerms(strengths: string[], gaps: string[]) {
-     if (!strengths.length && !gaps.length) {
-       return 'No keywords found in the job description.';
+diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
+index 99d0f0ee3440edfa927bf3fcc6e3dcea32cf60fa..6b8d6d3b1637424bfde860f1c76d8d252e342c7e 100644
+--- a/apps/web/app/results/page.tsx
++++ b/apps/web/app/results/page.tsx
+@@ -30,50 +30,71 @@ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string
+       typeof parsed === "object" &&
+       "result" in parsed &&
+       "savedAt" in parsed &&
+       typeof (parsed as any).savedAt === "string"
+     ) {
+       const payload = parsed as StoredPayload;
+       if (
+         payload?.result &&
+         (typeof payload.result.score === "number" || typeof payload.result.overallScore === "number")
+       ) {
+         return { result: payload.result, savedAt: payload.savedAt };
+       }
      }
-     const total = strengths.length + gaps.length;
-     return `Matched ${strengths.length} of ${total} key terms from the job description.`;
+ 
+     // Old format: AnalysisResult directly
+     if (parsed && typeof parsed === "object" && "score" in parsed && typeof (parsed as any).score === "number") {
+       return { result: parsed as AnalysisResult, savedAt: new Date().toISOString() };
+     }
+ 
+     return null;
+   } catch {
+     return null;
    }
+ }
  
--  private buildInputsHash(job: Job, baseline: Baseline) {
-+  private buildInputsHash(
-+    job: Job,
-+    baseline: Baseline,
-+    dimensionWeights: DimensionWeightOverrides,
-+  ) {
-     const sectionPayload =
-       baseline.sections?.map((section) => ({
-         type: section.sectionType ?? section.type,
-         content: section.content,
-         includePolicy: section.includePolicy,
-         order: section.order,
-       })) ?? [];
++type GapDetail = {
++  label?: string;
++  domain?: string;
++  confidence?: number;
++  jdExcerpt?: string;
++  baselineExcerpt?: string;
++};
++
++function isGapDetail(gap: unknown): gap is GapDetail {
++  return (
++    typeof gap === "object" &&
++    gap !== null &&
++    ("label" in gap || "domain" in gap || "confidence" in gap || "jdExcerpt" in gap || "baselineExcerpt" in gap)
++  );
++}
++
++function formatConfidence(confidence: number) {
++  const normalized = confidence <= 1 ? confidence * 100 : confidence;
++  return `${Math.round(normalized)}%`;
++}
++
+ function formatLastUpdated(iso: string) {
+   try {
+     const d = new Date(iso);
+     if (Number.isNaN(d.getTime())) return "Unknown";
+     return d.toLocaleString();
+   } catch {
+     return "Unknown";
+   }
+ }
  
-     const payload = {
-       job: {
-         rawDescription: job.rawDescription,
-         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-         normalizedRequirements: job.normalizedRequirements ?? [],
-         title: job.title ?? null,
-         company: job.company ?? null,
-       },
-       baseline: {
-         id: baseline.id,
-         version: baseline.version ?? null,
-         sections: sectionPayload,
-       },
-+      calibration: dimensionWeights,
+ const ScoreRing = ({ score }: { score: number }) => {
+   const radius = 64;
+   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
+   const clamped = Math.min(Math.max(score, 0), 100);
+   const offset = circumference * (1 - clamped / 100);
+   const gradientId = "resultsScoreGradient";
+ 
+   return (
+     <div style={{ position: "relative", width: 160, height: 160, display: "grid", placeItems: "center" }}>
+       <svg viewBox="0 0 200 200" style={{ width: "100%", height: "100%" }}>
+         <defs>
+           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+             <stop offset="0%" stopColor="#f59e0b" />
+             <stop offset="50%" stopColor="#fbbf24" />
+             <stop offset="100%" stopColor="#f97316" />
+@@ -147,51 +168,54 @@ function ResultsContent() {
+         const data = (await response.json()) as AnalysisResult;
+         if (cancelled) return;
+         const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+         setStored(payload);
+       } catch {
+         // Ignore fetch errors; fall back to stored data.
+       }
      };
  
-     return createHash('sha256')
-       .update(JSON.stringify(payload))
-       .digest('hex');
-   }
+     loadLatest();
+     return () => {
+       cancelled = true;
+     };
+   }, [searchParams, stored?.result?.jobId]);
  
-   async getCalibration(userId: string) {
-     const user = await this.usersRepository.findOne({ where: { id: userId } });
+   const score = stored?.result?.score ?? stored?.result?.overallScore ?? null;
+   const label = fitLabel(score);
+   const lastUpdated = stored?.savedAt ? formatLastUpdated(stored.savedAt) : "Not yet";
  
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
+   const hasResult = score !== null;
+   const baselineId = stored?.result?.baselineId ?? null;
+   const verdict = stored?.result?.verdict ?? null;
+   const dimensionScores = stored?.result?.dimensionScores ?? null;
+   const strengths = stored?.result?.strengths ?? [];
+-  const gaps = stored?.result?.gaps ?? [];
++  const rawGaps = (stored?.result?.gaps as unknown) ?? [];
++  const gaps = Array.isArray(rawGaps) ? rawGaps : [];
++  const gapDetails = gaps.filter(isGapDetail);
++  const gapStrings = gaps.filter((gap): gap is string => typeof gap === "string");
+   const complianceFlags = stored?.result?.complianceFlags ?? [];
  
-     const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
-     const weights =
-       user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
- 
-     return { ok: true, profileName, weights };
-   }
- 
-   async saveCalibration(
-     userId: string,
-     payload: { profileName?: string; weights?: CalibrationWeights | null },
-   ) {
-     const profileName = payload.profileName?.trim();
- 
-     if (!profileName) {
-       throw new BadRequestException('profileName is required');
-     }
- 
-     // VERIFY: Validate calibration weight ranges with data science.
-     if (!payload.weights) {
-       throw new BadRequestException('weights are required');
-     }
- 
-     const user = await this.usersRepository.findOne({ where: { id: userId } });
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
-     user.calibrationProfileName = profileName;
-     user.calibrationWeights = payload.weights;
- 
-     await this.usersRepository.save(user);
- 
-     return { ok: true, profileName, weights: payload.weights };
-   }
- 
-+  private mapCalibrationToDimensionWeights(weights?: CalibrationWeights | null) {
-+    return {
-+      experienceAlignment: weights?.dimensionA ?? 1,
-+      technicalPlatformFit: weights?.dimensionB ?? 1,
-+      leadershipLevel: weights?.dimensionC ?? 1,
-+      strategicTacticalFit: weights?.dimensionD ?? 1,
-+      industryContext: weights?.dimensionE ?? 1,
-+    } satisfies DimensionWeightOverrides;
-+  }
-+
-   async analyzeForUser(userId: string, payload: AnalysisRequest): Promise<AnalysisResult> {
-     const baselineId = payload.baselineId?.trim();
+   const handleCreateInterview = async () => {
      if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
+       setInterviewError("Save a baseline analysis first, then try again.");
+       return;
      }
  
-     const hasJobId = Boolean(payload.jobId?.trim());
-     const hasJobDescription = Boolean(payload.jobDescription?.trim());
+     setInterviewError(null);
+     setIsCreatingInterview(true);
  
-     if (!hasJobId && !hasJobDescription) {
-       throw new BadRequestException('jobId or jobDescription is required');
-     }
- 
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       relations: ['sections'],
-       order: { sections: { order: 'ASC' } },
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     if (!baseline.sections?.length) {
-       baseline.sections = await this.baselineSectionRepository.find({
-@@ -270,97 +288,104 @@ export class AnalysisService {
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     if (!baseline.sections?.length) {
-       baseline.sections = await this.baselineSectionRepository.find({
-         where: { baselineId: baseline.id },
-         order: { order: 'ASC' },
+     try {
+       const response = await fetch("/api/interviews", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ baselineId }),
        });
-     }
  
-     const job = await this.jobRepository.findOne({
-       where: { id: jobId, userId },
-     });
+       if (!response.ok) {
+         const payload = await response.json().catch(() => null);
+         const message = payload?.error ?? "Unable to create interview session.";
+         throw new Error(message);
+       }
  
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     const includedSections =
-       baseline.sections?.filter(
-         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-       ) ?? [];
- 
--    const inputsHash = this.buildInputsHash(job, baseline);
-+    const calibration = await this.getCalibration(userId);
+       const session = (await response.json()) as { id?: string };
+@@ -337,55 +361,105 @@ function ResultsContent() {
+               <div
+                 style={{
+                   borderRadius: 12,
+                   border: "1px solid rgba(255,255,255,0.08)",
+                   background: "rgba(0,0,0,0.18)",
+                   padding: "14px 14px",
+                   display: "grid",
+                   gap: 12,
+                 }}
+               >
+                 <div>
+                   <div style={{ fontSize: 13, fontWeight: 900, color: "#fde68a" }}>Alignment strengths</div>
+                   {strengths.length ? (
+                     <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                       {strengths.map((item, index) => (
+                         <li key={`${item}-${index}`}>{item}</li>
+                       ))}
+                     </ul>
+                   ) : (
+                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No strengths identified yet.</div>
+                   )}
+                 </div>
+                 <div>
+                   <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>Gaps to address</div>
+                   {gaps.length ? (
+-                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+-                      {gaps.map((item, index) => (
+-                        <li key={`${item}-${index}`}>{item}</li>
++                    <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
++                      {gapDetails.map((gap, index) => (
++                        <div
++                          key={`${gap.label ?? gap.domain ?? "gap"}-${index}`}
++                          style={{
++                            border: "1px solid rgba(255,255,255,0.08)",
++                            background: "rgba(255,255,255,0.03)",
++                            borderRadius: 10,
++                            padding: "10px 12px",
++                            display: "grid",
++                            gap: 6,
++                          }}
++                        >
++                          <div
++                            style={{
++                              display: "flex",
++                              justifyContent: "space-between",
++                              gap: 10,
++                              alignItems: "baseline",
++                              flexWrap: "wrap",
++                            }}
++                          >
++                            <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>
++                              {gap.label ?? "Gap"}
++                            </div>
++                            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", display: "flex", gap: 12 }}>
++                              {gap.domain ? <span>Domain: {gap.domain}</span> : null}
++                              {typeof gap.confidence === "number" ? (
++                                <span>Confidence: {formatConfidence(gap.confidence)}</span>
++                              ) : null}
++                            </div>
++                          </div>
++                          {gap.jdExcerpt ? (
++                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
++                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>JD Excerpt</div>
++                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.jdExcerpt}</div>
++                            </div>
++                          ) : null}
++                          {gap.baselineExcerpt ? (
++                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
++                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>Baseline Excerpt</div>
++                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.baselineExcerpt}</div>
++                            </div>
++                          ) : null}
++                        </div>
+                       ))}
+-                    </ul>
 +
-+    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-+
-+    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
++                      {gapStrings.length ? (
++                        <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
++                          {gapStrings.map((item, index) => (
++                            <li key={`${item}-${index}`}>{item}</li>
++                          ))}
++                        </ul>
++                      ) : null}
++                    </div>
+                   ) : (
+                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
+                   )}
+                 </div>
+               </div>
+             ) : null}
  
-     const existing = await this.fitAssessmentRepository.findOne({
-       where: { userId, jobId, baselineId, inputsHash },
-       order: { createdAt: 'DESC' },
-     });
+             {hasResult ? (
+               <div
+                 style={{
+                   borderRadius: 12,
+                   border: "1px solid rgba(255,255,255,0.08)",
+                   background: "rgba(0,0,0,0.18)",
+                   padding: "14px 14px",
+                   display: "grid",
+                   gap: 8,
+                 }}
+               >
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Compliance flags</div>
+                 {complianceFlags.length ? (
+                   <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                     {complianceFlags.map((flag, index) => (
+                       <li key={`${flag}-${index}`}>{flag}</li>
+                     ))}
+                   </ul>
+@@ -495,25 +569,30 @@ function ResultsContent() {
+                 <div style={{ fontSize: 13, fontWeight: 900, color: "rgba(241,245,249,0.92)" }}>Quick links</div>
+                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                   <Link href="/analyze" style={ttrComponents.quietButton}>
+                     Run another analysis
+                   </Link>
+                   <Link href="/calibrate" style={ttrComponents.quietButton}>
+                     Open Calibrate
+                   </Link>
+                 </div>
+               </div>
+             ) : null}
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
  
-     if (existing) {
-       const summary = this.buildSummaryFromTerms(
-         existing.strengths ?? [],
-         existing.gaps ?? [],
-       );
-       return {
-         ok: true,
-         assessmentId: existing.id,
-         jobId: existing.jobId,
-         baselineId: existing.baselineId,
-         baselineVersion: existing.baselineVersion,
-         overallScore: existing.overallScore,
-         score: existing.overallScore,
-         verdict: existing.verdict,
-         dimensionScores: existing.dimensionScores,
-         strengths: existing.strengths,
-         gaps: existing.gaps,
-         complianceFlags: existing.complianceFlags,
-         summary,
-         createdAt: existing.createdAt,
-       };
-     }
- 
--    const scoring = this.fitScoringService.score({
--      job: {
--        rawDescription: job.rawDescription,
--        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
--        normalizedRequirements: job.normalizedRequirements ?? [],
--        title: job.title ?? null,
--        company: job.company ?? null,
--        sourceUrl: job.sourceUrl ?? null,
-+    const scoring = this.fitScoringService.score(
-+      {
-+        job: {
-+          rawDescription: job.rawDescription,
-+          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-+          normalizedRequirements: job.normalizedRequirements ?? [],
-+          title: job.title ?? null,
-+          company: job.company ?? null,
-+          sourceUrl: job.sourceUrl ?? null,
-+        },
-+        baseline: {
-+          version: baseline.version ?? null,
-+          sections: includedSections.map((section) => ({
-+            type: section.sectionType ?? section.type,
-+            content: section.content,
-+          })),
-+        },
-       },
--      baseline: {
--        version: baseline.version ?? null,
--        sections: includedSections.map((section) => ({
--          type: section.sectionType ?? section.type,
--          content: section.content,
--        })),
--      },
--    });
-+      dimensionWeights,
-+    );
- 
-     const assessment = this.fitAssessmentRepository.create({
-       userId,
-       jobId,
-       baselineId: baseline.id,
-       baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
-       overallScore: scoring.overallScore,
-       verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
-       dimensionScores: scoring.dimensionScores,
-       strengths: scoring.strengths,
-       gaps: scoring.gaps,
-       complianceFlags: scoring.complianceFlags,
-       inputsHash,
-     });
- 
-     const saved = await this.fitAssessmentRepository.save(assessment);
- 
-     return {
-       ok: true,
-       assessmentId: saved.id,
-       jobId: saved.jobId,
-       baselineId: saved.baselineId,
-       baselineVersion: saved.baselineVersion,
-       overallScore: saved.overallScore,
-       score: saved.overallScore,
-@@ -385,25 +410,29 @@ export class AnalysisService {
-     }
- 
-     const summary = this.buildSummaryFromTerms(
-       assessment.strengths ?? [],
-       assessment.gaps ?? [],
-     );
- 
-     return {
-       ok: true,
-       assessmentId: assessment.id,
-       jobId: assessment.jobId,
-       baselineId: assessment.baselineId,
-       baselineVersion: assessment.baselineVersion,
-       overallScore: assessment.overallScore,
-       score: assessment.overallScore,
-       verdict: assessment.verdict,
-       dimensionScores: assessment.dimensionScores,
-       strengths: assessment.strengths,
-       gaps: assessment.gaps,
-       complianceFlags: assessment.complianceFlags,
-       summary,
-       createdAt: assessment.createdAt,
-     };
-   }
+ export default function ResultsPage() {
+   return (
+     <Suspense fallback={<div style={{ padding: 24, color: "rgba(226,232,240,0.8)" }}>Loading results…</div>}>
+       <ResultsContent />
+     </Suspense>
+   );
  }
 +
 +// VERIFY:
-+// - Calibration weights are fetched per user and default to 1.0 for missing dimensions.
-+// - Inputs hash incorporates calibration to avoid stale assessments.
-diff --git a/apps/api/src/analysis/fit-scoring.service.ts b/apps/api/src/analysis/fit-scoring.service.ts
-index 1137a1798e9213905932c085af735726479c3631..b2ec981e117d76333c00db43950ba65e8748bb5e 100644
---- a/apps/api/src/analysis/fit-scoring.service.ts
-+++ b/apps/api/src/analysis/fit-scoring.service.ts
-@@ -1,43 +1,45 @@
- import { Injectable } from '@nestjs/common';
- import { FitAssessmentVerdict, FitDimensionScores } from './fit-assessment.entity';
- 
- export type FitScoringInput = {
-   job: {
-     title?: string | null;
-     company?: string | null;
-     rawDescription: string;
-     normalizedResponsibilities: string[];
-     normalizedRequirements: string[];
-     sourceUrl?: string | null;
-   };
-   baseline: {
-     version?: number | null;
-     sections: Array<{ type?: string; content: string }>;
-   };
- };
- 
-+export type DimensionWeightOverrides = Partial<Record<keyof FitDimensionScores, number>>;
-+
- export type FitScoringResult = {
-   overallScore: number;
-   verdict: FitAssessmentVerdict;
-   dimensionScores: FitDimensionScores;
-   strengths: string[];
-   gaps: string[];
-   complianceFlags: string[];
-   summary: string;
- };
- 
- const STOPWORDS = new Set([
-   'a',
-   'an',
-   'and',
-   'are',
-   'as',
-   'at',
-   'be',
-   'by',
-   'for',
-   'from',
-   'has',
-   'have',
-   'in',
-   'is',
-@@ -436,98 +438,141 @@ const computeComplianceFlags = (
-   if (jobText.trim().length < MIN_TEXT_LENGTH) {
-     flags.push('Job description too short for reliable scoring');
-   }
- 
-   const normalizedJob = normalizeText(jobText);
-   const promptSignals = ['ignore previous instructions', 'system prompt', 'assistant', 'developer message'];
-   if (promptSignals.some((signal) => normalizedJob.includes(signal))) {
-     flags.push('Job description contains prompt-like content');
-   }
- 
-   if (sourceUrl && !/^https?:\/\//i.test(sourceUrl)) {
-     flags.push('Suspicious job source URL');
-   }
- 
-   return flags;
- };
- 
- const buildVerdict = (overallScore: number) => {
-   if (overallScore >= VERDICT_THRESHOLDS.APPLY) return FitAssessmentVerdict.APPLY;
-   if (overallScore >= VERDICT_THRESHOLDS.CONSIDER) return FitAssessmentVerdict.CONSIDER;
-   return FitAssessmentVerdict.SKIP;
- };
- 
- @Injectable()
- export class FitScoringService {
--  score(input: FitScoringInput): FitScoringResult {
-+  score(
-+    input: FitScoringInput,
-+    dimensionWeights?: DimensionWeightOverrides | null,
-+  ): FitScoringResult {
-     const jobText = [
-       input.job.title ?? '',
-       input.job.company ?? '',
-       input.job.rawDescription,
-       ...input.job.normalizedResponsibilities,
-       ...input.job.normalizedRequirements,
-     ].join('\n');
- 
-     const baselineText = input.baseline.sections.map((section) => section.content).join('\n');
-     const baselineSkillsText =
-       buildSectionText(input.baseline.sections, ['SKILLS']) || baselineText;
-     const baselineExperienceText =
-       buildSectionText(input.baseline.sections, ['EXPERIENCE', 'PROJECT', 'SUMMARY']) ||
-       baselineText;
- 
-     const responsibilitiesText = input.job.normalizedResponsibilities.join('\n');
-     const requirementsText = input.job.normalizedRequirements.join('\n');
- 
-     const experienceAlignment = scoreExperienceAlignment(
-       responsibilitiesText,
-       requirementsText,
-       baselineExperienceText,
-     );
-     const leadershipLevel = scoreLeadership(jobText, baselineText);
-     const technicalPlatformFit = scoreTechnicalFit(jobText, baselineSkillsText);
-     const industryContext = scoreIndustry(jobText, baselineText);
-     const strategicTacticalFit = scoreStrategicTactical(jobText, baselineExperienceText);
- 
-     const dimensionScores: FitDimensionScores = {
-       experienceAlignment,
-       leadershipLevel,
-       technicalPlatformFit,
-       industryContext,
-       strategicTacticalFit,
-     };
- 
-+    const defaultWeights: Record<keyof FitDimensionScores, number> = {
-+      experienceAlignment: 0.3,
-+      technicalPlatformFit: 0.25,
-+      leadershipLevel: 0.2,
-+      strategicTacticalFit: 0.15,
-+      industryContext: 0.1,
-+    };
-+
-+    const appliedWeights: Record<keyof FitDimensionScores, number> = {
-+      experienceAlignment: dimensionWeights?.experienceAlignment ?? 1,
-+      technicalPlatformFit: dimensionWeights?.technicalPlatformFit ?? 1,
-+      leadershipLevel: dimensionWeights?.leadershipLevel ?? 1,
-+      strategicTacticalFit: dimensionWeights?.strategicTacticalFit ?? 1,
-+      industryContext: dimensionWeights?.industryContext ?? 1,
-+    };
-+
-+    const weightedDefaults = (Object.keys(defaultWeights) as Array<keyof FitDimensionScores>)
-+      .map((key) => ({
-+        key,
-+        weight: defaultWeights[key] * appliedWeights[key],
-+      }))
-+      .reduce(
-+        (acc, { key, weight }) => {
-+          acc.total += weight;
-+          acc.values[key] = weight;
-+          return acc;
-+        },
-+        { total: 0, values: {} as Record<keyof FitDimensionScores, number> },
-+      );
-+
-+    const normalizedTotal =
-+      weightedDefaults.total > 0
-+        ? weightedDefaults.total
-+        : (Object.values(defaultWeights).reduce((sum, value) => sum + value, 0));
-+
-     const overallScore = clampScore(
--      experienceAlignment * 0.3 +
--        technicalPlatformFit * 0.25 +
--        leadershipLevel * 0.2 +
--        strategicTacticalFit * 0.15 +
--        industryContext * 0.1,
-+      (experienceAlignment * weightedDefaults.values.experienceAlignment +
-+        technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
-+        leadershipLevel * weightedDefaults.values.leadershipLevel +
-+        strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
-+        industryContext * weightedDefaults.values.industryContext) /
-+        normalizedTotal,
-     );
- 
-     const { strengths, gaps } = buildStrengthsAndGaps(
-       requirementsText,
-       responsibilitiesText,
-       jobText,
-       baselineText,
-     );
- 
-     const complianceFlags = computeComplianceFlags(
-       jobText,
-       baselineText,
-       input.job.sourceUrl,
-     );
- 
-     return {
-       overallScore,
-       verdict: buildVerdict(overallScore),
-       dimensionScores,
-       strengths,
-       gaps,
-       complianceFlags,
-       summary: buildSummary(strengths, gaps),
-     };
-   }
- 
-   buildComplianceFlags(jobText: string, baselineText: string, sourceUrl?: string | null) {
-     return computeComplianceFlags(jobText, baselineText, sourceUrl);
-   }
- }
-+
-+// VERIFY:
-+// - Weighted aggregation uses per-dimension overrides and defaults to 1.0 when absent.
-+// - Verdict thresholds remain aligned with the weighted overall score.
++// - TypeScript build succeeds for Results page updates.
++// - Gaps render correctly for both string and object inputs.
++// - Linting passes for this file.
+
 
  
 

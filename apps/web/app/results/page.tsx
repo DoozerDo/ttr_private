@@ -52,6 +52,27 @@ function safeParseStored(raw: string): { result: AnalysisResult; savedAt: string
   }
 }
 
+type GapDetail = {
+  label?: string;
+  domain?: string;
+  confidence?: number;
+  jdExcerpt?: string;
+  baselineExcerpt?: string;
+};
+
+function isGapDetail(gap: unknown): gap is GapDetail {
+  return (
+    typeof gap === "object" &&
+    gap !== null &&
+    ("label" in gap || "domain" in gap || "confidence" in gap || "jdExcerpt" in gap || "baselineExcerpt" in gap)
+  );
+}
+
+function formatConfidence(confidence: number) {
+  const normalized = confidence <= 1 ? confidence * 100 : confidence;
+  return `${Math.round(normalized)}%`;
+}
+
 function formatLastUpdated(iso: string) {
   try {
     const d = new Date(iso);
@@ -169,7 +190,10 @@ function ResultsContent() {
   const verdict = stored?.result?.verdict ?? null;
   const dimensionScores = stored?.result?.dimensionScores ?? null;
   const strengths = stored?.result?.strengths ?? [];
-  const gaps = stored?.result?.gaps ?? [];
+  const rawGaps = (stored?.result?.gaps as unknown) ?? [];
+  const gaps = Array.isArray(rawGaps) ? rawGaps : [];
+  const gapDetails = gaps.filter(isGapDetail);
+  const gapStrings = gaps.filter((gap): gap is string => typeof gap === "string");
   const complianceFlags = stored?.result?.complianceFlags ?? [];
 
   const handleCreateInterview = async () => {
@@ -359,11 +383,61 @@ function ResultsContent() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>Gaps to address</div>
                   {gaps.length ? (
-                    <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
-                      {gaps.map((item, index) => (
-                        <li key={`${item}-${index}`}>{item}</li>
+                    <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
+                      {gapDetails.map((gap, index) => (
+                        <div
+                          key={`${gap.label ?? gap.domain ?? "gap"}-${index}`}
+                          style={{
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            background: "rgba(255,255,255,0.03)",
+                            borderRadius: 10,
+                            padding: "10px 12px",
+                            display: "grid",
+                            gap: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              alignItems: "baseline",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 900, color: "#fca5a5" }}>
+                              {gap.label ?? "Gap"}
+                            </div>
+                            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", display: "flex", gap: 12 }}>
+                              {gap.domain ? <span>Domain: {gap.domain}</span> : null}
+                              {typeof gap.confidence === "number" ? (
+                                <span>Confidence: {formatConfidence(gap.confidence)}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          {gap.jdExcerpt ? (
+                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
+                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>JD Excerpt</div>
+                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.jdExcerpt}</div>
+                            </div>
+                          ) : null}
+                          {gap.baselineExcerpt ? (
+                            <div style={{ fontSize: 12, color: "rgba(241,245,249,0.86)" }}>
+                              <div style={{ fontWeight: 800, color: "rgba(241,245,249,0.75)" }}>Baseline Excerpt</div>
+                              <div style={{ marginTop: 4, lineHeight: 1.5 }}>{gap.baselineExcerpt}</div>
+                            </div>
+                          ) : null}
+                        </div>
                       ))}
-                    </ul>
+
+                      {gapStrings.length ? (
+                        <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(241,245,249,0.9)" }}>
+                          {gapStrings.map((item, index) => (
+                            <li key={`${item}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
                   ) : (
                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>No major gaps flagged.</div>
                   )}
@@ -517,3 +591,8 @@ export default function ResultsPage() {
     </Suspense>
   );
 }
+
+// VERIFY:
+// - TypeScript build succeeds for Results page updates.
+// - Gaps render correctly for both string and object inputs.
+// - Linting passes for this file.
