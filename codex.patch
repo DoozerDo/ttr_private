@@ -1,226 +1,229 @@
-diff --git a/apps/api/src/baseline/baseline-version.entity.ts b/apps/api/src/baseline/baseline-version.entity.ts
-index 47da33c408e50c5552cb0de1d0e9cd8d96ca24f0..f03b2f3f3e42b7f45d714a82aa65f11f5669617e 100644
---- a/apps/api/src/baseline/baseline-version.entity.ts
-+++ b/apps/api/src/baseline/baseline-version.entity.ts
-@@ -6,32 +6,36 @@ import {
-   ManyToOne,
-   PrimaryGeneratedColumn,
- } from 'typeorm';
- import { Baseline } from './baseline.entity';
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 51f3cf3074d2cb0a0a40a88887531e4f3b79b6dc..0407dca91a222cf74c71764c2dc4f4d3d7d6cbc3 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,43 +1,45 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { AppController } from './app.controller';
+ import { AppService } from './app.service';
+ import { AuthModule } from './auth/auth.module';
+ import { AnalysisModule } from './analysis/analysis.module';
+ import { BaselineModule } from './baseline/baseline.module';
+ import { InterviewsModule } from './interviews/interviews.module';
+ import { JobsModule } from './jobs/jobs.module';
++import { ResumeModule } from './resume/resume.module';
+ import { User } from './users/user.entity';
+ import { UsersModule } from './users/users.module';
  
- @Entity({ name: 'baseline_versions' })
- export class BaselineVersion {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @ManyToOne(() => Baseline, (baseline) => baseline.versions, {
-     onDelete: 'CASCADE',
-   })
-   @JoinColumn({ name: 'baselineId' })
-   baseline!: Baseline;
- 
-   @Column()
-   baselineId!: string;
- 
-   @Column({ type: 'int' })
-   versionNumber!: number;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   fileHash!: string | null;
- 
-+  get hash(): string | null {
-+    return this.fileHash;
-+  }
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env.local', '.env'],
+     }),
+     TypeOrmModule.forRootAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         type: 'postgres',
+         url:
+           configService.get<string>('DATABASE_URL') ??
+           'postgresql://postgres:postgres@db:5432/targetthisrole',
+         entities: [User],
+         synchronize: configService.get<string>('NODE_ENV') !== 'production',
+         autoLoadEntities: true,
+       }),
+     }),
+     UsersModule,
+     AuthModule,
+     AnalysisModule,
+     BaselineModule,
+     InterviewsModule,
+     JobsModule,
++    ResumeModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7463d3a351b9ca53e41ce7668004938ea898c898
+--- /dev/null
++++ b/apps/api/src/resume/resume.controller.ts
+@@ -0,0 +1,41 @@
++import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { ResumeService } from './resume.service';
 +
-   // VERIFY: Confirm that the stored path matches the persisted upload location.
-   @Column({ type: 'varchar' })
-   storagePath!: string;
- 
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- }
-diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
-index 375ee9df1ded8eb4f3eaa3cd76f01ac68c12fcac..5d0786d9d3fee3d77f54bc3c9d0076e871e32faf 100644
---- a/apps/api/src/baseline/baseline.service.ts
-+++ b/apps/api/src/baseline/baseline.service.ts
-@@ -1,26 +1,30 @@
--import { Injectable, NotFoundException } from '@nestjs/common';
-+import {
-+  BadRequestException,
-+  Injectable,
-+  NotFoundException,
-+} from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import type { Express } from 'express';
- import { createHash } from 'node:crypto';
- import { readFile } from 'node:fs/promises';
- import { BaselineTextExtractor } from './baseline-text-extractor.service';
- import {
-   BaselineSection,
-   BaselineSectionType,
-   BaselineIncludePolicy,
- } from './baseline-section.entity';
- import { Baseline } from './baseline.entity';
- import { BaselineParserService, ParsedSection } from './baseline-parser.service';
- import { BaselineVersion } from './baseline-version.entity';
- 
- export type FileMetadata = {
-   originalname: string;
-   mimetype: string;
-   path: string;
- };
- 
- @Injectable()
- export class BaselineService {
-   constructor(
-     @InjectRepository(Baseline)
-@@ -48,128 +52,140 @@ export class BaselineService {
-     parsedSections: ParsedSection[],
-   ): Partial<BaselineSection>[] {
-     const sanitizedRaw = this.sanitizeSectionContent(rawText);
- 
-     const structuredSections = parsedSections.map((section, index) => ({
-       sectionType: section.sectionType,
-       title: section.title,
-       content: this.sanitizeSectionContent(section.content),
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       // ensure RAW stays first; fall back to index if section.order is undefined
-       order: (section.order ?? index) + 1,
-     }));
- 
-     return [
-       {
-         sectionType: BaselineSectionType.RAW,
-         title: 'Raw',
-         content: sanitizedRaw,
-         includePolicy: BaselineIncludePolicy.NEVER,
-         order: 0,
-       },
-       ...structuredSections,
-     ];
-   }
- 
--  private async computeFileHash(filePath: string): Promise<string | null> {
-+  private async computeFileHash(filePath: string): Promise<string> {
-     try {
-       const fileBuffer = await readFile(filePath);
-       return createHash('sha256').update(fileBuffer).digest('hex');
-     } catch {
--      // VERIFY: Decide whether a missing hash should block baseline persistence.
--      return null;
-+      throw new BadRequestException('Unable to compute file hash');
-     }
-   }
- 
-   async createBaseline(
-     userId: string,
-     file: FileMetadata,
-     parsedSections?: Partial<BaselineSection>[],
-   ) {
-     const fileHash = await this.computeFileHash(file.path);
- 
-+    if (!fileHash) {
-+      throw new BadRequestException('Baseline file hash is required');
++@Controller('resume')
++@UseGuards(AuthGuard('jwt'))
++export class ResumeController {
++  constructor(private readonly resumeService: ResumeService) {}
++
++  @Post('generate')
++  async generate(
++    @Body()
++    body: {
++      baselineId?: string;
++      baselineVersionId?: string;
++      jobId?: string;
++    },
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
 +    }
 +
-     return this.baselineRepository.manager.transaction(async (manager) => {
-       const baseline = manager.create(Baseline, {
-         userId,
-         originalFilename: file.originalname,
-         mimeType: file.mimetype,
-         storagePath: file.path,
-         hash: fileHash,
-         sections:
-           parsedSections?.map((section, index) => ({
-             sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-             title: section.title ?? null,
-             content: this.sanitizeSectionContent(section.content),
-             includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-             order: section.order ?? index,
-           })) ?? [
-             {
-               sectionType: BaselineSectionType.OTHER,
-               title: null,
-               content: this.sanitizeSectionContent(),
-               includePolicy: BaselineIncludePolicy.OPTIONAL,
-               order: 0,
-             },
-           ],
-       });
- 
-       const savedBaseline = await manager.save(baseline);
- 
-       // VERIFY: Persisting the initial version increments the current baseline version.
-       const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
- 
-       const versionRecord = manager.create(BaselineVersion, {
-         baselineId: savedBaseline.id,
-         versionNumber: nextVersionNumber,
--        // VERIFY: Hash storage is currently tied to the baseline hash field.
--        fileHash: fileHash ?? savedBaseline.hash,
-+        fileHash,
-         storagePath: savedBaseline.storagePath,
-       });
- 
--      await manager.save(versionRecord);
-+      const savedVersion = await manager.save(versionRecord);
- 
-       savedBaseline.version = nextVersionNumber;
- 
-+      savedBaseline.versions = [savedVersion];
++    if (!body.baselineId) {
++      throw new BadRequestException('baselineId is required');
++    }
 +
-       return manager.save(savedBaseline);
-     });
-   }
- 
-   async listBaselinesForUser(userId: string) {
-     return this.baselineRepository.find({
-       where: { userId },
--      order: { createdAt: 'DESC' },
-+      relations: ['versions'],
-+      order: {
-+        createdAt: 'DESC',
-+        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
-+      },
-     });
-   }
- 
-   async getBaselineByIdForUser(id: string, userId: string) {
-     const baseline = await this.baselineRepository.findOne({
-       where: { id, userId },
--      relations: ['sections'],
-+      relations: ['sections', 'versions'],
-       order: {
-         sections: {
-           order: 'ASC',
-         },
-+        versions: {
-+          versionNumber: 'DESC',
-+          createdAt: 'DESC',
-+        },
-       },
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     return baseline;
-   }
- 
-   async buildSectionsFromFile(file: Express.Multer.File) {
-     const content = await this.baselineTextExtractor.extractText(file);
-     const parsedSections = this.baselineParser.parseBaseline(content);
- 
-     return this.buildSections(content, parsedSections);
-   }
- 
-   async reparseBaselineForUser(baselineId: string, userId: string) {
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       relations: ['sections'],
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
++    if (!body.baselineVersionId) {
++      throw new BadRequestException('baselineVersionId is required');
++    }
++
++    return this.resumeService.generateResume(userId, {
++      baselineId: body.baselineId,
++      baselineVersionId: body.baselineVersionId,
++      jobId: body.jobId ?? null,
++    });
++  }
++}
+diff --git a/apps/api/src/resume/resume.module.ts b/apps/api/src/resume/resume.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e2fb7a6e0466572ac88eb2d1186f4f528b46a3a
+--- /dev/null
++++ b/apps/api/src/resume/resume.module.ts
+@@ -0,0 +1,14 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { BaselineSection } from '../baseline/baseline-section.entity';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { ResumeController } from './resume.controller';
++import { ResumeService } from './resume.service';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([Baseline, BaselineSection, BaselineVersion])],
++  controllers: [ResumeController],
++  providers: [ResumeService],
++})
++export class ResumeModule {}
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0736fa0cade364887df6560efffec5586af35cca
+--- /dev/null
++++ b/apps/api/src/resume/resume.service.ts
+@@ -0,0 +1,67 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++
++export type GenerateResumeRequest = {
++  baselineId: string;
++  baselineVersionId: string;
++  jobId?: string | null;
++};
++
++@Injectable()
++export class ResumeService {
++  constructor(
++    @InjectRepository(Baseline)
++    private readonly baselineRepository: Repository<Baseline>,
++    @InjectRepository(BaselineVersion)
++    private readonly baselineVersionRepository: Repository<BaselineVersion>,
++  ) {}
++
++  async generateResume(userId: string, request: GenerateResumeRequest) {
++    if (!request.baselineId) {
++      throw new BadRequestException('baselineId is required');
++    }
++
++    if (!request.baselineVersionId) {
++      throw new BadRequestException('baselineVersionId is required');
++    }
++
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: request.baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: request.baselineVersionId, baselineId: baseline.id },
++    });
++
++    if (!baselineVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const sections = (baseline.sections ?? []).map((section) => ({
++      id: section.id,
++      type: section.sectionType,
++      title: section.title,
++      content: section.content,
++      includePolicy: section.includePolicy,
++      order: section.order,
++      source: 'baseline',
++    }));
++
++    return {
++      ok: true,
++      baselineId: baseline.id,
++      baselineVersionId: baselineVersion.id,
++      jobId: request.jobId ?? null,
++      sections,
++    };
++  }
++}
+diff --git a/apps/web/app/api/resume/route.ts b/apps/web/app/api/resume/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ad956090de7d431e9348045e8dae61019ef7c22
+--- /dev/null
++++ b/apps/web/app/api/resume/route.ts
+@@ -0,0 +1,32 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/resume/generate`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+

@@ -8,6 +8,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { BaselineModule } from './baseline/baseline.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
+import { ResumeModule } from './resume/resume.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     BaselineModule,
     InterviewsModule,
     JobsModule,
+    ResumeModule,
   ],
   controllers: [AppController],
   providers: [AppService],
