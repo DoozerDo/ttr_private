@@ -8,7 +8,8 @@ import Link from "next/link";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
 
-type ProfileKey = "default" | "support-ops" | "leadership" | "strict" | "custom";
+type BuiltInProfileKey = "default" | "support-ops" | "leadership" | "strict";
+type ProfileKey = BuiltInProfileKey | string;
 
 type CalibrationWeights = {
   dimensionA: number;
@@ -61,6 +62,7 @@ export default function CalibratePage() {
 
   const [profileKey, setProfileKey] = useState<ProfileKey>("default");
   const [profileName, setProfileName] = useState("default");
+  const [customProfiles, setCustomProfiles] = useState<Profile[]>([]);
   const [weights, setWeights] = useState<CalibrationWeights>({
     dimensionA: PROFILES[0].sliders.roleScope,
     dimensionB: PROFILES[0].sliders.domainFit,
@@ -73,23 +75,52 @@ export default function CalibratePage() {
 
   const isErrorStatus = status ? /fail|unable|incomplete/i.test(status) : false;
 
-  const profile = useMemo(() => {
-    if (profileKey === "custom") {
-      return {
-        key: "custom",
-        label: profileName,
-        description: "Loaded calibration profile.",
-        sliders: {
-          // VERIFY: Align custom profile slider mapping with backend dimensions.
-          roleScope: weights.dimensionA,
-          domainFit: weights.dimensionB,
-          platformFit: weights.dimensionC,
-        },
-      } satisfies Profile;
+  useEffect(() => {
+    const cachedProfiles = window.localStorage.getItem("ttr-custom-calibration-profiles");
+
+    if (cachedProfiles) {
+      try {
+        const parsed = JSON.parse(cachedProfiles) as Profile[];
+        setCustomProfiles(parsed);
+      } catch (error) {
+        console.warn("Unable to parse cached calibration profiles", error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (customProfiles.length === 0) {
+      window.localStorage.removeItem("ttr-custom-calibration-profiles");
+      return;
     }
 
-    return PROFILES.find((p) => p.key === profileKey) ?? PROFILES[0];
-  }, [profileKey, profileName, weights]);
+    window.localStorage.setItem("ttr-custom-calibration-profiles", JSON.stringify(customProfiles));
+  }, [customProfiles]);
+
+  const availableProfiles = useMemo(
+    () => [...PROFILES, ...customProfiles],
+    [customProfiles],
+  );
+
+  const profile = useMemo(() => {
+    const matchedProfile = availableProfiles.find((p) => p.key === profileKey);
+
+    if (matchedProfile) {
+      return matchedProfile;
+    }
+
+    return {
+      key: profileKey,
+      label: profileName,
+      description: "Loaded calibration profile.",
+      sliders: {
+        // VERIFY: Align custom profile slider mapping with backend dimensions.
+        roleScope: weights.dimensionA,
+        domainFit: weights.dimensionB,
+        platformFit: weights.dimensionC,
+      },
+    } satisfies Profile;
+  }, [availableProfiles, profileKey, profileName, weights]);
 
   useEffect(() => {
     const fetchCalibration = async () => {
@@ -112,13 +143,34 @@ export default function CalibratePage() {
           return;
         }
 
-        setProfileName(data.profileName);
-        setProfileKey(
-          PROFILES.some((p) => p.key === data.profileName)
-            ? (data.profileName as ProfileKey)
-            : "custom",
-        );
-        setWeights(data.weights);
+        const profileName = data.profileName;
+        const weights = data.weights;
+        const isBuiltIn = PROFILES.some((p) => p.key === profileName);
+
+        setProfileName(profileName);
+        setProfileKey(profileName as ProfileKey);
+        setWeights(weights);
+        if (!isBuiltIn) {
+          setCustomProfiles((current) => {
+            if (current.some((p) => p.key === profileName)) {
+              return current;
+            }
+
+            return [
+              ...current,
+              {
+                key: profileName,
+                label: profileName,
+                description: "Saved custom calibration profile.",
+                sliders: {
+                  roleScope: weights.dimensionA,
+                  domainFit: weights.dimensionB,
+                  platformFit: weights.dimensionC,
+                },
+              },
+            ];
+          });
+        }
         setStatus(null);
       } catch (error) {
         console.error("Failed to load calibration", error);
@@ -132,17 +184,16 @@ export default function CalibratePage() {
   const applyProfile = (nextKey: ProfileKey) => {
     setProfileKey(nextKey);
 
-    if (nextKey === "custom") {
-      return;
-    }
-
-    const nextProfile = PROFILES.find((p) => p.key === nextKey);
+    const nextProfile = availableProfiles.find((p) => p.key === nextKey);
 
     if (!nextProfile) {
       return;
     }
 
-    setProfileName(nextProfile.key);
+    const profileNameValue = PROFILES.some((p) => p.key === nextProfile.key)
+      ? nextProfile.key
+      : nextProfile.label;
+    setProfileName(profileNameValue);
     setWeights((current) => ({
       dimensionA: nextProfile.sliders.roleScope,
       dimensionB: nextProfile.sliders.domainFit,
@@ -153,23 +204,97 @@ export default function CalibratePage() {
     }));
   };
 
-  const saveCalibration = async () => {
+  const addOrUpdateCustomProfile = (name: string, currentWeights: CalibrationWeights) => {
+    setCustomProfiles((profiles) => {
+      const nextProfile: Profile = {
+        key: name,
+        label: name,
+        description: "Saved custom calibration profile.",
+        sliders: {
+          roleScope: currentWeights.dimensionA,
+          domainFit: currentWeights.dimensionB,
+          platformFit: currentWeights.dimensionC,
+        },
+      };
+
+      if (profiles.some((p) => p.key === name)) {
+        return profiles.map((p) => (p.key === name ? nextProfile : p));
+      }
+
+      return [...profiles, nextProfile];
+    });
+  };
+
+  const removeCustomProfile = async (keyToRemove: ProfileKey) => {
+    setCustomProfiles((profiles) => profiles.filter((p) => p.key !== keyToRemove));
+
+    if (profileKey === keyToRemove) {
+      const defaultProfile = PROFILES.find((p) => p.key === "default");
+
+      if (defaultProfile) {
+        setProfileName(defaultProfile.key);
+        setProfileKey(defaultProfile.key);
+        setWeights((current) => ({
+          dimensionA: defaultProfile.sliders.roleScope,
+          dimensionB: defaultProfile.sliders.domainFit,
+          dimensionC: defaultProfile.sliders.platformFit,
+          dimensionD: current.dimensionD,
+          dimensionE: current.dimensionE,
+        }));
+
+        // Persist reverting to default so the removed profile does not reload.
+        await saveCalibration({
+          profileNameOverride: defaultProfile.key,
+          weightsOverride: {
+            dimensionA: defaultProfile.sliders.roleScope,
+            dimensionB: defaultProfile.sliders.domainFit,
+            dimensionC: defaultProfile.sliders.platformFit,
+            dimensionD: weights.dimensionD,
+            dimensionE: weights.dimensionE,
+          },
+        });
+      }
+    }
+
+    setStatus("Custom profile removed.");
+  };
+
+  const saveCalibration = async ({
+    profileNameOverride,
+    weightsOverride,
+  }: {
+    profileNameOverride?: string;
+    weightsOverride?: CalibrationWeights;
+  } = {}) => {
     setIsSaving(true);
     setStatus(null);
 
     try {
+      const trimmedName = profileNameOverride ?? (profileName.trim() || profile.label || profile.key);
+      setProfileName(trimmedName);
+      const nextProfileKey: ProfileKey = PROFILES.some((p) => p.key === trimmedName)
+        ? (trimmedName as BuiltInProfileKey)
+        : trimmedName;
+      setProfileKey(nextProfileKey);
+
+      const weightsToSave = weightsOverride ?? weights;
+
       const response = await fetch("/api/calibration", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          profileName: profileName.trim() || profile.key,
-          weights,
+          profileName: trimmedName,
+          weights: weightsToSave,
         }),
       });
 
       if (!response.ok) {
         setStatus("Unable to save calibration.");
         return;
+      }
+
+      if (!PROFILES.some((p) => p.key === trimmedName)) {
+        addOrUpdateCustomProfile(trimmedName, weights);
       }
 
       setStatus("Calibration saved.");
@@ -209,21 +334,30 @@ export default function CalibratePage() {
                 Calibration profile
               </label>
 
-              <select
-                id="cal-profile"
-                value={profileKey}
-                onChange={(e) => applyProfile(e.target.value as ProfileKey)}
-                style={ttrComponents.input}
-              >
-                {PROFILES.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-                {profileKey === "custom" && (
-                  <option value="custom">Custom profile</option>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <select
+                  id="cal-profile"
+                  value={profileKey}
+                  onChange={(e) => applyProfile(e.target.value as ProfileKey)}
+                  style={{ ...ttrComponents.input, flex: 1 }}
+                >
+                  {availableProfiles.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+
+                {!PROFILES.some((p) => p.key === profileKey) && (
+                  <button
+                    style={{ ...ttrComponents.quietButton, whiteSpace: "nowrap" }}
+                    onClick={() => removeCustomProfile(profileKey)}
+                    disabled={isSaving}
+                  >
+                    Delete
+                  </button>
                 )}
-              </select>
+              </div>
 
               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
                 {profile.description}
@@ -347,7 +481,7 @@ export default function CalibratePage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <button
                   style={ttrComponents.primaryButton}
-                  onClick={saveCalibration}
+                  onClick={() => saveCalibration()}
                   disabled={isSaving}
                 >
                   {isSaving ? "Saving..." : "Save calibration"}

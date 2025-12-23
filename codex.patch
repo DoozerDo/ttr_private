@@ -1,230 +1,487 @@
-diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
-index e0342e46331ce72e4ee552ae7a6800bfe8311536..a565b517d0482101196bb7852dcc2f321b9ac8ec 100644
---- a/apps/web/app/baseline/[id]/page.tsx
-+++ b/apps/web/app/baseline/[id]/page.tsx
-@@ -1,67 +1,92 @@
+diff --git a/apps/web/app/calibrate/page.tsx b/apps/web/app/calibrate/page.tsx
+index dd97f192b50e38d1d1b54c657223e6a18adcea80..97768f9e0cc03d849f069d76e8401c58526e426d 100644
+--- a/apps/web/app/calibrate/page.tsx
++++ b/apps/web/app/calibrate/page.tsx
+@@ -1,36 +1,37 @@
+ // apps/web/app/calibrate/page.tsx
+ "use client";
+ 
+ import type { CSSProperties } from "react";
+ import { useEffect, useMemo, useState } from "react";
  import Link from "next/link";
--import { cookies } from "next/headers";
-+import { cookies, headers } from "next/headers";
- import { notFound, redirect } from "next/navigation";
  
- import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
- import { formatDateTime } from "../../../lib/format-date";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
  
- type BaselineVersionDto = {
-   versionNumber: number;
-   fileHash: string;
-   createdAt: string;
+-type ProfileKey = "default" | "support-ops" | "leadership" | "strict" | "custom";
++type BuiltInProfileKey = "default" | "support-ops" | "leadership" | "strict";
++type ProfileKey = BuiltInProfileKey | string;
+ 
+ type CalibrationWeights = {
+   dimensionA: number;
+   dimensionB: number;
+   dimensionC: number;
+   dimensionD: number;
+   dimensionE: number;
  };
  
-+async function buildInternalApiUrl(path: string) {
-+  const headerList = await headers();
-+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
-+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-+  const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+ type Profile = {
+   key: ProfileKey;
+   label: string;
+   description: string;
+   sliders: {
+     roleScope: number;
+     domainFit: number;
+     platformFit: number;
+   };
+ };
+ 
+ const PROFILES: Profile[] = [
+   {
+     key: "default",
+     label: "Default",
+     description: "Balanced weighting intended for most role evaluations.",
+@@ -39,213 +40,346 @@ const PROFILES: Profile[] = [
+   {
+     key: "support-ops",
+     label: "Support Operations",
+     description: "Prioritizes operational execution, tooling, and process rigor.",
+     sliders: { roleScope: 60, domainFit: 50, platformFit: 65 },
+   },
+   {
+     key: "leadership",
+     label: "Leadership Heavy",
+     description: "Weights scope, cross-functional leadership, and organizational impact more strongly.",
+     sliders: { roleScope: 75, domainFit: 55, platformFit: 40 },
+   },
+   {
+     key: "strict",
+     label: "Strict Match",
+     description: "Applies more conservative scoring with higher alignment requirements.",
+     sliders: { roleScope: 55, domainFit: 70, platformFit: 70 },
+   },
+ ];
+ 
+ export default function CalibratePage() {
+   const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+ 
+   const [profileKey, setProfileKey] = useState<ProfileKey>("default");
+   const [profileName, setProfileName] = useState("default");
++  const [customProfiles, setCustomProfiles] = useState<Profile[]>([]);
+   const [weights, setWeights] = useState<CalibrationWeights>({
+     dimensionA: PROFILES[0].sliders.roleScope,
+     dimensionB: PROFILES[0].sliders.domainFit,
+     dimensionC: PROFILES[0].sliders.platformFit,
+     dimensionD: 50,
+     dimensionE: 50,
+   });
+   const [status, setStatus] = useState<string | null>(null);
+   const [isSaving, setIsSaving] = useState(false);
+ 
+   const isErrorStatus = status ? /fail|unable|incomplete/i.test(status) : false;
+ 
++  useEffect(() => {
++    const cachedProfiles = window.localStorage.getItem("ttr-custom-calibration-profiles");
 +
-+  const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
++    if (cachedProfiles) {
++      try {
++        const parsed = JSON.parse(cachedProfiles) as Profile[];
++        setCustomProfiles(parsed);
++      } catch (error) {
++        console.warn("Unable to parse cached calibration profiles", error);
++      }
++    }
++  }, []);
 +
-+  return new URL(path, baseUrl ?? "http://localhost:3000").toString();
-+}
++  useEffect(() => {
++    if (customProfiles.length === 0) {
++      window.localStorage.removeItem("ttr-custom-calibration-profiles");
++      return;
++    }
 +
-+async function buildInternalFetchOptions(): Promise<RequestInit> {
-+  const headerList = await headers();
-+  const cookieHeader = headerList.get("cookie");
++    window.localStorage.setItem("ttr-custom-calibration-profiles", JSON.stringify(customProfiles));
++  }, [customProfiles]);
 +
-+  const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
++  const availableProfiles = useMemo(
++    () => [...PROFILES, ...customProfiles],
++    [customProfiles],
++  );
 +
-+  return {
-+    cache: "no-store",
-+    credentials: "include",
-+    headers: headersInit,
+   const profile = useMemo(() => {
+-    if (profileKey === "custom") {
+-      return {
+-        key: "custom",
+-        label: profileName,
+-        description: "Loaded calibration profile.",
+-        sliders: {
+-          // VERIFY: Align custom profile slider mapping with backend dimensions.
+-          roleScope: weights.dimensionA,
+-          domainFit: weights.dimensionB,
+-          platformFit: weights.dimensionC,
+-        },
+-      } satisfies Profile;
++    const matchedProfile = availableProfiles.find((p) => p.key === profileKey);
++
++    if (matchedProfile) {
++      return matchedProfile;
+     }
+ 
+-    return PROFILES.find((p) => p.key === profileKey) ?? PROFILES[0];
+-  }, [profileKey, profileName, weights]);
++    return {
++      key: profileKey,
++      label: profileName,
++      description: "Loaded calibration profile.",
++      sliders: {
++        // VERIFY: Align custom profile slider mapping with backend dimensions.
++        roleScope: weights.dimensionA,
++        domainFit: weights.dimensionB,
++        platformFit: weights.dimensionC,
++      },
++    } satisfies Profile;
++  }, [availableProfiles, profileKey, profileName, weights]);
+ 
+   useEffect(() => {
+     const fetchCalibration = async () => {
+       try {
+         const response = await fetch("/api/calibration", { cache: "no-store" });
+ 
+         if (!response.ok) {
+           setStatus("Unable to load calibration.");
+           return;
+         }
+ 
+         const data = (await response.json()) as {
+           ok?: boolean;
+           profileName?: string;
+           weights?: CalibrationWeights;
+         };
+ 
+         if (!data?.ok || !data.profileName || !data.weights) {
+           setStatus("Calibration response was incomplete.");
+           return;
+         }
+ 
+-        setProfileName(data.profileName);
+-        setProfileKey(
+-          PROFILES.some((p) => p.key === data.profileName)
+-            ? (data.profileName as ProfileKey)
+-            : "custom",
+-        );
+-        setWeights(data.weights);
++        const profileName = data.profileName;
++        const weights = data.weights;
++        const isBuiltIn = PROFILES.some((p) => p.key === profileName);
++
++        setProfileName(profileName);
++        setProfileKey(profileName as ProfileKey);
++        setWeights(weights);
++        if (!isBuiltIn) {
++          setCustomProfiles((current) => {
++            if (current.some((p) => p.key === profileName)) {
++              return current;
++            }
++
++            return [
++              ...current,
++              {
++                key: profileName,
++                label: profileName,
++                description: "Saved custom calibration profile.",
++                sliders: {
++                  roleScope: weights.dimensionA,
++                  domainFit: weights.dimensionB,
++                  platformFit: weights.dimensionC,
++                },
++              },
++            ];
++          });
++        }
+         setStatus(null);
+       } catch (error) {
+         console.error("Failed to load calibration", error);
+         setStatus("Failed to load calibration.");
+       }
+     };
+ 
+     fetchCalibration();
+   }, []);
+ 
+   const applyProfile = (nextKey: ProfileKey) => {
+     setProfileKey(nextKey);
+ 
+-    if (nextKey === "custom") {
+-      return;
+-    }
+-
+-    const nextProfile = PROFILES.find((p) => p.key === nextKey);
++    const nextProfile = availableProfiles.find((p) => p.key === nextKey);
+ 
+     if (!nextProfile) {
+       return;
+     }
+ 
+-    setProfileName(nextProfile.key);
++    const profileNameValue = PROFILES.some((p) => p.key === nextProfile.key)
++      ? nextProfile.key
++      : nextProfile.label;
++    setProfileName(profileNameValue);
+     setWeights((current) => ({
+       dimensionA: nextProfile.sliders.roleScope,
+       dimensionB: nextProfile.sliders.domainFit,
+       dimensionC: nextProfile.sliders.platformFit,
+       // VERIFY: Keep untouched dimensions aligned with prior state when applying presets.
+       dimensionD: current.dimensionD,
+       dimensionE: current.dimensionE,
+     }));
+   };
+ 
+-  const saveCalibration = async () => {
++  const addOrUpdateCustomProfile = (name: string, currentWeights: CalibrationWeights) => {
++    setCustomProfiles((profiles) => {
++      const nextProfile: Profile = {
++        key: name,
++        label: name,
++        description: "Saved custom calibration profile.",
++        sliders: {
++          roleScope: currentWeights.dimensionA,
++          domainFit: currentWeights.dimensionB,
++          platformFit: currentWeights.dimensionC,
++        },
++      };
++
++      if (profiles.some((p) => p.key === name)) {
++        return profiles.map((p) => (p.key === name ? nextProfile : p));
++      }
++
++      return [...profiles, nextProfile];
++    });
 +  };
-+}
 +
- async function fetchBaseline(id: string): Promise<BaselineDto | null> {
-   try {
--    const response = await fetch(`/api/baselines/${id}`, {
--      cache: "no-store",
--    });
-+    const response = await fetch(
-+      await buildInternalApiUrl(`/api/baselines/${id}`),
-+      await buildInternalFetchOptions(),
-+    );
++  const removeCustomProfile = async (keyToRemove: ProfileKey) => {
++    setCustomProfiles((profiles) => profiles.filter((p) => p.key !== keyToRemove));
++
++    if (profileKey === keyToRemove) {
++      const defaultProfile = PROFILES.find((p) => p.key === "default");
++
++      if (defaultProfile) {
++        setProfileName(defaultProfile.key);
++        setProfileKey(defaultProfile.key);
++        setWeights((current) => ({
++          dimensionA: defaultProfile.sliders.roleScope,
++          dimensionB: defaultProfile.sliders.domainFit,
++          dimensionC: defaultProfile.sliders.platformFit,
++          dimensionD: current.dimensionD,
++          dimensionE: current.dimensionE,
++        }));
++
++        // Persist reverting to default so the removed profile does not reload.
++        await saveCalibration({
++          profileNameOverride: defaultProfile.key,
++          weightsOverride: {
++            dimensionA: defaultProfile.sliders.roleScope,
++            dimensionB: defaultProfile.sliders.domainFit,
++            dimensionC: defaultProfile.sliders.platformFit,
++            dimensionD: weights.dimensionD,
++            dimensionE: weights.dimensionE,
++          },
++        });
++      }
++    }
++
++    setStatus("Custom profile removed.");
++  };
++
++  const saveCalibration = async ({
++    profileNameOverride,
++    weightsOverride,
++  }: {
++    profileNameOverride?: string;
++    weightsOverride?: CalibrationWeights;
++  } = {}) => {
+     setIsSaving(true);
+     setStatus(null);
  
-     if (response.status === 401) {
-       redirect("/auth/login");
+     try {
++      const trimmedName = profileNameOverride ?? (profileName.trim() || profile.label || profile.key);
++      setProfileName(trimmedName);
++      const nextProfileKey: ProfileKey = PROFILES.some((p) => p.key === trimmedName)
++        ? (trimmedName as BuiltInProfileKey)
++        : trimmedName;
++      setProfileKey(nextProfileKey);
++
++      const weightsToSave = weightsOverride ?? weights;
++
+       const response = await fetch("/api/calibration", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({
+-          profileName: profileName.trim() || profile.key,
+-          weights,
++          profileName: trimmedName,
++          weights: weightsToSave,
+         }),
+       });
+ 
+       if (!response.ok) {
+         setStatus("Unable to save calibration.");
+         return;
+       }
+ 
++      if (!PROFILES.some((p) => p.key === trimmedName)) {
++        addOrUpdateCustomProfile(trimmedName, weights);
++      }
++
+       setStatus("Calibration saved.");
+     } catch (error) {
+       console.error("Failed to save calibration", error);
+       setStatus("Failed to save calibration.");
+     } finally {
+       setIsSaving(false);
      }
+   };
  
-     if (!response.ok) {
-       return null;
-     }
- 
-     return (await response.json()) as BaselineDto;
-   } catch (error) {
-     console.error("Failed to fetch baseline", error);
-     return null;
-   }
- }
- 
- async function fetchBaselineVersions(
-   id: string,
- ): Promise<BaselineVersionDto[] | null> {
--  // VERIFY: ensure versions API returns expected shape
-   try {
--    const response = await fetch(`/api/baselines/${id}/versions`, {
--      cache: "no-store",
--    });
-+    const response = await fetch(
-+      await buildInternalApiUrl(`/api/baselines/${id}/versions`),
-+      await buildInternalFetchOptions(),
-+    );
- 
-     if (response.status === 401) {
-       redirect("/auth/login");
-     }
- 
-     if (!response.ok) {
-       return null;
-     }
- 
-     return (await response.json()) as BaselineVersionDto[];
-   } catch (error) {
-     console.error("Failed to fetch baseline versions", error);
-     return null;
-   }
- }
- 
- const friendlyTitles: Record<string, string> = {
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
-   OTHER: "Other",
-   RAW: "Raw",
- };
-@@ -168,51 +193,50 @@ export default async function BaselineDetailPage({
-             </p>
-             <h1 className="text-3xl font-bold text-gray-900">
-               {baseline.originalFilename}
-             </h1>
-             <p className="text-sm text-gray-700">
-               Uploaded {formatDateTime(baseline.createdAt)}
-             </p>
-           </div>
-           <Link
-             href="/baseline"
-             className="text-sm font-semibold text-blue-600 hover:underline"
+   return (
+     <InstrumentShell
+       kicker="Signal configuration"
+       title="Calibrate"
+       subtitle="Define how the analyzer should interpret and prioritize different signals."
+     >
+       <div style={ttrLayout.panelsRow}>
+         <section style={{ ...basePanelStyle, flex: 1.05 }}>
+           <div
+             style={{
+               display: "flex",
+               alignItems: "center",
+               justifyContent: "space-between",
+               gap: 12,
+             }}
            >
-             Back to baselines
-           </Link>
-         </div>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Calibration</span>
+               <h2 style={ttrTypography.h2}>Profiles and weighting</h2>
+             </div>
+           </div>
  
-         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-           <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
-           {versions && versions.length > 0 ? (
-             <ul className="space-y-2">
-               {versions.map((version) => (
-                 <li
-                   key={version.versionNumber}
-                   className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+           <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
+             <div>
+               <label style={ttrComponents.fieldLabel} htmlFor="cal-profile">
+                 Calibration profile
+               </label>
+ 
+-              <select
+-                id="cal-profile"
+-                value={profileKey}
+-                onChange={(e) => applyProfile(e.target.value as ProfileKey)}
+-                style={ttrComponents.input}
+-              >
+-                {PROFILES.map((p) => (
+-                  <option key={p.key} value={p.key}>
+-                    {p.label}
+-                  </option>
+-                ))}
+-                {profileKey === "custom" && (
+-                  <option value="custom">Custom profile</option>
++              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
++                <select
++                  id="cal-profile"
++                  value={profileKey}
++                  onChange={(e) => applyProfile(e.target.value as ProfileKey)}
++                  style={{ ...ttrComponents.input, flex: 1 }}
++                >
++                  {availableProfiles.map((p) => (
++                    <option key={p.key} value={p.key}>
++                      {p.label}
++                    </option>
++                  ))}
++                </select>
++
++                {!PROFILES.some((p) => p.key === profileKey) && (
++                  <button
++                    style={{ ...ttrComponents.quietButton, whiteSpace: "nowrap" }}
++                    onClick={() => removeCustomProfile(profileKey)}
++                    disabled={isSaving}
++                  >
++                    Delete
++                  </button>
+                 )}
+-              </select>
++              </div>
+ 
+               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                 {profile.description}
+               </p>
+             </div>
+ 
+             <div style={{ display: "grid", gap: 12 }}>
+               <div>
+                 <label style={ttrComponents.fieldLabel}>Role scope weighting</label>
+                 <input
+                   type="range"
+                   min={0}
+                   max={100}
+                   value={weights.dimensionA}
+                   onChange={(e) =>
+                     setWeights((current) => ({
+                       ...current,
+                       dimensionA: Number(e.target.value),
+                     }))
+                   }
+                   style={{ width: "100%" }}
+                 />
+                 <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                   Intended to influence how strongly level, ownership, and scope alignment affect scoring.
+                 </p>
+@@ -325,51 +459,51 @@ export default function CalibratePage() {
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(255,255,255,0.04)",
+                 padding: "10px 12px",
+                 display: "flex",
+                 alignItems: "center",
+                 justifyContent: "space-between",
+                 gap: 12,
+                 flexWrap: "wrap",
+               }}
+             >
+               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                 <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
+                   Save calibration
+                 </div>
+                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                   Persist the selected profile and weights for future analysis runs.
+                 </div>
+               </div>
+ 
+               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                 <button
+                   style={ttrComponents.primaryButton}
+-                  onClick={saveCalibration}
++                  onClick={() => saveCalibration()}
+                   disabled={isSaving}
                  >
--                  {/* VERIFY: confirm fields display correctly */}
-                   <div className="flex flex-wrap justify-between gap-2">
-                     <span className="font-semibold">Version {version.versionNumber}</span>
-                     <span className="text-xs text-gray-600">
-                       {formatDateTime(version.createdAt)}
-                     </span>
-                   </div>
-                   <div className="text-xs text-gray-700">File hash: {version.fileHash}</div>
-                 </li>
-               ))}
-             </ul>
-           ) : (
-             <p className="text-sm text-gray-700">No version history available.</p>
-           )}
+                   {isSaving ? "Saving..." : "Save calibration"}
+                 </button>
+                 <Link href="/analyze" style={ttrComponents.quietButton}>
+                   Back to Analyze
+                 </Link>
+               </div>
+             </div>
+ 
+             {status && (
+               <div style={isErrorStatus ? ttrComponents.dangerBox : ttrComponents.successBox}>
+                 {status}
+               </div>
+             )}
+           </div>
          </section>
  
-         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
-           {!hasRenderableSections && !fallbackContent ? (
-             <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
-           ) : (
-             <div className="space-y-6">
-               {hasRenderableSections && renderContentSections(groupedSections)}
-               {!hasRenderableSections && fallbackContent ? (
-                 <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
-                   <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-diff --git a/apps/web/app/baseline/page.tsx b/apps/web/app/baseline/page.tsx
-index 779794555ef7fa64295caa45f7e18e553c2a7e67..40799842a17ecbca67701ed5008ec0a661e42a0e 100644
---- a/apps/web/app/baseline/page.tsx
-+++ b/apps/web/app/baseline/page.tsx
-@@ -1,39 +1,64 @@
--import { cookies } from "next/headers";
-+import { cookies, headers } from "next/headers";
- import { redirect } from "next/navigation";
- import Link from "next/link";
- 
- import type { BaselineDto } from "../../lib/baselines";
- import { BaselineDashboard } from "./baseline-dashboard";
- import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
- import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
- 
-+async function buildInternalApiUrl(path: string) {
-+  const headerList = await headers();
-+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
-+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-+  const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
-+
-+  const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
-+
-+  return new URL(path, baseUrl ?? "http://localhost:3000").toString();
-+}
-+
-+async function buildInternalFetchOptions(): Promise<RequestInit> {
-+  const headerList = await headers();
-+  const cookieHeader = headerList.get("cookie");
-+
-+  const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
-+
-+  return {
-+    cache: "no-store",
-+    credentials: "include",
-+    headers: headersInit,
-+  };
-+}
-+
- async function fetchBaselines(): Promise<BaselineDto[]> {
-   try {
--    const res = await fetch("/api/baselines", {
--      cache: "no-store",
--    });
-+    const res = await fetch(
-+      await buildInternalApiUrl("/api/baselines"),
-+      await buildInternalFetchOptions(),
-+    );
- 
-     if (res.status === 401) {
-       redirect("/auth/login");
-     }
- 
-     if (!res.ok) {
-       return [];
-     }
- 
-     return (await res.json()) as BaselineDto[];
-   } catch (error) {
-     console.error("Failed to fetch baselines", error);
-     return [];
-   }
- }
- 
- export default async function BaselinePage() {
-   const cookieStore = await cookies();
-   const token = cookieStore.get("auth_token")?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
-   }
- 
-   const baselines = await fetchBaselines();
+         <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
+           <div
+             style={{
+               position: "absolute",
+               inset: 0,
+               background:
+                 "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
