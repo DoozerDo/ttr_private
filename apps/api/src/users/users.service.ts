@@ -11,7 +11,13 @@ export class UsersService {
   ) {}
 
   async create(email: string, passwordHash: string): Promise<User> {
-    const user = this.usersRepository.create({ email, passwordHash });
+    const user = this.usersRepository.create({
+      email,
+      passwordHash,
+      // VERIFY: Confirm null calibration defaults are desired on signup.
+      calibrationProfileName: null,
+      calibrationWeights: null,
+    });
     return this.usersRepository.save(user);
   }
 

@@ -1,201 +1,121 @@
-diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
-index bd97f374e3bded80d8e780a2b600f54cde6e57e8..e0342e46331ce72e4ee552ae7a6800bfe8311536 100644
---- a/apps/web/app/baseline/[id]/page.tsx
-+++ b/apps/web/app/baseline/[id]/page.tsx
-@@ -1,53 +1,83 @@
- import Link from "next/link";
- import { cookies } from "next/headers";
- import { notFound, redirect } from "next/navigation";
- 
- import { BaselineDto, BaselineSectionDto } from "../../../lib/baselines";
- import { formatDateTime } from "../../../lib/format-date";
- 
-+type BaselineVersionDto = {
-+  versionNumber: number;
-+  fileHash: string;
-+  createdAt: string;
-+};
+diff --git a/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts b/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..13cd6914b9059347db9912d1f74cc4560cb92a9b
+--- /dev/null
++++ b/apps/api/src/migrations/1750000000000-UserCalibrationProfile.ts
+@@ -0,0 +1,26 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
 +
- async function fetchBaseline(id: string): Promise<BaselineDto | null> {
-   try {
-     const response = await fetch(`/api/baselines/${id}`, {
-       cache: "no-store",
-     });
- 
-     if (response.status === 401) {
-       redirect("/auth/login");
-     }
- 
-     if (!response.ok) {
-       return null;
-     }
- 
-     return (await response.json()) as BaselineDto;
-   } catch (error) {
-     console.error("Failed to fetch baseline", error);
-     return null;
-   }
- }
- 
-+async function fetchBaselineVersions(
-+  id: string,
-+): Promise<BaselineVersionDto[] | null> {
-+  // VERIFY: ensure versions API returns expected shape
-+  try {
-+    const response = await fetch(`/api/baselines/${id}/versions`, {
-+      cache: "no-store",
-+    });
++export class UserCalibrationProfile1750000000000
++  implements MigrationInterface
++{
++  name = 'UserCalibrationProfile1750000000000';
 +
-+    if (response.status === 401) {
-+      redirect("/auth/login");
-+    }
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "calibrationProfileName" character varying(255)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "calibrationWeights" jsonb`,
++    );
++    // VERIFY: Confirm null defaults cover existing users without calibration data.
++  }
 +
-+    if (!response.ok) {
-+      return null;
-+    }
-+
-+    return (await response.json()) as BaselineVersionDto[];
-+  } catch (error) {
-+    console.error("Failed to fetch baseline versions", error);
-+    return null;
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "users" DROP COLUMN "calibrationWeights"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" DROP COLUMN "calibrationProfileName"`,
++    );
 +  }
 +}
+diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
+index 1ae5ce4597704db1378ce1838317321432f139fc..2e731eb4f37d9e6e187e506c1dbdadf721e0274a 100644
+--- a/apps/api/src/users/user.entity.ts
++++ b/apps/api/src/users/user.entity.ts
+@@ -1,27 +1,44 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   Index,
+   PrimaryGeneratedColumn,
+   UpdateDateColumn,
+ } from 'typeorm';
+ 
++export type CalibrationWeights = {
++  dimensionA: number;
++  dimensionB: number;
++  dimensionC: number;
++  dimensionD: number;
++  dimensionE: number;
++};
 +
- const friendlyTitles: Record<string, string> = {
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
-   OTHER: "Other",
-   RAW: "Raw",
- };
- 
- const displayOrder = [
-   "SUMMARY",
-   "EXPERIENCE",
-   "PROJECT",
-   "SKILLS",
-   "EDUCATION",
-   "OTHER",
-   "RAW",
- ];
- 
- function organizeSections(sections: BaselineSectionDto[]) {
-   const sorted = [...sections].sort((a, b) => a.order - b.order);
-   const grouped: Record<string, BaselineSectionDto[]> = {};
- 
-   sorted.forEach((section) => {
-@@ -90,84 +120,110 @@ function renderContentSections(groupedSections: Record<string, BaselineSectionDt
-           </article>
-         ))}
-       </div>
-     </div>
-   ));
- }
- 
- export default async function BaselineDetailPage({
-   params,
- }: {
-   params: Promise<{ id: string }>;
- }) {
-   const resolvedParams = await params;
-   const cookieStore = await cookies();
-   const token = cookieStore.get("auth_token")?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
-   }
- 
-   if (!resolvedParams?.id) {
-     notFound();
-   }
- 
-   const baseline = await fetchBaseline(resolvedParams.id);
-+  const versions = await fetchBaselineVersions(resolvedParams.id);
- 
-   if (!baseline) {
-     notFound();
-   }
- 
-   const groupedSections = organizeSections(baseline.sections ?? []);
-   const hasRenderableSections = Object.values(groupedSections).some(
-     (sections) => sections.length > 0,
-   );
- 
-   const fallbackContent =
-     !hasRenderableSections && baseline.sections?.[0]?.content
-       ? baseline.sections[0].content
-       : null;
- 
-   return (
-     <main className="min-h-screen bg-gray-50 px-4 py-8">
-       <div className="mx-auto flex max-w-5xl flex-col gap-6">
-         <div className="flex items-center justify-between">
-           <div className="space-y-2">
-             <p className="text-sm font-semibold uppercase tracking-wide text-gray-600">
-               Baseline details
-             </p>
-             <h1 className="text-3xl font-bold text-gray-900">
-               {baseline.originalFilename}
-             </h1>
-             <p className="text-sm text-gray-700">
-               Uploaded {formatDateTime(baseline.createdAt)}
-             </p>
-           </div>
-           <Link
-             href="/baseline"
-             className="text-sm font-semibold text-blue-600 hover:underline"
-           >
-             Back to baselines
-           </Link>
-         </div>
- 
-+        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-+          <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
-+          {versions && versions.length > 0 ? (
-+            <ul className="space-y-2">
-+              {versions.map((version) => (
-+                <li
-+                  key={version.versionNumber}
-+                  className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
-+                >
-+                  {/* VERIFY: confirm fields display correctly */}
-+                  <div className="flex flex-wrap justify-between gap-2">
-+                    <span className="font-semibold">Version {version.versionNumber}</span>
-+                    <span className="text-xs text-gray-600">
-+                      {formatDateTime(version.createdAt)}
-+                    </span>
-+                  </div>
-+                  <div className="text-xs text-gray-700">File hash: {version.fileHash}</div>
-+                </li>
-+              ))}
-+            </ul>
-+          ) : (
-+            <p className="text-sm text-gray-700">No version history available.</p>
-+          )}
-+        </section>
++// VERIFY: Confirm calibration dimension labels and structure.
 +
-         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-           <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
-           {!hasRenderableSections && !fallbackContent ? (
-             <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
-           ) : (
-             <div className="space-y-6">
-               {hasRenderableSections && renderContentSections(groupedSections)}
-               {!hasRenderableSections && fallbackContent ? (
-                 <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
-                   <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-                     {fallbackContent}
-                   </pre>
-                 </article>
-               ) : null}
-             </div>
-           )}
-         </section>
-       </div>
-     </main>
-   );
+ @Entity({ name: 'users' })
+ export class User {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Index({ unique: true })
+   @Column({ unique: true })
+   email!: string;
+ 
+   @Column()
+   passwordHash!: string;
+ 
++  @Column({ type: 'character varying', length: 255, nullable: true })
++  calibrationProfileName!: string | null;
++
++  // VERIFY: Ensure null defaults are acceptable for calibration weights.
++  @Column({ type: 'jsonb', nullable: true })
++  calibrationWeights!: CalibrationWeights | null;
++
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
  }
+diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
+index 85586d3c85982a3ce6c5b009d7f87522848d189a..7b73e3bfa1a5608d99abf2c62aae2aff76fe4932 100644
+--- a/apps/api/src/users/users.service.ts
++++ b/apps/api/src/users/users.service.ts
+@@ -1,25 +1,31 @@
+ import { Injectable } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { User } from './user.entity';
+ 
+ @Injectable()
+ export class UsersService {
+   constructor(
+     @InjectRepository(User)
+     private readonly usersRepository: Repository<User>,
+   ) {}
+ 
+   async create(email: string, passwordHash: string): Promise<User> {
+-    const user = this.usersRepository.create({ email, passwordHash });
++    const user = this.usersRepository.create({
++      email,
++      passwordHash,
++      // VERIFY: Confirm null calibration defaults are desired on signup.
++      calibrationProfileName: null,
++      calibrationWeights: null,
++    });
+     return this.usersRepository.save(user);
+   }
+ 
+   findByEmail(email: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { email } });
+   }
+ 
+   findById(id: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { id } });
+   }
+ }
+
 
 
