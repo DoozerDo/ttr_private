@@ -1,620 +1,339 @@
-diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index 0407dca91a222cf74c71764c2dc4f4d3d7d6cbc3..e4253590466da3e99c9e632f615fa342dd96d027 100644
---- a/apps/api/src/app.module.ts
-+++ b/apps/api/src/app.module.ts
-@@ -1,45 +1,47 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { AppController } from './app.controller';
- import { AppService } from './app.service';
- import { AuthModule } from './auth/auth.module';
- import { AnalysisModule } from './analysis/analysis.module';
- import { BaselineModule } from './baseline/baseline.module';
-+import { ComplianceModule } from './compliance/compliance.module';
- import { InterviewsModule } from './interviews/interviews.module';
- import { JobsModule } from './jobs/jobs.module';
- import { ResumeModule } from './resume/resume.module';
- import { User } from './users/user.entity';
- import { UsersModule } from './users/users.module';
- 
- @Module({
-   imports: [
-     ConfigModule.forRoot({
-       isGlobal: true,
-       envFilePath: ['.env.development.local', '.env.local', '.env'],
-     }),
-     TypeOrmModule.forRootAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         type: 'postgres',
-         url:
-           configService.get<string>('DATABASE_URL') ??
-           'postgresql://postgres:postgres@db:5432/targetthisrole',
-         entities: [User],
-         synchronize: configService.get<string>('NODE_ENV') !== 'production',
-         autoLoadEntities: true,
-       }),
-     }),
-     UsersModule,
-     AuthModule,
-     AnalysisModule,
-     BaselineModule,
-+    ComplianceModule,
-     InterviewsModule,
-     JobsModule,
-     ResumeModule,
-   ],
-   controllers: [AppController],
-   providers: [AppService],
- })
- export class AppModule {}
-diff --git a/apps/api/src/compliance/compliance-audit.entity.ts b/apps/api/src/compliance/compliance-audit.entity.ts
+﻿diff --git a/apps/api/src/applications/dto/create-application.dto.ts b/apps/api/src/applications/dto/create-application.dto.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..75be2776d3e8e550277af0777e5d98ad5fe533ac
 --- /dev/null
-+++ b/apps/api/src/compliance/compliance-audit.entity.ts
-@@ -0,0 +1,43 @@
-+import {
-+  Column,
-+  CreateDateColumn,
-+  Entity,
-+  PrimaryGeneratedColumn,
-+} from 'typeorm';
-+import {
-+  ComplianceAction,
-+  ComplianceFlag,
-+} from './compliance.types';
++++ b/apps/api/src/applications/dto/create-application.dto.ts
+@@ -0,0 +1,12 @@
++import { ApplicationStage } from '../application.entity';
 +
-+@Entity({ name: 'compliance_audits' })
-+export class ComplianceAudit {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @Column({ type: 'varchar' })
-+  actorId!: string;
-+
-+  @Column({
-+    type: 'enum',
-+    enum: ComplianceAction,
-+  })
-+  action!: ComplianceAction;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  baselineVersionHash!: string | null;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  jobHash!: string | null;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  outputHash!: string | null;
-+
-+  @Column({ type: 'jsonb', default: () => '\'[]\'::jsonb' })
-+  complianceFlags!: ComplianceFlag[];
-+
-+  @Column({ type: 'boolean', default: false })
-+  passFail!: boolean;
-+
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  createdAt!: Date;
++export class CreateApplicationDto {
++  jobId?: string | null;
++  company!: string;
++  title!: string;
++  appliedDate?: Date | string | null;
++  fitScore?: number | null;
++  stage?: ApplicationStage;
++  notes?: string | null;
++  sourceUrl?: string | null;
 +}
-diff --git a/apps/api/src/compliance/compliance.controller.ts b/apps/api/src/compliance/compliance.controller.ts
+diff --git a/apps/api/src/applications/dto/update-application.dto.ts b/apps/api/src/applications/dto/update-application.dto.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..fa960f390a0ca5cb0c72ded5dfd1cc51e7227ecb
 --- /dev/null
-+++ b/apps/api/src/compliance/compliance.controller.ts
-@@ -0,0 +1,97 @@
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  Get,
-+  Post,
-+  Query,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
++++ b/apps/api/src/applications/dto/update-application.dto.ts
+@@ -0,0 +1,12 @@
++import { ApplicationStage } from '../application.entity';
++
++export class UpdateApplicationDto {
++  jobId?: string | null;
++  company?: string;
++  title?: string;
++  appliedDate?: Date | string | null;
++  fitScore?: number | null;
++  stage?: ApplicationStage;
++  notes?: string | null;
++  sourceUrl?: string | null;
++}
+diff --git a/apps/api/src/applications/applications.service.ts b/apps/api/src/applications/applications.service.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/api/src/applications/applications.service.ts
+@@ -0,0 +1,99 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 +import { InjectRepository } from '@nestjs/typeorm';
 +import { Repository } from 'typeorm';
-+import { ComplianceAudit } from './compliance-audit.entity';
-+import {
-+  ComplianceAction,
-+  ComplianceFlagCode,
-+  ComplianceFlagSeverity,
-+} from './compliance.types';
++import { Application, ApplicationStage } from './application.entity';
++import { CreateApplicationDto } from './dto/create-application.dto';
++import { UpdateApplicationDto } from './dto/update-application.dto';
 +
-+@Controller('audit')
-+@UseGuards(AuthGuard('jwt'))
-+export class ComplianceController {
-+  constructor(
-+    @InjectRepository(ComplianceAudit)
-+    private readonly auditsRepository: Repository<ComplianceAudit>,
-+  ) {}
-+
-+  @Get()
-+  async list(
-+    @Req() request: Request & { user?: { id?: string } },
-+    @Query('action') action?: ComplianceAction,
-+    @Query('artifact_id') artifactId?: string,
-+  ) {
-+    const actorId = request.user?.id;
-+    if (!actorId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    const where: Record<string, unknown> = { actorId };
-+    if (action) where.action = action;
-+    if (artifactId) where.outputHash = artifactId;
-+
-+    const audits = await this.auditsRepository.find({
-+      where,
-+      order: { createdAt: 'DESC' },
-+    });
-+
-+    return audits;
-+  }
-+
-+  @Post()
-+  async create(
-+    @Req() request: Request & { user?: { id?: string } },
-+    @Body()
-+    body: {
-+      action?: ComplianceAction;
-+      baseline_version_hash?: string | null;
-+      job_hash?: string | null;
-+      output_hash?: string | null;
-+      compliance_flags?: Array<{ code: ComplianceFlagCode; message?: string | null }>;
-+    },
-+  ) {
-+    const actorId = request.user?.id;
-+    if (!actorId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    if (!body.action) {
-+      throw new BadRequestException('action is required');
-+    }
-+
-+    const complianceFlags =
-+      body.compliance_flags?.map((flag) => ({
-+        code: flag.code,
-+        message: flag.message ?? flag.code,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+      })) ?? [];
-+
-+    const blocked = complianceFlags.some(
-+      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-+    );
-+
-+    const audit = this.auditsRepository.create({
-+      actorId,
-+      action: body.action,
-+      baselineVersionHash: body.baseline_version_hash ?? null,
-+      jobHash: body.job_hash ?? null,
-+      outputHash: body.output_hash ?? null,
-+      complianceFlags,
-+      passFail: !blocked,
-+    });
-+
-+    return this.auditsRepository.save(audit);
-+  }
-+}
-diff --git a/apps/api/src/compliance/compliance.module.ts b/apps/api/src/compliance/compliance.module.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..f14307db8c66a086b339d764854a0c70f7f01135
---- /dev/null
-+++ b/apps/api/src/compliance/compliance.module.ts
-@@ -0,0 +1,13 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { ComplianceAudit } from './compliance-audit.entity';
-+import { ComplianceService } from './compliance.service';
-+import { ComplianceController } from './compliance.controller';
-+
-+@Module({
-+  imports: [TypeOrmModule.forFeature([ComplianceAudit])],
-+  controllers: [ComplianceController],
-+  providers: [ComplianceService],
-+  exports: [ComplianceService],
-+})
-+export class ComplianceModule {}
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..1435cb1a29713f6fae649eb4e6b36058f6f06797
---- /dev/null
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -0,0 +1,93 @@
-+import { createHash } from 'crypto';
-+import { ComplianceService } from './compliance.service';
-+import {
-+  ComplianceAction,
-+  ComplianceFlagCode,
-+} from './compliance.types';
-+
-+const buildAuditRepo = () => {
-+  const create = jest.fn((payload) => payload);
-+  const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
-+
-+  return { create, save };
-+};
-+
-+describe('ComplianceService', () => {
-+  const repoMock = buildAuditRepo();
-+  const service = new ComplianceService(
-+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+    // @ts-ignore: manual repository injection
-+    repoMock,
-+  );
-+
-+  beforeEach(() => {
-+    jest.clearAllMocks();
-+  });
-+
-+  it('passes validation when baseline hash and job company are present', async () => {
-+    const baselineVersion = { hash: 'baseline-hash' };
-+    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
-+
-+    const result = await service.validateAndAudit({
-+      action: ComplianceAction.RESUME_GENERATION,
-+      actorId: 'user-1',
-+      baselineVersion,
-+      job,
-+      outputHash: 'out-123',
-+    });
-+
-+    expect(result.blocked).toBe(false);
-+    expect(result.complianceFlags).toHaveLength(0);
-+    expect(repoMock.save).toHaveBeenCalledWith(
-+      expect.objectContaining({
-+        actorId: 'user-1',
-+        action: ComplianceAction.RESUME_GENERATION,
-+        baselineVersionHash: 'baseline-hash',
-+        jobHash: createHash('sha256').update('Job description').digest('hex'),
-+        outputHash: 'out-123',
-+        passFail: true,
-+      }),
-+    );
-+  });
-+
-+  it('fails validation when baseline hash is missing', async () => {
-+    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
-+
-+    const result = await service.validateAndAudit({
-+      action: ComplianceAction.RESUME_GENERATION,
-+      actorId: 'user-1',
-+      baselineVersion: { hash: null },
-+      job,
-+    });
-+
-+    expect(result.blocked).toBe(true);
-+    expect(result.complianceFlags).toEqual([
-+      expect.objectContaining({ code: ComplianceFlagCode.MISSING_BASELINE_HASH }),
-+    ]);
-+    expect(repoMock.save).toHaveBeenCalledWith(
-+      expect.objectContaining({
-+        passFail: false,
-+      }),
-+    );
-+  });
-+
-+  it('returns multiple flags when more than one condition fails', async () => {
-+    const job = { company: '', rawDescription: 'Job description' };
-+
-+    const result = await service.validateAndAudit({
-+      action: ComplianceAction.RESUME_GENERATION,
-+      actorId: 'user-2',
-+      baselineVersion: { hash: null },
-+      job,
-+    });
-+
-+    const codes = result.complianceFlags.map((flag) => flag.code);
-+    expect(codes).toEqual(
-+      expect.arrayContaining([
-+        ComplianceFlagCode.MISSING_BASELINE_HASH,
-+        ComplianceFlagCode.UNKNOWN_COMPANY,
-+      ]),
-+    );
-+    expect(result.blocked).toBe(true);
-+  });
-+});
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..2f68ce109ae3211826883690a62b5e44e96b779d
---- /dev/null
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -0,0 +1,90 @@
-+import { Injectable } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { createHash } from 'crypto';
-+import { Repository } from 'typeorm';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { Job } from '../jobs/job.entity';
-+import { ComplianceAudit } from './compliance-audit.entity';
-+import {
-+  ComplianceAction,
-+  ComplianceFlag,
-+  ComplianceFlagCode,
-+  ComplianceFlagSeverity,
-+} from './compliance.types';
-+
-+type ComplianceContext = {
-+  actorId: string;
-+  action: ComplianceAction;
-+  baselineVersion?: BaselineVersion | null;
-+  job?: Job | null;
-+  outputHash?: string | null;
-+  scopeInflationDetected?: boolean;
++export type ListApplicationsFilters = {
++  stage?: ApplicationStage;
++  company?: string;
 +};
 +
 +@Injectable()
-+export class ComplianceService {
++export class ApplicationsService {
 +  constructor(
-+    @InjectRepository(ComplianceAudit)
-+    private readonly auditsRepository: Repository<ComplianceAudit>,
++    @InjectRepository(Application)
++    private readonly applicationRepository: Repository<Application>,
 +  ) {}
 +
-+  private buildFlags(context: ComplianceContext): ComplianceFlag[] {
-+    const flags: ComplianceFlag[] = [];
-+
-+    if (!context.baselineVersion?.hash) {
-+      flags.push({
-+        code: ComplianceFlagCode.MISSING_BASELINE_HASH,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Baseline version hash is required.',
-+      });
++  async createApplication(userId: string, dto: CreateApplicationDto) {
++    if (!dto.company?.trim()) {
++      throw new BadRequestException('Company is required.');
++    }
++    if (!dto.title?.trim()) {
++      throw new BadRequestException('Title is required.');
 +    }
 +
-+    if (context.job && !context.job.company?.trim()) {
-+      flags.push({
-+        code: ComplianceFlagCode.UNKNOWN_COMPANY,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Job company must be provided for generation.',
-+      });
-+    }
-+
-+    if (context.scopeInflationDetected) {
-+      flags.push({
-+        code: ComplianceFlagCode.SCOPE_INFLATION,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Detected potential scope inflation against baseline.',
-+      });
-+    }
-+
-+    return flags;
-+  }
-+
-+  private buildJobHash(job?: Job | null) {
-+    if (!job?.rawDescription) return null;
-+    return createHash('sha256').update(job.rawDescription).digest('hex');
-+  }
-+
-+  async validateAndAudit(context: ComplianceContext) {
-+    const complianceFlags = this.buildFlags(context);
-+    const blocked = complianceFlags.some(
-+      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-+    );
-+
-+    const audit = this.auditsRepository.create({
-+      actorId: context.actorId,
-+      action: context.action,
-+      baselineVersionHash: context.baselineVersion?.hash ?? null,
-+      jobHash: this.buildJobHash(context.job),
-+      outputHash: context.outputHash ?? null,
-+      complianceFlags,
-+      passFail: !blocked,
++    const application = this.applicationRepository.create({
++      userId,
++      jobId: dto.jobId || null,
++      company: dto.company.trim(),
++      title: dto.title.trim(),
++      appliedDate: dto.appliedDate ? new Date(dto.appliedDate) : null,
++      fitScore: dto.fitScore ?? null,
++      stage: dto.stage ?? ApplicationStage.SAVED,
++      notes: dto.notes?.trim() || null,
++      sourceUrl: dto.sourceUrl?.trim() || null,
 +    });
 +
-+    const saved = await this.auditsRepository.save(audit);
++    return this.applicationRepository.save(application);
++  }
 +
-+    return {
-+      complianceFlags,
-+      blocked,
-+      audit: saved,
-+    };
++  async listApplicationsForUser(userId: string, filters?: ListApplicationsFilters) {
++    const queryBuilder = this.applicationRepository
++      .createQueryBuilder('application')
++      .where('application.userId = :userId', { userId });
++
++    if (filters?.stage) {
++      queryBuilder.andWhere('application.stage = :stage', { stage: filters.stage });
++    }
++
++    if (filters?.company) {
++      queryBuilder.andWhere('LOWER(application.company) LIKE LOWER(:company)', {
++        company: `%${filters.company}%`,
++      });
++    }
++
++    queryBuilder.orderBy('application.createdAt', 'DESC');
++
++    return queryBuilder.getMany();
++  }
++
++  async getApplicationForUser(id: string, userId: string) {
++    const application = await this.applicationRepository.findOne({
++      where: { id, userId },
++    });
++
++    if (!application) {
++      throw new NotFoundException('Application not found');
++    }
++
++    return application;
++  }
++
++  async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
++    const application = await this.getApplicationForUser(id, userId);
++
++    if (dto.company !== undefined) application.company = dto.company.trim();
++    if (dto.title !== undefined) application.title = dto.title.trim();
++    if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
++    if (dto.appliedDate !== undefined) {
++      application.appliedDate = dto.appliedDate ? new Date(dto.appliedDate) : null;
++    }
++    if (dto.fitScore !== undefined) application.fitScore = dto.fitScore;
++    if (dto.stage !== undefined) application.stage = dto.stage;
++    if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
++    if (dto.sourceUrl !== undefined) application.sourceUrl = dto.sourceUrl?.trim() || null;
++
++    return this.applicationRepository.save(application);
++  }
++
++  async deleteApplication(id: string, userId: string) {
++    const application = await this.getApplicationForUser(id, userId);
++
++    await this.applicationRepository.remove(application);
++
++    return { deleted: true, id };
 +  }
 +}
-diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
+diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..833d21dd5f557574c16cbe4b00f7c0f8d55e925e
 --- /dev/null
-+++ b/apps/api/src/compliance/compliance.types.ts
-@@ -0,0 +1,22 @@
-+export enum ComplianceAction {
-+  FIT_SCORE = 'fit_score',
-+  RESUME_GENERATION = 'resume_gen',
-+  COVER_LETTER_GENERATION = 'cover_letter_gen',
-+  APPLICATION_EXPORT = 'application_export',
-+}
++++ b/apps/api/src/applications/applications.service.spec.ts
+@@ -0,0 +1,175 @@
++import { ApplicationsService } from './applications.service';
++import { Application, ApplicationStage } from './application.entity';
 +
-+export enum ComplianceFlagCode {
-+  SCOPE_INFLATION = 'scope_inflation',
-+  MISSING_BASELINE_HASH = 'missing_baseline_hash',
-+  UNKNOWN_COMPANY = 'unknown_company',
-+}
++describe('ApplicationsService', () => {
++  const mockApplication: Application = {
++    id: 'app-1',
++    userId: 'user-1',
++    jobId: null,
++    company: 'Acme Corp',
++    title: 'Software Engineer',
++    appliedDate: null,
++    fitScore: null,
++    stage: ApplicationStage.SAVED,
++    notes: null,
++    sourceUrl: null,
++    createdAt: new Date(),
++    updatedAt: new Date(),
++  };
 +
-+export enum ComplianceFlagSeverity {
-+  BLOCK = 'block',
-+}
++  const createMockRepository = () => ({
++    create: jest.fn((data: Partial<Application>) => ({ ...mockApplication, ...data })),
++    save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
++    findOne: jest.fn(),
++    remove: jest.fn((app: Application) => Promise.resolve(app)),
++    createQueryBuilder: jest.fn(() => ({
++      where: jest.fn().mockReturnThis(),
++      andWhere: jest.fn().mockReturnThis(),
++      orderBy: jest.fn().mockReturnThis(),
++      getMany: jest.fn().mockResolvedValue([mockApplication]),
++    })),
++  });
 +
-+export type ComplianceFlag = {
-+  code: ComplianceFlagCode;
-+  severity: ComplianceFlagSeverity;
-+  message: string;
-+};
-diff --git a/apps/api/src/resume/resume.module.ts b/apps/api/src/resume/resume.module.ts
-index 4d7e8a65fbbbe6b419d0ec3129850c88de274905..a208aa3a0bdf050ad0f705332ff6ed03428e97fa 100644
---- a/apps/api/src/resume/resume.module.ts
-+++ b/apps/api/src/resume/resume.module.ts
-@@ -1,22 +1,26 @@
++  const createService = (repository = createMockRepository()) =>
++    new ApplicationsService(repository as never);
++
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  describe('createApplication', () => {
++    it('creates an application with required fields', async () => {
++      const repository = createMockRepository();
++      const service = createService(repository);
++
++      const result = await service.createApplication('user-1', {
++        company: 'Acme Corp',
++        title: 'Software Engineer',
++      });
++
++      expect(repository.create).toHaveBeenCalledWith({
++        userId: 'user-1',
++        jobId: null,
++        company: 'Acme Corp',
++        title: 'Software Engineer',
++        appliedDate: null,
++        fitScore: null,
++        stage: ApplicationStage.SAVED,
++        notes: null,
++        sourceUrl: null,
++      });
++      expect(repository.save).toHaveBeenCalled();
++      expect(result.company).toBe('Acme Corp');
++    });
++
++    it('throws when company is missing', async () => {
++      const service = createService();
++
++      await expect(
++        service.createApplication('user-1', { company: '', title: 'Engineer' }),
++      ).rejects.toThrow('Company is required.');
++    });
++
++    it('throws when title is missing', async () => {
++      const service = createService();
++
++      await expect(
++        service.createApplication('user-1', { company: 'Acme', title: '' }),
++      ).rejects.toThrow('Title is required.');
++    });
++  });
++
++  describe('listApplicationsForUser', () => {
++    it('lists applications for user', async () => {
++      const repository = createMockRepository();
++      const service = createService(repository);
++
++      const result = await service.listApplicationsForUser('user-1');
++
++      expect(repository.createQueryBuilder).toHaveBeenCalledWith('application');
++      expect(result).toHaveLength(1);
++      expect(result[0].company).toBe('Acme Corp');
++    });
++
++    it('filters by stage', async () => {
++      const repository = createMockRepository();
++      const queryBuilder = repository.createQueryBuilder();
++      const service = createService(repository);
++
++      await service.listApplicationsForUser('user-1', { stage: ApplicationStage.APPLIED });
++
++      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
++        'application.stage = :stage',
++        { stage: ApplicationStage.APPLIED },
++      );
++    });
++
++    it('filters by company', async () => {
++      const repository = createMockRepository();
++      const queryBuilder = repository.createQueryBuilder();
++      const service = createService(repository);
++
++      await service.listApplicationsForUser('user-1', { company: 'Acme' });
++
++      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
++        'LOWER(application.company) LIKE LOWER(:company)',
++        { company: '%Acme%' },
++      );
++    });
++  });
++
++  describe('getApplicationForUser', () => {
++    it('returns application when found', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(mockApplication);
++      const service = createService(repository);
++
++      const result = await service.getApplicationForUser('app-1', 'user-1');
++
++      expect(result).toEqual(mockApplication);
++    });
++
++    it('throws when application not found', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(null);
++      const service = createService(repository);
++
++      await expect(service.getApplicationForUser('app-1', 'user-1')).rejects.toThrow(
++        'Application not found',
++      );
++    });
++
++    it('enforces ownership', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(null);
++      const service = createService(repository);
++
++      await expect(service.getApplicationForUser('app-1', 'other-user')).rejects.toThrow(
++        'Application not found',
++      );
++    });
++  });
++
++  describe('updateApplication', () => {
++    it('updates application fields', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue({ ...mockApplication });
++      const service = createService(repository);
++
++      const result = await service.updateApplication('app-1', 'user-1', {
++        stage: ApplicationStage.INTERVIEWING,
++        notes: 'Had phone screen',
++      });
++
++      expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
++      expect(result.notes).toBe('Had phone screen');
++    });
++  });
++
++  describe('deleteApplication', () => {
++    it('deletes application', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(mockApplication);
++      const service = createService(repository);
++
++      const result = await service.deleteApplication('app-1', 'user-1');
++
++      expect(repository.remove).toHaveBeenCalledWith(mockApplication);
++      expect(result).toEqual({ deleted: true, id: 'app-1' });
++    });
++  });
++});
+diff --git a/apps/api/src/applications/applications.module.ts b/apps/api/src/applications/applications.module.ts
+--- a/apps/api/src/applications/applications.module.ts
++++ b/apps/api/src/applications/applications.module.ts
+@@ -1,9 +1,11 @@
  import { Module } from '@nestjs/common';
  import { TypeOrmModule } from '@nestjs/typeorm';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineSection } from '../baseline/baseline-section.entity';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceModule } from '../compliance/compliance.module';
-+import { Job } from '../jobs/job.entity';
- import { ResumeController } from './resume.controller';
- import { ResumeService } from './resume.service';
+ import { Application } from './application.entity';
++import { ApplicationsService } from './applications.service';
  
  @Module({
-   imports: [
-     TypeOrmModule.forFeature([
-       Baseline,
-       BaselineSection,
-       BaselineVersion,
-       BaselineBlockPolicy,
-+      Job,
-     ]),
-+    ComplianceModule,
-   ],
-   controllers: [ResumeController],
-   providers: [ResumeService],
+   imports: [TypeOrmModule.forFeature([Application])],
++  providers: [ApplicationsService],
+   exports: [TypeOrmModule],
  })
- export class ResumeModule {}
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index e41589b1798b5c78d44cc6022635d952f2ac4f81..7df91c5ea72799328010dc4d1da5320959860770 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -1,51 +1,63 @@
--import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import {
-+  BadRequestException,
-+  Injectable,
-+  NotFoundException,
-+  UnprocessableEntityException,
-+} from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
-+import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { Baseline } from '../baseline/baseline.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceService } from '../compliance/compliance.service';
-+import { ComplianceAction } from '../compliance/compliance.types';
-+import { Job } from '../jobs/job.entity';
- 
- export type GenerateResumeRequest = {
-   baselineId: string;
-   baselineVersionId: string;
-   jobId?: string | null;
- };
- 
- @Injectable()
- export class ResumeService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineVersion)
-     private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     @InjectRepository(BaselineBlockPolicy)
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-+    @InjectRepository(Job)
-+    private readonly jobsRepository: Repository<Job>,
-+    private readonly complianceService: ComplianceService,
-   ) {}
- 
-   private applyPoliciesToSections(
-     sections: BaselineSection[],
-     policies: BaselineBlockPolicy[],
-   ) {
-     if (!policies.length) {
-       return [...sections].sort((a, b) => a.order - b.order);
-     }
- 
-     const policyMap = new Map<string, BaselineBlockPolicy>(
-       policies.map((policy) => [policy.baselineSectionId, policy]),
-     );
- 
-     return [...sections]
-       .map((section) => {
-         const policy = policyMap.get(section.id);
-         return {
-           ...section,
-           includePolicy: policy?.includePolicy ?? section.includePolicy,
-           order: policy?.order ?? section.order,
-           sectionType: section.sectionType ?? section.type,
-         } as BaselineSection;
-       })
-       .sort((a, b) => a.order - b.order);
-@@ -77,34 +89,72 @@ export class ResumeService {
-     if (!baselineVersion) {
-       throw new NotFoundException('Baseline version not found');
-     }
- 
-     const policies = await this.baselineBlockPolicyRepository.find({
-       where: { baselineVersionId: baselineVersion.id },
-       relations: ['baselineSection'],
-       order: { order: 'ASC' },
-     });
- 
-     const sectionsWithPolicies = this.applyPoliciesToSections(
-       baseline.sections ?? [],
-       policies,
-     );
- 
-     const sections = sectionsWithPolicies.map((section) => ({
-       id: section.id,
-       type: section.sectionType,
-       title: section.title,
-       content: section.content,
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       order: section.order,
-       source: 'baseline',
-     }));
- 
-+    const job = request.jobId
-+      ? await this.jobsRepository.findOne({
-+          where: { id: request.jobId, userId },
-+        })
-+      : null;
-+
-+    if (request.jobId && !job) {
-+      throw new NotFoundException('Job not found');
-+    }
-+
-+    const outputHash = createHash('sha256')
-+      .update(JSON.stringify(sections))
-+      .digest('hex');
-+
-+    const { complianceFlags, blocked, audit } =
-+      await this.complianceService.validateAndAudit({
-+        action: ComplianceAction.RESUME_GENERATION,
-+        actorId: userId,
-+        baselineVersion,
-+        job,
-+        outputHash,
-+        scopeInflationDetected: sections.some(
-+          (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
-+        ),
-+      });
-+
-+    if (blocked) {
-+      throw new UnprocessableEntityException({
-+        error: {
-+          code: 'unprocessable',
-+          message: 'Compliance validation failed.',
-+          details: { compliance_flags: complianceFlags },
-+        },
-+      });
-+    }
-+
-     return {
-       ok: true,
-       baselineId: baseline.id,
-       baselineVersionId: baselineVersion.id,
-       jobId: request.jobId ?? null,
-       sections,
-+      compliance_flags: complianceFlags,
-+      audit_id: audit.id,
-     };
-   }
- }
-
+ export class ApplicationsModule {}
