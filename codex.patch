@@ -1,339 +1,169 @@
-﻿diff --git a/apps/api/src/applications/dto/create-application.dto.ts b/apps/api/src/applications/dto/create-application.dto.ts
+﻿diff --git a/apps/web/app/api/applications/route.ts b/apps/web/app/api/applications/route.ts
 new file mode 100644
 --- /dev/null
-+++ b/apps/api/src/applications/dto/create-application.dto.ts
-@@ -0,0 +1,12 @@
-+import { ApplicationStage } from '../application.entity';
++++ b/apps/web/app/api/applications/route.ts
+@@ -0,0 +1,58 @@
++import { NextRequest, NextResponse } from "next/server";
 +
-+export class CreateApplicationDto {
-+  jobId?: string | null;
-+  company!: string;
-+  title!: string;
-+  appliedDate?: Date | string | null;
-+  fitScore?: number | null;
-+  stage?: ApplicationStage;
-+  notes?: string | null;
-+  sourceUrl?: string | null;
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++
++export async function GET(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const url = new URL(req.url);
++  const queryString = url.search;
++
++  const response = await fetch(`${baseUrl}/applications${queryString}`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
 +}
-diff --git a/apps/api/src/applications/dto/update-application.dto.ts b/apps/api/src/applications/dto/update-application.dto.ts
-new file mode 100644
---- /dev/null
-+++ b/apps/api/src/applications/dto/update-application.dto.ts
-@@ -0,0 +1,12 @@
-+import { ApplicationStage } from '../application.entity';
 +
-+export class UpdateApplicationDto {
-+  jobId?: string | null;
-+  company?: string;
-+  title?: string;
-+  appliedDate?: Date | string | null;
-+  fitScore?: number | null;
-+  stage?: ApplicationStage;
-+  notes?: string | null;
-+  sourceUrl?: string | null;
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/applications`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
 +}
-diff --git a/apps/api/src/applications/applications.service.ts b/apps/api/src/applications/applications.service.ts
+diff --git a/apps/web/app/api/applications/[id]/route.ts b/apps/web/app/api/applications/[id]/route.ts
 new file mode 100644
 --- /dev/null
-+++ b/apps/api/src/applications/applications.service.ts
-@@ -0,0 +1,99 @@
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
-+import { Application, ApplicationStage } from './application.entity';
-+import { CreateApplicationDto } from './dto/create-application.dto';
-+import { UpdateApplicationDto } from './dto/update-application.dto';
++++ b/apps/web/app/api/applications/[id]/route.ts
+@@ -0,0 +1,89 @@
++import { NextRequest, NextResponse } from "next/server";
 +
-+export type ListApplicationsFilters = {
-+  stage?: ApplicationStage;
-+  company?: string;
-+};
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
 +
-+@Injectable()
-+export class ApplicationsService {
-+  constructor(
-+    @InjectRepository(Application)
-+    private readonly applicationRepository: Repository<Application>,
-+  ) {}
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
 +
-+  async createApplication(userId: string, dto: CreateApplicationDto) {
-+    if (!dto.company?.trim()) {
-+      throw new BadRequestException('Company is required.');
-+    }
-+    if (!dto.title?.trim()) {
-+      throw new BadRequestException('Title is required.');
-+    }
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
 +
-+    const application = this.applicationRepository.create({
-+      userId,
-+      jobId: dto.jobId || null,
-+      company: dto.company.trim(),
-+      title: dto.title.trim(),
-+      appliedDate: dto.appliedDate ? new Date(dto.appliedDate) : null,
-+      fitScore: dto.fitScore ?? null,
-+      stage: dto.stage ?? ApplicationStage.SAVED,
-+      notes: dto.notes?.trim() || null,
-+      sourceUrl: dto.sourceUrl?.trim() || null,
-+    });
-+
-+    return this.applicationRepository.save(application);
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
 +  }
 +
-+  async listApplicationsForUser(userId: string, filters?: ListApplicationsFilters) {
-+    const queryBuilder = this.applicationRepository
-+      .createQueryBuilder('application')
-+      .where('application.userId = :userId', { userId });
-+
-+    if (filters?.stage) {
-+      queryBuilder.andWhere('application.stage = :stage', { stage: filters.stage });
-+    }
-+
-+    if (filters?.company) {
-+      queryBuilder.andWhere('LOWER(application.company) LIKE LOWER(:company)', {
-+        company: `%${filters.company}%`,
-+      });
-+    }
-+
-+    queryBuilder.orderBy('application.createdAt', 'DESC');
-+
-+    return queryBuilder.getMany();
++  if (!token) {
++    return error;
 +  }
 +
-+  async getApplicationForUser(id: string, userId: string) {
-+    const application = await this.applicationRepository.findOne({
-+      where: { id, userId },
-+    });
++  const response = await fetch(`${baseUrl}/applications/${id}`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
 +
-+    if (!application) {
-+      throw new NotFoundException('Application not found');
-+    }
-+
-+    return application;
-+  }
-+
-+  async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
-+    const application = await this.getApplicationForUser(id, userId);
-+
-+    if (dto.company !== undefined) application.company = dto.company.trim();
-+    if (dto.title !== undefined) application.title = dto.title.trim();
-+    if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
-+    if (dto.appliedDate !== undefined) {
-+      application.appliedDate = dto.appliedDate ? new Date(dto.appliedDate) : null;
-+    }
-+    if (dto.fitScore !== undefined) application.fitScore = dto.fitScore;
-+    if (dto.stage !== undefined) application.stage = dto.stage;
-+    if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
-+    if (dto.sourceUrl !== undefined) application.sourceUrl = dto.sourceUrl?.trim() || null;
-+
-+    return this.applicationRepository.save(application);
-+  }
-+
-+  async deleteApplication(id: string, userId: string) {
-+    const application = await this.getApplicationForUser(id, userId);
-+
-+    await this.applicationRepository.remove(application);
-+
-+    return { deleted: true, id };
-+  }
++  return relayApiResponse(response);
 +}
-diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
-new file mode 100644
---- /dev/null
-+++ b/apps/api/src/applications/applications.service.spec.ts
-@@ -0,0 +1,175 @@
-+import { ApplicationsService } from './applications.service';
-+import { Application, ApplicationStage } from './application.entity';
 +
-+describe('ApplicationsService', () => {
-+  const mockApplication: Application = {
-+    id: 'app-1',
-+    userId: 'user-1',
-+    jobId: null,
-+    company: 'Acme Corp',
-+    title: 'Software Engineer',
-+    appliedDate: null,
-+    fitScore: null,
-+    stage: ApplicationStage.SAVED,
-+    notes: null,
-+    sourceUrl: null,
-+    createdAt: new Date(),
-+    updatedAt: new Date(),
-+  };
++export async function PATCH(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
 +
-+  const createMockRepository = () => ({
-+    create: jest.fn((data: Partial<Application>) => ({ ...mockApplication, ...data })),
-+    save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
-+    findOne: jest.fn(),
-+    remove: jest.fn((app: Application) => Promise.resolve(app)),
-+    createQueryBuilder: jest.fn(() => ({
-+      where: jest.fn().mockReturnThis(),
-+      andWhere: jest.fn().mockReturnThis(),
-+      orderBy: jest.fn().mockReturnThis(),
-+      getMany: jest.fn().mockResolvedValue([mockApplication]),
-+    })),
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/applications/${id}`, {
++    method: "PATCH",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
 +  });
 +
-+  const createService = (repository = createMockRepository()) =>
-+    new ApplicationsService(repository as never);
++  return relayApiResponse(response);
++}
 +
-+  afterEach(() => {
-+    jest.restoreAllMocks();
++export async function DELETE(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/applications/${id}`, {
++    method: "DELETE",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
 +  });
 +
-+  describe('createApplication', () => {
-+    it('creates an application with required fields', async () => {
-+      const repository = createMockRepository();
-+      const service = createService(repository);
-+
-+      const result = await service.createApplication('user-1', {
-+        company: 'Acme Corp',
-+        title: 'Software Engineer',
-+      });
-+
-+      expect(repository.create).toHaveBeenCalledWith({
-+        userId: 'user-1',
-+        jobId: null,
-+        company: 'Acme Corp',
-+        title: 'Software Engineer',
-+        appliedDate: null,
-+        fitScore: null,
-+        stage: ApplicationStage.SAVED,
-+        notes: null,
-+        sourceUrl: null,
-+      });
-+      expect(repository.save).toHaveBeenCalled();
-+      expect(result.company).toBe('Acme Corp');
-+    });
-+
-+    it('throws when company is missing', async () => {
-+      const service = createService();
-+
-+      await expect(
-+        service.createApplication('user-1', { company: '', title: 'Engineer' }),
-+      ).rejects.toThrow('Company is required.');
-+    });
-+
-+    it('throws when title is missing', async () => {
-+      const service = createService();
-+
-+      await expect(
-+        service.createApplication('user-1', { company: 'Acme', title: '' }),
-+      ).rejects.toThrow('Title is required.');
-+    });
-+  });
-+
-+  describe('listApplicationsForUser', () => {
-+    it('lists applications for user', async () => {
-+      const repository = createMockRepository();
-+      const service = createService(repository);
-+
-+      const result = await service.listApplicationsForUser('user-1');
-+
-+      expect(repository.createQueryBuilder).toHaveBeenCalledWith('application');
-+      expect(result).toHaveLength(1);
-+      expect(result[0].company).toBe('Acme Corp');
-+    });
-+
-+    it('filters by stage', async () => {
-+      const repository = createMockRepository();
-+      const queryBuilder = repository.createQueryBuilder();
-+      const service = createService(repository);
-+
-+      await service.listApplicationsForUser('user-1', { stage: ApplicationStage.APPLIED });
-+
-+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
-+        'application.stage = :stage',
-+        { stage: ApplicationStage.APPLIED },
-+      );
-+    });
-+
-+    it('filters by company', async () => {
-+      const repository = createMockRepository();
-+      const queryBuilder = repository.createQueryBuilder();
-+      const service = createService(repository);
-+
-+      await service.listApplicationsForUser('user-1', { company: 'Acme' });
-+
-+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
-+        'LOWER(application.company) LIKE LOWER(:company)',
-+        { company: '%Acme%' },
-+      );
-+    });
-+  });
-+
-+  describe('getApplicationForUser', () => {
-+    it('returns application when found', async () => {
-+      const repository = createMockRepository();
-+      repository.findOne.mockResolvedValue(mockApplication);
-+      const service = createService(repository);
-+
-+      const result = await service.getApplicationForUser('app-1', 'user-1');
-+
-+      expect(result).toEqual(mockApplication);
-+    });
-+
-+    it('throws when application not found', async () => {
-+      const repository = createMockRepository();
-+      repository.findOne.mockResolvedValue(null);
-+      const service = createService(repository);
-+
-+      await expect(service.getApplicationForUser('app-1', 'user-1')).rejects.toThrow(
-+        'Application not found',
-+      );
-+    });
-+
-+    it('enforces ownership', async () => {
-+      const repository = createMockRepository();
-+      repository.findOne.mockResolvedValue(null);
-+      const service = createService(repository);
-+
-+      await expect(service.getApplicationForUser('app-1', 'other-user')).rejects.toThrow(
-+        'Application not found',
-+      );
-+    });
-+  });
-+
-+  describe('updateApplication', () => {
-+    it('updates application fields', async () => {
-+      const repository = createMockRepository();
-+      repository.findOne.mockResolvedValue({ ...mockApplication });
-+      const service = createService(repository);
-+
-+      const result = await service.updateApplication('app-1', 'user-1', {
-+        stage: ApplicationStage.INTERVIEWING,
-+        notes: 'Had phone screen',
-+      });
-+
-+      expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
-+      expect(result.notes).toBe('Had phone screen');
-+    });
-+  });
-+
-+  describe('deleteApplication', () => {
-+    it('deletes application', async () => {
-+      const repository = createMockRepository();
-+      repository.findOne.mockResolvedValue(mockApplication);
-+      const service = createService(repository);
-+
-+      const result = await service.deleteApplication('app-1', 'user-1');
-+
-+      expect(repository.remove).toHaveBeenCalledWith(mockApplication);
-+      expect(result).toEqual({ deleted: true, id: 'app-1' });
-+    });
-+  });
-+});
-diff --git a/apps/api/src/applications/applications.module.ts b/apps/api/src/applications/applications.module.ts
---- a/apps/api/src/applications/applications.module.ts
-+++ b/apps/api/src/applications/applications.module.ts
-@@ -1,9 +1,11 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { Application } from './application.entity';
-+import { ApplicationsService } from './applications.service';
- 
- @Module({
-   imports: [TypeOrmModule.forFeature([Application])],
-+  providers: [ApplicationsService],
-   exports: [TypeOrmModule],
- })
- export class ApplicationsModule {}
++  return relayApiResponse(response);
++}
