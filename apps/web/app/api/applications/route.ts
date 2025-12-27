@@ -17,8 +17,7 @@ export async function GET(req: NextRequest) {
     return error;
   }
 
-  const url = new URL(req.url);
-  const queryString = url.search;
+  const queryString = new URL(req.url).search;
 
   const response = await fetch(`${baseUrl}/applications${queryString}`, {
     method: "GET",
@@ -56,3 +55,6 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify(body),
   });
+
+  return relayApiResponse(response);
+}

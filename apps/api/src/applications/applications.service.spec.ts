@@ -1,4 +1,5 @@
 import { ApplicationsService } from './applications.service';
+import { ComplianceAction } from '../compliance/compliance.types';
 import { Application, ApplicationStage } from './application.entity';
 
 describe('ApplicationsService', () => {
@@ -22,6 +23,7 @@ describe('ApplicationsService', () => {
     save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
     findOne: jest.fn(),
     remove: jest.fn((app: Application) => Promise.resolve(app)),
+    find: jest.fn(),
     createQueryBuilder: jest.fn(() => ({
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
@@ -30,8 +32,18 @@ describe('ApplicationsService', () => {
     })),
   });
 
-  const createService = (repository = createMockRepository()) =>
-    new ApplicationsService(repository as never);
+  const createMockComplianceService = () => ({
+    validateAndAudit: jest.fn().mockResolvedValue({
+      complianceFlags: [],
+      blocked: false,
+      audit: { id: 'audit-id' },
+    }),
+  });
+
+  const createService = (
+    repository = createMockRepository(),
+    complianceService = createMockComplianceService(),
+  ) => new ApplicationsService(repository as never, complianceService as never);
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -173,3 +185,46 @@ describe('ApplicationsService', () => {
       const service = createService(repository);
 
       const result = await service.deleteApplication('app-1', 'user-1');
+
+      expect(repository.remove).toHaveBeenCalled();
+      expect(result).toEqual({ deleted: true, id: 'app-1' });
+    });
+  });
+
+  describe('exportApplicationsToCsv', () => {
+    it('exports applications and audits compliance', async () => {
+      const repository = createMockRepository();
+      const complianceService = createMockComplianceService();
+
+      repository.find.mockResolvedValue([
+        {
+          ...mockApplication,
+          appliedDate: new Date('2024-01-01T00:00:00.000Z'),
+          fitScore: 80,
+          notes: 'Followed up',
+          sourceUrl: 'https://example.com',
+        },
+      ]);
+
+      const service = createService(repository, complianceService);
+
+      const csv = await service.exportApplicationsToCsv('user-1');
+
+      expect(repository.find).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+        order: { createdAt: 'DESC' },
+      });
+      expect(csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
+      expect(csv).toContain(
+        'Acme Corp,Software Engineer,2024-01-01T00:00:00.000Z,80,SAVED,Followed up,https://example.com',
+      );
+      expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ComplianceAction.APPLICATION_EXPORT,
+          actorId: 'user-1',
+          outputHash: expect.any(String),
+        }),
+      );
+    });
+  });
+});

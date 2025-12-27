@@ -87,3 +87,12 @@ export async function DELETE(
     return error;
   }
 
+  const response = await fetch(`${baseUrl}/applications/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return relayApiResponse(response);
+}

@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
+import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceAction } from '../compliance/compliance.types';
+import { ComplianceService } from '../compliance/compliance.service';
 import { Application, ApplicationStage } from './application.entity';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
@@ -15,6 +19,7 @@ export class ApplicationsService {
   constructor(
     @InjectRepository(Application)
     private readonly applicationRepository: Repository<Application>,
+    private readonly complianceService: ComplianceService,
   ) {}
 
   async createApplication(userId: string, dto: CreateApplicationDto) {
@@ -95,5 +100,57 @@ export class ApplicationsService {
     await this.applicationRepository.remove(application);
 
     return { deleted: true, id };
+  }
+
+  async exportApplicationsToCsv(userId: string) {
+    const applications = await this.applicationRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const escapeCsv = (value: string) => {
+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+
+      return value;
+    };
+
+    const headers = [
+      'company',
+      'title',
+      'appliedDate',
+      'fitScore',
+      'stage',
+      'notes',
+      'sourceUrl',
+    ];
+
+    const rows = applications.map((application) => [
+      application.company ?? '',
+      application.title ?? '',
+      application.appliedDate ? application.appliedDate.toISOString() : '',
+      application.fitScore ?? '',
+      application.stage ?? '',
+      application.notes ?? '',
+      application.sourceUrl ?? '',
+    ]);
+
+    const csv = [
+      headers.join(','),
+      ...rows.map((row) => row.map((value) => escapeCsv(String(value))).join(',')),
+    ].join('\n');
+
+    const baselineVersion = new BaselineVersion();
+    baselineVersion.fileHash = 'applications_export';
+
+    await this.complianceService.validateAndAudit({
+      action: ComplianceAction.APPLICATION_EXPORT,
+      actorId: userId,
+      baselineVersion,
+      outputHash: createHash('sha256').update(csv).digest('hex'),
+    });
+
+    return csv;
   }
 }

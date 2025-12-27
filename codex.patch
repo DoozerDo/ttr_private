@@ -1,169 +1,552 @@
-﻿diff --git a/apps/web/app/api/applications/route.ts b/apps/web/app/api/applications/route.ts
+﻿diff --git a/apps/api/src/applications/applications.controller.ts b/apps/api/src/applications/applications.controller.ts
 new file mode 100644
+index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725fd9b8fc6e
 --- /dev/null
-+++ b/apps/web/app/api/applications/route.ts
-@@ -0,0 +1,58 @@
-+import { NextRequest, NextResponse } from "next/server";
++++ b/apps/api/src/applications/applications.controller.ts
+@@ -0,0 +1,142 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Delete,
++  Get,
++  Header,
++  Param,
++  Patch,
++  Post,
++  Query,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import { Request } from 'express';
++import {
++  ApplicationsService,
++  ListApplicationsFilters,
++} from './applications.service';
++import { CreateApplicationDto } from './dto/create-application.dto';
++import { UpdateApplicationDto } from './dto/update-application.dto';
++import { ApplicationStage } from './application.entity';
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++@Controller('applications')
++@UseGuards(AuthGuard('jwt'))
++export class ApplicationsController {
++  constructor(private readonly applicationsService: ApplicationsService) {}
 +
-+export async function GET(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
++  @Post()
++  async createApplication(
++    @Body() body: Partial<CreateApplicationDto>,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
 +
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.applicationsService.createApplication(userId, {
++      company: body.company,
++      title: body.title,
++      jobId: body.jobId,
++      appliedDate: body.appliedDate,
++      fitScore: body.fitScore,
++      stage: body.stage,
++      notes: body.notes,
++      sourceUrl: body.sourceUrl,
++    });
 +  }
 +
-+  if (!token) {
-+    return error;
++  @Get('export')
++  @Header('Content-Type', 'text/csv')
++  @Header('Content-Disposition', 'attachment; filename="applications.csv"')
++  async exportApplications(@Req() request: Request & { user?: { id?: string } }) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.applicationsService.exportApplicationsToCsv(userId);
 +  }
 +
-+  const url = new URL(req.url);
-+  const queryString = url.search;
++  @Get()
++  async listApplications(
++    @Req() request: Request & { user?: { id?: string } },
++    @Query('stage') stage?: ApplicationStage,
++    @Query('company') company?: string,
++  ) {
++    const userId = request.user?.id;
 +
-+  const response = await fetch(`${baseUrl}/applications${queryString}`, {
-+    method: "GET",
-+    cache: "no-store",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+    },
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const filters: ListApplicationsFilters = {};
++
++    if (stage) {
++      filters.stage = stage;
++    }
++
++    if (company) {
++      filters.company = company;
++    }
++
++    return this.applicationsService.listApplicationsForUser(userId, filters);
++  }
++
++  @Get(':id')
++  async getApplication(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.applicationsService.getApplicationForUser(id, userId);
++  }
++
++  @Patch(':id')
++  async updateApplication(
++    @Param('id') id: string,
++    @Body() body: Partial<UpdateApplicationDto>,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.applicationsService.updateApplication(id, userId, {
++      company: body.company,
++      title: body.title,
++      jobId: body.jobId,
++      appliedDate: body.appliedDate,
++      fitScore: body.fitScore,
++      stage: body.stage,
++      notes: body.notes,
++      sourceUrl: body.sourceUrl,
++    });
++  }
++
++  @Delete(':id')
++  async deleteApplication(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.applicationsService.deleteApplication(id, userId);
++  }
++}
+diff --git a/apps/api/src/applications/applications.module.ts b/apps/api/src/applications/applications.module.ts
+index d2d2f7e58166c7655280aac047a7cde9f92b7c0f..63e35cbc7658648e63b0d2a59f7f5281c93b4f5a 100644
+--- a/apps/api/src/applications/applications.module.ts
++++ b/apps/api/src/applications/applications.module.ts
+@@ -1,11 +1,14 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
++import { ComplianceModule } from '../compliance/compliance.module';
+ import { Application } from './application.entity';
++import { ApplicationsController } from './applications.controller';
+ import { ApplicationsService } from './applications.service';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([Application])],
++  imports: [TypeOrmModule.forFeature([Application]), ComplianceModule],
++  controllers: [ApplicationsController],
+   providers: [ApplicationsService],
+   exports: [TypeOrmModule],
+ })
+ export class ApplicationsModule {}
+diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
+index ef1442be6a657ab5c8c521c52af432f1628df1b0..fb0ba2b4ed9c4134281da479fd29419b58ef0064 100644
+--- a/apps/api/src/applications/applications.service.spec.ts
++++ b/apps/api/src/applications/applications.service.spec.ts
+@@ -1,59 +1,71 @@
+ import { ApplicationsService } from './applications.service';
++import { ComplianceAction } from '../compliance/compliance.types';
+ import { Application, ApplicationStage } from './application.entity';
+ 
+ describe('ApplicationsService', () => {
+   const mockApplication: Application = {
+     id: 'app-1',
+     userId: 'user-1',
+     jobId: null,
+     company: 'Acme Corp',
+     title: 'Software Engineer',
+     appliedDate: null,
+     fitScore: null,
+     stage: ApplicationStage.SAVED,
+     notes: null,
+     sourceUrl: null,
+     createdAt: new Date(),
+     updatedAt: new Date(),
+   };
+ 
+   const createMockRepository = () => ({
+     create: jest.fn((data: Partial<Application>) => ({ ...mockApplication, ...data })),
+     save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
+     findOne: jest.fn(),
+     remove: jest.fn((app: Application) => Promise.resolve(app)),
++    find: jest.fn(),
+     createQueryBuilder: jest.fn(() => ({
+       where: jest.fn().mockReturnThis(),
+       andWhere: jest.fn().mockReturnThis(),
+       orderBy: jest.fn().mockReturnThis(),
+       getMany: jest.fn().mockResolvedValue([mockApplication]),
+     })),
+   });
+ 
+-  const createService = (repository = createMockRepository()) =>
+-    new ApplicationsService(repository as never);
++  const createMockComplianceService = () => ({
++    validateAndAudit: jest.fn().mockResolvedValue({
++      complianceFlags: [],
++      blocked: false,
++      audit: { id: 'audit-id' },
++    }),
 +  });
 +
-+  return relayApiResponse(response);
-+}
++  const createService = (
++    repository = createMockRepository(),
++    complianceService = createMockComplianceService(),
++  ) => new ApplicationsService(repository as never, complianceService as never);
+ 
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
+ 
+   describe('createApplication', () => {
+     it('creates an application with required fields', async () => {
+       const repository = createMockRepository();
+       const service = createService(repository);
+ 
+       const result = await service.createApplication('user-1', {
+         company: 'Acme Corp',
+         title: 'Software Engineer',
+       });
+ 
+       expect(repository.create).toHaveBeenCalledWith({
+         userId: 'user-1',
+         jobId: null,
+         company: 'Acme Corp',
+         title: 'Software Engineer',
+         appliedDate: null,
+         fitScore: null,
+         stage: ApplicationStage.SAVED,
+         notes: null,
+         sourceUrl: null,
+@@ -151,25 +163,68 @@ describe('ApplicationsService', () => {
+   });
+ 
+   describe('updateApplication', () => {
+     it('updates application fields', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue({ ...mockApplication });
+       const service = createService(repository);
+ 
+       const result = await service.updateApplication('app-1', 'user-1', {
+         stage: ApplicationStage.INTERVIEWING,
+         notes: 'Had phone screen',
+       });
+ 
+       expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
+       expect(result.notes).toBe('Had phone screen');
+     });
+   });
+ 
+   describe('deleteApplication', () => {
+     it('deletes application', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue(mockApplication);
+       const service = createService(repository);
+ 
+       const result = await service.deleteApplication('app-1', 'user-1');
 +
-+export async function POST(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/applications`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
++      expect(repository.remove).toHaveBeenCalled();
++      expect(result).toEqual({ deleted: true, id: 'app-1' });
++    });
 +  });
 +
-+  return relayApiResponse(response);
-+}
++  describe('exportApplicationsToCsv', () => {
++    it('exports applications and audits compliance', async () => {
++      const repository = createMockRepository();
++      const complianceService = createMockComplianceService();
++
++      repository.find.mockResolvedValue([
++        {
++          ...mockApplication,
++          appliedDate: new Date('2024-01-01T00:00:00.000Z'),
++          fitScore: 80,
++          notes: 'Followed up',
++          sourceUrl: 'https://example.com',
++        },
++      ]);
++
++      const service = createService(repository, complianceService);
++
++      const csv = await service.exportApplicationsToCsv('user-1');
++
++      expect(repository.find).toHaveBeenCalledWith({
++        where: { userId: 'user-1' },
++        order: { createdAt: 'DESC' },
++      });
++      expect(csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
++      expect(csv).toContain(
++        'Acme Corp,Software Engineer,2024-01-01T00:00:00.000Z,80,SAVED,Followed up,https://example.com',
++      );
++      expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
++        expect.objectContaining({
++          action: ComplianceAction.APPLICATION_EXPORT,
++          actorId: 'user-1',
++          outputHash: expect.any(String),
++        }),
++      );
++    });
++  });
++});
+diff --git a/apps/api/src/applications/applications.service.ts b/apps/api/src/applications/applications.service.ts
+index 2de6916a253242f3417bb1a96ef135f2ae4527e1..47766e5637ac8dbb860581484b9845cb2e18ffab 100644
+--- a/apps/api/src/applications/applications.service.ts
++++ b/apps/api/src/applications/applications.service.ts
+@@ -1,42 +1,47 @@
+ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
++import { createHash } from 'crypto';
+ import { Repository } from 'typeorm';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { ComplianceAction } from '../compliance/compliance.types';
++import { ComplianceService } from '../compliance/compliance.service';
+ import { Application, ApplicationStage } from './application.entity';
+ import { CreateApplicationDto } from './dto/create-application.dto';
+ import { UpdateApplicationDto } from './dto/update-application.dto';
+ 
+ export type ListApplicationsFilters = {
+   stage?: ApplicationStage;
+   company?: string;
+ };
+ 
+ @Injectable()
+ export class ApplicationsService {
+   constructor(
+     @InjectRepository(Application)
+     private readonly applicationRepository: Repository<Application>,
++    private readonly complianceService: ComplianceService,
+   ) {}
+ 
+   async createApplication(userId: string, dto: CreateApplicationDto) {
+     if (!dto.company?.trim()) {
+       throw new BadRequestException('Company is required.');
+     }
+     if (!dto.title?.trim()) {
+       throw new BadRequestException('Title is required.');
+     }
+ 
+     const application = this.applicationRepository.create({
+       userId,
+       jobId: dto.jobId || null,
+       company: dto.company.trim(),
+       title: dto.title.trim(),
+       appliedDate: dto.appliedDate ? new Date(dto.appliedDate) : null,
+       fitScore: dto.fitScore ?? null,
+       stage: dto.stage ?? ApplicationStage.SAVED,
+       notes: dto.notes?.trim() || null,
+       sourceUrl: dto.sourceUrl?.trim() || null,
+     });
+ 
+     return this.applicationRepository.save(application);
+   }
+ 
+@@ -74,26 +79,78 @@ export class ApplicationsService {
+ 
+   async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
+     const application = await this.getApplicationForUser(id, userId);
+ 
+     if (dto.company !== undefined) application.company = dto.company.trim();
+     if (dto.title !== undefined) application.title = dto.title.trim();
+     if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
+     if (dto.appliedDate !== undefined) {
+       application.appliedDate = dto.appliedDate ? new Date(dto.appliedDate) : null;
+     }
+     if (dto.fitScore !== undefined) application.fitScore = dto.fitScore;
+     if (dto.stage !== undefined) application.stage = dto.stage;
+     if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
+     if (dto.sourceUrl !== undefined) application.sourceUrl = dto.sourceUrl?.trim() || null;
+ 
+     return this.applicationRepository.save(application);
+   }
+ 
+   async deleteApplication(id: string, userId: string) {
+     const application = await this.getApplicationForUser(id, userId);
+ 
+     await this.applicationRepository.remove(application);
+ 
+     return { deleted: true, id };
+   }
++
++  async exportApplicationsToCsv(userId: string) {
++    const applications = await this.applicationRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++
++    const escapeCsv = (value: string) => {
++      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
++        return `"${value.replace(/"/g, '""')}"`;
++      }
++
++      return value;
++    };
++
++    const headers = [
++      'company',
++      'title',
++      'appliedDate',
++      'fitScore',
++      'stage',
++      'notes',
++      'sourceUrl',
++    ];
++
++    const rows = applications.map((application) => [
++      application.company ?? '',
++      application.title ?? '',
++      application.appliedDate ? application.appliedDate.toISOString() : '',
++      application.fitScore ?? '',
++      application.stage ?? '',
++      application.notes ?? '',
++      application.sourceUrl ?? '',
++    ]);
++
++    const csv = [
++      headers.join(','),
++      ...rows.map((row) => row.map((value) => escapeCsv(String(value))).join(',')),
++    ].join('\n');
++
++    const baselineVersion = new BaselineVersion();
++    baselineVersion.fileHash = 'applications_export';
++
++    await this.complianceService.validateAndAudit({
++      action: ComplianceAction.APPLICATION_EXPORT,
++      actorId: userId,
++      baselineVersion,
++      outputHash: createHash('sha256').update(csv).digest('hex'),
++    });
++
++    return csv;
++  }
+ }
 diff --git a/apps/web/app/api/applications/[id]/route.ts b/apps/web/app/api/applications/[id]/route.ts
-new file mode 100644
---- /dev/null
+index ec2443fd98ec460c9746c0e36454c12b6987a765..898fc8051bf46c715c90a2c0144821775f3ad2b7 100644
+--- a/apps/web/app/api/applications/[id]/route.ts
 +++ b/apps/web/app/api/applications/[id]/route.ts
-@@ -0,0 +1,89 @@
-+import { NextRequest, NextResponse } from "next/server";
-+
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
-+
-+export async function GET(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const response = await fetch(`${baseUrl}/applications/${id}`, {
-+    method: "GET",
-+    cache: "no-store",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+    },
-+  });
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function PATCH(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/applications/${id}`, {
-+    method: "PATCH",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function DELETE(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
+@@ -65,25 +65,34 @@ export async function PATCH(
+   });
+ 
+   return relayApiResponse(response);
+ }
+ 
+ export async function DELETE(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ) {
+   const { id } = await context.params;
+ 
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
 +  const response = await fetch(`${baseUrl}/applications/${id}`, {
 +    method: "DELETE",
 +    headers: {
 +      Authorization: `Bearer ${token}`,
 +    },
 +  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/api/applications/route.ts b/apps/web/app/api/applications/route.ts
+index b4c349af55d6f670b6f49a050a9aaa4c2ef9f2bc..1fafb293f029f8a7d12242761130e83d18836e51 100644
+--- a/apps/web/app/api/applications/route.ts
++++ b/apps/web/app/api/applications/route.ts
+@@ -1,58 +1,60 @@
+ import { NextRequest, NextResponse } from "next/server";
+ 
+ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+ 
+ export async function GET(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+-  const url = new URL(req.url);
+-  const queryString = url.search;
++  const queryString = new URL(req.url).search;
+ 
+   const response = await fetch(`${baseUrl}/applications${queryString}`, {
+     method: "GET",
+     cache: "no-store",
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+   });
+ 
+   return relayApiResponse(response);
+ }
+ 
+ export async function POST(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+   const body = await req.json();
+ 
+   const response = await fetch(`${baseUrl}/applications`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
 +
 +  return relayApiResponse(response);
 +}
