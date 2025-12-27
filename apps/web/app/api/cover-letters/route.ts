@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/cover-letters`, {
+  const queryString = req.nextUrl.search ?? "";
+
+  const response = await fetch(`${baseUrl}/cover-letters${queryString}`, {
     method: "GET",
     cache: "no-store",
     headers: {
