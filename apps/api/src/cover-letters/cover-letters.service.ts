@@ -19,7 +19,7 @@ import { CoverLetter } from './cover-letter.entity';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import {
   AllowedBaselineBlock,
-  CoverLetterJobContext,
+  CoverLetterGenerator,
 } from './generators/cover-letter-generator.interface';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
 
@@ -30,7 +30,7 @@ export class CoverLettersService {
   private readonly baselineVersionRepository: Repository<BaselineVersion>;
   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
   private readonly jobRepository: Repository<Job>;
-  private readonly generator = new TemplateCoverLetterGenerator();
+  private readonly generator: CoverLetterGenerator;
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
@@ -41,6 +41,7 @@ export class CoverLettersService {
       BaselineBlockPolicy,
     );
     this.jobRepository = this.dataSource.getRepository(Job);
+    this.generator = new TemplateCoverLetterGenerator();
   }
 
   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
@@ -85,34 +86,32 @@ export class CoverLettersService {
     );
 
     const allowedSections = sections.filter(
-      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+      (section) =>
+        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+        BaselineIncludePolicy.NEVER,
     );
 
     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+    const jobContext = {
+      id: job.id,
+      title: this.cleanText(job.title),
+      company: this.cleanText(job.company),
+      responsibilities: this.sanitizeList(job.normalizedResponsibilities),
+      requirements: this.sanitizeList(job.normalizedRequirements),
+    };
+
     const generationInputsHash = this.computeGenerationInputsHash(
       baseline.id,
       job.id,
       allowedBlocks,
-      {
-        id: job.id,
-        title: job.title ?? null,
-        company: job.company ?? null,
-        responsibilities: job.normalizedResponsibilities ?? [],
-        requirements: job.normalizedRequirements ?? [],
-      },
+      jobContext,
     );
 
-    const { content } = this.generator.generate({
+    const generation = this.generator.generate({
       baselineId: baseline.id,
       jobId: job.id,
       allowedBaselineBlocks: allowedBlocks,
-      job: {
-        id: job.id,
-        title: job.title ?? null,
-        company: job.company ?? null,
-        responsibilities: job.normalizedResponsibilities ?? [],
-        requirements: job.normalizedRequirements ?? [],
-      },
+      job: jobContext,
       maxWords: input.maxWords,
       tone: input.tone,
     });
@@ -123,7 +122,7 @@ export class CoverLettersService {
       jobId: job.id,
       generatorType: 'template',
       generatorVersion: 'v1',
-      content,
+      content: generation.content,
       generationInputsHash,
     });
 
@@ -193,8 +192,8 @@ export class CoverLettersService {
   ): AllowedBaselineBlock[] {
     return sections.map((section, index) => ({
       id: section.id,
-      title: section.title ?? null,
-      content: this.sanitizeContent(section.content),
+      title: this.cleanText(section.title ?? null) || null,
+      content: this.cleanText(section.content),
       includePolicy:
         section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
       order: section.order ?? index,
@@ -203,7 +202,7 @@ export class CoverLettersService {
     }));
   }
 
-  private sanitizeContent(content?: string | null) {
+  private cleanText(content?: string | null) {
     if (!content) {
       return '';
     }
@@ -217,44 +216,50 @@ export class CoverLettersService {
       .trim();
   }
 
+  private sanitizeList(values?: string[] | null) {
+    return (values ?? [])
+      .map((value) => this.cleanText(value))
+      .filter((value) => value.length > 0);
+  }
+
   private computeGenerationInputsHash(
     baselineId: string,
     jobId: string,
     allowedBlocks: AllowedBaselineBlock[],
-    job: CoverLetterJobContext,
+    job: {
+      id: string;
+      title: string | null;
+      company: string | null;
+      responsibilities: string[];
+      requirements: string[];
+    },
   ) {
     const normalizedBaseline = allowedBlocks
-      .map((block) => ({
+      .map((block, index) => ({
         id: block.id,
         title: block.title ?? null,
-        order: block.order,
+        order: block.order ?? index,
         includePolicy: block.includePolicy,
         sectionType: block.sectionType,
-        content: block.content,
+        content: this.cleanText(block.content),
       }))
       .sort((a, b) => a.order - b.order);
 
     const normalizedJob = {
       id: job.id,
-      title: job.title ?? null,
-      company: job.company ?? null,
-      responsibilities: (job.responsibilities ?? []).map((item) =>
-        (item ?? '').trim(),
-      ),
-      requirements: (job.requirements ?? []).map((item) =>
-        (item ?? '').trim(),
-      ),
+      title: this.cleanText(job.title),
+      company: this.cleanText(job.company),
+      responsibilities: this.sanitizeList(job.responsibilities),
+      requirements: this.sanitizeList(job.requirements),
     };
 
-    const payload = {
-      baselineId,
-      jobId,
-      baseline: normalizedBaseline,
-      job: normalizedJob,
-    };
+    const normalizedString = [
+      `baselineId:${baselineId}`,
+      `jobId:${jobId}`,
+      `baseline:${JSON.stringify(normalizedBaseline)}`,
+      `job:${JSON.stringify(normalizedJob)}`,
+    ].join('|');
 
-    return createHash('sha256')
-      .update(JSON.stringify(payload))
-      .digest('hex');
+    return createHash('sha256').update(normalizedString).digest('hex');
   }
 }
