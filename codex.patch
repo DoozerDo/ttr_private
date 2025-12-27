@@ -1,21 +1,18 @@
-﻿diff --git a/apps/web/app/api/jobs/[id]/route.ts b/apps/web/app/api/jobs/[id]/route.ts
+﻿diff --git a/apps/web/app/api/baselines/[id]/reparse/route.ts b/apps/web/app/api/baselines/[id]/reparse/route.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..bf9b5b6d1a7d8903302e364810cf183d95b7164e
+index 0000000000000000000000000000000000000000..d34805d06a7fcff1c96559cf3a52c0833e0c6479
 --- /dev/null
-+++ b/apps/web/app/api/jobs/[id]/route.ts
++++ b/apps/web/app/api/baselines/[id]/reparse/route.ts
 @@ -0,0 +1,36 @@
 +import { NextRequest, NextResponse } from "next/server";
 +
-+import {
-+  getApiBaseUrl,
-+  relayApiResponse,
-+  requireAuthToken,
-+} from "../../baselines/helpers";
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 +
-+export async function GET(
++export async function POST(
 +  req: NextRequest,
-+  { params }: { params: { id: string } },
++  context: { params: Promise<{ id: string }> },
 +) {
++  const { id } = await context.params;
 +  const baseUrl = getApiBaseUrl();
 +  const { token, error } = requireAuthToken(req);
 +
@@ -30,13 +27,60 @@ index 0000000000000000000000000000000000000000..bf9b5b6d1a7d8903302e364810cf183d
 +    return error;
 +  }
 +
-+  const response = await fetch(`${baseUrl}/jobs/${params.id}`, {
-+    method: "GET",
-+    cache: "no-store",
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/baselines/${id}/reparse`, {
++    method: "POST",
 +    headers: {
 +      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
 +    },
++    body: JSON.stringify(body),
 +  });
 +
 +  return relayApiResponse(response);
 +}
+diff --git a/apps/web/app/api/jobs/[id]/route.ts b/apps/web/app/api/jobs/[id]/route.ts
+index bf9b5b6d1a7d8903302e364810cf183d95b7164e..be149440ffc835b5009708ae47c6363385d1ded8 100644
+--- a/apps/web/app/api/jobs/[id]/route.ts
++++ b/apps/web/app/api/jobs/[id]/route.ts
+@@ -1,36 +1,37 @@
+ import { NextRequest, NextResponse } from "next/server";
+ 
+ import {
+   getApiBaseUrl,
+   relayApiResponse,
+   requireAuthToken,
+ } from "../../baselines/helpers";
+ 
+ export async function GET(
+   req: NextRequest,
+-  { params }: { params: { id: string } },
++  context: { params: Promise<{ id: string }> },
+ ) {
++  const { id } = await context.params;
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+-  const response = await fetch(`${baseUrl}/jobs/${params.id}`, {
++  const response = await fetch(`${baseUrl}/jobs/${id}`, {
+     method: "GET",
+     cache: "no-store",
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+   });
+ 
+   return relayApiResponse(response);
+ }

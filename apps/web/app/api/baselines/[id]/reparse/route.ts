@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 
-export async function GET(
+export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
@@ -21,14 +21,17 @@ export async function GET(
   }
 
   const { id } = await context.params;
-  const response = await fetch(`${baseUrl}/jobs/${id}`, {
-    method: "GET",
-    cache: "no-store",
+
+  const body = await req.json().catch(() => null);
+
+  const response = await fetch(`${baseUrl}/baselines/${id}/reparse`, {
+    method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
   return relayApiResponse(response);
 }
-
