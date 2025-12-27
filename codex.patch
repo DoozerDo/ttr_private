@@ -1,86 +1,261 @@
-﻿diff --git a/apps/web/app/api/baselines/[id]/reparse/route.ts b/apps/web/app/api/baselines/[id]/reparse/route.ts
+﻿diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index d627880c83a6f07410d19697afcbfc6bb29e1a52..8f07d2fb821f0732d52a881d2f11614c0ea3f3b2 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,51 +1,53 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { AppController } from './app.controller';
+ import { AppService } from './app.service';
+ import { AuthModule } from './auth/auth.module';
+ import { AnalysisModule } from './analysis/analysis.module';
+ import { ApplicationsModule } from './applications/applications.module';
+ import { BaselineModule } from './baseline/baseline.module';
+ import { ComplianceModule } from './compliance/compliance.module';
+ import { InterviewsModule } from './interviews/interviews.module';
+ import { JobsModule } from './jobs/jobs.module';
++import { CoverLettersModule } from './cover-letters/cover-letters.module';
+ import { ResumeModule } from './resume/resume.module';
+ import { SearchSetsModule } from './search-sets/search-sets.module';
+ import { User } from './users/user.entity';
+ import { UsersModule } from './users/users.module';
+ 
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env.local', '.env'],
+     }),
+     TypeOrmModule.forRootAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         type: 'postgres',
+         url:
+           configService.get<string>('DATABASE_URL') ??
+           'postgresql://postgres:postgres@db:5432/targetthisrole',
+         entities: [User],
+         synchronize: configService.get<string>('NODE_ENV') !== 'production',
+         autoLoadEntities: true,
+       }),
+     }),
+     UsersModule,
+     AuthModule,
+     AnalysisModule,
+     ApplicationsModule,
+     BaselineModule,
+     ComplianceModule,
+     InterviewsModule,
+     JobsModule,
+     SearchSetsModule,
+     ResumeModule,
++    CoverLettersModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/cover-letters/cover-letter.entity.ts b/apps/api/src/cover-letters/cover-letter.entity.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..d34805d06a7fcff1c96559cf3a52c0833e0c6479
+index 0000000000000000000000000000000000000000..7c5e7e05e19d2118e91e9b7ed7a7fe7ebe684785
 --- /dev/null
-+++ b/apps/web/app/api/baselines/[id]/reparse/route.ts
-@@ -0,0 +1,36 @@
-+import { NextRequest, NextResponse } from "next/server";
++++ b/apps/api/src/cover-letters/cover-letter.entity.ts
+@@ -0,0 +1,38 @@
++import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
++@Entity({ name: 'cover_letters' })
++export class CoverLetter {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
 +
-+export async function POST(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
++  @Index()
++  @Column({ type: 'uuid' })
++  userId!: string;
 +
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
++  @Index()
++  @Column({ type: 'uuid' })
++  jobId!: string;
++
++  @Index()
++  @Column({ type: 'uuid' })
++  baselineId!: string;
++
++  @Column({ type: 'varchar', default: 'template' })
++  generatorType!: string;
++
++  @Column({ type: 'varchar', default: 'v1' })
++  generatorVersion!: string;
++
++  @Column({ type: 'text' })
++  content!: string;
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  generationInputsHash!: string | null;
++
++  @Index()
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
+diff --git a/apps/api/src/cover-letters/cover-letters.controller.ts b/apps/api/src/cover-letters/cover-letters.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..27c1ce76888bce51ae35847514dd2059097e7250
+--- /dev/null
++++ b/apps/api/src/cover-letters/cover-letters.controller.ts
+@@ -0,0 +1,39 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  HttpException,
++  HttpStatus,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import { Request } from 'express';
++import { CoverLettersService } from './cover-letters.service';
++import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
++
++@Controller('cover-letters')
++@UseGuards(AuthGuard('jwt'))
++export class CoverLettersController {
++  constructor(private readonly coverLettersService: CoverLettersService) {}
++
++  @Post('generate')
++  async generate(
++    @Body() body: GenerateCoverLetterDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const placeholderResponse = this.coverLettersService.buildNotImplementedResponse(
++      userId,
++      body,
++    );
++
++    throw new HttpException(placeholderResponse, HttpStatus.NOT_IMPLEMENTED);
++  }
++}
+diff --git a/apps/api/src/cover-letters/cover-letters.module.ts b/apps/api/src/cover-letters/cover-letters.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd93bc9bfe827dfbe386a942e36ad0bccf067e13
+--- /dev/null
++++ b/apps/api/src/cover-letters/cover-letters.module.ts
+@@ -0,0 +1,12 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { CoverLetter } from './cover-letter.entity';
++import { CoverLettersController } from './cover-letters.controller';
++import { CoverLettersService } from './cover-letters.service';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([CoverLetter])],
++  controllers: [CoverLettersController],
++  providers: [CoverLettersService],
++})
++export class CoverLettersModule {}
+diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c98cef8f00ee5dfe0c5a2849aa4114f9a8238026
+--- /dev/null
++++ b/apps/api/src/cover-letters/cover-letters.service.ts
+@@ -0,0 +1,15 @@
++import { Injectable } from '@nestjs/common';
++import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
++
++@Injectable()
++export class CoverLettersService {
++  buildNotImplementedResponse(
++    _userId: string,
++    _input: GenerateCoverLetterDto,
++  ) {
++    return {
++      status: 'not_implemented',
++      message: 'Cover letter generation is not implemented yet.',
++    };
++  }
++}
+diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..33b1655c56c546567fc4c765201b959a67987cd5
+--- /dev/null
++++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+@@ -0,0 +1,9 @@
++export class GenerateCoverLetterDto {
++  baselineId!: string;
++
++  jobId!: string;
++
++  maxWords?: number;
++
++  tone?: string;
++}
+diff --git a/apps/api/src/migrations/1790000000000-CoverLetters.ts b/apps/api/src/migrations/1790000000000-CoverLetters.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8052dbd5b27235cd11ee443bd963c9d070df6eff
+--- /dev/null
++++ b/apps/api/src/migrations/1790000000000-CoverLetters.ts
+@@ -0,0 +1,54 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class CoverLetters1790000000000 implements MigrationInterface {
++  name = 'CoverLetters1790000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(`
++      CREATE TABLE "cover_letters" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" uuid NOT NULL,
++        "jobId" uuid NOT NULL,
++        "baselineId" uuid NOT NULL,
++        "generatorType" character varying NOT NULL DEFAULT 'template',
++        "generatorVersion" character varying NOT NULL DEFAULT 'v1',
++        "content" text NOT NULL,
++        "generationInputsHash" character varying(255),
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_cover_letters_id" PRIMARY KEY ("id")
++      )
++    `);
++
++    await queryRunner.query(
++      `CREATE INDEX "IDX_cover_letters_userId" ON "cover_letters" ("userId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX "IDX_cover_letters_jobId" ON "cover_letters" ("jobId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX "IDX_cover_letters_baselineId" ON "cover_letters" ("baselineId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX "IDX_cover_letters_createdAt" ON "cover_letters" ("createdAt")`,
 +    );
 +  }
 +
-+  if (!token) {
-+    return error;
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_cover_letters_createdAt"`,
++    );
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_cover_letters_baselineId"`,
++    );
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_cover_letters_jobId"`,
++    );
++    await queryRunner.query(
++      `DROP INDEX IF EXISTS "IDX_cover_letters_userId"`,
++    );
++    await queryRunner.query(`DROP TABLE "cover_letters"`);
 +  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/baselines/${id}/reparse`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
 +}
-diff --git a/apps/web/app/api/jobs/[id]/route.ts b/apps/web/app/api/jobs/[id]/route.ts
-index bf9b5b6d1a7d8903302e364810cf183d95b7164e..be149440ffc835b5009708ae47c6363385d1ded8 100644
---- a/apps/web/app/api/jobs/[id]/route.ts
-+++ b/apps/web/app/api/jobs/[id]/route.ts
-@@ -1,36 +1,37 @@
- import { NextRequest, NextResponse } from "next/server";
- 
- import {
-   getApiBaseUrl,
-   relayApiResponse,
-   requireAuthToken,
- } from "../../baselines/helpers";
- 
- export async function GET(
-   req: NextRequest,
--  { params }: { params: { id: string } },
-+  context: { params: Promise<{ id: string }> },
- ) {
-+  const { id } = await context.params;
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
--  const response = await fetch(`${baseUrl}/jobs/${params.id}`, {
-+  const response = await fetch(`${baseUrl}/jobs/${id}`, {
-     method: "GET",
-     cache: "no-store",
-     headers: {
-       Authorization: `Bearer ${token}`,
-     },
-   });
- 
-   return relayApiResponse(response);
- }
