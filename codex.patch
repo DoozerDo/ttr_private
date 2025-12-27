@@ -1,43 +1,33 @@
-﻿diff --git a/apps/api/src/interviews/dto/create-interview-response.dto.ts b/apps/api/src/interviews/dto/create-interview-response.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c40b22722311b9b2104c6d5e05f965152c80f717
---- /dev/null
-+++ b/apps/api/src/interviews/dto/create-interview-response.dto.ts
-@@ -0,0 +1,4 @@
-+export class CreateInterviewResponseDto {
-+  question!: string;
-+  response!: string;
-+}
-diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
-index 2e77a93a69bb3d0f1824e7512c774c076a629b79..1963252ee9657b079a1eb9465273028e15a71981 100644
---- a/apps/api/src/interviews/interviews.controller.ts
-+++ b/apps/api/src/interviews/interviews.controller.ts
-@@ -1,40 +1,41 @@
+﻿diff --git a/apps/api/src/analysis/analysis.controller.ts b/apps/api/src/analysis/analysis.controller.ts
+index e1ff5243b39591350eb2f6acc7f24d63a94f5fe6..ace697740ea0fc8abc18fafa9b5053d120a41666 100644
+--- a/apps/api/src/analysis/analysis.controller.ts
++++ b/apps/api/src/analysis/analysis.controller.ts
+@@ -1,63 +1,92 @@
  import {
    BadRequestException,
    Body,
    Controller,
-   Delete,
    Get,
    Param,
-   Patch,
    Post,
    Req,
++  Query,
    UseGuards,
  } from '@nestjs/common';
  import { AuthGuard } from '@nestjs/passport';
  import type { Request } from 'express';
- import { InterviewsService } from './interviews.service';
-+import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
+ import { AnalysisService } from './analysis.service';
+ import type { AnalysisRequest } from './analysis.service';
+ import { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
  
- @Controller('interviews')
+ @Controller('analysis')
  @UseGuards(AuthGuard('jwt'))
- export class InterviewsController {
-   constructor(private readonly interviewsService: InterviewsService) {}
+ export class AnalysisController {
+   constructor(private readonly analysisService: AnalysisService) {}
  
    @Post()
-   async createInterview(
-     @Body() body: any,
+   async analyze(
+     @Body() body: AnalysisRequest,
      @Req() request: Request & { user?: { id?: string } },
    ) {
      const userId = request.user?.id;
@@ -46,16 +36,12 @@ index 2e77a93a69bb3d0f1824e7512c774c076a629b79..1963252ee9657b079a1eb9465273028e
        throw new BadRequestException('Invalid user context');
      }
  
-     return this.interviewsService.createInterview(userId, body);
+     return this.analysisService.analyzeForUser(userId, body);
    }
  
-   @Get()
-   async listInterviews(@Req() request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-@@ -64,26 +65,59 @@ export class InterviewsController {
-     @Body() body: any,
+   @Post('run')
+   async runFitAssessment(
+     @Body() body: RunFitAssessmentDto,
      @Req() request: Request & { user?: { id?: string } },
    ) {
      const userId = request.user?.id;
@@ -64,27 +50,12 @@ index 2e77a93a69bb3d0f1824e7512c774c076a629b79..1963252ee9657b079a1eb9465273028e
        throw new BadRequestException('Invalid user context');
      }
  
-     return this.interviewsService.updateInterview(id, userId, body);
+     return this.analysisService.runFitAssessment(userId, body);
    }
  
-   @Delete(':id')
-   async deleteInterview(
-     @Param('id') id: string,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.interviewsService.deleteInterview(id, userId);
-   }
-+
-+  @Post(':id/responses')
-+  async createInterviewResponse(
-+    @Param('id') id: string,
-+    @Body() body: { responses?: CreateInterviewResponseDto[] },
++  @Get('fit-assessments')
++  async getFitAssessments(
++    @Query('jobId') jobId: string | undefined,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -93,129 +64,113 @@ index 2e77a93a69bb3d0f1824e7512c774c076a629b79..1963252ee9657b079a1eb9465273028e
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    const responses =
-+      (body?.responses?.length ? body.responses : []).filter(
-+        (response): response is CreateInterviewResponseDto =>
-+          Boolean(response?.question && response?.response),
-+      );
-+
-+    if (responses.length === 0) {
-+      throw new BadRequestException('No responses provided');
-+    }
-+
-+    const createdResponses = await Promise.all(
-+      responses.map((response) =>
-+        this.interviewsService.createInterviewResponse(id, userId, response),
-+      ),
-+    );
-+
-+    return createdResponses.length === 1
-+      ? createdResponses[0]
-+      : createdResponses;
++    return this.analysisService.getFitAssessments(userId, jobId);
 +  }
- }
-diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
-index 37c9b760340aa9660c4082177525c06e803c3e1c..12df937148253a914384eed2f8a1a82de7e9c539 100644
---- a/apps/api/src/interviews/interviews.service.ts
-+++ b/apps/api/src/interviews/interviews.service.ts
-@@ -1,46 +1,50 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
-+import { InterviewResponse } from './interview-response.entity';
- import { InterviewSession } from './interview-session.entity';
-+import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
- 
- export type CreateInterviewDto = {
-   baselineId?: string;
-   jobId?: string | null;
-   date?: string;
-   type?: string;
- };
- 
- export type UpdateInterviewDto = Partial<CreateInterviewDto> & {
-   status?: string;
- };
- 
- @Injectable()
- export class InterviewsService {
-   constructor(
-     @InjectRepository(InterviewSession)
-     private readonly interviewRepository: Repository<InterviewSession>,
-+    @InjectRepository(InterviewResponse)
-+    private readonly interviewResponseRepository: Repository<InterviewResponse>,
-   ) {}
- 
-   private validateDate(date?: string | null) {
-     if (!date?.trim()) {
-       throw new BadRequestException('Interview date is required.');
-     }
-   }
- 
-   private validateType(type?: string | null) {
-     if (type !== undefined && !type?.trim()) {
-       throw new BadRequestException('Interview type is required.');
-     }
-   }
- 
-   private validateBaselineId(baselineId?: string | null) {
-     if (!baselineId?.trim()) {
-       throw new BadRequestException('Baseline ID is required.');
-     }
-   }
- 
-   async createInterview(userId: string, dto: CreateInterviewDto) {
-     this.validateDate(dto.date ?? null);
-     this.validateType(dto.type ?? null);
-     this.validateBaselineId(dto.baselineId ?? null);
- 
-@@ -91,26 +95,48 @@ export class InterviewsService {
-     }
- 
-     if (dto.baselineId !== undefined) {
-       this.validateBaselineId(dto.baselineId ?? null);
-       interview.baselineId = dto.baselineId?.trim() || interview.baselineId;
-     }
- 
-     if (dto.jobId !== undefined) {
-       interview.jobId = dto.jobId?.trim() || null;
-     }
- 
-     if (dto.status !== undefined) {
-       interview.status = dto.status;
-     }
- 
-     return this.interviewRepository.save(interview);
-   }
- 
-   async deleteInterview(id: string, userId: string) {
-     const interview = await this.getInterviewForUser(id, userId);
- 
-     await this.interviewRepository.remove(interview);
- 
-     return { deleted: true, id };
-   }
 +
-+  async createInterviewResponse(
-+    sessionId: string,
-+    userId: string,
-+    dto: CreateInterviewResponseDto,
++  @Get('fit-scores')
++  async getFitScores(
++    @Query('jobId') jobId: string | undefined,
++    @Req() request: Request & { user?: { id?: string } },
 +  ) {
-+    const session = await this.interviewRepository.findOne({
-+      where: { id: sessionId, userId },
-+    });
++    const userId = request.user?.id;
 +
-+    if (!session) {
-+      throw new NotFoundException('Interview not found');
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    const response = this.interviewResponseRepository.create({
-+      sessionId: session.id,
-+      question: dto.question,
-+      response: dto.response,
-+    });
-+
-+    return this.interviewResponseRepository.save(response);
++    return this.analysisService.getFitScores(userId, jobId);
 +  }
++
+   @Get('job/:jobId/latest')
+   async getLatestAssessment(
+     @Param('jobId') jobId: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.analysisService.getLatestAssessment(userId, jobId);
+   }
  }
+diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
+index 54541cd6d4494227e84ba97f1f9f803f14253cc6..6a6ab6dbe24a28519301ed2cd00cfc47fb44d940 100644
+--- a/apps/api/src/analysis/analysis.service.ts
++++ b/apps/api/src/analysis/analysis.service.ts
+@@ -691,50 +691,72 @@ export class AnalysisService {
+       gaps: scoring.gaps,
+       complianceFlags: scoring.complianceFlags,
+       inputsHash,
+     });
+ 
+     const saved = await this.fitAssessmentRepository.save(assessment);
+ 
+     return {
+       ok: true,
+       assessmentId: saved.id,
+       jobId: saved.jobId,
+       baselineId: saved.baselineId,
+       baselineVersion: saved.baselineVersion,
+       overallScore: saved.overallScore,
+       score: saved.overallScore,
+       verdict: saved.verdict,
+       dimensionScores: saved.dimensionScores,
+       strengths: saved.strengths,
+       gaps: saved.gaps,
+       complianceFlags: saved.complianceFlags,
+       summary: scoring.summary,
+       createdAt: saved.createdAt,
+     };
+   }
+ 
++  async getFitAssessments(userId: string, jobId?: string) {
++    const where = jobId?.trim()
++      ? { userId, jobId: jobId.trim() }
++      : { userId };
++
++    return this.fitAssessmentRepository.find({
++      where,
++      order: { createdAt: 'DESC' },
++    });
++  }
++
++  async getFitScores(userId: string, jobId?: string) {
++    const assessments = await this.getFitAssessments(userId, jobId);
++
++    return assessments.map((assessment) => ({
++      id: assessment.id,
++      jobId: assessment.jobId,
++      fitScore: assessment.overallScore,
++      createdAt: assessment.createdAt,
++    }));
++  }
++
+   async getLatestAssessment(userId: string, jobId: string) {
+     const assessment = await this.fitAssessmentRepository.findOne({
+       where: { userId, jobId },
+       order: { createdAt: 'DESC' },
+     });
+ 
+     if (!assessment) {
+       throw new NotFoundException('Fit assessment not found');
+     }
+ 
+     const summary = this.buildSummaryFromTerms(
+       assessment.strengths ?? [],
+       assessment.gaps ?? [],
+     );
+ 
+     return {
+       ok: true,
+       assessmentId: assessment.id,
+       jobId: assessment.jobId,
+       baselineId: assessment.baselineId,
+       baselineVersion: assessment.baselineVersion,
+       overallScore: assessment.overallScore,
+       score: assessment.overallScore,
+       verdict: assessment.verdict,
+       dimensionScores: assessment.dimensionScores,
+
 

@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Req,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -45,6 +46,34 @@ export class AnalysisController {
     }
 
     return this.analysisService.runFitAssessment(userId, body);
+  }
+
+  @Get('fit-assessments')
+  async getFitAssessments(
+    @Query('jobId') jobId: string | undefined,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.getFitAssessments(userId, jobId);
+  }
+
+  @Get('fit-scores')
+  async getFitScores(
+    @Query('jobId') jobId: string | undefined,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.getFitScores(userId, jobId);
   }
 
   @Get('job/:jobId/latest')

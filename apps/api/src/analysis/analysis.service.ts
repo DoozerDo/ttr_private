@@ -713,6 +713,28 @@ export class AnalysisService {
     };
   }
 
+  async getFitAssessments(userId: string, jobId?: string) {
+    const where = jobId?.trim()
+      ? { userId, jobId: jobId.trim() }
+      : { userId };
+
+    return this.fitAssessmentRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getFitScores(userId: string, jobId?: string) {
+    const assessments = await this.getFitAssessments(userId, jobId);
+
+    return assessments.map((assessment) => ({
+      id: assessment.id,
+      jobId: assessment.jobId,
+      fitScore: assessment.overallScore,
+      createdAt: assessment.createdAt,
+    }));
+  }
+
   async getLatestAssessment(userId: string, jobId: string) {
     const assessment = await this.fitAssessmentRepository.findOne({
       where: { userId, jobId },
