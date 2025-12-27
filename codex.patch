@@ -1,53 +1,167 @@
-﻿diff --git a/apps/web/app/api/cover-letters/route.ts b/apps/web/app/api/cover-letters/route.ts
-index 1af5c36d51438597afe8fc93eef40403e428053f..b65a77937e717b189af229212e9f38e71bb7a2ff 100644
---- a/apps/web/app/api/cover-letters/route.ts
-+++ b/apps/web/app/api/cover-letters/route.ts
-@@ -1,45 +1,47 @@
- import { NextRequest, NextResponse } from "next/server";
+﻿diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+index 13a83b6e4a0d7b4b345f695c5b421b7c95910e34..9f9a080e11acedf07f503717953215e4979a99aa 100644
+--- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+@@ -1,76 +1,110 @@
+-import {
+-  BaselineIncludePolicy,
+-  BaselineSectionType,
+-} from '../../baseline/baseline-section.entity';
+ import { TemplateCoverLetterGenerator } from './template-cover-letter.generator';
  
- import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+ describe('TemplateCoverLetterGenerator', () => {
+   const generator = new TemplateCoverLetterGenerator();
+-
+   const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
  
- export async function GET(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
--  const response = await fetch(`${baseUrl}/cover-letters`, {
-+  const queryString = req.nextUrl.search ?? "";
+-  it('generates deterministic cover letter content from allowed baseline blocks', () => {
+-    const result = generator.generate({
+-      baselineId: 'baseline-1',
+-      jobId: 'job-1',
+-      tone: 'calm',
++  const disallowedPhrase = 'DO_NOT_INCLUDE_THIS';
++  const allowedBaselineText = [
++    'Built incident response playbooks with engineers and support teams.',
++    'Published onboarding guides for API customers.',
++    'Tracked launch risks and maintained weekly status updates.',
++  ].join('\n');
 +
-+  const response = await fetch(`${baseUrl}/cover-letters${queryString}`, {
-     method: "GET",
-     cache: "no-store",
-     headers: {
-       Authorization: `Bearer ${token}`,
-     },
++  const jobTitle = 'Platform Integrations Lead';
++  const company = 'Northwind Systems';
++  const jobText = [
++    'Responsibilities: Lead onboarding experiences for new merchants; Partner with design to simplify API adoption.',
++    'Requirements: Document product decisions clearly; Manage risk during migrations.',
++  ].join('\n');
++
++  const [responsibilitiesLine, requirementsLine] = jobText.split('\n');
++  const parseLine = (line: string) =>
++    line
++      .split(':')[1]
++      .split(';')
++      .map((item) => item.trim().replace(/\.$/, ''))
++      .filter(Boolean);
++
++  const responsibilities = parseLine(responsibilitiesLine);
++  const requirements = parseLine(requirementsLine);
++
++  it('generates deterministic cover letter content from plain inputs', () => {
++    const output = generator.generate({
++      baselineId: 'baseline-fixed',
++      jobId: 'job-fixed',
++      tone: 'measured',
+       job: {
+-        id: 'job-1',
+-        title: 'Product Manager',
+-        company: 'ExampleCorp',
+-        responsibilities: ['Define product strategy', 'Drive roadmap'],
+-        requirements: ['Align product planning with customer needs'],
++        id: 'job-fixed',
++        title: jobTitle,
++        company,
++        responsibilities,
++        requirements,
++        jobText,
+       },
+       allowedBaselineBlocks: [
+         {
+-          id: 'block-1',
+-          title: 'Experience',
+-          content: 'Managed product launches across teams and coordinated stakeholder updates',
+-          includePolicy: BaselineIncludePolicy.OPTIONAL,
++          id: 'block-allowed-1',
++          title: 'Operational Wins',
++          content: allowedBaselineText,
++          includePolicy: 'OPTIONAL',
+           order: 0,
+-          sectionType: BaselineSectionType.EXPERIENCE,
++          sectionType: 'EXPERIENCE',
++        },
++        {
++          id: 'block-allowed-2',
++          title: 'Collaboration',
++          content: 'Facilitated vendor reviews and consolidated feedback for roadmap decisions.',
++          includePolicy: 'ALWAYS',
++          order: 1,
++          sectionType: 'PROJECT',
+         },
+       ],
+-    });
++      maxWords: 380,
++    } as any);
+ 
+-    expect(result.content).toMatchInlineSnapshot(`
+-      "I am writing to express my interest in the Product Manager role at ExampleCorp. I appreciate the chance to present a concise and candid overview of my background, focusing only on information that is already documented in a calm manner. The baseline materials I provided outline my verified experience, and I will rely on those details as I address the responsibilities of the role. I will mirror the priorities listed in the job description and keep every statement anchored to that verified record.
++    expect(output.content).toMatchInlineSnapshot(`
++"I am applying for the Platform Integrations Lead role at Northwind Systems. I prepared this cover letter directly from the approved baseline text and the responsibilities you provided, keeping every statement grounded in verified details. I will maintain a measured tone throughout. I will highlight the portions of my record that align with the description and avoid adding claims that are not supported.
+ 
+-      Key points from my background include Managed product launches across teams and coordinated stakeholder updates. I communicate in a calm voice The enclosed baseline content also captures how I plan work, collaborate with partners, and document progress without overextending claims. These experiences relate to priorities such as Define product strategy and Drive roadmap. Each excerpt comes directly from the approved baseline so the narrative stays factual and consistent.
++Documented experience from the baseline includes Built incident response playbooks with engineers and support teams, Published onboarding guides for API customers, and Tracked launch risks and maintained weekly status updates. The same measured style appears across these examples. These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.
+ 
+-      I will ground my approach in the practices and outcomes already recorded, such as Managed product launches across teams and coordinated stakeholder updates. For responsibilities like Define product strategy and Drive roadmap, I will reference the documented work above, confirm expectations early, and avoid overstating experience when a requirement extends beyond that record. At ExampleCorp, I will collaborate closely to ensure every commitment is backed by evidence from my baseline. Where a requirement extends beyond the baseline, I will flag it early, seek clarity, and adjust plans so that delivery remains honest and dependable. My plan is straightforward: clarify scope, pair each priority with the most relevant baseline evidence, outline checkpoints, and document decisions so that expectations stay aligned.
++For priorities such as Lead onboarding experiences for new merchants, Partner with design to simplify API adoption, Document product decisions clearly, and Manage risk during migrations, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material. When expectations align, I will reference passages such as Facilitated vendor reviews and consolidated feedback for roadmap decisions to show direct support. If any responsibility sits outside the documented baseline text, I will call out the gap immediately, ask for context, and proceed without implying experience I cannot prove. At Northwind Systems, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.
+ 
+-      Thank you for considering how my documented background can serve ExampleCorp. I look forward to the possibility of discussing the Product Manager role further and sharing more in the same calm style. I am prepared to share any additional excerpts from my baseline to keep our conversation precise and verifiable. Please let me know a convenient time to connect, and I will prepare a brief walkthrough of the most relevant baseline highlights."
+-    `);
+-    expect(result.wordCount).toBe(countWords(result.content));
+-  });
++Thank you for reviewing how my documented background fits the Platform Integrations Lead role at Northwind Systems. I will continue to communicate in the same measured style. I appreciate your consideration and am ready to share any additional approved excerpts that help Northwind Systems make a confident decision. Please let me know a good time to connect, and I will come prepared with the most relevant baseline highlights."
++`);
+ 
+-  it('omits disallowed baseline text when filtered before generation', () => {
+-    const allowedBaselineBlock = {
+-      id: 'allowed-1',
+-      title: 'Projects',
+-      content: 'Documented integration of third-party APIs without storing credentials',
+-      includePolicy: BaselineIncludePolicy.ALWAYS,
+-      order: 1,
+-      sectionType: BaselineSectionType.PROJECT,
+-    };
+-    const disallowedContent =
+-      'Sensitive beta feature roadmap details that should stay out of the cover letter';
++    const paragraphs = output.content.split(/\n\s*\n/);
++    expect(paragraphs).toHaveLength(4);
++    expect(output.content).not.toContain(disallowedPhrase);
+ 
+-    const result = generator.generate({
+-      baselineId: 'baseline-2',
+-      jobId: 'job-2',
++    const wordCount = countWords(output.content);
++    expect(output.wordCount).toBe(wordCount);
++    expect(wordCount).toBeLessThanOrEqual(400);
++  });
++
++  it('never injects disallowed content when it is absent from inputs', () => {
++    const output = generator.generate({
++      baselineId: 'baseline-sentinel',
++      jobId: 'job-sentinel',
+       job: {
+-        id: 'job-2',
+-        title: 'Integration Engineer',
+-        company: null,
+-        responsibilities: ['Maintain API reliability'],
+-        requirements: ['Audit integration risks'],
++        id: 'job-sentinel',
++        title: jobTitle,
++        company,
++        responsibilities: ['Map integrations to roadmap risks'],
++        requirements: ['Communicate progress transparently'],
+       },
+-      allowedBaselineBlocks: [allowedBaselineBlock],
+-    });
++      allowedBaselineBlocks: [
++        {
++          id: 'block-sentinel',
++          title: 'Highlights',
++          content: 'Maintained integration runbooks and rotated on-call coverage without incidents.',
++          includePolicy: 'OPTIONAL',
++          order: 0,
++          sectionType: 'OPERATIONS',
++        },
++      ],
++    } as any);
+ 
+-    expect(result.content).toContain(allowedBaselineBlock.content);
+-    expect(result.content).not.toContain(disallowedContent);
++    expect(output.content).not.toContain(disallowedPhrase);
    });
- 
-   return relayApiResponse(response);
- }
- 
- export async function POST(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
+ });

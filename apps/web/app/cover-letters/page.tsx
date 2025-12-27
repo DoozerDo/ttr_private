@@ -1,8 +1,8 @@
 // apps/web/app/cover-letters/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
 import type { BaselineDto } from "../../lib/baselines";
 import type { JobDto } from "../../lib/jobs";
@@ -20,6 +20,8 @@ type CoverLetterDto = {
 };
 
 type LoadState = "idle" | "loading" | "error";
+
+type SelectOption = { value: string; label: string };
 
 function formatJob(job: JobDto | undefined) {
   if (!job) return "Untitled job";
@@ -42,17 +44,19 @@ function formatDate(value: string) {
 
 export default function CoverLettersPage() {
   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+  const [baselineId, setBaselineId] = useState("");
   const [baselineState, setBaselineState] = useState<LoadState>("loading");
   const [baselineError, setBaselineError] = useState<string | null>(null);
-  const [baselineId, setBaselineId] = useState("");
 
   const [jobs, setJobs] = useState<JobDto[]>([]);
+  const [jobId, setJobId] = useState("");
   const [jobState, setJobState] = useState<LoadState>("loading");
   const [jobError, setJobError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState("");
 
   const [history, setHistory] = useState<CoverLetterDto[]>([]);
   const [historyState, setHistoryState] = useState<LoadState>("loading");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -77,17 +81,17 @@ export default function CoverLettersPage() {
         if (cancelled) return;
 
         setBaselines(data);
-        setBaselineId((prev) => {
-          if (prev && data.some((b) => b.id === prev)) return prev;
+        setBaselineId((current) => {
+          if (current && data.some((baseline) => baseline.id === current)) return current;
           return data[0]?.id ?? "";
         });
         setBaselineState("idle");
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : "Unable to load baselines.";
-        setBaselineError(message);
         setBaselines([]);
         setBaselineId("");
+        setBaselineError(message);
         setBaselineState("error");
       }
     };
@@ -116,17 +120,17 @@ export default function CoverLettersPage() {
         if (cancelled) return;
 
         setJobs(data);
-        setJobId((prev) => {
-          if (prev && data.some((job) => job.id === prev)) return prev;
+        setJobId((current) => {
+          if (current && data.some((job) => job.id === current)) return current;
           return data[0]?.id ?? "";
         });
         setJobState("idle");
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : "Unable to load jobs.";
-        setJobError(message);
         setJobs([]);
         setJobId("");
+        setJobError(message);
         setJobState("error");
       }
     };
@@ -142,6 +146,7 @@ export default function CoverLettersPage() {
 
     const loadHistory = async () => {
       setHistoryState("loading");
+      setHistoryError(null);
 
       try {
         const response = await fetch("/api/cover-letters", { cache: "no-store" });
@@ -160,6 +165,7 @@ export default function CoverLettersPage() {
         const message = error instanceof Error ? error.message : "Unable to load history.";
         setHistory([]);
         setHistoryState("error");
+        setHistoryError(message);
         setStatusMessage(null);
         setErrorMessage(message);
       }
@@ -171,16 +177,22 @@ export default function CoverLettersPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!selectedLetterId && history.length > 0) {
-      setSelectedLetterId(history[0].id);
-    }
-  }, [history, selectedLetterId]);
-
   const sortedHistory = useMemo(
     () => [...history].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [history],
   );
+
+  useEffect(() => {
+    if (sortedHistory.length === 0) {
+      setSelectedLetterId(null);
+      return;
+    }
+
+    setSelectedLetterId((current) => {
+      if (current && sortedHistory.some((item) => item.id === current)) return current;
+      return sortedHistory[0]?.id ?? null;
+    });
+  }, [sortedHistory]);
 
   const selectedLetter = useMemo(
     () => sortedHistory.find((item) => item.id === selectedLetterId) ?? null,
@@ -203,8 +215,8 @@ export default function CoverLettersPage() {
 
   const handleGenerate = async () => {
     if (!baselineId || !jobId) {
-      setErrorMessage("Select a baseline and job to generate a cover letter.");
       setStatusMessage(null);
+      setErrorMessage("Select a baseline and job to generate a cover letter.");
       return;
     }
 
@@ -240,19 +252,17 @@ export default function CoverLettersPage() {
     }
   };
 
-  const renderSelect = (
-    label: string,
-    value: string,
-    options: { value: string; label: string }[],
-    onChange: (next: string) => void,
-    disabled?: boolean,
-  ) => (
+  const renderSelect = (label: string, value: string, options: SelectOption[], onChange: (next: string) => void, disabled: boolean) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <label style={ttrComponents.fieldLabel}>{label}</label>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        style={{ ...ttrComponents.input, background: "rgba(0,0,0,0.35)", cursor: disabled ? "not-allowed" : "pointer" }}
+        style={{
+          ...ttrComponents.input,
+          background: "rgba(0,0,0,0.35)",
+          cursor: disabled ? "not-allowed" : "pointer",
+        }}
         disabled={disabled}
       >
         {options.length === 0 ? <option value="">No options</option> : null}
@@ -290,9 +300,7 @@ export default function CoverLettersPage() {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span style={{ fontWeight: 800, fontSize: 14 }}>
-            {formatJob(job)}
-          </span>
+          <span style={{ fontWeight: 800, fontSize: 14 }}>{formatJob(job)}</span>
           <span style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>{formatDate(item.createdAt)}</span>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -326,8 +334,7 @@ export default function CoverLettersPage() {
             <span style={ttrTypography.subtleLabel}>Generator</span>
             <h2 style={ttrTypography.h2}>Create a cover letter</h2>
             <p style={ttrTypography.paragraph}>
-              Select a baseline and job to craft a tailored cover letter. Generated content is saved to
-              your history for quick review.
+              Select a baseline and job to craft a tailored cover letter. Generated content is saved to your history for quick review.
             </p>
           </div>
 
@@ -335,12 +342,15 @@ export default function CoverLettersPage() {
             {renderSelect(
               baselineLabel,
               baselineId,
-              baselines.map((b) => ({ value: b.id, label: b.originalFilename || "Untitled baseline" })),
+              baselines.map((baseline) => ({ value: baseline.id, label: baseline.originalFilename || "Untitled baseline" })),
               setBaselineId,
               baselineState !== "idle",
             )}
-            {baselineState === "error" && baselineError ? (
-              <div style={ttrComponents.dangerBox}>{baselineError}</div>
+            {baselineState === "error" && baselineError ? <div style={ttrComponents.dangerBox}>{baselineError}</div> : null}
+            {baselineState === "idle" && baselines.length === 0 ? (
+              <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
+                No baselines available. Upload a baseline to start generating cover letters.
+              </div>
             ) : null}
 
             {renderSelect(
@@ -350,8 +360,11 @@ export default function CoverLettersPage() {
               setJobId,
               jobState !== "idle",
             )}
-            {jobState === "error" && jobError ? (
-              <div style={ttrComponents.dangerBox}>{jobError}</div>
+            {jobState === "error" && jobError ? <div style={ttrComponents.dangerBox}>{jobError}</div> : null}
+            {jobState === "idle" && jobs.length === 0 ? (
+              <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
+                No jobs found. Add a job to generate a tailored cover letter.
+              </div>
             ) : null}
 
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -392,10 +405,10 @@ export default function CoverLettersPage() {
               <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>Loading history...</div>
             ) : null}
             {historyState === "error" ? (
-              <div style={ttrComponents.dangerBox}>Unable to load history right now.</div>
+              <div style={ttrComponents.dangerBox}>{historyError || "Unable to load history right now."}</div>
             ) : null}
             {historyState === "idle" && sortedHistory.length === 0 ? (
-              <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>No cover letters yet.</div>
+              <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>No cover letters yet. Generate one to see it listed here.</div>
             ) : null}
 
             {sortedHistory.map((item) => renderHistoryItem(item))}
