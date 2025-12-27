@@ -2,8 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
-  HttpException,
-  HttpStatus,
+  Delete,
+  Get,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -29,11 +30,42 @@ export class CoverLettersController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const placeholderResponse = this.coverLettersService.buildNotImplementedResponse(
-      userId,
-      body,
-    );
+    return this.coverLettersService.generateCoverLetter(userId, body);
+  }
 
-    throw new HttpException(placeholderResponse, HttpStatus.NOT_IMPLEMENTED);
+  @Get()
+  async list(@Req() request: Request & { user?: { id?: string } }) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.coverLettersService.listCoverLetters(userId);
+  }
+
+  @Get(':id')
+  async getOne(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.coverLettersService.getCoverLetter(userId, id);
+  }
+
+  @Delete(':id')
+  async delete(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.coverLettersService.deleteCoverLetter(userId, id);
   }
 }

@@ -1,261 +1,658 @@
-﻿diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index d627880c83a6f07410d19697afcbfc6bb29e1a52..8f07d2fb821f0732d52a881d2f11614c0ea3f3b2 100644
---- a/apps/api/src/app.module.ts
-+++ b/apps/api/src/app.module.ts
-@@ -1,51 +1,53 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { AppController } from './app.controller';
- import { AppService } from './app.service';
- import { AuthModule } from './auth/auth.module';
- import { AnalysisModule } from './analysis/analysis.module';
- import { ApplicationsModule } from './applications/applications.module';
- import { BaselineModule } from './baseline/baseline.module';
- import { ComplianceModule } from './compliance/compliance.module';
- import { InterviewsModule } from './interviews/interviews.module';
- import { JobsModule } from './jobs/jobs.module';
-+import { CoverLettersModule } from './cover-letters/cover-letters.module';
- import { ResumeModule } from './resume/resume.module';
- import { SearchSetsModule } from './search-sets/search-sets.module';
- import { User } from './users/user.entity';
- import { UsersModule } from './users/users.module';
- 
- @Module({
-   imports: [
-     ConfigModule.forRoot({
-       isGlobal: true,
-       envFilePath: ['.env.development.local', '.env.local', '.env'],
-     }),
-     TypeOrmModule.forRootAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         type: 'postgres',
-         url:
-           configService.get<string>('DATABASE_URL') ??
-           'postgresql://postgres:postgres@db:5432/targetthisrole',
-         entities: [User],
-         synchronize: configService.get<string>('NODE_ENV') !== 'production',
-         autoLoadEntities: true,
-       }),
-     }),
-     UsersModule,
-     AuthModule,
-     AnalysisModule,
-     ApplicationsModule,
-     BaselineModule,
-     ComplianceModule,
-     InterviewsModule,
-     JobsModule,
-     SearchSetsModule,
-     ResumeModule,
-+    CoverLettersModule,
-   ],
-   controllers: [AppController],
-   providers: [AppService],
- })
- export class AppModule {}
-diff --git a/apps/api/src/cover-letters/cover-letter.entity.ts b/apps/api/src/cover-letters/cover-letter.entity.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..7c5e7e05e19d2118e91e9b7ed7a7fe7ebe684785
---- /dev/null
-+++ b/apps/api/src/cover-letters/cover-letter.entity.ts
-@@ -0,0 +1,38 @@
-+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-+
-+@Entity({ name: 'cover_letters' })
-+export class CoverLetter {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @Index()
-+  @Column({ type: 'uuid' })
-+  userId!: string;
-+
-+  @Index()
-+  @Column({ type: 'uuid' })
-+  jobId!: string;
-+
-+  @Index()
-+  @Column({ type: 'uuid' })
-+  baselineId!: string;
-+
-+  @Column({ type: 'varchar', default: 'template' })
-+  generatorType!: string;
-+
-+  @Column({ type: 'varchar', default: 'v1' })
-+  generatorVersion!: string;
-+
-+  @Column({ type: 'text' })
-+  content!: string;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  generationInputsHash!: string | null;
-+
-+  @Index()
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  createdAt!: Date;
-+
-+  @UpdateDateColumn({ type: 'timestamptz' })
-+  updatedAt!: Date;
-+}
-diff --git a/apps/api/src/cover-letters/cover-letters.controller.ts b/apps/api/src/cover-letters/cover-letters.controller.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..27c1ce76888bce51ae35847514dd2059097e7250
---- /dev/null
+﻿diff --git a/apps/api/src/cover-letters/cover-letters.controller.ts b/apps/api/src/cover-letters/cover-letters.controller.ts
+index 27c1ce76888bce51ae35847514dd2059097e7250..e0de9351e91fbe8c613069ae8c96d4325a8ef0b9 100644
+--- a/apps/api/src/cover-letters/cover-letters.controller.ts
 +++ b/apps/api/src/cover-letters/cover-letters.controller.ts
-@@ -0,0 +1,39 @@
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  HttpException,
-+  HttpStatus,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import { Request } from 'express';
-+import { CoverLettersService } from './cover-letters.service';
-+import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
+@@ -1,39 +1,71 @@
+ import {
+   BadRequestException,
+   Body,
+   Controller,
+-  HttpException,
+-  HttpStatus,
++  Delete,
++  Get,
++  Param,
+   Post,
+   Req,
+   UseGuards,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import { Request } from 'express';
+ import { CoverLettersService } from './cover-letters.service';
+ import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
+ 
+ @Controller('cover-letters')
+ @UseGuards(AuthGuard('jwt'))
+ export class CoverLettersController {
+   constructor(private readonly coverLettersService: CoverLettersService) {}
+ 
+   @Post('generate')
+   async generate(
+     @Body() body: GenerateCoverLetterDto,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+-    const placeholderResponse = this.coverLettersService.buildNotImplementedResponse(
+-      userId,
+-      body,
+-    );
++    return this.coverLettersService.generateCoverLetter(userId, body);
++  }
 +
-+@Controller('cover-letters')
-+@UseGuards(AuthGuard('jwt'))
-+export class CoverLettersController {
-+  constructor(private readonly coverLettersService: CoverLettersService) {}
-+
-+  @Post('generate')
-+  async generate(
-+    @Body() body: GenerateCoverLetterDto,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
++  @Get()
++  async list(@Req() request: Request & { user?: { id?: string } }) {
 +    const userId = request.user?.id;
-+
 +    if (!userId) {
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    const placeholderResponse = this.coverLettersService.buildNotImplementedResponse(
-+      userId,
-+      body,
++    return this.coverLettersService.listCoverLetters(userId);
++  }
++
++  @Get(':id')
++  async getOne(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.coverLettersService.getCoverLetter(userId, id);
++  }
++
++  @Delete(':id')
++  async delete(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
+ 
+-    throw new HttpException(placeholderResponse, HttpStatus.NOT_IMPLEMENTED);
++    return this.coverLettersService.deleteCoverLetter(userId, id);
+   }
+ }
+diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
+index c98cef8f00ee5dfe0c5a2849aa4114f9a8238026..a37438c858343e9867f81bc15c6ca84b2649333f 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.ts
+@@ -1,15 +1,260 @@
+-import { Injectable } from '@nestjs/common';
++import {
++  BadRequestException,
++  Injectable,
++  NotFoundException,
++} from '@nestjs/common';
++import { InjectDataSource } from '@nestjs/typeorm';
++import { createHash } from 'node:crypto';
++import { DataSource, Repository } from 'typeorm';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++  BaselineSectionType,
++} from '../baseline/baseline-section.entity';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { Job } from '../jobs/job.entity';
++import { CoverLetter } from './cover-letter.entity';
+ import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
++import {
++  AllowedBaselineBlock,
++  CoverLetterJobContext,
++} from './generators/cover-letter-generator.interface';
++import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
+ 
+ @Injectable()
+ export class CoverLettersService {
+-  buildNotImplementedResponse(
+-    _userId: string,
+-    _input: GenerateCoverLetterDto,
++  private readonly coverLetterRepository: Repository<CoverLetter>;
++  private readonly baselineRepository: Repository<Baseline>;
++  private readonly baselineVersionRepository: Repository<BaselineVersion>;
++  private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
++  private readonly jobRepository: Repository<Job>;
++  private readonly generator = new TemplateCoverLetterGenerator();
++
++  constructor(@InjectDataSource() private readonly dataSource: DataSource) {
++    this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
++    this.baselineRepository = this.dataSource.getRepository(Baseline);
++    this.baselineVersionRepository =
++      this.dataSource.getRepository(BaselineVersion);
++    this.baselineBlockPolicyRepository = this.dataSource.getRepository(
++      BaselineBlockPolicy,
++    );
++    this.jobRepository = this.dataSource.getRepository(Job);
++  }
++
++  async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const baseline = await this.baselineRepository.findOne({
++      where: { id: input.baselineId, userId },
++      relations: ['sections'],
++      order: { sections: { order: 'ASC' } },
++    });
++
++    if (!baseline) {
++      throw new NotFoundException('Baseline not found');
++    }
++
++    const job = await this.jobRepository.findOne({
++      where: { id: input.jobId, userId },
++    });
++
++    if (!job) {
++      throw new NotFoundException('Job not found');
++    }
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { baselineId: baseline.id },
++      order: { versionNumber: 'DESC', createdAt: 'DESC' },
++    });
++
++    const policies = baselineVersion
++      ? await this.baselineBlockPolicyRepository.find({
++          where: { baselineVersionId: baselineVersion.id },
++          relations: ['baselineSection'],
++          order: { order: 'ASC' },
++        })
++      : [];
++
++    const sections = this.applyPoliciesToSections(
++      baseline.sections ?? [],
++      policies,
 +    );
 +
-+    throw new HttpException(placeholderResponse, HttpStatus.NOT_IMPLEMENTED);
++    const allowedSections = sections.filter(
++      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
++    );
++
++    const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
++    const generationInputsHash = this.computeGenerationInputsHash(
++      baseline.id,
++      job.id,
++      allowedBlocks,
++      {
++        id: job.id,
++        title: job.title ?? null,
++        company: job.company ?? null,
++        responsibilities: job.normalizedResponsibilities ?? [],
++        requirements: job.normalizedRequirements ?? [],
++      },
++    );
++
++    const { content } = this.generator.generate({
++      baselineId: baseline.id,
++      jobId: job.id,
++      allowedBaselineBlocks: allowedBlocks,
++      job: {
++        id: job.id,
++        title: job.title ?? null,
++        company: job.company ?? null,
++        responsibilities: job.normalizedResponsibilities ?? [],
++        requirements: job.normalizedRequirements ?? [],
++      },
++      maxWords: input.maxWords,
++      tone: input.tone,
++    });
++
++    const coverLetter = this.coverLetterRepository.create({
++      userId,
++      baselineId: baseline.id,
++      jobId: job.id,
++      generatorType: 'template',
++      generatorVersion: 'v1',
++      content,
++      generationInputsHash,
++    });
++
++    return this.coverLetterRepository.save(coverLetter);
 +  }
-+}
-diff --git a/apps/api/src/cover-letters/cover-letters.module.ts b/apps/api/src/cover-letters/cover-letters.module.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..dd93bc9bfe827dfbe386a942e36ad0bccf067e13
---- /dev/null
-+++ b/apps/api/src/cover-letters/cover-letters.module.ts
-@@ -0,0 +1,12 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { CoverLetter } from './cover-letter.entity';
-+import { CoverLettersController } from './cover-letters.controller';
-+import { CoverLettersService } from './cover-letters.service';
 +
-+@Module({
-+  imports: [TypeOrmModule.forFeature([CoverLetter])],
-+  controllers: [CoverLettersController],
-+  providers: [CoverLettersService],
-+})
-+export class CoverLettersModule {}
-diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c98cef8f00ee5dfe0c5a2849aa4114f9a8238026
---- /dev/null
-+++ b/apps/api/src/cover-letters/cover-letters.service.ts
-@@ -0,0 +1,15 @@
-+import { Injectable } from '@nestjs/common';
-+import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
++  async listCoverLetters(userId: string) {
++    return this.coverLetterRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++  }
 +
-+@Injectable()
-+export class CoverLettersService {
-+  buildNotImplementedResponse(
-+    _userId: string,
-+    _input: GenerateCoverLetterDto,
++  async getCoverLetter(userId: string, id: string) {
++    const coverLetter = await this.coverLetterRepository.findOne({
++      where: { id, userId },
++    });
++
++    if (!coverLetter) {
++      throw new NotFoundException('Cover letter not found');
++    }
++
++    return coverLetter;
++  }
++
++  async deleteCoverLetter(userId: string, id: string) {
++    const coverLetter = await this.coverLetterRepository.findOne({
++      where: { id, userId },
++    });
++
++    if (!coverLetter) {
++      throw new NotFoundException('Cover letter not found');
++    }
++
++    await this.coverLetterRepository.remove(coverLetter);
++
++    return { deleted: true, id };
++  }
++
++  private applyPoliciesToSections(
++    sections: BaselineSection[],
++    policies: BaselineBlockPolicy[],
+   ) {
+-    return {
+-      status: 'not_implemented',
+-      message: 'Cover letter generation is not implemented yet.',
++    if (!policies.length) {
++      return [...sections].sort((a, b) => a.order - b.order);
++    }
++
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      policies.map((policy) => [policy.baselineSectionId, policy]),
++    );
++
++    return [...sections]
++      .map((section) => {
++        const policy = policyMap.get(section.id);
++        return {
++          ...section,
++          includePolicy: policy?.includePolicy ?? section.includePolicy,
++          order: policy?.order ?? section.order,
++          sectionType: section.sectionType ?? section.type,
++        } as BaselineSection;
++      })
++      .sort((a, b) => a.order - b.order);
++  }
++
++  private mapToAllowedBlocks(
++    sections: BaselineSection[],
++  ): AllowedBaselineBlock[] {
++    return sections.map((section, index) => ({
++      id: section.id,
++      title: section.title ?? null,
++      content: this.sanitizeContent(section.content),
++      includePolicy:
++        section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
++      order: section.order ?? index,
++      sectionType:
++        section.sectionType ?? section.type ?? BaselineSectionType.OTHER,
++    }));
++  }
++
++  private sanitizeContent(content?: string | null) {
++    if (!content) {
++      return '';
++    }
++
++    return content
++      .replace(/\r\n/g, '\n')
++      .replace(/\r/g, '\n')
++      .replace(/\t/g, ' ')
++      .replace(/\u00a0/g, ' ')
++      .replace(/\s+/g, ' ')
++      .trim();
++  }
++
++  private computeGenerationInputsHash(
++    baselineId: string,
++    jobId: string,
++    allowedBlocks: AllowedBaselineBlock[],
++    job: CoverLetterJobContext,
 +  ) {
++    const normalizedBaseline = allowedBlocks
++      .map((block) => ({
++        id: block.id,
++        title: block.title ?? null,
++        order: block.order,
++        includePolicy: block.includePolicy,
++        sectionType: block.sectionType,
++        content: block.content,
++      }))
++      .sort((a, b) => a.order - b.order);
++
++    const normalizedJob = {
++      id: job.id,
++      title: job.title ?? null,
++      company: job.company ?? null,
++      responsibilities: (job.responsibilities ?? []).map((item) =>
++        (item ?? '').trim(),
++      ),
++      requirements: (job.requirements ?? []).map((item) =>
++        (item ?? '').trim(),
++      ),
+     };
++
++    const payload = {
++      baselineId,
++      jobId,
++      baseline: normalizedBaseline,
++      job: normalizedJob,
++    };
++
++    return createHash('sha256')
++      .update(JSON.stringify(payload))
++      .digest('hex');
+   }
+ }
+diff --git a/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..972c340ca3fb708211ee067cd002cafdff2311fd
+--- /dev/null
++++ b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
+@@ -0,0 +1,39 @@
++import {
++  BaselineIncludePolicy,
++  BaselineSectionType,
++} from '../../baseline/baseline-section.entity';
++
++export type AllowedBaselineBlock = {
++  id: string;
++  title: string | null;
++  content: string;
++  includePolicy: BaselineIncludePolicy;
++  order: number;
++  sectionType: BaselineSectionType;
++};
++
++export type CoverLetterJobContext = {
++  id: string;
++  title: string | null;
++  company: string | null;
++  responsibilities: string[];
++  requirements: string[];
++};
++
++export type CoverLetterGenerationInput = {
++  baselineId: string;
++  jobId: string;
++  allowedBaselineBlocks: AllowedBaselineBlock[];
++  job: CoverLetterJobContext;
++  maxWords?: number;
++  tone?: string;
++};
++
++export type CoverLetterGenerationResult = {
++  content: string;
++  wordCount: number;
++};
++
++export interface CoverLetterGenerator {
++  generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult;
++}
+diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..07560b398beff6a9d474c2385ba662230d619fda
+--- /dev/null
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+@@ -0,0 +1,252 @@
++import {
++  AllowedBaselineBlock,
++  CoverLetterGenerationInput,
++  CoverLetterGenerationResult,
++  CoverLetterGenerator,
++  CoverLetterJobContext,
++} from './cover-letter-generator.interface';
++
++type NormalizedJobContext = CoverLetterJobContext & {
++  title: string | null;
++  company: string | null;
++  responsibilities: string[];
++  requirements: string[];
++};
++
++export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
++  generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
++    const wordLimit = this.resolveWordLimit(input.maxWords);
++    const normalizedJob = this.normalizeJob(input.job);
++    const tone = input.tone?.trim() || null;
++    const focusAreas = this.buildFocusAreas(normalizedJob);
++    const baselineSnippets = this.extractBaselineSnippets(
++      input.allowedBaselineBlocks,
++    );
++
++    const intro = this.buildIntroParagraph(normalizedJob, tone);
++    const strengths = this.buildStrengthsParagraph(
++      baselineSnippets,
++      focusAreas,
++      tone,
++    );
++    const execution = this.buildExecutionParagraph(
++      normalizedJob,
++      baselineSnippets,
++      focusAreas,
++    );
++    const closing = this.buildClosingParagraph(normalizedJob, tone);
++
++    let content = [intro, strengths, execution, closing]
++      .map((paragraph) => paragraph.trim())
++      .filter((paragraph) => paragraph.length > 0)
++      .join('\n\n')
++      .trim();
++
++    let wordCount = this.countWords(content);
++    if (wordCount > wordLimit) {
++      content = this.trimToWordLimit(content, wordLimit);
++      wordCount = this.countWords(content);
++    }
++
 +    return {
-+      status: 'not_implemented',
-+      message: 'Cover letter generation is not implemented yet.',
++      content,
++      wordCount,
 +    };
 +  }
-+}
-diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..33b1655c56c546567fc4c765201b959a67987cd5
---- /dev/null
-+++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-@@ -0,0 +1,9 @@
-+export class GenerateCoverLetterDto {
-+  baselineId!: string;
 +
-+  jobId!: string;
++  private resolveWordLimit(maxWords?: number | null) {
++    if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
++      return 350;
++    }
 +
-+  maxWords?: number;
-+
-+  tone?: string;
-+}
-diff --git a/apps/api/src/migrations/1790000000000-CoverLetters.ts b/apps/api/src/migrations/1790000000000-CoverLetters.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..8052dbd5b27235cd11ee443bd963c9d070df6eff
---- /dev/null
-+++ b/apps/api/src/migrations/1790000000000-CoverLetters.ts
-@@ -0,0 +1,54 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class CoverLetters1790000000000 implements MigrationInterface {
-+  name = 'CoverLetters1790000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
-+
-+    await queryRunner.query(`
-+      CREATE TABLE "cover_letters" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "userId" uuid NOT NULL,
-+        "jobId" uuid NOT NULL,
-+        "baselineId" uuid NOT NULL,
-+        "generatorType" character varying NOT NULL DEFAULT 'template',
-+        "generatorVersion" character varying NOT NULL DEFAULT 'v1',
-+        "content" text NOT NULL,
-+        "generationInputsHash" character varying(255),
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_cover_letters_id" PRIMARY KEY ("id")
-+      )
-+    `);
-+
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_cover_letters_userId" ON "cover_letters" ("userId")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_cover_letters_jobId" ON "cover_letters" ("jobId")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_cover_letters_baselineId" ON "cover_letters" ("baselineId")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_cover_letters_createdAt" ON "cover_letters" ("createdAt")`,
-+    );
++    const clamped = Math.min(Math.max(Math.floor(maxWords), 250), 400);
++    return clamped;
 +  }
 +
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_cover_letters_createdAt"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_cover_letters_baselineId"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_cover_letters_jobId"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_cover_letters_userId"`,
-+    );
-+    await queryRunner.query(`DROP TABLE "cover_letters"`);
++  private normalizeJob(job: CoverLetterJobContext): NormalizedJobContext {
++    const sanitizeList = (items?: string[]) =>
++      (items ?? [])
++        .map((item) => item?.trim())
++        .filter((item): item is string => Boolean(item));
++
++    return {
++      ...job,
++      title: job.title?.trim() || null,
++      company: job.company?.trim() || null,
++      responsibilities: sanitizeList(job.responsibilities),
++      requirements: sanitizeList(job.requirements),
++    };
++  }
++
++  private cleanText(text?: string | null) {
++    return (text ?? '')
++      .replace(/\r\n/g, '\n')
++      .replace(/\r/g, '\n')
++      .replace(/\t/g, ' ')
++      .replace(/\u00a0/g, ' ')
++      .replace(/\s+/g, ' ')
++      .trim();
++  }
++
++  private buildFocusAreas(job: NormalizedJobContext) {
++    const merged = [...job.responsibilities, ...job.requirements];
++    const unique = Array.from(new Set(merged));
++    return unique.slice(0, 8);
++  }
++
++  private extractBaselineSnippets(blocks: AllowedBaselineBlock[]) {
++    const snippets: string[] = [];
++
++    blocks
++      .filter((block) => this.cleanText(block.content).length > 0)
++      .sort((a, b) => a.order - b.order)
++      .forEach((block) => {
++        const cleaned = this.cleanText(block.content);
++        const parts = cleaned
++          .split(/(?<=[.!?])\s+|\n+/)
++          .map((sentence) => sentence.trim())
++          .filter((sentence) => sentence.length > 0);
++
++        parts.forEach((part) => {
++          const capped = this.limitWords(part, 60);
++          if (capped.length > 0) {
++            snippets.push(capped);
++          }
++        });
++      });
++
++    return snippets.slice(0, 12);
++  }
++
++  private buildIntroParagraph(job: NormalizedJobContext, tone: string | null) {
++    const roleDescriptor =
++      job.title && job.company
++        ? `the ${job.title} role at ${job.company}`
++        : job.title
++          ? `the ${job.title} role`
++          : job.company
++            ? `an opening at ${job.company}`
++            : 'the role you outlined';
++
++    const toneDescriptor = tone ? ` in a ${tone} manner` : '';
++
++    return `I am writing to express my interest in ${roleDescriptor}. I appreciate the chance to present a concise and candid overview of my background, focusing only on information that is already documented${toneDescriptor}. The baseline materials I provided outline my verified experience, and I will rely on those details as I address the responsibilities of the role. I will mirror the priorities listed in the job description and keep every statement anchored to that verified record.`;
++  }
++
++  private buildStrengthsParagraph(
++    baselineSnippets: string[],
++    focusAreas: string[],
++    tone: string | null,
++  ) {
++    const highlightList = baselineSnippets.slice(0, 3);
++    const experienceContext =
++      baselineSnippets.length > 3
++        ? `Beyond these highlights, the remaining baseline material provides additional context on how I approach planning, collaboration, and execution without overstating outcomes.`
++        : 'The enclosed baseline content also captures how I plan work, collaborate with partners, and document progress without overextending claims.';
++
++    const focusLine =
++      focusAreas.length > 0
++        ? `These experiences relate to priorities such as ${this.formatList(
++            focusAreas.slice(0, 3),
++          )}.`
++        : 'These experiences give you a clear view of how I work and what I can contribute.';
++
++    const tonePhrase = tone ? ` I communicate in a ${tone} voice` : '';
++
++    if (highlightList.length === 0) {
++      return `From my documented background, you will find detailed examples of how I operate.${tonePhrase} ${experienceContext} ${focusLine} Each excerpt comes directly from the approved baseline so the narrative stays factual and consistent.`;
++    }
++
++    return `Key points from my background include ${this.formatList(
++      highlightList,
++    )}.${tonePhrase} ${experienceContext} ${focusLine} Each excerpt comes directly from the approved baseline so the narrative stays factual and consistent.`;
++  }
++
++  private buildExecutionParagraph(
++    job: NormalizedJobContext,
++    baselineSnippets: string[],
++    focusAreas: string[],
++  ) {
++    const supportedLine =
++      baselineSnippets.length > 0
++        ? `I will ground my approach in the practices and outcomes already recorded, such as ${this.formatList(
++            baselineSnippets.slice(0, 2),
++          )}.`
++        : 'I will ground my approach in the practices and outcomes already recorded in my baseline.';
++
++    const focusLine =
++      focusAreas.length > 0
++        ? `For responsibilities like ${this.formatList(
++            focusAreas,
++          )}, I will reference the documented work above, confirm expectations early, and avoid overstating experience when a requirement extends beyond that record.`
++        : 'I will confirm expectations early and avoid overstating experience, keeping my work aligned with documented strengths.';
++
++    const collaborationLine = job.company
++      ? `At ${job.company}, I will collaborate closely to ensure every commitment is backed by evidence from my baseline.`
++      : 'I will collaborate closely to ensure every commitment is backed by evidence from my baseline.';
++    const neutralLine =
++      'Where a requirement extends beyond the baseline, I will flag it early, seek clarity, and adjust plans so that delivery remains honest and dependable.';
++    const workflowLine =
++      'My plan is straightforward: clarify scope, pair each priority with the most relevant baseline evidence, outline checkpoints, and document decisions so that expectations stay aligned.';
++
++    return `${supportedLine} ${focusLine} ${collaborationLine} ${neutralLine} ${workflowLine}`;
++  }
++
++  private buildClosingParagraph(job: NormalizedJobContext, tone: string | null) {
++    const appreciation = job.company
++      ? `Thank you for considering how my documented background can serve ${job.company}.`
++      : 'Thank you for considering how my documented background can serve your team.';
++    const roleReminder = job.title
++      ? `I look forward to the possibility of discussing the ${job.title} role further`
++      : 'I look forward to the possibility of discussing this opportunity further';
++    const toneLine = tone ? ` and sharing more in the same ${tone} style` : '';
++    const evidenceLine =
++      ' I am prepared to share any additional excerpts from my baseline to keep our conversation precise and verifiable.';
++    const nextStepLine =
++      ' Please let me know a convenient time to connect, and I will prepare a brief walkthrough of the most relevant baseline highlights.';
++
++    return `${appreciation} ${roleReminder}${toneLine}.${evidenceLine}${nextStepLine}`;
++  }
++
++  private formatList(items: string[]) {
++    const cleaned = items.map((item) => this.cleanText(item)).filter(Boolean);
++
++    if (cleaned.length === 0) {
++      return '';
++    }
++
++    if (cleaned.length === 1) {
++      return cleaned[0];
++    }
++
++    if (cleaned.length === 2) {
++      return `${cleaned[0]} and ${cleaned[1]}`;
++    }
++
++    const last = cleaned[cleaned.length - 1];
++    return `${cleaned.slice(0, -1).join(', ')}, and ${last}`;
++  }
++
++  private limitWords(text: string, limit: number) {
++    const words = text.split(/\s+/).filter(Boolean);
++    if (words.length <= limit) {
++      return this.cleanText(text);
++    }
++
++    return this.cleanText(words.slice(0, limit).join(' '));
++  }
++
++  private trimToWordLimit(text: string, limit: number) {
++    const words = text.split(/\s+/).filter(Boolean);
++    if (words.length <= limit) {
++      return text.trim();
++    }
++
++    const trimmed = words.slice(0, limit).join(' ').trim();
++    return trimmed.endsWith('.') ? trimmed : `${trimmed}.`;
++  }
++
++  private countWords(text: string) {
++    return text.split(/\s+/).filter(Boolean).length;
 +  }
 +}
