@@ -1,79 +1,116 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { InterviewResponse } from './interview-response.entity';
 import { InterviewSession } from './interview-session.entity';
 
-export type CreateInterviewSessionInput = {
-  baselineId: string;
+export type CreateInterviewDto = {
+  baselineId?: string;
   jobId?: string | null;
+  date?: string;
+  type?: string;
 };
 
-export type CreateInterviewResponseInput = {
-  question: string;
-  response: string;
+export type UpdateInterviewDto = Partial<CreateInterviewDto> & {
+  status?: string;
 };
 
 @Injectable()
 export class InterviewsService {
   constructor(
     @InjectRepository(InterviewSession)
-    private readonly sessionRepository: Repository<InterviewSession>,
-    @InjectRepository(InterviewResponse)
-    private readonly responseRepository: Repository<InterviewResponse>,
+    private readonly interviewRepository: Repository<InterviewSession>,
   ) {}
 
-  async createSession(userId: string, payload: CreateInterviewSessionInput) {
-    const session = this.sessionRepository.create({
+  private validateDate(date?: string | null) {
+    if (!date?.trim()) {
+      throw new BadRequestException('Interview date is required.');
+    }
+  }
+
+  private validateType(type?: string | null) {
+    if (type !== undefined && !type?.trim()) {
+      throw new BadRequestException('Interview type is required.');
+    }
+  }
+
+  private validateBaselineId(baselineId?: string | null) {
+    if (!baselineId?.trim()) {
+      throw new BadRequestException('Baseline ID is required.');
+    }
+  }
+
+  async createInterview(userId: string, dto: CreateInterviewDto) {
+    this.validateDate(dto.date ?? null);
+    this.validateType(dto.type ?? null);
+    this.validateBaselineId(dto.baselineId ?? null);
+
+    const interview = this.interviewRepository.create({
       userId,
-      baselineId: payload.baselineId.trim(),
-      jobId: payload.jobId?.trim() || null,
-      status: 'active',
+      baselineId: dto.baselineId!.trim(),
+      jobId: dto.jobId?.trim() || null,
+      status: dto.type?.trim() || 'scheduled',
     });
 
-    return this.sessionRepository.save(session);
-  }
-
-  async addResponses(
-    sessionId: string,
-    userId: string,
-    responses: CreateInterviewResponseInput[],
-  ) {
-    const session = await this.sessionRepository.findOne({
-      where: { id: sessionId, userId },
-    });
-
-    if (!session) {
-      throw new NotFoundException('Interview session not found');
+    if (dto.date) {
+      interview.createdAt = new Date(dto.date);
     }
 
-    const responseEntities = responses.map((entry) =>
-      this.responseRepository.create({
-        sessionId: session.id,
-        question: entry.question.trim(),
-        response: entry.response.trim(),
-      }),
-    );
+    return this.interviewRepository.save(interview);
+  }
 
-    await this.responseRepository.save(responseEntities);
-
-    return this.responseRepository.find({
-      where: { sessionId: session.id },
-      order: { createdAt: 'ASC' },
+  async listInterviewsForUser(userId: string) {
+    return this.interviewRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
     });
   }
 
-  async getSession(sessionId: string, userId: string) {
-    const session = await this.sessionRepository.findOne({
-      where: { id: sessionId, userId },
-      relations: ['responses'],
-      order: { responses: { createdAt: 'ASC' } },
+  async getInterviewForUser(id: string, userId: string) {
+    const interview = await this.interviewRepository.findOne({
+      where: { id, userId },
     });
 
-    if (!session) {
-      throw new NotFoundException('Interview session not found');
+    if (!interview) {
+      throw new NotFoundException('Interview not found');
     }
 
-    return session;
+    return interview;
+  }
+
+  async updateInterview(id: string, userId: string, dto: UpdateInterviewDto) {
+    const interview = await this.getInterviewForUser(id, userId);
+
+    if (dto.date !== undefined) {
+      this.validateDate(dto.date ?? null);
+      interview.createdAt = new Date(dto.date);
+    }
+
+    if (dto.type !== undefined) {
+      this.validateType(dto.type ?? null);
+      interview.status = dto.type?.trim() || interview.status;
+    }
+
+    if (dto.baselineId !== undefined) {
+      this.validateBaselineId(dto.baselineId ?? null);
+      interview.baselineId = dto.baselineId?.trim() || interview.baselineId;
+    }
+
+    if (dto.jobId !== undefined) {
+      interview.jobId = dto.jobId?.trim() || null;
+    }
+
+    if (dto.status !== undefined) {
+      interview.status = dto.status;
+    }
+
+    return this.interviewRepository.save(interview);
+  }
+
+  async deleteInterview(id: string, userId: string) {
+    const interview = await this.getInterviewForUser(id, userId);
+
+    await this.interviewRepository.remove(interview);
+
+    return { deleted: true, id };
   }
 }

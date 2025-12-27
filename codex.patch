@@ -1,164 +1,128 @@
-﻿diff --git a/apps/api/src/applications/applications.controller.spec.ts b/apps/api/src/applications/applications.controller.spec.ts
+﻿diff --git a/apps/api/src/interviews/interviews.controller.spec.ts b/apps/api/src/interviews/interviews.controller.spec.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e11573139d61fe805bfc550f0fd48e9682a3205d
+index 0000000000000000000000000000000000000000..d204e3700fff6d82492a363a61c91b8974ec7b99
 --- /dev/null
-+++ b/apps/api/src/applications/applications.controller.spec.ts
-@@ -0,0 +1,116 @@
++++ b/apps/api/src/interviews/interviews.controller.spec.ts
+@@ -0,0 +1,82 @@
 +import { BadRequestException } from '@nestjs/common';
-+import { ApplicationsController } from './applications.controller';
-+import { ApplicationsService } from './applications.service';
-+import { ApplicationStage } from './application.entity';
++import { InterviewsController } from './interviews.controller';
++import { InterviewsService } from './interviews.service';
 +
-+describe('ApplicationsController', () => {
++describe('InterviewsController', () => {
 +  const createMockRequest = (userId?: string) =>
 +    ({ user: userId ? { id: userId } : undefined } as { user?: { id?: string } });
 +
-+  const createMockResponse = () => {
-+    const response: Partial<{ setHeader: jest.Mock; send: jest.Mock }> = {
-+      setHeader: jest.fn(),
-+      send: jest.fn(),
-+    };
-+
-+    response.send.mockReturnValue('csv-data');
-+
-+    return response;
-+  };
-+
 +  const createMockService = () =>
 +    ({
-+      createApplication: jest.fn().mockResolvedValue({ id: 'app-1' }),
-+      listApplicationsForUser: jest.fn().mockResolvedValue([]),
-+      getApplicationForUser: jest.fn().mockResolvedValue({ id: 'app-1' }),
-+      updateApplication: jest.fn().mockResolvedValue({ id: 'app-1', stage: ApplicationStage.APPLIED }),
-+      deleteApplication: jest.fn().mockResolvedValue({ deleted: true, id: 'app-1' }),
-+      exportApplicationsToCsv: jest.fn().mockResolvedValue('csv-data'),
-+    }) as unknown as ApplicationsService;
++      createInterview: jest.fn().mockResolvedValue({ id: 'interview-1' }),
++      listInterviewsForUser: jest.fn().mockResolvedValue([]),
++      getInterviewForUser: jest.fn().mockResolvedValue({ id: 'interview-1' }),
++      updateInterview: jest.fn().mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
++      deleteInterview: jest.fn().mockResolvedValue({ deleted: true, id: 'interview-1' }),
++    }) as unknown as InterviewsService;
 +
 +  afterEach(() => {
 +    jest.restoreAllMocks();
 +  });
 +
-+  it('throws when user is missing', async () => {
++  it('throws when user is missing on create', async () => {
 +    const service = createMockService();
-+    const controller = new ApplicationsController(service);
++    const controller = new InterviewsController(service);
 +
-+    await expect(
-+      controller.createApplication({ company: 'Acme', title: 'Engineer' } as any, createMockRequest()),
-+    ).rejects.toThrow(BadRequestException);
-+  });
-+
-+  it('creates application with user context', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const body = { company: 'Acme', title: 'Engineer' };
-+    const request = createMockRequest('user-1');
-+
-+    await controller.createApplication(body as any, request as any);
-+
-+    expect(service.createApplication).toHaveBeenCalledWith('user-1', body);
-+  });
-+
-+  it('lists applications with filters', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const request = createMockRequest('user-1');
-+
-+    await controller.listApplications(request as any, ApplicationStage.SAVED, 'Acme');
-+
-+    expect(service.listApplicationsForUser).toHaveBeenCalledWith('user-1', {
-+      stage: ApplicationStage.SAVED,
-+      company: 'Acme',
-+    });
-+  });
-+
-+  it('gets application for user', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const request = createMockRequest('user-1');
-+
-+    await controller.getApplication('app-1', request as any);
-+
-+    expect(service.getApplicationForUser).toHaveBeenCalledWith('app-1', 'user-1');
-+  });
-+
-+  it('updates application for user', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const request = createMockRequest('user-1');
-+    const update = { stage: ApplicationStage.INTERVIEWING };
-+
-+    await controller.updateApplication('app-1', update as any, request as any);
-+
-+    expect(service.updateApplication).toHaveBeenCalledWith('app-1', 'user-1', update);
-+  });
-+
-+  it('deletes application for user', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const request = createMockRequest('user-1');
-+
-+    await controller.deleteApplication('app-1', request as any);
-+
-+    expect(service.deleteApplication).toHaveBeenCalledWith('app-1', 'user-1');
-+  });
-+
-+  it('exports applications as csv and sets headers', async () => {
-+    const service = createMockService();
-+    const controller = new ApplicationsController(service);
-+    const request = createMockRequest('user-1');
-+    const response = createMockResponse();
-+
-+    const result = await controller.exportApplications(request as any, response as any);
-+
-+    expect(service.exportApplicationsToCsv).toHaveBeenCalledWith('user-1');
-+    expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'text/csv');
-+    expect(response.setHeader).toHaveBeenCalledWith(
-+      'Content-Disposition',
-+      'attachment; filename=\"applications.csv\"',
++    await expect(controller.createInterview({}, createMockRequest())).rejects.toThrow(
++      BadRequestException,
 +    );
-+    expect(response.send).toHaveBeenCalledWith('csv-data');
-+    expect(result).toBe('csv-data');
++  });
++
++  it('creates interview with user context', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++    const body = { baselineId: 'baseline-1', date: '2024-02-01', type: 'phone' };
++
++    await controller.createInterview(body, request as any);
++
++    expect(service.createInterview).toHaveBeenCalledWith('user-1', body);
++  });
++
++  it('lists interviews for user', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++
++    await controller.listInterviews(request as any);
++
++    expect(service.listInterviewsForUser).toHaveBeenCalledWith('user-1');
++  });
++
++  it('gets interview for user', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++
++    await controller.getInterview('interview-1', request as any);
++
++    expect(service.getInterviewForUser).toHaveBeenCalledWith('interview-1', 'user-1');
++  });
++
++  it('updates interview for user', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++    const update = { status: 'confirmed' };
++
++    await controller.updateInterview('interview-1', update, request as any);
++
++    expect(service.updateInterview).toHaveBeenCalledWith('interview-1', 'user-1', update);
++  });
++
++  it('deletes interview for user', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++
++    await controller.deleteInterview('interview-1', request as any);
++
++    expect(service.deleteInterview).toHaveBeenCalledWith('interview-1', 'user-1');
 +  });
 +});
-diff --git a/apps/api/src/applications/applications.controller.ts b/apps/api/src/applications/applications.controller.ts
-index dae5ddd2e38012302bcb902c28a0204ab0d71320..7e65c9eefdf3dce3b23f03af7bbb309551225a42 100644
---- a/apps/api/src/applications/applications.controller.ts
-+++ b/apps/api/src/applications/applications.controller.ts
-@@ -1,81 +1,85 @@
+diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
+index 1bc72b8416860febc824b1d6f62696de0bd5e5d1..2e77a93a69bb3d0f1824e7512c774c076a629b79 100644
+--- a/apps/api/src/interviews/interviews.controller.ts
++++ b/apps/api/src/interviews/interviews.controller.ts
+@@ -1,86 +1,89 @@
  import {
    BadRequestException,
    Body,
    Controller,
-   Delete,
++  Delete,
    Get,
--  Header,
    Param,
-   Patch,
++  Patch,
    Post,
-   Query,
    Req,
-+  Res,
    UseGuards,
  } from '@nestjs/common';
  import { AuthGuard } from '@nestjs/passport';
 -import { Request } from 'express';
-+import { Request, Response } from 'express';
- import {
-   ApplicationsService,
-   ListApplicationsFilters,
- } from './applications.service';
- import { CreateApplicationDto } from './dto/create-application.dto';
- import { UpdateApplicationDto } from './dto/update-application.dto';
- import { ApplicationStage } from './application.entity';
+-import {
+-  CreateInterviewResponseInput,
+-  CreateInterviewSessionInput,
+-  InterviewsService,
+-} from './interviews.service';
++import type { Request } from 'express';
++import { InterviewsService } from './interviews.service';
  
- @Controller('applications')
+ @Controller('interviews')
  @UseGuards(AuthGuard('jwt'))
- export class ApplicationsController {
-   constructor(private readonly applicationsService: ApplicationsService) {}
+ export class InterviewsController {
+   constructor(private readonly interviewsService: InterviewsService) {}
  
    @Post()
-   async createApplication(
-     @Body() body: CreateApplicationDto,
+-  async createSession(
+-    @Body() body: Partial<CreateInterviewSessionInput>,
++  async createInterview(
++    @Body() body: any,
      @Req() request: Request & { user?: { id?: string } },
    ) {
      const userId = request.user?.id;
@@ -167,15 +131,37 @@ index dae5ddd2e38012302bcb902c28a0204ab0d71320..7e65c9eefdf3dce3b23f03af7bbb3095
        throw new BadRequestException('Invalid user context');
      }
  
-     return this.applicationsService.createApplication(userId, body);
+-    const baselineId = body.baselineId?.trim();
++    return this.interviewsService.createInterview(userId, body);
++  }
++
++  @Get()
++  async listInterviews(@Req() request: Request & { user?: { id?: string } }) {
++    const userId = request.user?.id;
+ 
+-    if (!baselineId) {
+-      throw new BadRequestException('Baseline ID is required');
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
+     }
+ 
+-    return this.interviewsService.createSession(userId, {
+-      baselineId,
+-      jobId: body.jobId,
+-    });
++    return this.interviewsService.listInterviewsForUser(userId);
    }
  
-   @Get('export')
--  @Header('Content-Type', 'text/csv')
--  @Header('Content-Disposition', 'attachment; filename="applications.csv"')
-   async exportApplications(
+-  @Post(':id/responses')
+-  async addResponses(
++  @Get(':id')
++  async getInterview(
+     @Param('id') id: string,
+-    @Body()
+-    body: {
+-      responses?: CreateInterviewResponseInput[];
+-    },
      @Req() request: Request & { user?: { id?: string } },
-+    @Res() response: Response,
    ) {
      const userId = request.user?.id;
  
@@ -183,20 +169,36 @@ index dae5ddd2e38012302bcb902c28a0204ab0d71320..7e65c9eefdf3dce3b23f03af7bbb3095
        throw new BadRequestException('Invalid user context');
      }
  
--    return this.applicationsService.exportApplicationsToCsv(userId);
-+    const csv = await this.applicationsService.exportApplicationsToCsv(userId);
+-    const responses = body.responses?.filter(
+-      (entry) => entry.question?.trim() && entry.response?.trim(),
+-    );
++    return this.interviewsService.getInterviewForUser(id, userId);
++  }
 +
-+    response.setHeader('Content-Type', 'text/csv');
-+    response.setHeader('Content-Disposition', 'attachment; filename="applications.csv"');
-+
-+    return response.send(csv);
++  @Patch(':id')
++  async updateInterview(
++    @Param('id') id: string,
++    @Body() body: any,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
+ 
+-    if (!responses || responses.length === 0) {
+-      throw new BadRequestException('Responses are required');
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
+     }
+ 
+-    return this.interviewsService.addResponses(id, userId, responses);
++    return this.interviewsService.updateInterview(id, userId, body);
    }
  
-   @Get()
-   async listApplications(
+-  @Get(':id')
+-  async getSession(
++  @Delete(':id')
++  async deleteInterview(
+     @Param('id') id: string,
      @Req() request: Request & { user?: { id?: string } },
-     @Query('stage') stage?: ApplicationStage,
-     @Query('company') company?: string,
    ) {
      const userId = request.user?.id;
  
@@ -204,26 +206,460 @@ index dae5ddd2e38012302bcb902c28a0204ab0d71320..7e65c9eefdf3dce3b23f03af7bbb3095
        throw new BadRequestException('Invalid user context');
      }
  
-     const filters: ListApplicationsFilters = {};
- 
-     if (stage) {
-       filters.stage = stage;
-     }
- 
-     if (company) {
-       filters.company = company;
-     }
- 
-     return this.applicationsService.listApplicationsForUser(userId, filters);
-diff --git a/apps/web/app/api/applications/export/route.ts b/apps/web/app/api/applications/export/route.ts
+-    return this.interviewsService.getSession(id, userId);
++    return this.interviewsService.deleteInterview(id, userId);
+   }
+ }
+diff --git a/apps/api/src/interviews/interviews.service.spec.ts b/apps/api/src/interviews/interviews.service.spec.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..b57a2577f7b5710615abd9a9f7ea69cbe4b001ef
+index 0000000000000000000000000000000000000000..8006373452baabfb11d52f3ad590f0f04aafdfba
 --- /dev/null
-+++ b/apps/web/app/api/applications/export/route.ts
-@@ -0,0 +1,28 @@
-+import { NextRequest, NextResponse } from "next/server";
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++++ b/apps/api/src/interviews/interviews.service.spec.ts
+@@ -0,0 +1,173 @@
++import { BadRequestException, NotFoundException } from '@nestjs/common';
++import { InterviewsService } from './interviews.service';
++import { InterviewSession } from './interview-session.entity';
 +
++describe('InterviewsService', () => {
++  const mockInterview: InterviewSession = {
++    id: 'interview-1',
++    userId: 'user-1',
++    baselineId: 'baseline-1',
++    jobId: null,
++    status: 'scheduled',
++    createdAt: new Date('2024-01-01T00:00:00.000Z'),
++    updatedAt: new Date('2024-01-01T00:00:00.000Z'),
++    responses: [],
++  };
++
++  const createMockRepository = () => ({
++    create: jest.fn((data: Partial<InterviewSession>) => ({ ...mockInterview, ...data })),
++    save: jest.fn((data: InterviewSession) =>
++      Promise.resolve({
++        ...mockInterview,
++        ...data,
++        id: data.id || 'new-id',
++      }),
++    ),
++    find: jest.fn(),
++    findOne: jest.fn(),
++    remove: jest.fn((data: InterviewSession) => Promise.resolve(data)),
++  });
++
++  const createService = (repository = createMockRepository()) =>
++    new InterviewsService(repository as never);
++
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  describe('createInterview', () => {
++    it('creates interview with required fields', async () => {
++      const repository = createMockRepository();
++      const service = createService(repository);
++
++      const result = await service.createInterview('user-1', {
++        baselineId: 'baseline-1',
++        date: '2024-02-01',
++        type: 'phone',
++        jobId: 'job-1',
++      });
++
++      expect(repository.create).toHaveBeenCalledWith({
++        userId: 'user-1',
++        baselineId: 'baseline-1',
++        jobId: 'job-1',
++        status: 'phone',
++      });
++      expect(repository.save).toHaveBeenCalled();
++      expect(result.status).toBe('phone');
++      expect(result.createdAt).toEqual(new Date('2024-02-01'));
++    });
++
++    it('throws when date is missing', async () => {
++      const service = createService();
++
++      await expect(
++        service.createInterview('user-1', { baselineId: 'baseline-1' }),
++      ).rejects.toThrow(BadRequestException);
++    });
++
++    it('throws when baselineId is missing', async () => {
++      const service = createService();
++
++      await expect(
++        service.createInterview('user-1', { date: '2024-02-01' }),
++      ).rejects.toThrow(BadRequestException);
++    });
++  });
++
++  describe('listInterviewsForUser', () => {
++    it('lists interviews for user ordered by createdAt', async () => {
++      const repository = createMockRepository();
++      repository.find.mockResolvedValue([mockInterview]);
++      const service = createService(repository);
++
++      const result = await service.listInterviewsForUser('user-1');
++
++      expect(repository.find).toHaveBeenCalledWith({
++        where: { userId: 'user-1' },
++        order: { createdAt: 'DESC' },
++      });
++      expect(result).toEqual([mockInterview]);
++    });
++  });
++
++  describe('getInterviewForUser', () => {
++    it('returns interview when found', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(mockInterview);
++      const service = createService(repository);
++
++      const interview = await service.getInterviewForUser('interview-1', 'user-1');
++
++      expect(repository.findOne).toHaveBeenCalledWith({
++        where: { id: 'interview-1', userId: 'user-1' },
++      });
++      expect(interview).toEqual(mockInterview);
++    });
++
++    it('throws when interview not found', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(null);
++      const service = createService(repository);
++
++      await expect(service.getInterviewForUser('interview-1', 'user-1')).rejects.toThrow(
++        NotFoundException,
++      );
++    });
++  });
++
++  describe('updateInterview', () => {
++    it('updates interview fields with validation', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue({ ...mockInterview });
++      const service = createService(repository);
++
++      const result = await service.updateInterview('interview-1', 'user-1', {
++        date: '2024-03-01',
++        type: 'onsite',
++        jobId: 'job-2',
++        baselineId: 'baseline-2',
++        status: 'confirmed',
++      });
++
++      expect(repository.save).toHaveBeenCalled();
++      expect(result.jobId).toBe('job-2');
++      expect(result.baselineId).toBe('baseline-2');
++      expect(result.status).toBe('confirmed');
++      expect(result.createdAt).toEqual(new Date('2024-03-01'));
++    });
++
++    it('throws when type is empty', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue({ ...mockInterview });
++      const service = createService(repository);
++
++      await expect(
++        service.updateInterview('interview-1', 'user-1', { type: '' }),
++      ).rejects.toThrow(BadRequestException);
++    });
++
++    it('throws when date is empty', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue({ ...mockInterview });
++      const service = createService(repository);
++
++      await expect(
++        service.updateInterview('interview-1', 'user-1', { date: '' }),
++      ).rejects.toThrow(BadRequestException);
++    });
++  });
++
++  describe('deleteInterview', () => {
++    it('removes interview for user', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(mockInterview);
++      const service = createService(repository);
++
++      const result = await service.deleteInterview('interview-1', 'user-1');
++
++      expect(repository.remove).toHaveBeenCalled();
++      expect(result).toEqual({ deleted: true, id: 'interview-1' });
++    });
++  });
++});
+diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
+index c917f89856e0fb03db30de1782742ebf155bb89b..37c9b760340aa9660c4082177525c06e803c3e1c 100644
+--- a/apps/api/src/interviews/interviews.service.ts
++++ b/apps/api/src/interviews/interviews.service.ts
+@@ -1,79 +1,116 @@
+-import { Injectable, NotFoundException } from '@nestjs/common';
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+-import { InterviewResponse } from './interview-response.entity';
+ import { InterviewSession } from './interview-session.entity';
+ 
+-export type CreateInterviewSessionInput = {
+-  baselineId: string;
++export type CreateInterviewDto = {
++  baselineId?: string;
+   jobId?: string | null;
++  date?: string;
++  type?: string;
+ };
+ 
+-export type CreateInterviewResponseInput = {
+-  question: string;
+-  response: string;
++export type UpdateInterviewDto = Partial<CreateInterviewDto> & {
++  status?: string;
+ };
+ 
+ @Injectable()
+ export class InterviewsService {
+   constructor(
+     @InjectRepository(InterviewSession)
+-    private readonly sessionRepository: Repository<InterviewSession>,
+-    @InjectRepository(InterviewResponse)
+-    private readonly responseRepository: Repository<InterviewResponse>,
++    private readonly interviewRepository: Repository<InterviewSession>,
+   ) {}
+ 
+-  async createSession(userId: string, payload: CreateInterviewSessionInput) {
+-    const session = this.sessionRepository.create({
+-      userId,
+-      baselineId: payload.baselineId.trim(),
+-      jobId: payload.jobId?.trim() || null,
+-      status: 'active',
+-    });
++  private validateDate(date?: string | null) {
++    if (!date?.trim()) {
++      throw new BadRequestException('Interview date is required.');
++    }
++  }
+ 
+-    return this.sessionRepository.save(session);
++  private validateType(type?: string | null) {
++    if (type !== undefined && !type?.trim()) {
++      throw new BadRequestException('Interview type is required.');
++    }
++  }
++
++  private validateBaselineId(baselineId?: string | null) {
++    if (!baselineId?.trim()) {
++      throw new BadRequestException('Baseline ID is required.');
++    }
+   }
+ 
+-  async addResponses(
+-    sessionId: string,
+-    userId: string,
+-    responses: CreateInterviewResponseInput[],
+-  ) {
+-    const session = await this.sessionRepository.findOne({
+-      where: { id: sessionId, userId },
++  async createInterview(userId: string, dto: CreateInterviewDto) {
++    this.validateDate(dto.date ?? null);
++    this.validateType(dto.type ?? null);
++    this.validateBaselineId(dto.baselineId ?? null);
++
++    const interview = this.interviewRepository.create({
++      userId,
++      baselineId: dto.baselineId!.trim(),
++      jobId: dto.jobId?.trim() || null,
++      status: dto.type?.trim() || 'scheduled',
+     });
+ 
+-    if (!session) {
+-      throw new NotFoundException('Interview session not found');
++    if (dto.date) {
++      interview.createdAt = new Date(dto.date);
+     }
+ 
+-    const responseEntities = responses.map((entry) =>
+-      this.responseRepository.create({
+-        sessionId: session.id,
+-        question: entry.question.trim(),
+-        response: entry.response.trim(),
+-      }),
+-    );
+-
+-    await this.responseRepository.save(responseEntities);
++    return this.interviewRepository.save(interview);
++  }
+ 
+-    return this.responseRepository.find({
+-      where: { sessionId: session.id },
+-      order: { createdAt: 'ASC' },
++  async listInterviewsForUser(userId: string) {
++    return this.interviewRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
+     });
+   }
+ 
+-  async getSession(sessionId: string, userId: string) {
+-    const session = await this.sessionRepository.findOne({
+-      where: { id: sessionId, userId },
+-      relations: ['responses'],
+-      order: { responses: { createdAt: 'ASC' } },
++  async getInterviewForUser(id: string, userId: string) {
++    const interview = await this.interviewRepository.findOne({
++      where: { id, userId },
+     });
+ 
+-    if (!session) {
+-      throw new NotFoundException('Interview session not found');
++    if (!interview) {
++      throw new NotFoundException('Interview not found');
+     }
+ 
+-    return session;
++    return interview;
++  }
++
++  async updateInterview(id: string, userId: string, dto: UpdateInterviewDto) {
++    const interview = await this.getInterviewForUser(id, userId);
++
++    if (dto.date !== undefined) {
++      this.validateDate(dto.date ?? null);
++      interview.createdAt = new Date(dto.date);
++    }
++
++    if (dto.type !== undefined) {
++      this.validateType(dto.type ?? null);
++      interview.status = dto.type?.trim() || interview.status;
++    }
++
++    if (dto.baselineId !== undefined) {
++      this.validateBaselineId(dto.baselineId ?? null);
++      interview.baselineId = dto.baselineId?.trim() || interview.baselineId;
++    }
++
++    if (dto.jobId !== undefined) {
++      interview.jobId = dto.jobId?.trim() || null;
++    }
++
++    if (dto.status !== undefined) {
++      interview.status = dto.status;
++    }
++
++    return this.interviewRepository.save(interview);
++  }
++
++  async deleteInterview(id: string, userId: string) {
++    const interview = await this.getInterviewForUser(id, userId);
++
++    await this.interviewRepository.remove(interview);
++
++    return { deleted: true, id };
+   }
+ }
+diff --git a/apps/web/app/api/interviews/[id]/route.ts b/apps/web/app/api/interviews/[id]/route.ts
+index af1a910a74527dde8c7009ffb36088956e84692c..50bb8e9136200ab482b3e207e94365d78ab8c1c1 100644
+--- a/apps/web/app/api/interviews/[id]/route.ts
++++ b/apps/web/app/api/interviews/[id]/route.ts
+@@ -9,25 +9,89 @@ export async function GET(
+   const { id } = await context.params;
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+   const response = await fetch(`${baseUrl}/interviews/${id}`, {
+     method: "GET",
+     cache: "no-store",
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+   });
+ 
+   return relayApiResponse(response);
+ }
++
++export async function PATCH(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++    method: "PATCH",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
++
++export async function DELETE(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++    method: "DELETE",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/api/interviews/route.ts b/apps/web/app/api/interviews/route.ts
+index a8dba7a747bcff5e8f865909be0860a5cc607a4b..4c882c152436b4b902c6b0a8c72f27941714586e 100644
+--- a/apps/web/app/api/interviews/route.ts
++++ b/apps/web/app/api/interviews/route.ts
+@@ -1,29 +1,55 @@
+ import { NextRequest, NextResponse } from "next/server";
+ 
+ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+ 
 +export async function GET(req: NextRequest) {
 +  const baseUrl = getApiBaseUrl();
 +  const { token, error } = requireAuthToken(req);
@@ -239,7 +675,7 @@ index 0000000000000000000000000000000000000000..b57a2577f7b5710615abd9a9f7ea69cb
 +    return error;
 +  }
 +
-+  const response = await fetch(`${baseUrl}/applications/export`, {
++  const response = await fetch(`${baseUrl}/interviews`, {
 +    method: "GET",
 +    cache: "no-store",
 +    headers: {
@@ -249,3 +685,29 @@ index 0000000000000000000000000000000000000000..b57a2577f7b5710615abd9a9f7ea69cb
 +
 +  return relayApiResponse(response);
 +}
++
+ export async function POST(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+   const body = await req.json();
+ 
+   const response = await fetch(`${baseUrl}/interviews`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
