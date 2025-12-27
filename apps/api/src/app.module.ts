@@ -31,7 +31,7 @@ import { UsersModule } from './users/users.module';
           configService.get<string>('DATABASE_URL') ??
           'postgresql://postgres:postgres@db:5432/targetthisrole',
         entities: [User],
-        synchronize: configService.get<string>('NODE_ENV') !== 'production',
+        synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
         autoLoadEntities: true,
       }),
     }),

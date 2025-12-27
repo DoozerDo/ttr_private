@@ -24,6 +24,7 @@ services:
       - ../../apps/api/.env.development.local
     environment:
       NODE_ENV: development
+      TYPEORM_SYNCHRONIZE: "true"
 
     # DEV-ONLY service:
     # - mounts local source for live reload
