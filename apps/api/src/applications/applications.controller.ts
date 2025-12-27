@@ -4,23 +4,16 @@ import {
   Controller,
   Delete,
   Get,
-  Header,
   Param,
   Patch,
   Post,
-  Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Request } from 'express';
-import {
-  ApplicationsService,
-  ListApplicationsFilters,
-} from './applications.service';
-import { CreateApplicationDto } from './dto/create-application.dto';
-import { UpdateApplicationDto } from './dto/update-application.dto';
-import { ApplicationStage } from './application.entity';
+import type { Request, Response } from 'express';
+import { ApplicationsService } from './applications.service';
 
 @Controller('applications')
 @UseGuards(AuthGuard('jwt'))
@@ -29,56 +22,43 @@ export class ApplicationsController {
 
   @Post()
   async createApplication(
-    @Body() body: CreateApplicationDto,
+    @Body() dto: any,
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
-
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-
-    return this.applicationsService.createApplication(userId, body);
-  }
-
-  @Get('export')
-  @Header('Content-Type', 'text/csv')
-  @Header('Content-Disposition', 'attachment; filename="applications.csv"')
-  async exportApplications(
-    @Req() request: Request & { user?: { id?: string } },
-  ) {
-    const userId = request.user?.id;
-
-    if (!userId) {
-      throw new BadRequestException('Invalid user context');
-    }
-
-    return this.applicationsService.exportApplicationsToCsv(userId);
+    return this.applicationsService.createApplication(userId, dto);
   }
 
   @Get()
-  async listApplications(
+  async listApplications(@Req() request: Request & { user?: { id?: string } }) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    return this.applicationsService.listApplicationsForUser(userId);
+  }
+
+  @Get('export')
+  async exportApplications(
     @Req() request: Request & { user?: { id?: string } },
-    @Query('stage') stage?: ApplicationStage,
-    @Query('company') company?: string,
+    @Res() response: Response,
   ) {
     const userId = request.user?.id;
-
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
 
-    const filters: ListApplicationsFilters = {};
+    const csv = await this.applicationsService.exportApplicationsToCsv(userId);
 
-    if (stage) {
-      filters.stage = stage;
-    }
-
-    if (company) {
-      filters.company = company;
-    }
-
-    return this.applicationsService.listApplicationsForUser(userId, filters);
+    response.setHeader('Content-Type', 'text/csv');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="applications.csv"',
+    );
+    response.send(csv);
   }
 
   @Get(':id')
@@ -87,27 +67,23 @@ export class ApplicationsController {
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
-
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-
     return this.applicationsService.getApplicationForUser(id, userId);
   }
 
   @Patch(':id')
   async updateApplication(
     @Param('id') id: string,
-    @Body() body: UpdateApplicationDto,
+    @Body() dto: any,
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
-
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-
-    return this.applicationsService.updateApplication(id, userId, body);
+    return this.applicationsService.updateApplication(id, userId, dto);
   }
 
   @Delete(':id')
@@ -116,11 +92,9 @@ export class ApplicationsController {
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
-
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-
     return this.applicationsService.deleteApplication(id, userId);
   }
 }
