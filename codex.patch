@@ -1,41 +1,784 @@
-﻿diff --git a/apps/api/src/applications/applications.controller.ts b/apps/api/src/applications/applications.controller.ts
+﻿diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 4c291a59d7f4abafea588b1c6bdbdd95b4e2e9df..d627880c83a6f07410d19697afcbfc6bb29e1a52 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,49 +1,51 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { AppController } from './app.controller';
+ import { AppService } from './app.service';
+ import { AuthModule } from './auth/auth.module';
+ import { AnalysisModule } from './analysis/analysis.module';
+ import { ApplicationsModule } from './applications/applications.module';
+ import { BaselineModule } from './baseline/baseline.module';
+ import { ComplianceModule } from './compliance/compliance.module';
+ import { InterviewsModule } from './interviews/interviews.module';
+ import { JobsModule } from './jobs/jobs.module';
+ import { ResumeModule } from './resume/resume.module';
++import { SearchSetsModule } from './search-sets/search-sets.module';
+ import { User } from './users/user.entity';
+ import { UsersModule } from './users/users.module';
+ 
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env.local', '.env'],
+     }),
+     TypeOrmModule.forRootAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         type: 'postgres',
+         url:
+           configService.get<string>('DATABASE_URL') ??
+           'postgresql://postgres:postgres@db:5432/targetthisrole',
+         entities: [User],
+         synchronize: configService.get<string>('NODE_ENV') !== 'production',
+         autoLoadEntities: true,
+       }),
+     }),
+     UsersModule,
+     AuthModule,
+     AnalysisModule,
+     ApplicationsModule,
+     BaselineModule,
+     ComplianceModule,
+     InterviewsModule,
+     JobsModule,
++    SearchSetsModule,
+     ResumeModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/migrations/1770000000000-SearchSets.ts b/apps/api/src/migrations/1770000000000-SearchSets.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725fd9b8fc6e
+index 0000000000000000000000000000000000000000..7346f9e6e864598a795fc7c6cc8c9caa407a428b
 --- /dev/null
-+++ b/apps/api/src/applications/applications.controller.ts
-@@ -0,0 +1,142 @@
++++ b/apps/api/src/migrations/1770000000000-SearchSets.ts
+@@ -0,0 +1,48 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class SearchSets1770000000000 implements MigrationInterface {
++  name = 'SearchSets1770000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(`
++      CREATE TYPE "search_sets_seniority_enum" AS ENUM('ENTRY', 'MID', 'SENIOR', 'LEAD', 'EXECUTIVE', 'ANY')
++    `);
++
++    await queryRunner.query(`
++      CREATE TYPE "search_sets_workmode_enum" AS ENUM('REMOTE', 'HYBRID', 'ONSITE', 'ANY')
++    `);
++
++    await queryRunner.query(`
++      CREATE TABLE "search_sets" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" uuid NOT NULL,
++        "titlePatterns" jsonb NOT NULL DEFAULT '[]'::jsonb,
++        "seniority" "search_sets_seniority_enum" NOT NULL DEFAULT 'ANY',
++        "industry" jsonb NOT NULL DEFAULT '[]'::jsonb,
++        "workMode" "search_sets_workmode_enum" NOT NULL DEFAULT 'ANY',
++        "sourceUrl" character varying(2048),
++        "isActive" boolean NOT NULL DEFAULT true,
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_search_sets_id" PRIMARY KEY ("id")
++      )
++    `);
++
++    await queryRunner.query(
++      `CREATE INDEX "IDX_search_sets_userId" ON "search_sets" ("userId")`,
++    );
++    await queryRunner.query(
++      `CREATE INDEX "IDX_search_sets_isActive" ON "search_sets" ("isActive")`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_search_sets_isActive"`);
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_search_sets_userId"`);
++    await queryRunner.query(`DROP TABLE "search_sets"`);
++    await queryRunner.query(`DROP TYPE "search_sets_workmode_enum"`);
++    await queryRunner.query(`DROP TYPE "search_sets_seniority_enum"`);
++  }
++}
+diff --git a/apps/api/src/search-sets/dto/create-search-set.dto.ts b/apps/api/src/search-sets/dto/create-search-set.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e92a863ef74a12e11feccd753f83bb360a17e921
+--- /dev/null
++++ b/apps/api/src/search-sets/dto/create-search-set.dto.ts
+@@ -0,0 +1,10 @@
++import { SearchSetSeniority, SearchSetWorkMode } from '../search-set.entity';
++
++export class CreateSearchSetDto {
++  titlePatterns?: string[];
++  seniority?: SearchSetSeniority;
++  industry?: string[];
++  workMode?: SearchSetWorkMode;
++  sourceUrl?: string | null;
++  isActive?: boolean;
++}
+diff --git a/apps/api/src/search-sets/dto/update-search-set.dto.ts b/apps/api/src/search-sets/dto/update-search-set.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e07685092fa9dbdfc3d45b87510c4cd2680f842
+--- /dev/null
++++ b/apps/api/src/search-sets/dto/update-search-set.dto.ts
+@@ -0,0 +1,10 @@
++import { SearchSetSeniority, SearchSetWorkMode } from '../search-set.entity';
++
++export class UpdateSearchSetDto {
++  titlePatterns?: string[];
++  seniority?: SearchSetSeniority;
++  industry?: string[];
++  workMode?: SearchSetWorkMode;
++  sourceUrl?: string | null;
++  isActive?: boolean;
++}
+diff --git a/apps/api/src/search-sets/search-set.entity.ts b/apps/api/src/search-sets/search-set.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc190e9221fc14f0cc73c9a229345631daa80826
+--- /dev/null
++++ b/apps/api/src/search-sets/search-set.entity.ts
+@@ -0,0 +1,64 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++
++export enum SearchSetSeniority {
++  ENTRY = 'ENTRY',
++  MID = 'MID',
++  SENIOR = 'SENIOR',
++  LEAD = 'LEAD',
++  EXECUTIVE = 'EXECUTIVE',
++  ANY = 'ANY',
++}
++
++export enum SearchSetWorkMode {
++  REMOTE = 'REMOTE',
++  HYBRID = 'HYBRID',
++  ONSITE = 'ONSITE',
++  ANY = 'ANY',
++}
++
++@Entity({ name: 'search_sets' })
++export class SearchSet {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Column()
++  userId!: string;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  titlePatterns!: string[];
++
++  @Column({
++    type: 'enum',
++    enum: SearchSetSeniority,
++    default: SearchSetSeniority.ANY,
++  })
++  seniority!: SearchSetSeniority;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  industry!: string[];
++
++  @Column({
++    type: 'enum',
++    enum: SearchSetWorkMode,
++    default: SearchSetWorkMode.ANY,
++  })
++  workMode!: SearchSetWorkMode;
++
++  @Column({ type: 'varchar', length: 2048, nullable: true })
++  sourceUrl!: string | null;
++
++  @Column({ type: 'boolean', default: true })
++  isActive!: boolean;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.spec.ts b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..290edb76b1ca5adb5b216ad166a1cc7065432603
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+@@ -0,0 +1,194 @@
++import { FitAssessment, FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
++import { Job, JobIngestionMethod } from '../jobs/job.entity';
++import {
++  SearchSet,
++  SearchSetSeniority,
++  SearchSetWorkMode,
++} from './search-set.entity';
++import { SearchSetsRunnerService } from './search-sets-runner.service';
++import { SearchSetsService } from './search-sets.service';
++
++describe('SearchSetsRunnerService', () => {
++  const baseSearchSet: SearchSet = {
++    id: 'set-1',
++    userId: 'user-1',
++    titlePatterns: ['Engineer'],
++    seniority: SearchSetSeniority.ANY,
++    industry: [],
++    workMode: SearchSetWorkMode.ANY,
++    sourceUrl: null,
++    isActive: true,
++    createdAt: new Date(),
++    updatedAt: new Date(),
++  };
++
++  const createJob = (overrides: Partial<Job> = {}): Job =>
++    ({
++      id: overrides.id ?? 'job-1',
++      userId: overrides.userId ?? 'user-1',
++      title: overrides.title ?? 'Senior Engineer',
++      company: overrides.company ?? 'Acme Corp',
++      rawDescription: overrides.rawDescription ?? 'Remote friendly role',
++      sourceUrl: overrides.sourceUrl ?? null,
++      normalizedResponsibilities: overrides.normalizedResponsibilities ?? [],
++      normalizedRequirements: overrides.normalizedRequirements ?? [],
++      jdIngestionMethod: overrides.jdIngestionMethod ?? JobIngestionMethod.PASTE,
++      jdParsedAt: overrides.jdParsedAt ?? new Date(),
++      createdAt: overrides.createdAt ?? new Date(),
++      updatedAt: overrides.updatedAt ?? new Date(),
++    } as Job);
++
++  const createFitAssessment = (overrides: Partial<FitAssessment>): FitAssessment =>
++    ({
++      id: overrides.id ?? 'assessment-1',
++      userId: overrides.userId ?? 'user-1',
++      jobId: overrides.jobId ?? 'job-1',
++      baselineId: overrides.baselineId ?? 'baseline-1',
++      baselineVersion: overrides.baselineVersion ?? 1,
++      overallScore: overrides.overallScore ?? 80,
++      verdict: overrides.verdict ?? FitAssessmentVerdict.CONSIDER,
++      dimensionScores:
++        overrides.dimensionScores ??
++        ({
++          experienceAlignment: 1,
++          leadershipLevel: 1,
++          technicalPlatformFit: 1,
++          industryContext: 1,
++          strategicTacticalFit: 1,
++        } as FitAssessment['dimensionScores']),
++      strengths: overrides.strengths ?? [],
++      gaps: overrides.gaps ?? [],
++      complianceFlags: overrides.complianceFlags ?? [],
++      inputsHash: overrides.inputsHash ?? null,
++      createdAt: overrides.createdAt ?? new Date(),
++    } as FitAssessment);
++
++  const createQueryBuilder = () => {
++    const qb = {
++      where: jest.fn().mockReturnThis(),
++      andWhere: jest.fn().mockReturnThis(),
++      orderBy: jest.fn().mockReturnThis(),
++      getMany: jest.fn(),
++    };
++
++    return qb;
++  };
++
++  const createService = ({
++    jobs = [createJob()],
++    searchSet = baseSearchSet,
++    assessments = [createFitAssessment({ overallScore: 90 })],
++  }: {
++    jobs?: Job[];
++    searchSet?: SearchSet;
++    assessments?: FitAssessment[];
++  }) => {
++    const jobRepository = {
++      find: jest.fn().mockResolvedValue(jobs),
++    };
++
++    const qb = createQueryBuilder();
++    qb.getMany.mockResolvedValue(assessments);
++
++    const fitAssessmentRepository = {
++      createQueryBuilder: jest.fn(() => qb),
++    };
++
++    const searchSetsService = {
++      getSearchSetForUser: jest.fn().mockResolvedValue(searchSet),
++    } as unknown as jest.Mocked<SearchSetsService>;
++
++    const service = new SearchSetsRunnerService(
++      jobRepository as never,
++      searchSetsService,
++      fitAssessmentRepository as never,
++    );
++
++    return { service, jobRepository, fitAssessmentRepository, searchSetsService, qb };
++  };
++
++  it('filters jobs by title pattern and attaches latest fit assessment', async () => {
++    const newerAssessment = createFitAssessment({
++      id: 'assessment-2',
++      createdAt: new Date('2024-01-02T00:00:00Z'),
++      overallScore: 95,
++      verdict: FitAssessmentVerdict.APPLY,
++    });
++    const olderAssessment = createFitAssessment({
++      id: 'assessment-1',
++      createdAt: new Date('2024-01-01T00:00:00Z'),
++      overallScore: 80,
++      verdict: FitAssessmentVerdict.CONSIDER,
++    });
++
++    const { service, fitAssessmentRepository } = createService({
++      jobs: [createJob()],
++      assessments: [newerAssessment, olderAssessment],
++    });
++
++    const results = await service.runSearchSet('set-1', 'user-1', 5);
++
++    expect(fitAssessmentRepository.createQueryBuilder).toHaveBeenCalled();
++    expect(results).toEqual([
++      {
++        jobId: 'job-1',
++        title: 'Senior Engineer',
++        company: 'Acme Corp',
++        sourceUrl: null,
++        fitScore: 95,
++        verdict: FitAssessmentVerdict.APPLY,
++      },
++    ]);
++  });
++
++  it('applies work mode and seniority filters', async () => {
++    const { service } = createService({
++      jobs: [
++        createJob({
++          id: 'job-remote',
++          title: 'Senior SRE',
++          rawDescription: 'Fully remote position',
++        }),
++        createJob({
++          id: 'job-onsite',
++          title: 'Junior Engineer',
++          rawDescription: 'Onsite role',
++        }),
++      ],
++      searchSet: {
++        ...baseSearchSet,
++        titlePatterns: ['Engineer'],
++        workMode: SearchSetWorkMode.REMOTE,
++        seniority: SearchSetSeniority.SENIOR,
++      },
++      assessments: [],
++    });
++
++    const results = await service.runSearchSet('set-1', 'user-1', 10);
++
++    expect(results).toHaveLength(1);
++    expect(results[0].jobId).toBe('job-remote');
++  });
++
++  it('limits results to 10', async () => {
++    const jobs = Array.from({ length: 12 }).map((_, index) =>
++      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
++    );
++
++    const { service } = createService({ jobs, assessments: [] });
++
++    const results = await service.runSearchSet('set-1', 'user-1', 20);
++
++    expect(results).toHaveLength(10);
++  });
++
++  it('returns empty results when search set is inactive', async () => {
++    const { service } = createService({
++      searchSet: { ...baseSearchSet, isActive: false },
++    });
++
++    const results = await service.runSearchSet('set-1', 'user-1');
++
++    expect(results).toEqual([]);
++  });
++});
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.ts b/apps/api/src/search-sets/search-sets-runner.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..10b451caf50a2b1266394adc9710a96acd36c740
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets-runner.service.ts
+@@ -0,0 +1,217 @@
++import { Injectable } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { Job } from '../jobs/job.entity';
++import {
++  SearchSet,
++  SearchSetSeniority,
++  SearchSetWorkMode,
++} from './search-set.entity';
++import { SearchSetsService } from './search-sets.service';
++
++type SearchSetRunResult = {
++  jobId: string;
++  title: string | null;
++  company: string | null;
++  sourceUrl: string | null;
++  fitScore: number | null;
++  verdict: FitAssessment['verdict'] | null;
++};
++
++@Injectable()
++export class SearchSetsRunnerService {
++  constructor(
++    @InjectRepository(Job)
++    private readonly jobRepository: Repository<Job>,
++    private readonly searchSetsService: SearchSetsService,
++    @InjectRepository(FitAssessment)
++    private readonly fitAssessmentRepository: Repository<FitAssessment>,
++  ) {}
++
++  async runSearchSet(searchSetId: string, userId: string, limit = 10) {
++    const searchSet = await this.searchSetsService.getSearchSetForUser(
++      searchSetId,
++      userId,
++    );
++
++    if (!searchSet.isActive) {
++      return [];
++    }
++
++    const jobs = await this.jobRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++
++    const filteredJobs = jobs.filter((job) =>
++      this.matchesSearchSet(job, searchSet),
++    );
++    const cappedLimit = Math.min(Math.max(limit ?? 10, 1), 10);
++    const selectedJobs = filteredJobs.slice(0, cappedLimit);
++
++    if (selectedJobs.length === 0) {
++      return [];
++    }
++
++    const latestAssessments = await this.loadLatestAssessments(
++      selectedJobs.map((job) => job.id),
++      userId,
++    );
++
++    return selectedJobs.map((job) => {
++      const assessment = latestAssessments.get(job.id);
++      return {
++        jobId: job.id,
++        title: job.title,
++        company: job.company,
++        sourceUrl: job.sourceUrl,
++        fitScore: assessment?.overallScore ?? null,
++        verdict: assessment?.verdict ?? null,
++      } satisfies SearchSetRunResult;
++    });
++  }
++
++  private matchesSearchSet(job: Job, searchSet: SearchSet) {
++    if (!this.matchesTitlePatterns(job.title, searchSet.titlePatterns)) {
++      return false;
++    }
++
++    if (!this.matchesSeniority(job, searchSet.seniority)) {
++      return false;
++    }
++
++    if (!this.matchesWorkMode(job, searchSet.workMode)) {
++      return false;
++    }
++
++    if (!this.matchesIndustry(job, searchSet.industry)) {
++      return false;
++    }
++
++    return true;
++  }
++
++  private matchesTitlePatterns(title: string | null, patterns: string[]) {
++    if (!patterns || patterns.length === 0) {
++      return true;
++    }
++
++    const normalizedTitle = (title ?? '').toLowerCase();
++    return patterns.some((pattern) =>
++      normalizedTitle.includes(pattern.toLowerCase()),
++    );
++  }
++
++  private inferSeniority(title: string | null): SearchSetSeniority | null {
++    if (!title) return null;
++
++    const normalized = title.toLowerCase();
++
++    if (/\b(chief|c[et]o|executive|vp|vice president|director|head)\b/.test(normalized)) {
++      return SearchSetSeniority.EXECUTIVE;
++    }
++
++    if (/\b(principal|staff|lead)\b/.test(normalized)) {
++      return SearchSetSeniority.LEAD;
++    }
++
++    if (/\b(senior|sr\.?)\b/.test(normalized)) {
++      return SearchSetSeniority.SENIOR;
++    }
++
++    if (/\b(mid|level ii|level 2|ii)\b/.test(normalized)) {
++      return SearchSetSeniority.MID;
++    }
++
++    if (/\b(entry|junior|intern|apprentice|i)\b/.test(normalized)) {
++      return SearchSetSeniority.ENTRY;
++    }
++
++    return null;
++  }
++
++  private matchesSeniority(job: Job, seniority: SearchSetSeniority | null) {
++    if (!seniority || seniority === SearchSetSeniority.ANY) {
++      return true;
++    }
++
++    const inferred = this.inferSeniority(job.title);
++    if (!inferred) {
++      return false;
++    }
++
++    return inferred === seniority;
++  }
++
++  private inferWorkMode(job: Job): SearchSetWorkMode | null {
++    const normalizedText = `${job.title ?? ''} ${job.rawDescription ?? ''}`
++      .toLowerCase()
++      .trim();
++
++    if (!normalizedText) {
++      return null;
++    }
++
++    if (normalizedText.includes('remote')) {
++      return SearchSetWorkMode.REMOTE;
++    }
++
++    if (normalizedText.includes('hybrid')) {
++      return SearchSetWorkMode.HYBRID;
++    }
++
++    if (
++      normalizedText.includes('onsite') ||
++      normalizedText.includes('on-site') ||
++      normalizedText.includes('on site')
++    ) {
++      return SearchSetWorkMode.ONSITE;
++    }
++
++    return null;
++  }
++
++  private matchesWorkMode(job: Job, workMode: SearchSetWorkMode | null) {
++    if (!workMode || workMode === SearchSetWorkMode.ANY) {
++      return true;
++    }
++
++    const inferred = this.inferWorkMode(job);
++    if (!inferred) {
++      return false;
++    }
++
++    return inferred === workMode;
++  }
++
++  private matchesIndustry(job: Job, industries: string[]) {
++    if (!industries || industries.length === 0) {
++      return true;
++    }
++
++    const haystack = `${job.company ?? ''} ${job.rawDescription ?? ''}`.toLowerCase();
++    return industries.some((industry) =>
++      haystack.includes(industry.toLowerCase()),
++    );
++  }
++
++  private async loadLatestAssessments(jobIds: string[], userId: string) {
++    const query = this.fitAssessmentRepository
++      .createQueryBuilder('assessment')
++      .where('assessment.userId = :userId', { userId })
++      .andWhere('assessment.jobId IN (:...jobIds)', { jobIds })
++      .orderBy('assessment.createdAt', 'DESC');
++
++    const assessments = await query.getMany();
++    const latest = new Map<string, FitAssessment>();
++
++    for (const assessment of assessments) {
++      if (!latest.has(assessment.jobId)) {
++        latest.set(assessment.jobId, assessment);
++      }
++    }
++
++    return latest;
++  }
++}
+diff --git a/apps/api/src/search-sets/search-sets.controller.spec.ts b/apps/api/src/search-sets/search-sets.controller.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..886dd482699d441720d84bc6e9ef1567f4ec3079
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets.controller.spec.ts
+@@ -0,0 +1,104 @@
++import { BadRequestException } from '@nestjs/common';
++import { SearchSetWorkMode } from './search-set.entity';
++import { SearchSetsController } from './search-sets.controller';
++import { SearchSetsRunnerService } from './search-sets-runner.service';
++import { SearchSetsService } from './search-sets.service';
++
++describe('SearchSetsController', () => {
++  const createController = () => {
++    const searchSetsService = {
++      createSearchSet: jest.fn(),
++      listSearchSetsForUser: jest.fn(),
++      getSearchSetForUser: jest.fn(),
++      updateSearchSet: jest.fn(),
++      deleteSearchSet: jest.fn(),
++    } as unknown as jest.Mocked<SearchSetsService>;
++
++    const runnerService = {
++      runSearchSet: jest.fn(),
++    } as unknown as jest.Mocked<SearchSetsRunnerService>;
++
++    const controller = new SearchSetsController(searchSetsService, runnerService);
++
++    return { controller, searchSetsService, runnerService };
++  };
++
++  const mockRequest = (userId?: string) => ({ user: { id: userId } }) as any;
++
++  it('creates a search set', async () => {
++    const { controller, searchSetsService } = createController();
++    const body = { titlePatterns: ['Engineer'] };
++    searchSetsService.createSearchSet.mockResolvedValue({ id: 'set-1' } as any);
++
++    const result = await controller.createSearchSet(body, mockRequest('user-1'));
++
++    expect(searchSetsService.createSearchSet).toHaveBeenCalledWith('user-1', body);
++    expect(result).toEqual({ id: 'set-1' });
++  });
++
++  it('lists search sets', async () => {
++    const { controller, searchSetsService } = createController();
++    searchSetsService.listSearchSetsForUser.mockResolvedValue([{ id: 'set-1' }] as any);
++
++    const result = await controller.listSearchSets(mockRequest('user-1'));
++
++    expect(searchSetsService.listSearchSetsForUser).toHaveBeenCalledWith('user-1');
++    expect(result).toEqual([{ id: 'set-1' }]);
++  });
++
++  it('gets a search set', async () => {
++    const { controller, searchSetsService } = createController();
++    searchSetsService.getSearchSetForUser.mockResolvedValue({ id: 'set-1' } as any);
++
++    const result = await controller.getSearchSet('set-1', mockRequest('user-1'));
++
++    expect(searchSetsService.getSearchSetForUser).toHaveBeenCalledWith('set-1', 'user-1');
++    expect(result).toEqual({ id: 'set-1' });
++  });
++
++  it('updates a search set', async () => {
++    const { controller, searchSetsService } = createController();
++    searchSetsService.updateSearchSet.mockResolvedValue({ id: 'set-1' } as any);
++
++    const result = await controller.updateSearchSet(
++      'set-1',
++      { workMode: SearchSetWorkMode.REMOTE },
++      mockRequest('user-1'),
++    );
++
++    expect(searchSetsService.updateSearchSet).toHaveBeenCalledWith(
++      'set-1',
++      'user-1',
++      { workMode: SearchSetWorkMode.REMOTE },
++    );
++    expect(result).toEqual({ id: 'set-1' });
++  });
++
++  it('deletes a search set', async () => {
++    const { controller, searchSetsService } = createController();
++    searchSetsService.deleteSearchSet.mockResolvedValue({ deleted: true, id: 'set-1' } as any);
++
++    const result = await controller.deleteSearchSet('set-1', mockRequest('user-1'));
++
++    expect(searchSetsService.deleteSearchSet).toHaveBeenCalledWith('set-1', 'user-1');
++    expect(result).toEqual({ deleted: true, id: 'set-1' });
++  });
++
++  it('runs a search set', async () => {
++    const { controller, runnerService } = createController();
++    runnerService.runSearchSet.mockResolvedValue([{ jobId: 'job-1' }] as any);
++
++    const result = await controller.runSearchSet('set-1', { limit: 5 }, mockRequest('user-1'));
++
++    expect(runnerService.runSearchSet).toHaveBeenCalledWith('set-1', 'user-1', 5);
++    expect(result).toEqual([{ jobId: 'job-1' }]);
++  });
++
++  it('throws when user context is missing', async () => {
++    const { controller } = createController();
++
++    await expect(
++      controller.createSearchSet({ titlePatterns: [] }, mockRequest(undefined)),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
++});
+diff --git a/apps/api/src/search-sets/search-sets.controller.ts b/apps/api/src/search-sets/search-sets.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ef7305a5fb4735ee0c8c36463f7167f1adcbc0b9
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets.controller.ts
+@@ -0,0 +1,112 @@
 +import {
 +  BadRequestException,
 +  Body,
 +  Controller,
 +  Delete,
 +  Get,
-+  Header,
 +  Param,
 +  Patch,
 +  Post,
-+  Query,
 +  Req,
 +  UseGuards,
 +} from '@nestjs/common';
 +import { AuthGuard } from '@nestjs/passport';
 +import { Request } from 'express';
-+import {
-+  ApplicationsService,
-+  ListApplicationsFilters,
-+} from './applications.service';
-+import { CreateApplicationDto } from './dto/create-application.dto';
-+import { UpdateApplicationDto } from './dto/update-application.dto';
-+import { ApplicationStage } from './application.entity';
++import { CreateSearchSetDto } from './dto/create-search-set.dto';
++import { UpdateSearchSetDto } from './dto/update-search-set.dto';
++import { SearchSetsRunnerService } from './search-sets-runner.service';
++import { SearchSetsService } from './search-sets.service';
 +
-+@Controller('applications')
++@Controller('search-sets')
 +@UseGuards(AuthGuard('jwt'))
-+export class ApplicationsController {
-+  constructor(private readonly applicationsService: ApplicationsService) {}
++export class SearchSetsController {
++  constructor(
++    private readonly searchSetsService: SearchSetsService,
++    private readonly searchSetsRunnerService: SearchSetsRunnerService,
++  ) {}
 +
 +  @Post()
-+  async createApplication(
-+    @Body() body: Partial<CreateApplicationDto>,
++  async createSearchSet(
++    @Body() body: CreateSearchSetDto,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -44,58 +787,22 @@ index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725f
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.applicationsService.createApplication(userId, {
-+      company: body.company,
-+      title: body.title,
-+      jobId: body.jobId,
-+      appliedDate: body.appliedDate,
-+      fitScore: body.fitScore,
-+      stage: body.stage,
-+      notes: body.notes,
-+      sourceUrl: body.sourceUrl,
-+    });
-+  }
-+
-+  @Get('export')
-+  @Header('Content-Type', 'text/csv')
-+  @Header('Content-Disposition', 'attachment; filename="applications.csv"')
-+  async exportApplications(@Req() request: Request & { user?: { id?: string } }) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.applicationsService.exportApplicationsToCsv(userId);
++    return this.searchSetsService.createSearchSet(userId, body);
 +  }
 +
 +  @Get()
-+  async listApplications(
-+    @Req() request: Request & { user?: { id?: string } },
-+    @Query('stage') stage?: ApplicationStage,
-+    @Query('company') company?: string,
-+  ) {
++  async listSearchSets(@Req() request: Request & { user?: { id?: string } }) {
 +    const userId = request.user?.id;
 +
 +    if (!userId) {
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    const filters: ListApplicationsFilters = {};
-+
-+    if (stage) {
-+      filters.stage = stage;
-+    }
-+
-+    if (company) {
-+      filters.company = company;
-+    }
-+
-+    return this.applicationsService.listApplicationsForUser(userId, filters);
++    return this.searchSetsService.listSearchSetsForUser(userId);
 +  }
 +
 +  @Get(':id')
-+  async getApplication(
++  async getSearchSet(
 +    @Param('id') id: string,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
@@ -105,13 +812,13 @@ index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725f
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.applicationsService.getApplicationForUser(id, userId);
++    return this.searchSetsService.getSearchSetForUser(id, userId);
 +  }
 +
 +  @Patch(':id')
-+  async updateApplication(
++  async updateSearchSet(
 +    @Param('id') id: string,
-+    @Body() body: Partial<UpdateApplicationDto>,
++    @Body() body: UpdateSearchSetDto,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -120,20 +827,11 @@ index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725f
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.applicationsService.updateApplication(id, userId, {
-+      company: body.company,
-+      title: body.title,
-+      jobId: body.jobId,
-+      appliedDate: body.appliedDate,
-+      fitScore: body.fitScore,
-+      stage: body.stage,
-+      notes: body.notes,
-+      sourceUrl: body.sourceUrl,
-+    });
++    return this.searchSetsService.updateSearchSet(id, userId, body);
 +  }
 +
 +  @Delete(':id')
-+  async deleteApplication(
++  async deleteSearchSet(
 +    @Param('id') id: string,
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
@@ -143,338 +841,367 @@ index 0000000000000000000000000000000000000000..fa3fbda9d988f083cb90a624177d725f
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.applicationsService.deleteApplication(id, userId);
++    return this.searchSetsService.deleteSearchSet(id, userId);
++  }
++
++  @Post(':id/run')
++  async runSearchSet(
++    @Param('id') id: string,
++    @Body() body: { limit?: number },
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const limit = typeof body?.limit === 'number' ? body.limit : undefined;
++
++    return this.searchSetsRunnerService.runSearchSet(id, userId, limit);
 +  }
 +}
-diff --git a/apps/api/src/applications/applications.module.ts b/apps/api/src/applications/applications.module.ts
-index d2d2f7e58166c7655280aac047a7cde9f92b7c0f..63e35cbc7658648e63b0d2a59f7f5281c93b4f5a 100644
---- a/apps/api/src/applications/applications.module.ts
-+++ b/apps/api/src/applications/applications.module.ts
-@@ -1,11 +1,14 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
-+import { ComplianceModule } from '../compliance/compliance.module';
- import { Application } from './application.entity';
-+import { ApplicationsController } from './applications.controller';
- import { ApplicationsService } from './applications.service';
- 
- @Module({
--  imports: [TypeOrmModule.forFeature([Application])],
-+  imports: [TypeOrmModule.forFeature([Application]), ComplianceModule],
-+  controllers: [ApplicationsController],
-   providers: [ApplicationsService],
-   exports: [TypeOrmModule],
- })
- export class ApplicationsModule {}
-diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
-index ef1442be6a657ab5c8c521c52af432f1628df1b0..fb0ba2b4ed9c4134281da479fd29419b58ef0064 100644
---- a/apps/api/src/applications/applications.service.spec.ts
-+++ b/apps/api/src/applications/applications.service.spec.ts
-@@ -1,59 +1,71 @@
- import { ApplicationsService } from './applications.service';
-+import { ComplianceAction } from '../compliance/compliance.types';
- import { Application, ApplicationStage } from './application.entity';
- 
- describe('ApplicationsService', () => {
-   const mockApplication: Application = {
-     id: 'app-1',
-     userId: 'user-1',
-     jobId: null,
-     company: 'Acme Corp',
-     title: 'Software Engineer',
-     appliedDate: null,
-     fitScore: null,
-     stage: ApplicationStage.SAVED,
-     notes: null,
-     sourceUrl: null,
-     createdAt: new Date(),
-     updatedAt: new Date(),
-   };
- 
-   const createMockRepository = () => ({
-     create: jest.fn((data: Partial<Application>) => ({ ...mockApplication, ...data })),
-     save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
-     findOne: jest.fn(),
-     remove: jest.fn((app: Application) => Promise.resolve(app)),
+diff --git a/apps/api/src/search-sets/search-sets.module.ts b/apps/api/src/search-sets/search-sets.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f7a11f9f7b846976639163d4d2637e76c4c9b38
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets.module.ts
+@@ -0,0 +1,15 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { Job } from '../jobs/job.entity';
++import { SearchSet } from './search-set.entity';
++import { SearchSetsController } from './search-sets.controller';
++import { SearchSetsRunnerService } from './search-sets-runner.service';
++import { SearchSetsService } from './search-sets.service';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([SearchSet, Job, FitAssessment])],
++  controllers: [SearchSetsController],
++  providers: [SearchSetsService, SearchSetsRunnerService],
++})
++export class SearchSetsModule {}
+diff --git a/apps/api/src/search-sets/search-sets.service.spec.ts b/apps/api/src/search-sets/search-sets.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a568c2aa10e16c4c488e099f95dd060b727bc427
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets.service.spec.ts
+@@ -0,0 +1,124 @@
++import { NotFoundException } from '@nestjs/common';
++import {
++  SearchSet,
++  SearchSetSeniority,
++  SearchSetWorkMode,
++} from './search-set.entity';
++import { SearchSetsService } from './search-sets.service';
++
++describe('SearchSetsService', () => {
++  const mockSearchSet: SearchSet = {
++    id: 'set-1',
++    userId: 'user-1',
++    titlePatterns: ['Engineer'],
++    seniority: SearchSetSeniority.ANY,
++    industry: [],
++    workMode: SearchSetWorkMode.ANY,
++    sourceUrl: null,
++    isActive: true,
++    createdAt: new Date(),
++    updatedAt: new Date(),
++  };
++
++  const createMockRepository = () => ({
++    create: jest.fn((data: Partial<SearchSet>) => ({ ...mockSearchSet, ...data })),
++    save: jest.fn(async (data: SearchSet) => data),
 +    find: jest.fn(),
-     createQueryBuilder: jest.fn(() => ({
-       where: jest.fn().mockReturnThis(),
-       andWhere: jest.fn().mockReturnThis(),
-       orderBy: jest.fn().mockReturnThis(),
-       getMany: jest.fn().mockResolvedValue([mockApplication]),
-     })),
-   });
- 
--  const createService = (repository = createMockRepository()) =>
--    new ApplicationsService(repository as never);
-+  const createMockComplianceService = () => ({
-+    validateAndAudit: jest.fn().mockResolvedValue({
-+      complianceFlags: [],
-+      blocked: false,
-+      audit: { id: 'audit-id' },
-+    }),
++    findOne: jest.fn(),
++    remove: jest.fn(async (data: SearchSet) => data),
 +  });
 +
-+  const createService = (
-+    repository = createMockRepository(),
-+    complianceService = createMockComplianceService(),
-+  ) => new ApplicationsService(repository as never, complianceService as never);
- 
-   afterEach(() => {
-     jest.restoreAllMocks();
-   });
- 
-   describe('createApplication', () => {
-     it('creates an application with required fields', async () => {
-       const repository = createMockRepository();
-       const service = createService(repository);
- 
-       const result = await service.createApplication('user-1', {
-         company: 'Acme Corp',
-         title: 'Software Engineer',
-       });
- 
-       expect(repository.create).toHaveBeenCalledWith({
-         userId: 'user-1',
-         jobId: null,
-         company: 'Acme Corp',
-         title: 'Software Engineer',
-         appliedDate: null,
-         fitScore: null,
-         stage: ApplicationStage.SAVED,
-         notes: null,
-         sourceUrl: null,
-@@ -151,25 +163,68 @@ describe('ApplicationsService', () => {
-   });
- 
-   describe('updateApplication', () => {
-     it('updates application fields', async () => {
-       const repository = createMockRepository();
-       repository.findOne.mockResolvedValue({ ...mockApplication });
-       const service = createService(repository);
- 
-       const result = await service.updateApplication('app-1', 'user-1', {
-         stage: ApplicationStage.INTERVIEWING,
-         notes: 'Had phone screen',
-       });
- 
-       expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
-       expect(result.notes).toBe('Had phone screen');
-     });
-   });
- 
-   describe('deleteApplication', () => {
-     it('deletes application', async () => {
-       const repository = createMockRepository();
-       repository.findOne.mockResolvedValue(mockApplication);
-       const service = createService(repository);
- 
-       const result = await service.deleteApplication('app-1', 'user-1');
++  const createService = (repository = createMockRepository()) =>
++    new SearchSetsService(repository as never);
 +
-+      expect(repository.remove).toHaveBeenCalled();
-+      expect(result).toEqual({ deleted: true, id: 'app-1' });
-+    });
++  afterEach(() => {
++    jest.restoreAllMocks();
 +  });
 +
-+  describe('exportApplicationsToCsv', () => {
-+    it('exports applications and audits compliance', async () => {
-+      const repository = createMockRepository();
-+      const complianceService = createMockComplianceService();
++  it('creates a search set with sanitized values', async () => {
++    const repository = createMockRepository();
++    const service = createService(repository);
 +
-+      repository.find.mockResolvedValue([
-+        {
-+          ...mockApplication,
-+          appliedDate: new Date('2024-01-01T00:00:00.000Z'),
-+          fitScore: 80,
-+          notes: 'Followed up',
-+          sourceUrl: 'https://example.com',
-+        },
-+      ]);
-+
-+      const service = createService(repository, complianceService);
-+
-+      const csv = await service.exportApplicationsToCsv('user-1');
-+
-+      expect(repository.find).toHaveBeenCalledWith({
-+        where: { userId: 'user-1' },
-+        order: { createdAt: 'DESC' },
-+      });
-+      expect(csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
-+      expect(csv).toContain(
-+        'Acme Corp,Software Engineer,2024-01-01T00:00:00.000Z,80,SAVED,Followed up,https://example.com',
-+      );
-+      expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
-+        expect.objectContaining({
-+          action: ComplianceAction.APPLICATION_EXPORT,
-+          actorId: 'user-1',
-+          outputHash: expect.any(String),
-+        }),
-+      );
++    const result = await service.createSearchSet('user-1', {
++      titlePatterns: ['  Senior Engineer  ', ''],
++      industry: [' fintech '],
++      sourceUrl: ' https://example.com ',
 +    });
++
++    expect(repository.create).toHaveBeenCalledWith(
++      expect.objectContaining({
++        userId: 'user-1',
++        titlePatterns: ['Senior Engineer'],
++        industry: ['fintech'],
++        sourceUrl: 'https://example.com',
++        seniority: SearchSetSeniority.ANY,
++        workMode: SearchSetWorkMode.ANY,
++        isActive: true,
++      }),
++    );
++    expect(result.titlePatterns).toEqual(['Senior Engineer']);
++  });
++
++  it('lists search sets for a user', async () => {
++    const repository = createMockRepository();
++    repository.find.mockResolvedValue([mockSearchSet]);
++    const service = createService(repository);
++
++    const result = await service.listSearchSetsForUser('user-1');
++
++    expect(repository.find).toHaveBeenCalledWith({
++      where: { userId: 'user-1' },
++      order: { createdAt: 'DESC' },
++    });
++    expect(result).toEqual([mockSearchSet]);
++  });
++
++  it('retrieves a search set for a user', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockSearchSet);
++    const service = createService(repository);
++
++    const result = await service.getSearchSetForUser('set-1', 'user-1');
++
++    expect(result).toEqual(mockSearchSet);
++  });
++
++  it('throws when search set is not found', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(null);
++    const service = createService(repository);
++
++    await expect(service.getSearchSetForUser('missing', 'user-1')).rejects.toBeInstanceOf(
++      NotFoundException,
++    );
++  });
++
++  it('updates a search set', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({ ...mockSearchSet });
++    const service = createService(repository);
++
++    const result = await service.updateSearchSet('set-1', 'user-1', {
++      titlePatterns: ['Manager'],
++      industry: ['security'],
++      workMode: SearchSetWorkMode.REMOTE,
++      isActive: false,
++    });
++
++    expect(result.titlePatterns).toEqual(['Manager']);
++    expect(result.industry).toEqual(['security']);
++    expect(result.workMode).toBe(SearchSetWorkMode.REMOTE);
++    expect(result.isActive).toBe(false);
++  });
++
++  it('deletes a search set', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockSearchSet);
++    const service = createService(repository);
++
++    const result = await service.deleteSearchSet('set-1', 'user-1');
++
++    expect(repository.remove).toHaveBeenCalledWith(mockSearchSet);
++    expect(result).toEqual({ deleted: true, id: 'set-1' });
 +  });
 +});
-diff --git a/apps/api/src/applications/applications.service.ts b/apps/api/src/applications/applications.service.ts
-index 2de6916a253242f3417bb1a96ef135f2ae4527e1..47766e5637ac8dbb860581484b9845cb2e18ffab 100644
---- a/apps/api/src/applications/applications.service.ts
-+++ b/apps/api/src/applications/applications.service.ts
-@@ -1,42 +1,47 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
-+import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceAction } from '../compliance/compliance.types';
-+import { ComplianceService } from '../compliance/compliance.service';
- import { Application, ApplicationStage } from './application.entity';
- import { CreateApplicationDto } from './dto/create-application.dto';
- import { UpdateApplicationDto } from './dto/update-application.dto';
- 
- export type ListApplicationsFilters = {
-   stage?: ApplicationStage;
-   company?: string;
- };
- 
- @Injectable()
- export class ApplicationsService {
-   constructor(
-     @InjectRepository(Application)
-     private readonly applicationRepository: Repository<Application>,
-+    private readonly complianceService: ComplianceService,
-   ) {}
- 
-   async createApplication(userId: string, dto: CreateApplicationDto) {
-     if (!dto.company?.trim()) {
-       throw new BadRequestException('Company is required.');
-     }
-     if (!dto.title?.trim()) {
-       throw new BadRequestException('Title is required.');
-     }
- 
-     const application = this.applicationRepository.create({
-       userId,
-       jobId: dto.jobId || null,
-       company: dto.company.trim(),
-       title: dto.title.trim(),
-       appliedDate: dto.appliedDate ? new Date(dto.appliedDate) : null,
-       fitScore: dto.fitScore ?? null,
-       stage: dto.stage ?? ApplicationStage.SAVED,
-       notes: dto.notes?.trim() || null,
-       sourceUrl: dto.sourceUrl?.trim() || null,
-     });
- 
-     return this.applicationRepository.save(application);
-   }
- 
-@@ -74,26 +79,78 @@ export class ApplicationsService {
- 
-   async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
-     const application = await this.getApplicationForUser(id, userId);
- 
-     if (dto.company !== undefined) application.company = dto.company.trim();
-     if (dto.title !== undefined) application.title = dto.title.trim();
-     if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
-     if (dto.appliedDate !== undefined) {
-       application.appliedDate = dto.appliedDate ? new Date(dto.appliedDate) : null;
-     }
-     if (dto.fitScore !== undefined) application.fitScore = dto.fitScore;
-     if (dto.stage !== undefined) application.stage = dto.stage;
-     if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
-     if (dto.sourceUrl !== undefined) application.sourceUrl = dto.sourceUrl?.trim() || null;
- 
-     return this.applicationRepository.save(application);
-   }
- 
-   async deleteApplication(id: string, userId: string) {
-     const application = await this.getApplicationForUser(id, userId);
- 
-     await this.applicationRepository.remove(application);
- 
-     return { deleted: true, id };
-   }
+diff --git a/apps/api/src/search-sets/search-sets.service.ts b/apps/api/src/search-sets/search-sets.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..05137c9e5c4c39d3d4d5bee544031cb75fb89ee1
+--- /dev/null
++++ b/apps/api/src/search-sets/search-sets.service.ts
+@@ -0,0 +1,88 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { CreateSearchSetDto } from './dto/create-search-set.dto';
++import { UpdateSearchSetDto } from './dto/update-search-set.dto';
++import {
++  SearchSet,
++  SearchSetSeniority,
++  SearchSetWorkMode,
++} from './search-set.entity';
 +
-+  async exportApplicationsToCsv(userId: string) {
-+    const applications = await this.applicationRepository.find({
++@Injectable()
++export class SearchSetsService {
++  constructor(
++    @InjectRepository(SearchSet)
++    private readonly searchSetRepository: Repository<SearchSet>,
++  ) {}
++
++  private sanitizeList(values?: string[]) {
++    return values?.map((value) => value.trim()).filter((value) => value.length > 0) ?? [];
++  }
++
++  async createSearchSet(userId: string, dto: CreateSearchSetDto) {
++    const searchSet = this.searchSetRepository.create({
++      userId,
++      titlePatterns: this.sanitizeList(dto.titlePatterns),
++      seniority: dto.seniority ?? SearchSetSeniority.ANY,
++      industry: this.sanitizeList(dto.industry),
++      workMode: dto.workMode ?? SearchSetWorkMode.ANY,
++      sourceUrl: dto.sourceUrl?.trim() || null,
++      isActive: dto.isActive ?? true,
++    });
++
++    return this.searchSetRepository.save(searchSet);
++  }
++
++  async listSearchSetsForUser(userId: string) {
++    return this.searchSetRepository.find({
 +      where: { userId },
 +      order: { createdAt: 'DESC' },
 +    });
++  }
 +
-+    const escapeCsv = (value: string) => {
-+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-+        return `"${value.replace(/"/g, '""')}"`;
-+      }
-+
-+      return value;
-+    };
-+
-+    const headers = [
-+      'company',
-+      'title',
-+      'appliedDate',
-+      'fitScore',
-+      'stage',
-+      'notes',
-+      'sourceUrl',
-+    ];
-+
-+    const rows = applications.map((application) => [
-+      application.company ?? '',
-+      application.title ?? '',
-+      application.appliedDate ? application.appliedDate.toISOString() : '',
-+      application.fitScore ?? '',
-+      application.stage ?? '',
-+      application.notes ?? '',
-+      application.sourceUrl ?? '',
-+    ]);
-+
-+    const csv = [
-+      headers.join(','),
-+      ...rows.map((row) => row.map((value) => escapeCsv(String(value))).join(',')),
-+    ].join('\n');
-+
-+    const baselineVersion = new BaselineVersion();
-+    baselineVersion.fileHash = 'applications_export';
-+
-+    await this.complianceService.validateAndAudit({
-+      action: ComplianceAction.APPLICATION_EXPORT,
-+      actorId: userId,
-+      baselineVersion,
-+      outputHash: createHash('sha256').update(csv).digest('hex'),
++  async getSearchSetForUser(id: string, userId: string) {
++    const searchSet = await this.searchSetRepository.findOne({
++      where: { id, userId },
 +    });
 +
-+    return csv;
++    if (!searchSet) {
++      throw new NotFoundException('Search set not found');
++    }
++
++    return searchSet;
 +  }
- }
-diff --git a/apps/web/app/api/applications/[id]/route.ts b/apps/web/app/api/applications/[id]/route.ts
-index ec2443fd98ec460c9746c0e36454c12b6987a765..898fc8051bf46c715c90a2c0144821775f3ad2b7 100644
---- a/apps/web/app/api/applications/[id]/route.ts
-+++ b/apps/web/app/api/applications/[id]/route.ts
-@@ -65,25 +65,34 @@ export async function PATCH(
-   });
- 
-   return relayApiResponse(response);
- }
- 
- export async function DELETE(
-   req: NextRequest,
-   context: { params: Promise<{ id: string }> },
- ) {
-   const { id } = await context.params;
- 
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
-+  const response = await fetch(`${baseUrl}/applications/${id}`, {
++
++  async updateSearchSet(id: string, userId: string, dto: UpdateSearchSetDto) {
++    const searchSet = await this.getSearchSetForUser(id, userId);
++
++    if (dto.titlePatterns !== undefined) {
++      searchSet.titlePatterns = this.sanitizeList(dto.titlePatterns);
++    }
++    if (dto.seniority !== undefined) {
++      searchSet.seniority = dto.seniority;
++    }
++    if (dto.industry !== undefined) {
++      searchSet.industry = this.sanitizeList(dto.industry);
++    }
++    if (dto.workMode !== undefined) {
++      searchSet.workMode = dto.workMode;
++    }
++    if (dto.sourceUrl !== undefined) {
++      searchSet.sourceUrl = dto.sourceUrl?.trim() || null;
++    }
++    if (dto.isActive !== undefined) {
++      searchSet.isActive = dto.isActive;
++    }
++
++    return this.searchSetRepository.save(searchSet);
++  }
++
++  async deleteSearchSet(id: string, userId: string) {
++    const searchSet = await this.getSearchSetForUser(id, userId);
++
++    await this.searchSetRepository.remove(searchSet);
++
++    return { deleted: true, id };
++  }
++}
+diff --git a/apps/web/app/api/search-sets/[id]/route.ts b/apps/web/app/api/search-sets/[id]/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..46730441f7f31dc65ad9e41c30ebfda9b09a83be
+--- /dev/null
++++ b/apps/web/app/api/search-sets/[id]/route.ts
+@@ -0,0 +1,98 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/search-sets/${id}`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
++
++export async function PATCH(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/search-sets/${id}`, {
++    method: "PATCH",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
++
++export async function DELETE(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/search-sets/${id}`, {
 +    method: "DELETE",
 +    headers: {
 +      Authorization: `Bearer ${token}`,
@@ -483,70 +1210,109 @@ index ec2443fd98ec460c9746c0e36454c12b6987a765..898fc8051bf46c715c90a2c014482177
 +
 +  return relayApiResponse(response);
 +}
-diff --git a/apps/web/app/api/applications/route.ts b/apps/web/app/api/applications/route.ts
-index b4c349af55d6f670b6f49a050a9aaa4c2ef9f2bc..1fafb293f029f8a7d12242761130e83d18836e51 100644
---- a/apps/web/app/api/applications/route.ts
-+++ b/apps/web/app/api/applications/route.ts
-@@ -1,58 +1,60 @@
- import { NextRequest, NextResponse } from "next/server";
- 
- import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
- 
- export async function GET(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
--  const url = new URL(req.url);
--  const queryString = url.search;
-+  const queryString = new URL(req.url).search;
- 
-   const response = await fetch(`${baseUrl}/applications${queryString}`, {
-     method: "GET",
-     cache: "no-store",
-     headers: {
-       Authorization: `Bearer ${token}`,
-     },
-   });
- 
-   return relayApiResponse(response);
- }
- 
- export async function POST(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
-   const body = await req.json();
- 
-   const response = await fetch(`${baseUrl}/applications`, {
-     method: "POST",
-     headers: {
-       Authorization: `Bearer ${token}`,
-       "Content-Type": "application/json",
-     },
-     body: JSON.stringify(body),
-   });
+diff --git a/apps/web/app/api/search-sets/[id]/run/route.ts b/apps/web/app/api/search-sets/[id]/run/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dae09ad5403ef70551f313e282aef454054e781d
+--- /dev/null
++++ b/apps/web/app/api/search-sets/[id]/run/route.ts
+@@ -0,0 +1,36 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
++
++export async function POST(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/search-sets/${id}/run`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/api/search-sets/route.ts b/apps/web/app/api/search-sets/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e30ffad9ad845ae6ab6c197b98c06e5dc8fa7ba
+--- /dev/null
++++ b/apps/web/app/api/search-sets/route.ts
+@@ -0,0 +1,58 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++
++export async function GET(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const response = await fetch(`${baseUrl}/search-sets`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
++
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/search-sets`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
 +
 +  return relayApiResponse(response);
 +}

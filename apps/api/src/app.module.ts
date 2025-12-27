@@ -11,6 +11,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ResumeModule } from './resume/resume.module';
+import { SearchSetsModule } from './search-sets/search-sets.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
     ComplianceModule,
     InterviewsModule,
     JobsModule,
+    SearchSetsModule,
     ResumeModule,
   ],
   controllers: [AppController],
