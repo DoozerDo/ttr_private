@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { InterviewResponse } from './interview-response.entity';
 import { InterviewSession } from './interview-session.entity';
+import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
 
 export type CreateInterviewDto = {
   baselineId?: string;
@@ -19,6 +21,8 @@ export class InterviewsService {
   constructor(
     @InjectRepository(InterviewSession)
     private readonly interviewRepository: Repository<InterviewSession>,
+    @InjectRepository(InterviewResponse)
+    private readonly interviewResponseRepository: Repository<InterviewResponse>,
   ) {}
 
   private validateDate(date?: string | null) {
@@ -112,5 +116,27 @@ export class InterviewsService {
     await this.interviewRepository.remove(interview);
 
     return { deleted: true, id };
+  }
+
+  async createInterviewResponse(
+    sessionId: string,
+    userId: string,
+    dto: CreateInterviewResponseDto,
+  ) {
+    const session = await this.interviewRepository.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Interview not found');
+    }
+
+    const response = this.interviewResponseRepository.create({
+      sessionId: session.id,
+      question: dto.question,
+      response: dto.response,
+    });
+
+    return this.interviewResponseRepository.save(response);
   }
 }

@@ -13,6 +13,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { InterviewsService } from './interviews.service';
+import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
 
 @Controller('interviews')
 @UseGuards(AuthGuard('jwt'))
@@ -85,5 +86,38 @@ export class InterviewsController {
     }
 
     return this.interviewsService.deleteInterview(id, userId);
+  }
+
+  @Post(':id/responses')
+  async createInterviewResponse(
+    @Param('id') id: string,
+    @Body() body: { responses?: CreateInterviewResponseDto[] },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const responses =
+      (body?.responses?.length ? body.responses : []).filter(
+        (response): response is CreateInterviewResponseDto =>
+          Boolean(response?.question && response?.response),
+      );
+
+    if (responses.length === 0) {
+      throw new BadRequestException('No responses provided');
+    }
+
+    const createdResponses = await Promise.all(
+      responses.map((response) =>
+        this.interviewsService.createInterviewResponse(id, userId, response),
+      ),
+    );
+
+    return createdResponses.length === 1
+      ? createdResponses[0]
+      : createdResponses;
   }
 }

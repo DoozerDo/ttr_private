@@ -1,59 +1,221 @@
-﻿diff --git a/apps/api/src/migrations/1780000000000-Interviews.ts b/apps/api/src/migrations/1780000000000-Interviews.ts
+﻿diff --git a/apps/api/src/interviews/dto/create-interview-response.dto.ts b/apps/api/src/interviews/dto/create-interview-response.dto.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..08ee904a57c4c11e1e682d47f192d72eac9e8c0d
+index 0000000000000000000000000000000000000000..c40b22722311b9b2104c6d5e05f965152c80f717
 --- /dev/null
-+++ b/apps/api/src/migrations/1780000000000-Interviews.ts
-@@ -0,0 +1,52 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class Interviews1780000000000 implements MigrationInterface {
-+  name = 'Interviews1780000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
-+
-+    await queryRunner.query(`
-+      CREATE TABLE "interview_sessions" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "userId" character varying(255) NOT NULL,
-+        "baselineId" character varying(255) NOT NULL,
-+        "jobId" character varying(255),
-+        "status" character varying(64) NOT NULL DEFAULT 'active',
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_interview_sessions_id" PRIMARY KEY ("id")
-+      )
-+    `);
-+
-+    await queryRunner.query(`
-+      CREATE TABLE "interview_responses" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "sessionId" uuid NOT NULL,
-+        "question" text NOT NULL,
-+        "response" text NOT NULL,
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_interview_responses_id" PRIMARY KEY ("id"),
-+        CONSTRAINT "FK_interview_responses_session" FOREIGN KEY ("sessionId") REFERENCES "interview_sessions"("id") ON DELETE CASCADE
-+      )
-+    `);
-+
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_interview_sessions_userId" ON "interview_sessions" ("userId")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_interview_responses_sessionId" ON "interview_responses" ("sessionId")`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_interview_responses_sessionId"`,
-+    );
-+    await queryRunner.query(`DROP TABLE "interview_responses"`);
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_interview_sessions_userId"`,
-+    );
-+    await queryRunner.query(`DROP TABLE "interview_sessions"`);
-+  }
++++ b/apps/api/src/interviews/dto/create-interview-response.dto.ts
+@@ -0,0 +1,4 @@
++export class CreateInterviewResponseDto {
++  question!: string;
++  response!: string;
 +}
+diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
+index 2e77a93a69bb3d0f1824e7512c774c076a629b79..1963252ee9657b079a1eb9465273028e15a71981 100644
+--- a/apps/api/src/interviews/interviews.controller.ts
++++ b/apps/api/src/interviews/interviews.controller.ts
+@@ -1,40 +1,41 @@
+ import {
+   BadRequestException,
+   Body,
+   Controller,
+   Delete,
+   Get,
+   Param,
+   Patch,
+   Post,
+   Req,
+   UseGuards,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import type { Request } from 'express';
+ import { InterviewsService } from './interviews.service';
++import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
+ 
+ @Controller('interviews')
+ @UseGuards(AuthGuard('jwt'))
+ export class InterviewsController {
+   constructor(private readonly interviewsService: InterviewsService) {}
+ 
+   @Post()
+   async createInterview(
+     @Body() body: any,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.createInterview(userId, body);
+   }
+ 
+   @Get()
+   async listInterviews(@Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+@@ -64,26 +65,59 @@ export class InterviewsController {
+     @Body() body: any,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.updateInterview(id, userId, body);
+   }
+ 
+   @Delete(':id')
+   async deleteInterview(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.deleteInterview(id, userId);
+   }
++
++  @Post(':id/responses')
++  async createInterviewResponse(
++    @Param('id') id: string,
++    @Body() body: { responses?: CreateInterviewResponseDto[] },
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const responses =
++      (body?.responses?.length ? body.responses : []).filter(
++        (response): response is CreateInterviewResponseDto =>
++          Boolean(response?.question && response?.response),
++      );
++
++    if (responses.length === 0) {
++      throw new BadRequestException('No responses provided');
++    }
++
++    const createdResponses = await Promise.all(
++      responses.map((response) =>
++        this.interviewsService.createInterviewResponse(id, userId, response),
++      ),
++    );
++
++    return createdResponses.length === 1
++      ? createdResponses[0]
++      : createdResponses;
++  }
+ }
+diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
+index 37c9b760340aa9660c4082177525c06e803c3e1c..12df937148253a914384eed2f8a1a82de7e9c539 100644
+--- a/apps/api/src/interviews/interviews.service.ts
++++ b/apps/api/src/interviews/interviews.service.ts
+@@ -1,46 +1,50 @@
+ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
++import { InterviewResponse } from './interview-response.entity';
+ import { InterviewSession } from './interview-session.entity';
++import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
+ 
+ export type CreateInterviewDto = {
+   baselineId?: string;
+   jobId?: string | null;
+   date?: string;
+   type?: string;
+ };
+ 
+ export type UpdateInterviewDto = Partial<CreateInterviewDto> & {
+   status?: string;
+ };
+ 
+ @Injectable()
+ export class InterviewsService {
+   constructor(
+     @InjectRepository(InterviewSession)
+     private readonly interviewRepository: Repository<InterviewSession>,
++    @InjectRepository(InterviewResponse)
++    private readonly interviewResponseRepository: Repository<InterviewResponse>,
+   ) {}
+ 
+   private validateDate(date?: string | null) {
+     if (!date?.trim()) {
+       throw new BadRequestException('Interview date is required.');
+     }
+   }
+ 
+   private validateType(type?: string | null) {
+     if (type !== undefined && !type?.trim()) {
+       throw new BadRequestException('Interview type is required.');
+     }
+   }
+ 
+   private validateBaselineId(baselineId?: string | null) {
+     if (!baselineId?.trim()) {
+       throw new BadRequestException('Baseline ID is required.');
+     }
+   }
+ 
+   async createInterview(userId: string, dto: CreateInterviewDto) {
+     this.validateDate(dto.date ?? null);
+     this.validateType(dto.type ?? null);
+     this.validateBaselineId(dto.baselineId ?? null);
+ 
+@@ -91,26 +95,48 @@ export class InterviewsService {
+     }
+ 
+     if (dto.baselineId !== undefined) {
+       this.validateBaselineId(dto.baselineId ?? null);
+       interview.baselineId = dto.baselineId?.trim() || interview.baselineId;
+     }
+ 
+     if (dto.jobId !== undefined) {
+       interview.jobId = dto.jobId?.trim() || null;
+     }
+ 
+     if (dto.status !== undefined) {
+       interview.status = dto.status;
+     }
+ 
+     return this.interviewRepository.save(interview);
+   }
+ 
+   async deleteInterview(id: string, userId: string) {
+     const interview = await this.getInterviewForUser(id, userId);
+ 
+     await this.interviewRepository.remove(interview);
+ 
+     return { deleted: true, id };
+   }
++
++  async createInterviewResponse(
++    sessionId: string,
++    userId: string,
++    dto: CreateInterviewResponseDto,
++  ) {
++    const session = await this.interviewRepository.findOne({
++      where: { id: sessionId, userId },
++    });
++
++    if (!session) {
++      throw new NotFoundException('Interview not found');
++    }
++
++    const response = this.interviewResponseRepository.create({
++      sessionId: session.id,
++      question: dto.question,
++      response: dto.response,
++    });
++
++    return this.interviewResponseRepository.save(response);
++  }
+ }
 
