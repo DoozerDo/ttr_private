@@ -1,12 +1,11 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-
 import {
   getApiBaseUrl,
   relayApiResponse,
   requireAuthToken,
 } from "../../baselines/helpers";
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
 
@@ -17,22 +16,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!token) {
+  if (error) {
     return error;
   }
 
-  const queryString = req.nextUrl.search ?? "";
-
-  const response = await fetch(
-    `${baseUrl}/analysis/fit-assessments${queryString}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+  const response = await fetch(`${baseUrl}/analysis/fit-assessments`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
-  );
+    body: await req.text(),
+  });
 
   return relayApiResponse(response);
 }
+

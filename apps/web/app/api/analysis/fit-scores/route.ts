@@ -1,5 +1,4 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-
 import {
   getApiBaseUrl,
   relayApiResponse,
@@ -8,7 +7,6 @@ import {
 
 export async function GET(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
 
   if (!baseUrl) {
     return NextResponse.json(
@@ -17,17 +15,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!token) {
-    return error;
+  const auth = requireAuthToken(req);
+
+  if (!("token" in auth)) {
+    return auth.error;
   }
 
-  const queryString = req.nextUrl.search ?? "";
-
-  const response = await fetch(`${baseUrl}/analysis/fit-scores${queryString}`, {
+  const response = await fetch(`${baseUrl}/analysis/fit-scores`, {
     method: "GET",
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${auth.token}`,
     },
   });
 

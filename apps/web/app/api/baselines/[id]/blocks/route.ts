@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
+import {
+  getApiBaseUrl,
+  relayApiResponse,
+  requireAuthToken,
+} from "../../helpers";
+
+export const runtime = "nodejs";
 
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
-) {
+): Promise<Response> {
   const { id } = await context.params;
+
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
-  const baselineVersionId = req.nextUrl.searchParams.get("baseline_version_id");
+  const auth = requireAuthToken(req);
 
   if (!baseUrl) {
     return NextResponse.json(
@@ -18,38 +24,29 @@ export async function GET(
     );
   }
 
-  if (!token) {
-    return error;
+  if (!auth.token) {
+    return auth.error as Response;
   }
 
-  if (!baselineVersionId) {
-    return NextResponse.json(
-      { error: "baseline_version_id is required" },
-      { status: 400 },
-    );
-  }
-
-  const response = await fetch(
-    `${baseUrl}/baselines/${id}/blocks?baseline_version_id=${baselineVersionId}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+    method: "GET",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
     },
-  );
+  });
 
   return relayApiResponse(response);
 }
 
-export async function PATCH(
+export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
-) {
+): Promise<Response> {
   const { id } = await context.params;
+
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
+  const auth = requireAuthToken(req);
 
   if (!baseUrl) {
     return NextResponse.json(
@@ -58,16 +55,16 @@ export async function PATCH(
     );
   }
 
-  if (!token) {
-    return error;
+  if (!auth.token) {
+    return auth.error as Response;
   }
 
   const body = await req.json();
 
   const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
-    method: "PATCH",
+    method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${auth.token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),

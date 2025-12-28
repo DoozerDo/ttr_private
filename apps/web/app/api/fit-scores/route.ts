@@ -1,30 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
+  const auth = requireAuthToken(req);
 
-  if (!baseUrl) {
-    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-  }
+  if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
+  if (!auth.token) return auth.error;
 
-  if (!token) {
-    return error;
-  }
-
-  const body = await req.json();
-
-  const response = await fetch(`${baseUrl}/fit-scores`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const response = await fetch(`${baseUrl}/analysis/fit-scores`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${auth.token}` },
   });
 
   return relayApiResponse(response);

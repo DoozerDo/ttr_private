@@ -18,6 +18,12 @@ export default function ResultsPage() {
 
   async function loadLatest() {
     setError(null);
+
+    if (!jobId) {
+      setError("Job ID is required to load analysis.");
+      return;
+    }
+
     try {
       const res = await fetch(
         `/api/analysis/latest?jobId=${encodeURIComponent(jobId)}`,
@@ -29,14 +35,23 @@ export default function ResultsPage() {
         throw new Error(text);
       }
 
-      const data = await res.json();
+      const data: LatestAnalysis = await res.json();
       setLatest(data);
+
+      if (data?.baselineId) {
+        setBaselineId(data.baselineId);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to load analysis");
     }
   }
 
   async function generateResume() {
+    if (!baselineId || !jobId) {
+      setError("Baseline and Job are required to generate a resume.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResumeResponse(null);

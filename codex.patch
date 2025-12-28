@@ -1,66 +1,32 @@
-﻿diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
-index 7463d3a351b9ca53e41ce7668004938ea898c898..38dec7f669d56e7cc4c8028157765b0c1c183691 100644
---- a/apps/api/src/resume/resume.controller.ts
-+++ b/apps/api/src/resume/resume.controller.ts
-@@ -1,41 +1,42 @@
- import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Request } from 'express';
--import { ResumeService } from './resume.service';
-+
-+interface ResumeRequestBody {
-+  baselineId?: string;
-+  jobId?: string;
-+}
+diff --git a/apps/web/app/api/analysis/fit-assessments/route.ts b/apps/web/app/api/analysis/fit-assessments/route.ts
+--- a/apps/web/app/api/analysis/fit-assessments/route.ts
++++ b/apps/web/app/api/analysis/fit-assessments/route.ts
+@@ -1,24 +1,23 @@
+ import { NextRequest } from "next/server";
+ import { requireAuthToken } from "../../baselines/helpers";
  
- @Controller('resume')
- @UseGuards(AuthGuard('jwt'))
- export class ResumeController {
--  constructor(private readonly resumeService: ResumeService) {}
+ export async function POST(req: NextRequest) {
+-  const auth = requireAuthToken(req);
 -
--  @Post('generate')
--  async generate(
--    @Body()
--    body: {
--      baselineId?: string;
--      baselineVersionId?: string;
--      jobId?: string;
--    },
-+  @Post()
-+  async createResumeRequest(
-+    @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
+-  if (!auth.token) {
+-    return auth.error;
+-  }
++  const { token, error } = requireAuthToken(req);
++  if (error) {
++    return error;
++  }
  
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
+   const baseUrl = process.env.API_BASE_URL || "http://api:3001";
  
--    if (!body.baselineId) {
-+    const baselineId = body.baselineId?.trim();
-+    const jobId = body.jobId?.trim();
-+
-+    if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
-     }
+   const response = await fetch(`${baseUrl}/analysis/fit-assessments`, {
+     method: "POST",
+     headers: {
+       "Content-Type": "application/json",
+-      Authorization: `Bearer ${auth.token}`,
++      Authorization: `Bearer ${token}`,
+     },
+     body: await req.text(),
+   });
  
--    if (!body.baselineVersionId) {
--      throw new BadRequestException('baselineVersionId is required');
-+    if (!jobId) {
-+      throw new BadRequestException('jobId is required');
-     }
- 
--    return this.resumeService.generateResume(userId, {
--      baselineId: body.baselineId,
--      baselineVersionId: body.baselineVersionId,
--      jobId: body.jobId ?? null,
--    });
-+    return {
-+      ok: true,
-+      baselineId,
-+      jobId,
-+      message: 'Resume generation request received',
-+    };
-   }
+   return response;
  }

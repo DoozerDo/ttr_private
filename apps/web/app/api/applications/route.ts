@@ -1,30 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
+  const auth = requireAuthToken(req);
 
   if (!baseUrl) {
-    return NextResponse.json(
-      { error: "API base URL is not configured" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
   }
+  if (!auth.token) return auth.error;
 
-  if (!token) {
-    return error;
-  }
-
-  const queryString = new URL(req.url).search;
-
-  const response = await fetch(`${baseUrl}/applications${queryString}`, {
+  const response = await fetch(`${baseUrl}/applications`, {
     method: "GET",
     cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${auth.token}` },
   });
 
   return relayApiResponse(response);
@@ -32,25 +23,19 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
+  const auth = requireAuthToken(req);
 
   if (!baseUrl) {
-    return NextResponse.json(
-      { error: "API base URL is not configured" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
   }
-
-  if (!token) {
-    return error;
-  }
+  if (!auth.token) return auth.error;
 
   const body = await req.json();
 
   const response = await fetch(`${baseUrl}/applications`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${auth.token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
