@@ -33,7 +33,10 @@ export default function ResultsPage() {
     try {
       if (!latestEndpoint) throw new Error("Job ID is required.");
 
-      const res = await fetch(latestEndpoint, { cache: "no-store" });
+      const res = await fetch(
+        `/api/analysis/job/${encodeURIComponent(jobId)}/latest`,
+        { cache: "no-store" },
+      );
 
       if (!res.ok) {
         const text = await res.text();
