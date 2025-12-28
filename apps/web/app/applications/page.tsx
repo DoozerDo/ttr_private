@@ -1,26 +1,25 @@
-// apps/web/app/applications/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { apiFetchJson, downloadBlob } from '../lib/api';
 
 type AnyRecord = Record<string, unknown>;
 
 type Application = {
   id: string;
+  company?: string;
+  title?: string;
+  roleTitle?: string;
+  stage?: string;
+  status?: string;
+  link?: string;
+  appliedDate?: string;
+  notes?: string;
+  extra?: unknown;
+  extraJson?: unknown;
+  createdAt?: string;
+  updatedAt?: string;
 } & AnyRecord;
-
-type ApiError = {
-  message?: string;
-  error?: string;
-  statusCode?: number;
-};
-
-const STAGES = ['APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFER', 'REJECTED'] as const;
-type Stage = (typeof STAGES)[number];
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 function safeString(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -34,222 +33,85 @@ function safeString(v: unknown): string {
   }
 }
 
-function pickFirst(obj: AnyRecord, keys: string[]): string {
-  for (const k of keys) {
-    if (k in obj) return safeString(obj[k]);
-  }
-  return '';
+function normalizeStage(input: string): string {
+  const s = (input || '').trim();
+  if (!s) return 'APPLIED';
+  return s.toUpperCase();
 }
 
-function normalizeStage(input: string): Stage | '' {
-  const raw = input.trim();
-  if (!raw) return '';
-
-  const up = raw.toUpperCase();
-
-  if ((STAGES as readonly string[]).includes(up)) return up as Stage;
-
-  // Common friendly inputs
-  if (up === 'APPLY' || up === 'APPLIED') return 'APPLIED';
-  if (up === 'SCREEN' || up === 'SCREENING') return 'SCREENING';
-  if (up === 'INTERVIEW' || up === 'INTERVIEWING') return 'INTERVIEWING';
-  if (up === 'OFFER' || up === 'OFFERED') return 'OFFER';
-  if (up === 'REJECT' || up === 'REJECTED') return 'REJECTED';
-
-  return '';
+function parseJsonOrEmpty(input: string): unknown {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return {};
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    throw new Error('Extra JSON must be valid JSON.');
+  }
 }
 
-async function apiFetch<T>(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    cache: 'no-store',
-  });
-
-  const contentType = res.headers.get('content-type') || '';
-  const isJson = contentType.includes('application/json');
-
-  if (!res.ok) {
-    let detail: ApiError = {};
-    try {
-      detail = isJson ? await res.json() : { message: await res.text() };
-    } catch {
-      detail = { message: 'Request failed' };
-    }
-    const msg =
-      detail.message ||
-      detail.error ||
-      `Request failed with status ${res.status}`;
-    throw new Error(msg);
-  }
-
-  if (!isJson) {
-    // @ts-expect-error callers should not use apiFetch for non-json
-    return (await res.text()) as T;
-  }
-
-  return (await res.json()) as T;
+function looksLikeIsoDateOnly(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function formatDateMaybe(v: unknown): string {
-  const s = safeString(v);
-  if (!s) return '';
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleString();
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function buildPatchFromForm(form: {
-  company: string;
-  roleTitle: string;
-  stage: string;
-  link: string;
-  appliedDate: string;
-  notes: string;
-  extraJson: string;
-}): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
-
-  if (form.company.trim()) patch.company = form.company.trim();
-
-  if (form.roleTitle.trim()) {
-    const rt = form.roleTitle.trim();
-    // Compatibility with differing schemas
-    patch.title = rt;
-    patch.roleTitle = rt;
-  }
-
-  const normalizedStage = normalizeStage(form.stage);
-  if (normalizedStage) {
-    patch.stage = normalizedStage;
-    patch.status = normalizedStage;
-  }
-
-  if (form.link.trim()) {
-    const l = form.link.trim();
-    patch.link = l;
-    patch.url = l;
-  }
-
-  if (form.appliedDate.trim()) {
-    patch.appliedAt = form.appliedDate.trim();
-  }
-
-  if (form.notes.trim()) patch.notes = form.notes.trim();
-
-  if (form.extraJson.trim()) {
-    try {
-      const extra = JSON.parse(form.extraJson);
-      if (isRecord(extra)) {
-        for (const [k, v] of Object.entries(extra)) {
-          if (k === 'id') continue;
-          patch[k] = v;
-        }
-      }
-    } catch {
-      // ignore invalid JSON, UI validates separately
-    }
-  }
-
-  return patch;
+function toIsoDateIfNeeded(s: string): string {
+  const trimmed = (s || '').trim();
+  if (!trimmed) return '';
+  if (looksLikeIsoDateOnly(trimmed)) return trimmed;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return trimmed;
+  return d.toISOString();
 }
 
 export default function ApplicationsPage() {
   const [items, setItems] = useState<Application[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [busy, setBusy] = useState<boolean>(false);
+
   const [error, setError] = useState<string>('');
   const [notice, setNotice] = useState<string>('');
 
-  const [query, setQuery] = useState<string>('');
-  const [selectedId, setSelectedId] = useState<string>('');
+  const [search, setSearch] = useState<string>('');
 
-  const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
-  const [formCompany, setFormCompany] = useState<string>('');
-  const [formRoleTitle, setFormRoleTitle] = useState<string>('');
-  const [formStage, setFormStage] = useState<Stage>('APPLIED');
-  const [formLink, setFormLink] = useState<string>('');
-  const [formAppliedDate, setFormAppliedDate] = useState<string>('');
-  const [formNotes, setFormNotes] = useState<string>('');
-  const [formExtraJson, setFormExtraJson] = useState<string>('');
-  const [formJsonError, setFormJsonError] = useState<string>('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const selected = useMemo(() => {
-    return items.find((x) => x.id === selectedId) || null;
-  }, [items, selectedId]);
+  const [company, setCompany] = useState<string>('');
+  const [title, setTitle] = useState<string>('');
+  const [stage, setStage] = useState<string>('APPLIED');
+  const [link, setLink] = useState<string>('');
+  const [appliedDate, setAppliedDate] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+  const [extraJsonText, setExtraJsonText] = useState<string>(
+    '{ "cxFitScore": 94, "source": "LinkedIn" }',
+  );
+
+  const [detail, setDetail] = useState<Application | null>(null);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = (search || '').trim().toLowerCase();
     if (!q) return items;
 
     return items.filter((a) => {
-      const company = pickFirst(a, ['company', 'companyName', 'employer']);
-      const role = pickFirst(a, ['roleTitle', 'title', 'role', 'position']);
-      const stage = pickFirst(a, ['stage', 'status', 'state']);
-      const link = pickFirst(a, ['link', 'url', 'jobUrl']);
-      const hay = `${a.id} ${company} ${role} ${stage} ${link}`.toLowerCase();
+      const hay = [
+        a.id,
+        a.company,
+        a.title,
+        a.roleTitle,
+        a.stage,
+        a.status,
+        a.link,
+      ]
+        .map((v) => safeString(v).toLowerCase())
+        .join(' ');
       return hay.includes(q);
     });
-  }, [items, query]);
+  }, [items, search]);
 
-  const tableColumns = useMemo(() => {
-    const common = [
-      'company',
-      'companyName',
-      'roleTitle',
-      'title',
-      'stage',
-      'status',
-      'appliedAt',
-      'createdAt',
-      'updatedAt',
-      'link',
-      'url',
-    ];
-
-    const present = new Set<string>();
-    for (const it of items) {
-      for (const k of Object.keys(it)) present.add(k);
-    }
-
-    const cols: string[] = ['id'];
-    for (const k of common) {
-      if (present.has(k) && !cols.includes(k)) cols.push(k);
-    }
-
-    if (cols.length === 1) {
-      for (const k of Array.from(present)) {
-        if (k === 'id') continue;
-        cols.push(k);
-        if (cols.length >= 6) break;
-      }
-    }
-
-    return cols;
-  }, [items]);
-
-  async function refresh() {
+  async function loadList() {
     setLoading(true);
     setError('');
     setNotice('');
     try {
-      const data = await apiFetch<Application[]>('/api/applications', {
+      const data = await apiFetchJson<Application[]>('/api/applications', {
         method: 'GET',
       });
       setItems(Array.isArray(data) ? data : []);
@@ -261,186 +123,154 @@ export default function ApplicationsPage() {
   }
 
   useEffect(() => {
-    void refresh();
+    void loadList();
   }, []);
 
-  function resetForm() {
-    setSelectedId('');
-    setFormMode('create');
-    setFormCompany('');
-    setFormRoleTitle('');
-    setFormStage('APPLIED');
-    setFormLink('');
-    setFormAppliedDate('');
-    setFormNotes('');
-    setFormExtraJson('');
-    setFormJsonError('');
-    setNotice('');
+  function clearForm() {
+    setEditingId(null);
+    setCompany('');
+    setTitle('');
+    setStage('APPLIED');
+    setLink('');
+    setAppliedDate('');
+    setNotes('');
+    setExtraJsonText('{ "cxFitScore": 94, "source": "LinkedIn" }');
+    setDetail(null);
     setError('');
+    setNotice('');
   }
 
-  function validateExtraJson(value: string) {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setFormJsonError('');
-      return;
-    }
+  async function loadDetail(id: string) {
+    setBusy(true);
+    setError('');
+    setNotice('');
     try {
-      const parsed = JSON.parse(trimmed);
-      if (!isRecord(parsed)) {
-        setFormJsonError('Extra JSON must be an object');
+      const data = await apiFetchJson<Application>(`/api/applications/${id}`, {
+        method: 'GET',
+      });
+      setDetail(data);
+
+      setEditingId(id);
+      setCompany(safeString(data.company));
+      setTitle(safeString(data.title || data.roleTitle));
+      setStage(normalizeStage(safeString(data.stage || data.status || 'APPLIED')));
+      setLink(safeString(data.link));
+      setAppliedDate(safeString(data.appliedDate));
+      setNotes(safeString(data.notes));
+
+      const extra = data.extra ?? data.extraJson ?? {};
+      const text =
+        extra && typeof extra === 'object'
+          ? JSON.stringify(extra, null, 2)
+          : safeString(extra);
+      setExtraJsonText(text || '{}');
+
+      setNotice('Loaded application into form');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load application');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createApplication() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const t = title.trim();
+      if (!t) {
+        setError('Title is required.');
         return;
       }
-      setFormJsonError('');
-    } catch {
-      setFormJsonError('Extra JSON is not valid JSON');
-    }
-  }
 
-  function startEdit(app: Application) {
-    setNotice('');
-    setError('');
-    setFormMode('edit');
-    setSelectedId(app.id);
+      const payload: Record<string, unknown> = {
+        company: company.trim() || undefined,
+        title: t,
+        roleTitle: t,
+        stage: normalizeStage(stage),
+        status: normalizeStage(stage),
+        link: link.trim() || undefined,
+        appliedDate: appliedDate.trim() ? toIsoDateIfNeeded(appliedDate) : undefined,
+        notes: notes.trim() || undefined,
+        extra: parseJsonOrEmpty(extraJsonText),
+      };
 
-    setFormCompany(pickFirst(app, ['company', 'companyName', 'employer']));
-    setFormRoleTitle(pickFirst(app, ['roleTitle', 'title', 'role', 'position']));
-
-    const stageRaw = pickFirst(app, ['stage', 'status', 'state']);
-    const normalized = normalizeStage(stageRaw) || 'APPLIED';
-    setFormStage(normalized);
-
-    setFormLink(pickFirst(app, ['link', 'url', 'jobUrl']));
-
-    const applied = pickFirst(app, ['appliedAt', 'appliedOn', 'dateApplied']);
-    setFormAppliedDate(applied);
-
-    setFormNotes(pickFirst(app, ['notes', 'note']));
-
-    const extras: Record<string, unknown> = {};
-    const knownKeys = new Set([
-      'id',
-      'company',
-      'companyName',
-      'employer',
-      'roleTitle',
-      'title',
-      'role',
-      'position',
-      'stage',
-      'status',
-      'state',
-      'link',
-      'url',
-      'jobUrl',
-      'appliedAt',
-      'appliedOn',
-      'dateApplied',
-      'notes',
-      'note',
-    ]);
-    for (const [k, v] of Object.entries(app)) {
-      if (knownKeys.has(k)) continue;
-      extras[k] = v;
-    }
-    setFormExtraJson(
-      Object.keys(extras).length ? JSON.stringify(extras, null, 2) : '',
-    );
-    validateExtraJson(
-      Object.keys(extras).length ? JSON.stringify(extras) : '',
-    );
-  }
-
-  async function onCreate() {
-    setNotice('');
-    setError('');
-
-    if (!formRoleTitle.trim()) {
-      setError('Role Title is required.');
-      return;
-    }
-
-    validateExtraJson(formExtraJson);
-    if (formJsonError) return;
-
-    const body = buildPatchFromForm({
-      company: formCompany,
-      roleTitle: formRoleTitle,
-      stage: formStage,
-      link: formLink,
-      appliedDate: formAppliedDate,
-      notes: formNotes,
-      extraJson: formExtraJson,
-    });
-
-    try {
-      await apiFetch<Application>('/api/applications', {
+      await apiFetchJson('/api/applications', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
+
       setNotice('Application created');
-      resetForm();
-      await refresh();
+      await loadList();
+      clearForm();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Create failed');
+      setError(e instanceof Error ? e.message : 'Failed to create application');
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function onUpdate() {
-    if (!selectedId) return;
+  async function updateApplication() {
+    if (!editingId) return;
 
-    setNotice('');
+    setBusy(true);
     setError('');
-
-    if (!formRoleTitle.trim()) {
-      setError('Role Title is required.');
-      return;
-    }
-
-    validateExtraJson(formExtraJson);
-    if (formJsonError) return;
-
-    const patch = buildPatchFromForm({
-      company: formCompany,
-      roleTitle: formRoleTitle,
-      stage: formStage,
-      link: formLink,
-      appliedDate: formAppliedDate,
-      notes: formNotes,
-      extraJson: formExtraJson,
-    });
-
+    setNotice('');
     try {
-      await apiFetch<Application>(`/api/applications/${selectedId}`, {
+      const t = title.trim();
+      if (!t) {
+        setError('Title is required.');
+        return;
+      }
+
+      const payload: Record<string, unknown> = {
+        company: company.trim() || undefined,
+        title: t,
+        roleTitle: t,
+        stage: normalizeStage(stage),
+        status: normalizeStage(stage),
+        link: link.trim() || undefined,
+        appliedDate: appliedDate.trim() ? toIsoDateIfNeeded(appliedDate) : undefined,
+        notes: notes.trim() || undefined,
+        extra: parseJsonOrEmpty(extraJsonText),
+      };
+
+      await apiFetchJson(`/api/applications/${editingId}`, {
         method: 'PATCH',
-        body: JSON.stringify(patch),
+        body: JSON.stringify(payload),
       });
+
       setNotice('Application updated');
-      resetForm();
-      await refresh();
+      await loadList();
+      await loadDetail(editingId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Update failed');
+      setError(e instanceof Error ? e.message : 'Failed to update application');
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function onDelete(id: string) {
-    setNotice('');
+  async function deleteApplication(id: string) {
+    setBusy(true);
     setError('');
+    setNotice('');
     try {
-      await apiFetch<void>(`/api/applications/${id}`, {
-        method: 'DELETE',
-      });
+      await apiFetchJson(`/api/applications/${id}`, { method: 'DELETE' });
       setNotice('Application deleted');
-      if (selectedId === id) resetForm();
-      await refresh();
+      await loadList();
+      if (editingId === id) clearForm();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+      setError(e instanceof Error ? e.message : 'Failed to delete application');
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function onExport() {
-    setNotice('');
+  async function exportApplications() {
+    setBusy(true);
     setError('');
+    setNotice('');
     try {
       const res = await fetch('/api/applications/export', {
         method: 'GET',
@@ -448,66 +278,60 @@ export default function ApplicationsPage() {
       });
 
       if (!res.ok) {
-        let msg = `Export failed with status ${res.status}`;
-        try {
-          const contentType = res.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            const j = (await res.json()) as ApiError;
-            msg = j.message || j.error || msg;
-          } else {
-            const t = await res.text();
-            if (t) msg = t;
-          }
-        } catch {
-          // ignore
-        }
-        throw new Error(msg);
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `Export failed with status ${res.status}`);
       }
 
       const contentType = res.headers.get('content-type') || '';
       const blob = await res.blob();
 
-      const ext = contentType.includes('text/csv')
-        ? 'csv'
-        : contentType.includes('application/vnd.openxmlformats-officedocument')
-          ? 'xlsx'
-          : 'bin';
+      let ext = 'bin';
+      if (contentType.includes('text/csv')) ext = 'csv';
+      else if (contentType.includes('application/json')) ext = 'json';
+
       downloadBlob(blob, `applications-export.${ext}`);
       setNotice('Export downloaded');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setBusy(false);
     }
   }
+
+  const formModeLabel = editingId ? 'Update Application' : 'Create Application';
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Applications</h1>
-          <p className="text-sm text-gray-600">
-            Track, update, and export your applications.
-          </p>
+          <p className="text-sm text-gray-600">Track, update, and export your applications.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => void refresh()}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            onClick={() => void loadList()}
+            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+            disabled={loading || busy}
           >
             Refresh
           </button>
+
           <button
             type="button"
-            onClick={() => void onExport()}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            onClick={() => void exportApplications()}
+            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+            disabled={loading || busy}
           >
             Export
           </button>
+
           <button
             type="button"
-            onClick={resetForm}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            onClick={() => clearForm()}
+            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+            disabled={busy}
           >
             New
           </button>
@@ -531,202 +355,166 @@ export default function ApplicationsPage() {
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="w-full">
-              <label className="block text-sm font-medium text-gray-700">
-                Search
-              </label>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter by company, role, stage, link, or id"
-                className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              />
+          <div className="rounded border p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">List</h2>
+                <p className="text-xs text-gray-600">
+                  Use Edit to load a record into the form.
+                </p>
+              </div>
+              <div className="w-full sm:w-[320px]">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  placeholder="Filter by company, role, stage, link, or id"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-auto rounded border">
+              <table className="w-full border-collapse text-sm">
+                <thead className="bg-gray-50 text-left">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-2">id</th>
+                    <th className="whitespace-nowrap px-3 py-2">company</th>
+                    <th className="whitespace-nowrap px-3 py-2">title</th>
+                    <th className="whitespace-nowrap px-3 py-2">stage</th>
+                    <th className="whitespace-nowrap px-3 py-2">createdAt</th>
+                    <th className="whitespace-nowrap px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
+                        {loading ? 'Loading...' : 'No applications found.'}
+                      </td>
+                    </tr>
+                  )}
+
+                  {filtered.map((a) => (
+                    <tr key={a.id} className="border-t">
+                      <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs">
+                        {a.id}
+                      </td>
+                      <td className="px-3 py-2">{safeString(a.company)}</td>
+                      <td className="px-3 py-2">{safeString(a.title || a.roleTitle)}</td>
+                      <td className="px-3 py-2">{safeString(a.stage || a.status)}</td>
+                      <td className="px-3 py-2">{safeString(a.createdAt || '')}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+                            onClick={() => void loadDetail(a.id)}
+                            disabled={busy}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+                            onClick={() => void deleteApplication(a.id)}
+                            disabled={busy}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="mt-4 overflow-auto rounded border">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-700">
-                <tr>
-                  {tableColumns.map((c) => (
-                    <th key={c} className="whitespace-nowrap px-3 py-2">
-                      {c}
-                    </th>
-                  ))}
-                  <th className="whitespace-nowrap px-3 py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td
-                      colSpan={tableColumns.length + 1}
-                      className="px-3 py-6 text-center text-gray-600"
-                    >
-                      Loading...
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={tableColumns.length + 1}
-                      className="px-3 py-6 text-center text-gray-600"
-                    >
-                      No applications found.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((app) => {
-                    const isSelected = selectedId === app.id;
-                    return (
-                      <tr
-                        key={app.id}
-                        className={
-                          isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
-                        }
-                      >
-                        {tableColumns.map((c) => {
-                          const v = app[c];
-                          const isDate =
-                            c.toLowerCase().includes('date') ||
-                            c.toLowerCase().includes('at');
-                          return (
-                            <td
-                              key={`${app.id}:${c}`}
-                              className="max-w-[240px] truncate px-3 py-2"
-                              title={safeString(v)}
-                            >
-                              {isDate ? formatDateMaybe(v) : safeString(v)}
-                            </td>
-                          );
-                        })}
-                        <td className="whitespace-nowrap px-3 py-2">
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => startEdit(app)}
-                              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void onDelete(app.id)}
-                              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <div className="mt-6 rounded border p-4">
+            <h2 className="text-lg font-semibold">Record detail</h2>
+            <p className="mt-1 text-xs text-gray-600">Select a row and click Edit.</p>
 
-          <div className="mt-3 text-xs text-gray-600">
-            Tip: Use Edit to load any record into the form. The Extra JSON field
-            lets you update additional properties without changing the UI.
+            <pre className="mt-3 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
+              {detail ? JSON.stringify(detail, null, 2) : '{}'}
+            </pre>
           </div>
         </div>
 
         <div className="lg:col-span-2">
           <div className="rounded border p-4">
-            <h2 className="text-lg font-semibold">
-              {formMode === 'create' ? 'Create' : 'Edit'} Application
-            </h2>
-
-            {formMode === 'edit' && selected && (
-              <div className="mt-2 rounded border bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                Editing id: <span className="font-mono">{selected.id}</span>
-              </div>
-            )}
+            <h2 className="text-lg font-semibold">{formModeLabel}</h2>
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Company
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Company</label>
                 <input
-                  value={formCompany}
-                  onChange={(e) => setFormCompany(e.target.value)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
                   placeholder="Company"
+                  disabled={busy}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Role Title
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Role Title</label>
                 <input
-                  value={formRoleTitle}
-                  onChange={(e) => setFormRoleTitle(e.target.value)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   placeholder="Role title"
+                  disabled={busy}
                 />
-                <div className="mt-1 text-xs text-gray-500">
-                  Required. Sent as title and roleTitle.
-                </div>
+                <div className="mt-1 text-xs text-gray-500">Required.</div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Stage
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Stage</label>
                 <select
-                  value={formStage}
-                  onChange={(e) => setFormStage(e.target.value as Stage)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={stage}
+                  onChange={(e) => setStage(e.target.value)}
+                  disabled={busy}
                 >
-                  {STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
+                  <option value="APPLIED">APPLIED</option>
+                  <option value="SCREENING">SCREENING</option>
+                  <option value="INTERVIEWING">INTERVIEWING</option>
+                  <option value="OFFER">OFFER</option>
+                  <option value="REJECTED">REJECTED</option>
                 </select>
-                <div className="mt-1 text-xs text-gray-500">
-                  Sent to API as stage and status (enum safe).
-                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Link
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Link</label>
                 <input
-                  value={formLink}
-                  onChange={(e) => setFormLink(e.target.value)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
                   placeholder="Job link"
+                  disabled={busy}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Applied Date
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Applied Date</label>
                 <input
-                  value={formAppliedDate}
-                  onChange={(e) => setFormAppliedDate(e.target.value)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={appliedDate}
+                  onChange={(e) => setAppliedDate(e.target.value)}
                   placeholder="2025-12-27 or ISO timestamp"
+                  disabled={busy}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Notes
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Notes</label>
                 <textarea
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
                   placeholder="Notes"
+                  rows={3}
+                  disabled={busy}
                 />
               </div>
 
@@ -735,37 +523,30 @@ export default function ApplicationsPage() {
                   Extra JSON (object)
                 </label>
                 <textarea
-                  value={formExtraJson}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setFormExtraJson(v);
-                    validateExtraJson(v);
-                  }}
                   className="mt-1 w-full rounded border px-3 py-2 font-mono text-xs"
-                  rows={8}
-                  placeholder='{"cxFitScore": 94, "source": "LinkedIn"}'
+                  value={extraJsonText}
+                  onChange={(e) => setExtraJsonText(e.target.value)}
+                  rows={6}
+                  disabled={busy}
                 />
-                {formJsonError && (
-                  <div className="mt-1 text-xs text-red-700">{formJsonError}</div>
-                )}
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-2">
-                {formMode === 'create' ? (
+              <div className="flex gap-2 pt-2">
+                {!editingId ? (
                   <button
                     type="button"
-                    onClick={() => void onCreate()}
-                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90"
-                    disabled={!!formJsonError}
+                    onClick={() => void createApplication()}
+                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
+                    disabled={busy}
                   >
                     Create
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => void onUpdate()}
-                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90"
-                    disabled={!selectedId || !!formJsonError}
+                    onClick={() => void updateApplication()}
+                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
+                    disabled={busy}
                   >
                     Save
                   </button>
@@ -773,8 +554,9 @@ export default function ApplicationsPage() {
 
                 <button
                   type="button"
-                  onClick={resetForm}
-                  className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                  onClick={() => clearForm()}
+                  className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+                  disabled={busy}
                 >
                   Clear
                 </button>
@@ -782,14 +564,22 @@ export default function ApplicationsPage() {
             </div>
           </div>
 
-          <div className="mt-4 rounded border p-4">
-            <h3 className="text-sm font-semibold text-gray-800">Record detail</h3>
-            <div className="mt-2 text-xs text-gray-600">
-              Select a row and click Edit to inspect and update.
+          <div className="mt-6 rounded border p-4">
+            <h2 className="text-lg font-semibold">Status</h2>
+            <div className="mt-2 text-sm text-gray-700">
+              <div>
+                Records: <span className="font-mono">{items.length}</span>
+              </div>
+              <div className="mt-2">
+                Filtered: <span className="font-mono">{filtered.length}</span>
+              </div>
+              <div className="mt-2">
+                Mode: <span className="font-mono">{editingId ? 'edit' : 'create'}</span>
+              </div>
             </div>
-            <pre className="mt-3 max-h-[320px] overflow-auto rounded bg-gray-50 p-3 text-xs">
-              {selected ? JSON.stringify(selected, null, 2) : '{}'}
-            </pre>
+            <div className="mt-3 text-xs text-gray-600">
+              If you are not logged in, API calls will redirect to login.
+            </div>
           </div>
         </div>
       </div>
