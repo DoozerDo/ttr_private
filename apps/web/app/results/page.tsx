@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -16,8 +16,14 @@ export default function ResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const latestEndpoint = useMemo(() => {
+    if (!jobId) return null;
+    return `/api/analysis/job/${encodeURIComponent(jobId)}/latest`;
+  }, [jobId]);
+
   async function loadLatest() {
     setError(null);
+    setLatest(null);
 
     if (!jobId) {
       setError("Job ID is required to load analysis.");
@@ -25,10 +31,9 @@ export default function ResultsPage() {
     }
 
     try {
-      const res = await fetch(
-        `/api/analysis/latest?jobId=${encodeURIComponent(jobId)}`,
-        { cache: "no-store" },
-      );
+      if (!latestEndpoint) throw new Error("Job ID is required.");
+
+      const res = await fetch(latestEndpoint, { cache: "no-store" });
 
       if (!res.ok) {
         const text = await res.text();
@@ -42,7 +47,7 @@ export default function ResultsPage() {
         setBaselineId(data.baselineId);
       }
     } catch (e: any) {
-      setError(e.message || "Failed to load analysis");
+      setError(e?.message || "Failed to load analysis");
     }
   }
 
@@ -90,7 +95,7 @@ export default function ResultsPage() {
         window.URL.revokeObjectURL(url);
       }
     } catch (e: any) {
-      setError(e.message || "Resume generation failed");
+      setError(e?.message || "Resume generation failed");
     } finally {
       setLoading(false);
     }
@@ -145,6 +150,10 @@ export default function ResultsPage() {
           >
             Load latest analysis
           </button>
+
+          <div className="text-xs text-gray-500">
+            {latestEndpoint ? `Calling: ${latestEndpoint}` : ""}
+          </div>
         </div>
 
         <div className="border rounded p-4">
@@ -169,9 +178,7 @@ export default function ResultsPage() {
         <div>
           <label className="block text-sm">Resume response</label>
           <pre className="border rounded p-2 text-sm whitespace-pre-wrap">
-            {resumeResponse
-              ? JSON.stringify(resumeResponse, null, 2)
-              : ""}
+            {resumeResponse ? JSON.stringify(resumeResponse, null, 2) : ""}
           </pre>
         </div>
       </div>

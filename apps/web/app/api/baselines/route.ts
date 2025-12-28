@@ -8,7 +8,10 @@ export async function GET(req: NextRequest) {
   const auth = requireAuthToken(req);
 
   if (!baseUrl) {
-    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "API base URL is not configured" },
+      { status: 500 },
+    );
   }
   if (!auth.token) return auth.error;
 
@@ -26,11 +29,40 @@ export async function POST(req: NextRequest) {
   const auth = requireAuthToken(req);
 
   if (!baseUrl) {
-    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "API base URL is not configured" },
+      { status: 500 },
+    );
   }
   if (!auth.token) return auth.error;
 
-  const body = await req.json();
+  const contentType = req.headers.get("content-type") || "";
+
+  // Primary: accept multipart/form-data and forward as-is to the API.
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+
+    const response = await fetch(`${baseUrl}/baselines`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        // Do NOT set Content-Type here. Fetch will set the boundary for FormData.
+      },
+      body: formData,
+    });
+
+    return relayApiResponse(response);
+  }
+
+  // Fallback: support JSON for any callers that still POST JSON.
+  // Note: backend upload expects multipart, so JSON callers may still fail server-side.
+  // Keeping this prevents hard crashes if a client is still sending JSON.
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {
+    body = null;
+  }
 
   const response = await fetch(`${baseUrl}/baselines`, {
     method: "POST",
@@ -38,8 +70,9 @@ export async function POST(req: NextRequest) {
       Authorization: `Bearer ${auth.token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body ?? {}),
   });
 
   return relayApiResponse(response);
 }
+
