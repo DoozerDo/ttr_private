@@ -834,7 +834,10 @@ export default function AnalyzePage() {
                 ) : null}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
-                  <Link href="/results" style={ttrComponents.quietButton}>
+                  <Link
+                    href={result?.jobId ? `/results?jobId=${result.jobId}` : "/results"}
+                    style={ttrComponents.quietButton}
+                  >
                     View in Results
                   </Link>
 
