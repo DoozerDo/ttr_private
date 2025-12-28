@@ -1,11 +1,20 @@
+// apps/web/app/api/jobs/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+import {
+  getApiBaseUrl,
+  relayApiResponse,
+  requireAuthToken,
+} from "../baselines/helpers";
+
+function normalizeBaseUrl(input: string) {
+  return input.replace(/\/+$/, "").replace(/\/api$/, "");
+}
 
 export async function GET(req: NextRequest) {
-  const baseUrl = getApiBaseUrl();
+  const rawBaseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
 
-  if (!baseUrl) {
+  if (!rawBaseUrl) {
     return NextResponse.json(
       { error: "API base URL is not configured" },
       { status: 500 },
@@ -15,6 +24,8 @@ export async function GET(req: NextRequest) {
   if (!token) {
     return error;
   }
+
+  const baseUrl = normalizeBaseUrl(rawBaseUrl);
 
   const response = await fetch(`${baseUrl}/jobs`, {
     method: "GET",
@@ -28,10 +39,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const baseUrl = getApiBaseUrl();
+  const rawBaseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
 
-  if (!baseUrl) {
+  if (!rawBaseUrl) {
     return NextResponse.json(
       { error: "API base URL is not configured" },
       { status: 500 },
@@ -42,6 +53,7 @@ export async function POST(req: NextRequest) {
     return error;
   }
 
+  const baseUrl = normalizeBaseUrl(rawBaseUrl);
   const body = await req.json();
 
   const response = await fetch(`${baseUrl}/jobs`, {
@@ -55,4 +67,3 @@ export async function POST(req: NextRequest) {
 
   return relayApiResponse(response);
 }
-
