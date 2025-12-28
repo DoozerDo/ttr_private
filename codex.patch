@@ -1,109 +1,97 @@
-diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
-index 5320c6b735684ea8db7b7064716071137e882962..93a836006ae6ef6e313a779cd9e89dab1235fd21 100644
---- a/apps/web/app/analyze/page.tsx
-+++ b/apps/web/app/analyze/page.tsx
-@@ -156,50 +156,51 @@ export default function AnalyzePage() {
-   const [baselineError, setBaselineError] = useState<string | null>(null);
- 
-   const [jobs, setJobs] = useState<JobDto[]>([]);
-   const [jobId, setJobId] = useState("");
-   const [jobsLoading, setJobsLoading] = useState(true);
-   const [jobsError, setJobsError] = useState<string | null>(null);
- 
-   const [jobDescription, setJobDescription] = useState("");
-   const [result, setResult] = useState<AnalysisResult | null>(null);
-   const [restoredAt, setRestoredAt] = useState<string | null>(null);
- 
-   const [loading, setLoading] = useState(false);
-   const [error, setError] = useState<string | null>(null);
- 
-   const [animatedScore, setAnimatedScore] = useState(0);
-   const [showRaw, setShowRaw] = useState(false);
-   const [restoreError, setRestoreError] = useState<string | null>(null);
- 
-   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
-   const router = useRouter();
- 
-   const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
-   const hasSelectedJob = jobId.trim().length > 0;
-   const hasJobDescription = jobDescription.trim().length > 0;
-   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
-+  const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const loadBaselines = async () => {
-       setBaselineLoading(true);
-       setBaselineError(null);
- 
-       try {
-         const response = await fetch("/api/baselines", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load baselines.");
-         }
- 
-         const data = (await response.json()) as BaselineDto[];
-         if (cancelled) return;
- 
-         setBaselines(data);
- 
-         if (data.length > 0) {
-           setBaselineId((prev) => {
-             if (prev && data.some((b) => b.id === prev)) return prev;
-             return data[0].id;
-           });
-@@ -813,51 +814,51 @@ export default function AnalyzePage() {
-                     }}
-                   >
-                     <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                       Next steps
-                     </p>
- 
-                     <ol
-                       style={{
-                         margin: 0,
-                         paddingLeft: 18,
-                         display: "grid",
-                         gap: 6,
-                         color: "rgba(241,245,249,0.9)",
-                         fontSize: 14,
-                       }}
-                     >
-                       {result.recommendedActions.map((item, index) => (
-                         <li key={`${item}-${index}`}>{item}</li>
-                       ))}
-                     </ol>
-                   </div>
-                 ) : null}
- 
-                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
-                   <Link
--                    href={result?.jobId ? `/results?jobId=${result.jobId}` : "/results"}
-+                    href={resultsHref}
-                     style={ttrComponents.quietButton}
-                   >
-                     View in Results
-                   </Link>
- 
-                   <button
-                     type="button"
-                     onClick={() => setShowRaw((prev) => !prev)}
-                     style={{
-                       border: "1px solid rgba(255,255,255,0.12)",
-                       background: "rgba(255,255,255,0.04)",
-                       color: "rgba(255,255,255,0.75)",
-                       padding: "6px 10px",
-                       borderRadius: 10,
-                       fontSize: 12,
-                       cursor: "pointer",
-                     }}
-                   >
-                     {showRaw ? "Hide raw" : "View raw JSON"}
-                   </button>
-                 </div>
- 
-                 {showRaw ? (
-                   <pre
-                     style={{
+diff --git a/apps/web/app/api/cover-letters/[id]/route.ts b/apps/web/app/api/cover-letters/[id]/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ac1a53b6f117a6426fba69fb3d2b9025264bc51
+--- /dev/null
++++ b/apps/web/app/api/cover-letters/[id]/route.ts
+@@ -0,0 +1,91 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import {
++  getApiBaseUrl,
++  relayApiResponse,
++  requireAuthToken,
++} from "../../baselines/helpers";
++
++export const runtime = "nodejs";
++
++export async function GET(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!auth.token) {
++    return auth.error;
++  }
++
++  const { id } = await context.params;
++
++  if (!id) {
++    return NextResponse.json(
++      { error: "Missing id parameter" },
++      { status: 400 },
++    );
++  }
++
++  const response = await fetch(
++    `${baseUrl}/cover-letters/${encodeURIComponent(id)}`,
++    {
++      method: "GET",
++      cache: "no-store",
++      headers: {
++        Authorization: `Bearer ${auth.token}`,
++      },
++    },
++  );
++
++  return relayApiResponse(response);
++}
++
++export async function DELETE(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!auth.token) {
++    return auth.error;
++  }
++
++  const { id } = await context.params;
++
++  if (!id) {
++    return NextResponse.json(
++      { error: "Missing id parameter" },
++      { status: 400 },
++    );
++  }
++
++  const response = await fetch(
++    `${baseUrl}/cover-letters/${encodeURIComponent(id)}`,
++    {
++      method: "DELETE",
++      cache: "no-store",
++      headers: {
++        Authorization: `Bearer ${auth.token}`,
++      },
++    },
++  );
++
++  return relayApiResponse(response);
++}
