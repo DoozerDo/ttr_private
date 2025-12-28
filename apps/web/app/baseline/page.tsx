@@ -7,6 +7,8 @@ import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
 
+export const dynamic = "force-dynamic";
+
 async function buildInternalApiUrl(path: string) {
   const headerList = await headers();
   const protocol = headerList.get("x-forwarded-proto") ?? "http";
@@ -100,6 +102,3 @@ export default async function BaselinePage() {
     </InstrumentPanelShell>
   );
 }
-
-
-

@@ -1,167 +1,949 @@
-﻿diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-index 13a83b6e4a0d7b4b345f695c5b421b7c95910e34..9f9a080e11acedf07f503717953215e4979a99aa 100644
---- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-+++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-@@ -1,76 +1,110 @@
--import {
--  BaselineIncludePolicy,
--  BaselineSectionType,
--} from '../../baseline/baseline-section.entity';
- import { TemplateCoverLetterGenerator } from './template-cover-letter.generator';
+﻿diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
+index ea85ec27b0bc2d4b5bbe9268a7ea794a70904fce..ff2656b9c56c0a877533c22afd7f441224cd02b9 100644
+--- a/apps/web/app/analyze/page.tsx
++++ b/apps/web/app/analyze/page.tsx
+@@ -1,42 +1,66 @@
+ // apps/web/app/analyze/page.tsx
+ "use client";
  
- describe('TemplateCoverLetterGenerator', () => {
-   const generator = new TemplateCoverLetterGenerator();
+ import { useEffect, useMemo, useState } from "react";
+ import type { CSSProperties } from "react";
+ import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ 
+ import type { BaselineDto } from "../../lib/baselines";
+ import type { JobDto } from "../../lib/jobs";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
+ import type { AnalysisResult, StoredPayload } from "../lib/session";
+ import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
+ 
+ type ApiStatus = "unknown" | "online" | "offline";
+ 
++type StoredState = {
++  payload: StoredPayload | null;
++  error: string | null;
++};
++
++const STORAGE_KEY = "ttr:lastAnalysis";
++
++function readLastAnalysis(): StoredState {
++  if (typeof window === "undefined") return { payload: null, error: null };
++
++  try {
++    const raw = sessionStorage.getItem(STORAGE_KEY);
++    if (!raw) return { payload: null, error: null };
++
++    const parsed = JSON.parse(raw) as StoredPayload;
++    if (!parsed?.result) return { payload: null, error: null };
++
++    return { payload: parsed, error: null };
++  } catch (error) {
++    console.error("Unable to load last analysis", error);
++    return { payload: null, error: "We could not restore your last analysis." };
++  }
++}
++
+ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
+   const radius = 72;
+   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
+   const clampedScore = Math.min(Math.max(score, 0), 100);
+   const offset = circumference * (1 - clampedScore / 100);
+   const gradientId = "scoreRingGradient";
+ 
+   return (
+     <div
+       style={{
+         position: "relative",
+         display: "flex",
+         height: 176,
+         width: 176,
+         alignItems: "center",
+         justifyContent: "center",
+       }}
+     >
+       <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
+         <defs>
+           <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+             <stop offset="0%" stopColor="#f59e0b" />
+             <stop offset="50%" stopColor="#fbbf24" />
+             <stop offset="100%" stopColor="#f97316" />
+           </linearGradient>
+@@ -116,56 +140,58 @@ function signalQuality(score: number | null) {
+   if (score >= 90) return { label: "High", color: "#22c55e" };
+   if (score >= 75) return { label: "Medium", color: "#f59e0b" };
+   return { label: "Low", color: "#f97316" };
+ }
+ 
+ function latestVersionId(baseline?: BaselineDto) {
+   if (!baseline?.versions?.length) return "";
+   const sorted = [...baseline.versions].sort((a, b) => b.versionNumber - a.versionNumber);
+   return sorted[0]?.id ?? "";
+ }
+ 
+ export default function AnalyzePage() {
+   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+   const [baselineId, setBaselineId] = useState("");
+   const [baselineVersionId, setBaselineVersionId] = useState("");
+   const [baselineLoading, setBaselineLoading] = useState(true);
+   const [baselineError, setBaselineError] = useState<string | null>(null);
+ 
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobsLoading, setJobsLoading] = useState(true);
+   const [jobsError, setJobsError] = useState<string | null>(null);
+ 
+   const [jobDescription, setJobDescription] = useState("");
+   const [result, setResult] = useState<AnalysisResult | null>(null);
++  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+ 
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [animatedScore, setAnimatedScore] = useState(0);
+   const [showRaw, setShowRaw] = useState(false);
++  const [restoreError, setRestoreError] = useState<string | null>(null);
+ 
+   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+   const router = useRouter();
+ 
+   const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
+   const hasSelectedJob = jobId.trim().length > 0;
+   const hasJobDescription = jobDescription.trim().length > 0;
+   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
+ 
+   useEffect(() => {
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineLoading(true);
+       setBaselineError(null);
+ 
+       try {
+         const response = await fetch("/api/baselines", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
+         }
+ 
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
+@@ -272,59 +298,74 @@ export default function AnalyzePage() {
+     const probe = async (url: string) => {
+       try {
+         const res = await fetch(url, { cache: "no-store" });
+         return res.ok;
+       } catch {
+         return false;
+       }
+     };
+ 
+     const check = async () => {
+       setApiStatus((prev) => (prev === "online" ? "online" : "unknown"));
+       const online = (await probe("/api/status")) || (await probe("/api/health"));
+       if (cancelled) return;
+       setApiStatus(online ? "online" : "offline");
+     };
+ 
+     check();
+     const interval = setInterval(check, 10000);
+ 
+     return () => {
+       cancelled = true;
+       clearInterval(interval);
+     };
+   }, []);
+ 
++  useEffect(() => {
++    const { payload, error: restoreIssue } = readLastAnalysis();
++    if (!payload && !restoreIssue) return;
++
++    if (restoreIssue) {
++      setRestoreError(restoreIssue);
++    }
++
++    if (payload?.result) {
++      setResult(payload.result);
++      setRestoredAt(payload.savedAt);
++    }
++  }, []);
++
+   const handleAnalyze = async () => {
+     if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
+       setError("Please select a baseline and either choose a saved job or paste a description.");
+       return;
+     }
+ 
+     setLoading(true);
+     setError(null);
+     setResult(null);
++    setShowRaw(false);
+ 
+     try {
+       let resolvedJobId = jobId;
+ 
+       if (!hasSelectedJob && hasJobDescription) {
+         const createResponse = await fetch("/api/jobs", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ rawDescription: jobDescription }),
+         });
+ 
+         if (!createResponse.ok) {
+           const message = await createResponse.text();
+           throw new Error(message || "Unable to save this job description.");
+         }
+ 
+         const created = (await createResponse.json()) as { id?: string };
+         if (!created?.id) {
+           throw new Error("Job creation response was incomplete.");
+         }
+ 
+         resolvedJobId = created.id;
+         setJobId(created.id);
+       }
+ 
+@@ -332,50 +373,51 @@ export default function AnalyzePage() {
+         throw new Error("A baseline version is required to run Analyze.");
+       }
+ 
+       const requestJob: Record<string, unknown> = hasSelectedJob
+         ? { id: resolvedJobId }
+         : { raw_jd_text: jobDescription };
+ 
+       const response = await fetch("/api/fit-scores", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({
+           baseline_version_id: baselineVersionId,
+           job: requestJob,
+         }),
+       });
+ 
+       if (!response.ok) {
+         const message = await response.text();
+         throw new Error(message || "Unable to analyze this role right now.");
+       }
+ 
+       const raw = await response.json();
+       const data = normalizeAnalysisResult(raw);
+ 
+       setResult(data);
++      setRestoredAt(null);
+ 
+       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
+       saveLastAnalysis(payload);
+ 
+       if (data.jobId) {
+         router.push(`/results?jobId=${data.jobId}`);
+       }
+     } catch (e) {
+       const message = e instanceof Error ? e.message : "Unexpected error";
+       setError(message);
+       setResult(null);
+     } finally {
+       setLoading(false);
+     }
+   };
+ 
+   const scoreLabel = fitLabel(result?.score ?? null);
+   const quality = signalQuality(result?.score ?? null);
+ 
+   const pillColor =
+     apiStatus === "online"
+       ? "rgba(74, 222, 128, 0.15)"
+       : apiStatus === "offline"
+         ? "rgba(248, 113, 113, 0.18)"
+         : "rgba(251, 191, 36, 0.18)";
+@@ -523,50 +565,51 @@ export default function AnalyzePage() {
+                 id="jobDescription"
+                 name="jobDescription"
+                 rows={8}
+                 value={jobDescription}
+                 onChange={(event) => setJobDescription(event.target.value)}
+                 placeholder="Paste the role you want to target..."
+                 style={{
+                   ...ttrComponents.input,
+                   resize: "vertical",
+                   minHeight: 150,
+                   fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+                 }}
+               />
+ 
+               <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
+                 We only send this content to the analyzer service for this check. If you select a saved
+                 job posting, we will use that instead.
+               </p>
+ 
+               <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
+                 Characters: {jobDescription.length}
+               </div>
+             </div>
+ 
+             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
++            {restoreError && <div style={ttrComponents.dangerBox}>{restoreError}</div>}
+ 
+             <button
+               type="button"
+               onClick={handleAnalyze}
+               disabled={!canAnalyze}
+               style={{
+                 ...ttrComponents.primaryButton,
+                 cursor: canAnalyze ? "pointer" : "not-allowed",
+                 opacity: canAnalyze ? 1 : 0.6,
+               }}
+             >
+               {loading ? "Analyzing…" : "Analyze role fit"}
+             </button>
+ 
+             <div
+               style={{
+                 borderRadius: 12,
+                 border: "1px solid rgba(255,255,255,0.08)",
+                 background: "rgba(255,255,255,0.04)",
+                 padding: "10px 12px",
+                 display: "flex",
+                 alignItems: "center",
+                 justifyContent: "space-between",
+                 gap: 12,
+                 flexWrap: "wrap",
+@@ -623,50 +666,55 @@ export default function AnalyzePage() {
+             {!loading && !result && (
+               <div
+                 style={{
+                   border: "1px dashed rgba(251,191,36,0.35)",
+                   borderRadius: 14,
+                   padding: "32px 22px",
+                   background: "rgba(255,255,255,0.03)",
+                   textAlign: "center",
+                 }}
+               >
+                 <p
+                   style={{
+                     margin: 0,
+                     fontSize: 12,
+                     letterSpacing: 3,
+                     textTransform: "uppercase",
+                     color: "rgba(251,191,36,0.75)",
+                     fontWeight: 700,
+                   }}
+                 >
+                   Awaiting analysis
+                 </p>
+                 <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
+                   Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
+                 </p>
++                {restoredAt ? (
++                  <p style={{ marginTop: 10, fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
++                    Last run restored from this browser: {new Date(restoredAt).toLocaleString()}
++                  </p>
++                ) : null}
+               </div>
+             )}
+ 
+             {loading && <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.75)" }}>Analyzing…</p>}
+ 
+             {!loading && result && (
+               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                 <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                     <ScoreRing score={animatedScore} loading={loading} />
+                     <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>{scoreLabel}</div>
+                   </div>
+ 
+                   <div style={{ flex: 1, minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
+                     <p
+                       style={{
+                         margin: 0,
+                         fontSize: 13,
+                         letterSpacing: 2,
+                         textTransform: "uppercase",
+                         color: "rgba(251,191,36,0.75)",
+                         fontWeight: 700,
+                       }}
+                     >
+                       Alignment summary
+@@ -685,50 +733,56 @@ export default function AnalyzePage() {
+                           background: "rgba(255,255,255,0.08)",
+                           overflow: "hidden",
+                           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+                         }}
+                       >
+                         <div
+                           style={{
+                             width: `${Math.min(Math.max((result.score ?? 0) / 100, 0), 1) * 100}%`,
+                             height: "100%",
+                             background: quality.color,
+                             transition: "width 400ms ease",
+                           }}
+                         />
+                       </div>
+ 
+                       <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
+                         Signal quality: {quality.label}
+                       </span>
+                     </div>
+ 
+                     {result.baselineId && (
+                       <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                         Baseline: {result.baselineId}
+                       </div>
+                     )}
++
++                    {restoredAt ? (
++                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
++                        Restored from your last browser session: {new Date(restoredAt).toLocaleString()}
++                      </div>
++                    ) : null}
+                   </div>
+                 </div>
+ 
+                 {result.strengths?.length ? (
+                   <div>
+                     <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
+                       Signals in your favor
+                     </p>
+                     <div style={{ display: "flex", flexWrap: "wrap" }}>
+                       {result.strengths.map((item, index) => (
+                         <span key={`${item}-${index}`} style={ttrComponents.chip}>
+                           {item}
+                         </span>
+                       ))}
+                     </div>
+                   </div>
+                 ) : null}
+ 
+                 {result.gaps?.length ? (
+                   <div>
+                     <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
+                       Gaps to address
+                     </p>
+                     <div style={{ display: "flex", flexWrap: "wrap" }}>
+                       {result.gaps.map((item, index) => (
+diff --git a/apps/web/app/baseline/page.tsx b/apps/web/app/baseline/page.tsx
+index 40799842a17ecbca67701ed5008ec0a661e42a0e..78fae9244a3a2ff659c324401d0559763b5cd3dd 100644
+--- a/apps/web/app/baseline/page.tsx
++++ b/apps/web/app/baseline/page.tsx
+@@ -1,34 +1,36 @@
+ import { cookies, headers } from "next/headers";
+ import { redirect } from "next/navigation";
+ import Link from "next/link";
+ 
+ import type { BaselineDto } from "../../lib/baselines";
+ import { BaselineDashboard } from "./baseline-dashboard";
+ import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
+ import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
+ 
++export const dynamic = "force-dynamic";
++
+ async function buildInternalApiUrl(path: string) {
+   const headerList = await headers();
+   const protocol = headerList.get("x-forwarded-proto") ?? "http";
+   const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+ 
+   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+ 
+   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
+ }
+ 
+ async function buildInternalFetchOptions(): Promise<RequestInit> {
+   const headerList = await headers();
+   const cookieHeader = headerList.get("cookie");
+ 
+   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
+ 
+   return {
+     cache: "no-store",
+     credentials: "include",
+     headers: headersInit,
+   };
+ }
+ 
+ async function fetchBaselines(): Promise<BaselineDto[]> {
+@@ -78,28 +80,25 @@ export default async function BaselinePage() {
+       title="Baseline library"
+       rightSlot={rightSlot}
+     >
+       <section style={ttrComponents.basePanel}>
+         <div
+           style={{
+             display: "flex",
+             flexDirection: "column",
+             gap: 14,
+             marginBottom: 18,
+           }}
+         >
+           <span style={ttrTypography.subtleLabel}>Your data</span>
+           <h2 style={ttrTypography.h2}>Uploaded baselines</h2>
+           <p style={ttrTypography.bodyMuted}>
+             Upload and manage your locked résumé baselines. These are used as the
+             source of truth when analyzing role fit.
+           </p>
+         </div>
+ 
+         <BaselineDashboard initialBaselines={baselines} />
+       </section>
+     </InstrumentPanelShell>
+   );
+ }
 -
-   const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
+-
+-
+diff --git a/apps/web/app/jobs/new/page.tsx b/apps/web/app/jobs/new/page.tsx
+index 3b0895c24e0c45a76c88e91955a339226460ef7a..ff45cb70052d17dd5eee96f08aa7afec43dfd944 100644
+--- a/apps/web/app/jobs/new/page.tsx
++++ b/apps/web/app/jobs/new/page.tsx
+@@ -21,206 +21,220 @@ type IngestPreview = {
+   responsibilities: string[];
+   requirements: string[];
+ };
  
--  it('generates deterministic cover letter content from allowed baseline blocks', () => {
--    const result = generator.generate({
--      baselineId: 'baseline-1',
--      jobId: 'job-1',
--      tone: 'calm',
-+  const disallowedPhrase = 'DO_NOT_INCLUDE_THIS';
-+  const allowedBaselineText = [
-+    'Built incident response playbooks with engineers and support teams.',
-+    'Published onboarding guides for API customers.',
-+    'Tracked launch risks and maintained weekly status updates.',
-+  ].join('\n');
+ export default function JobIngestionPage() {
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [title, setTitle] = useState("");
+   const [company, setCompany] = useState("");
+   const [rawDescription, setRawDescription] = useState("");
+   const [url, setUrl] = useState("");
+   const [ingestionMode, setIngestionMode] = useState<IngestionMode>("PASTE");
+   const [preview, setPreview] = useState<IngestPreview | null>(null);
+   const [isPreviewing, setIsPreviewing] = useState(false);
+   const [isSubmitting, setIsSubmitting] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+   const [success, setSuccess] = useState<string | null>(null);
+ 
+   const sortedJobs = useMemo(
+     () =>
+       [...jobs].sort(
+         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+       ),
+     [jobs],
+   );
+ 
++  const isUrlMode = ingestionMode === "URL";
++  const canPreview = isUrlMode ? url.trim().length > 0 : rawDescription.trim().length > 0;
++  const canSubmit =
++    (isUrlMode ? url.trim().length > 0 : rawDescription.trim().length > 0) &&
++    !isSubmitting &&
++    !isPreviewing;
 +
-+  const jobTitle = 'Platform Integrations Lead';
-+  const company = 'Northwind Systems';
-+  const jobText = [
-+    'Responsibilities: Lead onboarding experiences for new merchants; Partner with design to simplify API adoption.',
-+    'Requirements: Document product decisions clearly; Manage risk during migrations.',
-+  ].join('\n');
+   useEffect(() => {
+     let cancelled = false;
+ 
+     const loadJobs = async () => {
+       try {
+         const response = await fetch("/api/jobs", { cache: "no-store" });
+         if (!response.ok) {
+           return;
+         }
+ 
+         const data = (await response.json()) as JobDto[];
+         if (!cancelled) setJobs(data);
+       } catch {
+         if (!cancelled) setJobs([]);
+       }
+     };
+ 
+     loadJobs();
+     return () => {
+       cancelled = true;
+     };
+   }, []);
+ 
++  const resetForm = () => {
++    setTitle("");
++    setCompany("");
++    setRawDescription("");
++    setUrl("");
++    setPreview(null);
++    setIngestionMode("PASTE");
++  };
 +
-+  const [responsibilitiesLine, requirementsLine] = jobText.split('\n');
-+  const parseLine = (line: string) =>
-+    line
-+      .split(':')[1]
-+      .split(';')
-+      .map((item) => item.trim().replace(/\.$/, ''))
-+      .filter(Boolean);
-+
-+  const responsibilities = parseLine(responsibilitiesLine);
-+  const requirements = parseLine(requirementsLine);
-+
-+  it('generates deterministic cover letter content from plain inputs', () => {
-+    const output = generator.generate({
-+      baselineId: 'baseline-fixed',
-+      jobId: 'job-fixed',
-+      tone: 'measured',
-       job: {
--        id: 'job-1',
--        title: 'Product Manager',
--        company: 'ExampleCorp',
--        responsibilities: ['Define product strategy', 'Drive roadmap'],
--        requirements: ['Align product planning with customer needs'],
-+        id: 'job-fixed',
-+        title: jobTitle,
-+        company,
-+        responsibilities,
-+        requirements,
-+        jobText,
-       },
-       allowedBaselineBlocks: [
-         {
--          id: 'block-1',
--          title: 'Experience',
--          content: 'Managed product launches across teams and coordinated stakeholder updates',
--          includePolicy: BaselineIncludePolicy.OPTIONAL,
-+          id: 'block-allowed-1',
-+          title: 'Operational Wins',
-+          content: allowedBaselineText,
-+          includePolicy: 'OPTIONAL',
-           order: 0,
--          sectionType: BaselineSectionType.EXPERIENCE,
-+          sectionType: 'EXPERIENCE',
-+        },
-+        {
-+          id: 'block-allowed-2',
-+          title: 'Collaboration',
-+          content: 'Facilitated vendor reviews and consolidated feedback for roadmap decisions.',
-+          includePolicy: 'ALWAYS',
-+          order: 1,
-+          sectionType: 'PROJECT',
+   const requestPreview = async (payload: { url?: string; pastedText?: string }, shouldSet = true) => {
+     setIsPreviewing(true);
+     setError(null);
+     setSuccess(null);
+ 
+     try {
+       const response = await fetch("/api/jobs/ingest", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
          },
-       ],
--    });
-+      maxWords: 380,
-+    } as any);
+         body: JSON.stringify(payload),
+       });
  
--    expect(result.content).toMatchInlineSnapshot(`
--      "I am writing to express my interest in the Product Manager role at ExampleCorp. I appreciate the chance to present a concise and candid overview of my background, focusing only on information that is already documented in a calm manner. The baseline materials I provided outline my verified experience, and I will rely on those details as I address the responsibilities of the role. I will mirror the priorities listed in the job description and keep every statement anchored to that verified record.
-+    expect(output.content).toMatchInlineSnapshot(`
-+"I am applying for the Platform Integrations Lead role at Northwind Systems. I prepared this cover letter directly from the approved baseline text and the responsibilities you provided, keeping every statement grounded in verified details. I will maintain a measured tone throughout. I will highlight the portions of my record that align with the description and avoid adding claims that are not supported.
+       const data = await response.json();
  
--      Key points from my background include Managed product launches across teams and coordinated stakeholder updates. I communicate in a calm voice The enclosed baseline content also captures how I plan work, collaborate with partners, and document progress without overextending claims. These experiences relate to priorities such as Define product strategy and Drive roadmap. Each excerpt comes directly from the approved baseline so the narrative stays factual and consistent.
-+Documented experience from the baseline includes Built incident response playbooks with engineers and support teams, Published onboarding guides for API customers, and Tracked launch risks and maintained weekly status updates. The same measured style appears across these examples. These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.
+       if (response.status === 401) {
+         window.location.href = "/auth/login";
+         return null;
+       }
  
--      I will ground my approach in the practices and outcomes already recorded, such as Managed product launches across teams and coordinated stakeholder updates. For responsibilities like Define product strategy and Drive roadmap, I will reference the documented work above, confirm expectations early, and avoid overstating experience when a requirement extends beyond that record. At ExampleCorp, I will collaborate closely to ensure every commitment is backed by evidence from my baseline. Where a requirement extends beyond the baseline, I will flag it early, seek clarity, and adjust plans so that delivery remains honest and dependable. My plan is straightforward: clarify scope, pair each priority with the most relevant baseline evidence, outline checkpoints, and document decisions so that expectations stay aligned.
-+For priorities such as Lead onboarding experiences for new merchants, Partner with design to simplify API adoption, Document product decisions clearly, and Manage risk during migrations, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material. When expectations align, I will reference passages such as Facilitated vendor reviews and consolidated feedback for roadmap decisions to show direct support. If any responsibility sits outside the documented baseline text, I will call out the gap immediately, ask for context, and proceed without implying experience I cannot prove. At Northwind Systems, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.
+       if (!response.ok) {
+         const message = data?.message || data?.error || "Unable to parse job description";
+         setError(typeof message === "string" ? message : "Unable to parse job description");
+         return null;
+       }
  
--      Thank you for considering how my documented background can serve ExampleCorp. I look forward to the possibility of discussing the Product Manager role further and sharing more in the same calm style. I am prepared to share any additional excerpts from my baseline to keep our conversation precise and verifiable. Please let me know a convenient time to connect, and I will prepare a brief walkthrough of the most relevant baseline highlights."
--    `);
--    expect(result.wordCount).toBe(countWords(result.content));
--  });
-+Thank you for reviewing how my documented background fits the Platform Integrations Lead role at Northwind Systems. I will continue to communicate in the same measured style. I appreciate your consideration and am ready to share any additional approved excerpts that help Northwind Systems make a confident decision. Please let me know a good time to connect, and I will come prepared with the most relevant baseline highlights."
-+`);
+       if (shouldSet) {
+         setPreview(data as IngestPreview);
+       }
  
--  it('omits disallowed baseline text when filtered before generation', () => {
--    const allowedBaselineBlock = {
--      id: 'allowed-1',
--      title: 'Projects',
--      content: 'Documented integration of third-party APIs without storing credentials',
--      includePolicy: BaselineIncludePolicy.ALWAYS,
--      order: 1,
--      sectionType: BaselineSectionType.PROJECT,
--    };
--    const disallowedContent =
--      'Sensitive beta feature roadmap details that should stay out of the cover letter';
-+    const paragraphs = output.content.split(/\n\s*\n/);
-+    expect(paragraphs).toHaveLength(4);
-+    expect(output.content).not.toContain(disallowedPhrase);
+       return data as IngestPreview;
+     } catch {
+       setError("Unable to parse job description right now.");
+       return null;
+     } finally {
+       setIsPreviewing(false);
+     }
+   };
  
--    const result = generator.generate({
--      baselineId: 'baseline-2',
--      jobId: 'job-2',
-+    const wordCount = countWords(output.content);
-+    expect(output.wordCount).toBe(wordCount);
-+    expect(wordCount).toBeLessThanOrEqual(400);
-+  });
+   const handlePreview = async () => {
+-    if (ingestionMode === "URL") {
++    if (isUrlMode) {
+       if (!url.trim()) {
+         setError("Please add a job description URL before previewing.");
+         return;
+       }
+       await requestPreview({ url: url.trim() });
+       return;
+     }
+ 
+     if (!rawDescription.trim()) {
+       setError("Please paste a job description before previewing.");
+       return;
+     }
+ 
+     await requestPreview({ pastedText: rawDescription });
+   };
+ 
++  const handleModeChange = (mode: IngestionMode) => {
++    setIngestionMode(mode);
++    setPreview(null);
++    setError(null);
++    setSuccess(null);
++  };
 +
-+  it('never injects disallowed content when it is absent from inputs', () => {
-+    const output = generator.generate({
-+      baselineId: 'baseline-sentinel',
-+      jobId: 'job-sentinel',
-       job: {
--        id: 'job-2',
--        title: 'Integration Engineer',
--        company: null,
--        responsibilities: ['Maintain API reliability'],
--        requirements: ['Audit integration risks'],
-+        id: 'job-sentinel',
-+        title: jobTitle,
-+        company,
-+        responsibilities: ['Map integrations to roadmap risks'],
-+        requirements: ['Communicate progress transparently'],
-       },
--      allowedBaselineBlocks: [allowedBaselineBlock],
--    });
-+      allowedBaselineBlocks: [
-+        {
-+          id: 'block-sentinel',
-+          title: 'Highlights',
-+          content: 'Maintained integration runbooks and rotated on-call coverage without incidents.',
-+          includePolicy: 'OPTIONAL',
-+          order: 0,
-+          sectionType: 'OPERATIONS',
-+        },
-+      ],
-+    } as any);
+   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
+     setError(null);
+     setSuccess(null);
  
--    expect(result.content).toContain(allowedBaselineBlock.content);
--    expect(result.content).not.toContain(disallowedContent);
-+    expect(output.content).not.toContain(disallowedPhrase);
-   });
- });
+     let previewPayload = preview;
+     const trimmedUrl = url.trim();
+ 
+-    if (ingestionMode === "URL") {
++    if (isUrlMode) {
+       if (!trimmedUrl) {
+         setError("Please add a job description URL before saving.");
+         return;
+       }
+       if (!previewPayload) {
+         previewPayload = await requestPreview({ url: trimmedUrl }, false);
+         if (!previewPayload) {
+           return;
+         }
+       }
+-    } else {
+-      if (!rawDescription.trim()) {
+-        setError("Please paste a job description before saving.");
+-        return;
+-      }
++    } else if (!rawDescription.trim()) {
++      setError("Please paste a job description before saving.");
++      return;
+     }
+ 
+     const finalRawDescription =
+-      ingestionMode === "URL"
+-        ? previewPayload?.rawDescription ?? ""
+-        : previewPayload?.rawDescription ?? rawDescription;
++      isUrlMode ? previewPayload?.rawDescription ?? "" : previewPayload?.rawDescription ?? rawDescription;
+ 
+     if (!finalRawDescription) {
+       setError("Please provide a job description before saving.");
+       return;
+     }
+ 
+     setIsSubmitting(true);
+ 
+     try {
+       const response = await fetch("/api/jobs", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
+         },
+         body: JSON.stringify({
+           title,
+           company,
+           rawDescription: finalRawDescription,
+-          sourceUrl: ingestionMode === "URL" ? trimmedUrl : null,
++          sourceUrl: isUrlMode ? trimmedUrl : null,
+           responsibilities: previewPayload?.responsibilities,
+           requirements: previewPayload?.requirements,
+           jdIngestionMethod: ingestionMode,
+         }),
+       });
+ 
+       const data = await response.json();
+ 
+       if (response.status === 401) {
+         window.location.href = "/auth/login";
+         return;
+       }
+ 
+       if (!response.ok) {
+         const message = data?.message || data?.error || "Unable to save job";
+         setError(typeof message === "string" ? message : "Unable to save job");
+         return;
+       }
+ 
+       setJobs((previous) => [data as JobDto, ...previous]);
+-      setTitle("");
+-      setCompany("");
+-      setRawDescription("");
+-      setUrl("");
+-      setPreview(null);
+-      setIngestionMode("PASTE");
++      resetForm();
+       setSuccess("Job description saved. Ready to analyze fit.");
+     } catch {
+       setError("Unable to save job right now.");
+     } finally {
+       setIsSubmitting(false);
+     }
+   };
+ 
+   const rightSlot = (
+     <Link href="/analyze" style={ttrComponents.secondaryButton}>
+       Analyze a role
+     </Link>
+   );
+ 
+   return (
+     <InstrumentPanelShell
+       kicker="Job ingestion"
+       title="Add a job description"
+       subtitle="Paste a job posting or fetch it from a URL to prepare for fit scoring."
+       rightSlot={rightSlot}
+     >
+       <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
+         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+           <span style={ttrTypography.subtleLabel}>Job intake</span>
+           <h2 style={ttrTypography.h2}>Capture the posting</h2>
+@@ -228,146 +242,141 @@ export default function JobIngestionPage() {
+             Paste the full job description or fetch it from a URL. Title and company are optional
+             but helpful for organization later.
+           </p>
+         </div>
+ 
+         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+             {(["PASTE", "URL"] as const).map((mode) => (
+               <label
+                 key={mode}
+                 style={{
+                   display: "flex",
+                   alignItems: "center",
+                   gap: 6,
+                   fontSize: 12,
+                   textTransform: "uppercase",
+                   letterSpacing: "0.08em",
+                   color: ingestionMode === mode ? "rgba(248,250,252,0.95)" : "rgba(148,163,184,0.7)",
+                 }}
+               >
+                 <input
+                   type="radio"
+                   name="ingestionMode"
+                   value={mode}
+                   checked={ingestionMode === mode}
+-                  onChange={() => {
+-                    setIngestionMode(mode);
+-                    setPreview(null);
+-                    setError(null);
+-                    setSuccess(null);
+-                  }}
++                  onChange={() => handleModeChange(mode)}
+                   disabled={isSubmitting || isPreviewing}
+                 />
+                 {mode === "PASTE" ? "Paste" : "URL"}
+               </label>
+             ))}
+           </div>
+ 
+           <div style={fieldStyle}>
+             <label style={ttrComponents.fieldLabel} htmlFor="jobTitle">
+               Job title (optional)
+             </label>
+             <input
+               id="jobTitle"
+               type="text"
+               value={title}
+               onChange={(event) => setTitle(event.target.value)}
+               placeholder="Senior Product Designer"
+               style={ttrComponents.textInput}
+               disabled={isSubmitting}
+             />
+           </div>
+ 
+           <div style={fieldStyle}>
+             <label style={ttrComponents.fieldLabel} htmlFor="jobCompany">
+               Company (optional)
+             </label>
+             <input
+               id="jobCompany"
+               type="text"
+               value={company}
+               onChange={(event) => setCompany(event.target.value)}
+               placeholder="Acme Health"
+               style={ttrComponents.textInput}
+               disabled={isSubmitting}
+             />
+           </div>
+ 
+-          {ingestionMode === "URL" ? (
++          {isUrlMode ? (
+             <div style={fieldStyle}>
+               <label style={ttrComponents.fieldLabel} htmlFor="jobUrl">
+                 Job description URL
+               </label>
+               <input
+                 id="jobUrl"
+                 type="url"
+                 value={url}
+                 onChange={(event) => {
+                   setUrl(event.target.value);
+                   setPreview(null);
+                 }}
+                 placeholder="https://company.com/jobs/role"
+                 style={ttrComponents.textInput}
+                 disabled={isSubmitting || isPreviewing}
+               />
+             </div>
+           ) : (
+             <div style={fieldStyle}>
+               <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
+                 Job description
+               </label>
+               <textarea
+                 id="jobDescription"
+                 value={rawDescription}
+                 onChange={(event) => {
+                   setRawDescription(event.target.value);
+                   setPreview(null);
+                 }}
+                 placeholder="Paste the full role description, requirements, and responsibilities."
+                 style={{ ...ttrComponents.textArea, minHeight: 220 }}
+                 disabled={isSubmitting || isPreviewing}
+               />
+             </div>
+           )}
+ 
+           <button
+             type="button"
+             onClick={handlePreview}
+-            disabled={isSubmitting || isPreviewing}
++            disabled={isSubmitting || isPreviewing || !canPreview}
+             style={{
+               ...ttrComponents.secondaryButton,
+               width: "fit-content",
+               padding: "10px 14px",
+               fontSize: 12,
+-              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
+-              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
++              opacity: isSubmitting || isPreviewing || !canPreview ? 0.7 : 1,
++              cursor: isSubmitting || isPreviewing || !canPreview ? "not-allowed" : "pointer",
+             }}
+           >
+             {isPreviewing
+               ? "Parsing..."
+-              : ingestionMode === "URL"
++              : isUrlMode
+                 ? "Fetch & preview"
+                 : "Preview parse"}
+           </button>
+ 
+           {error && <div style={ttrComponents.dangerBox}>{error}</div>}
+           {success && <div style={ttrComponents.successBox}>{success}</div>}
+ 
+           {preview && (
+             <div style={{ ...ttrComponents.basePanel, padding: 14 }}>
+               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                 <h3 style={{ ...ttrTypography.h3, margin: 0 }}>Parsed preview</h3>
+                 <details>
+                   <summary style={{ cursor: "pointer", fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
+                     View extracted description
+                   </summary>
+                   <p style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                     {preview.rawDescription}
+                   </p>
+                 </details>
+                 <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                   <div>
+                     <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
+                       Responsibilities
+                     </p>
+                     {preview.responsibilities.length === 0 ? (
+@@ -383,58 +392,58 @@ export default function JobIngestionPage() {
+                     )}
+                   </div>
+                   <div>
+                     <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600 }}>
+                       Requirements
+                     </p>
+                     {preview.requirements.length === 0 ? (
+                       <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                         No requirements detected yet.
+                       </p>
+                     ) : (
+                       <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                         {preview.requirements.map((item) => (
+                           <li key={item}>{item}</li>
+                         ))}
+                       </ul>
+                     )}
+                   </div>
+                 </div>
+               </div>
+             </div>
+           )}
+ 
+           <button
+             type="submit"
+-            disabled={isSubmitting || isPreviewing}
++            disabled={!canSubmit}
+             style={{
+               ...ttrComponents.primaryButton,
+               width: "fit-content",
+               padding: "12px 14px",
+               fontSize: 13,
+-              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
+-              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
++              opacity: !canSubmit ? 0.7 : 1,
++              cursor: !canSubmit ? "not-allowed" : "pointer",
+             }}
+           >
+             {isSubmitting ? "Saving..." : "Save job description"}
+           </button>
+         </form>
+       </section>
+ 
+       <section style={{ ...ttrComponents.basePanel, padding: 18, marginTop: 18 }}>
+         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+           <span style={ttrTypography.subtleLabel}>Recent</span>
+           <h2 style={ttrTypography.h2}>Saved job postings</h2>
+           <p style={ttrTypography.bodyMuted}>Your latest job descriptions appear first.</p>
+         </div>
+ 
+         <div style={{ marginTop: 12 }}>
+           {sortedJobs.length === 0 ? (
+             <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+               No job descriptions saved yet.
+             </p>
+           ) : (
+             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+               {sortedJobs.map((job, index) => (
+                 <li
+                   key={job.id}
+                   style={{

@@ -15,6 +15,30 @@ import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
 
 type ApiStatus = "unknown" | "online" | "offline";
 
+type StoredState = {
+  payload: StoredPayload | null;
+  error: string | null;
+};
+
+const STORAGE_KEY = "ttr:lastAnalysis";
+
+function readLastAnalysis(): StoredState {
+  if (typeof window === "undefined") return { payload: null, error: null };
+
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return { payload: null, error: null };
+
+    const parsed = JSON.parse(raw) as StoredPayload;
+    if (!parsed?.result) return { payload: null, error: null };
+
+    return { payload: parsed, error: null };
+  } catch (error) {
+    console.error("Unable to load last analysis", error);
+    return { payload: null, error: "We could not restore your last analysis." };
+  }
+}
+
 const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
   const radius = 72;
   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
@@ -138,12 +162,14 @@ export default function AnalyzePage() {
 
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [animatedScore, setAnimatedScore] = useState(0);
   const [showRaw, setShowRaw] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
   const router = useRouter();
@@ -294,6 +320,20 @@ export default function AnalyzePage() {
     };
   }, []);
 
+  useEffect(() => {
+    const { payload, error: restoreIssue } = readLastAnalysis();
+    if (!payload && !restoreIssue) return;
+
+    if (restoreIssue) {
+      setRestoreError(restoreIssue);
+    }
+
+    if (payload?.result) {
+      setResult(payload.result);
+      setRestoredAt(payload.savedAt);
+    }
+  }, []);
+
   const handleAnalyze = async () => {
     if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
       setError("Please select a baseline and either choose a saved job or paste a description.");
@@ -303,6 +343,7 @@ export default function AnalyzePage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setShowRaw(false);
 
     try {
       let resolvedJobId = jobId;
@@ -354,6 +395,7 @@ export default function AnalyzePage() {
       const data = normalizeAnalysisResult(raw);
 
       setResult(data);
+      setRestoredAt(null);
 
       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
       saveLastAnalysis(payload);
@@ -545,6 +587,7 @@ export default function AnalyzePage() {
             </div>
 
             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
+            {restoreError && <div style={ttrComponents.dangerBox}>{restoreError}</div>}
 
             <button
               type="button"
@@ -645,6 +688,11 @@ export default function AnalyzePage() {
                 <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
                   Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
                 </p>
+                {restoredAt ? (
+                  <p style={{ marginTop: 10, fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                    Last run restored from this browser: {new Date(restoredAt).toLocaleString()}
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -707,6 +755,12 @@ export default function AnalyzePage() {
                         Baseline: {result.baselineId}
                       </div>
                     )}
+
+                    {restoredAt ? (
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+                        Restored from your last browser session: {new Date(restoredAt).toLocaleString()}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 

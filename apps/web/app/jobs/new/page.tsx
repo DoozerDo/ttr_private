@@ -43,6 +43,13 @@ export default function JobIngestionPage() {
     [jobs],
   );
 
+  const isUrlMode = ingestionMode === "URL";
+  const canPreview = isUrlMode ? url.trim().length > 0 : rawDescription.trim().length > 0;
+  const canSubmit =
+    (isUrlMode ? url.trim().length > 0 : rawDescription.trim().length > 0) &&
+    !isSubmitting &&
+    !isPreviewing;
+
   useEffect(() => {
     let cancelled = false;
 
@@ -65,6 +72,15 @@ export default function JobIngestionPage() {
       cancelled = true;
     };
   }, []);
+
+  const resetForm = () => {
+    setTitle("");
+    setCompany("");
+    setRawDescription("");
+    setUrl("");
+    setPreview(null);
+    setIngestionMode("PASTE");
+  };
 
   const requestPreview = async (payload: { url?: string; pastedText?: string }, shouldSet = true) => {
     setIsPreviewing(true);
@@ -107,7 +123,7 @@ export default function JobIngestionPage() {
   };
 
   const handlePreview = async () => {
-    if (ingestionMode === "URL") {
+    if (isUrlMode) {
       if (!url.trim()) {
         setError("Please add a job description URL before previewing.");
         return;
@@ -124,6 +140,13 @@ export default function JobIngestionPage() {
     await requestPreview({ pastedText: rawDescription });
   };
 
+  const handleModeChange = (mode: IngestionMode) => {
+    setIngestionMode(mode);
+    setPreview(null);
+    setError(null);
+    setSuccess(null);
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -132,7 +155,7 @@ export default function JobIngestionPage() {
     let previewPayload = preview;
     const trimmedUrl = url.trim();
 
-    if (ingestionMode === "URL") {
+    if (isUrlMode) {
       if (!trimmedUrl) {
         setError("Please add a job description URL before saving.");
         return;
@@ -143,17 +166,13 @@ export default function JobIngestionPage() {
           return;
         }
       }
-    } else {
-      if (!rawDescription.trim()) {
-        setError("Please paste a job description before saving.");
-        return;
-      }
+    } else if (!rawDescription.trim()) {
+      setError("Please paste a job description before saving.");
+      return;
     }
 
     const finalRawDescription =
-      ingestionMode === "URL"
-        ? previewPayload?.rawDescription ?? ""
-        : previewPayload?.rawDescription ?? rawDescription;
+      isUrlMode ? previewPayload?.rawDescription ?? "" : previewPayload?.rawDescription ?? rawDescription;
 
     if (!finalRawDescription) {
       setError("Please provide a job description before saving.");
@@ -172,7 +191,7 @@ export default function JobIngestionPage() {
           title,
           company,
           rawDescription: finalRawDescription,
-          sourceUrl: ingestionMode === "URL" ? trimmedUrl : null,
+          sourceUrl: isUrlMode ? trimmedUrl : null,
           responsibilities: previewPayload?.responsibilities,
           requirements: previewPayload?.requirements,
           jdIngestionMethod: ingestionMode,
@@ -193,12 +212,7 @@ export default function JobIngestionPage() {
       }
 
       setJobs((previous) => [data as JobDto, ...previous]);
-      setTitle("");
-      setCompany("");
-      setRawDescription("");
-      setUrl("");
-      setPreview(null);
-      setIngestionMode("PASTE");
+      resetForm();
       setSuccess("Job description saved. Ready to analyze fit.");
     } catch {
       setError("Unable to save job right now.");
@@ -250,12 +264,7 @@ export default function JobIngestionPage() {
                   name="ingestionMode"
                   value={mode}
                   checked={ingestionMode === mode}
-                  onChange={() => {
-                    setIngestionMode(mode);
-                    setPreview(null);
-                    setError(null);
-                    setSuccess(null);
-                  }}
+                  onChange={() => handleModeChange(mode)}
                   disabled={isSubmitting || isPreviewing}
                 />
                 {mode === "PASTE" ? "Paste" : "URL"}
@@ -293,7 +302,7 @@ export default function JobIngestionPage() {
             />
           </div>
 
-          {ingestionMode === "URL" ? (
+          {isUrlMode ? (
             <div style={fieldStyle}>
               <label style={ttrComponents.fieldLabel} htmlFor="jobUrl">
                 Job description URL
@@ -333,19 +342,19 @@ export default function JobIngestionPage() {
           <button
             type="button"
             onClick={handlePreview}
-            disabled={isSubmitting || isPreviewing}
+            disabled={isSubmitting || isPreviewing || !canPreview}
             style={{
               ...ttrComponents.secondaryButton,
               width: "fit-content",
               padding: "10px 14px",
               fontSize: 12,
-              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
-              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
+              opacity: isSubmitting || isPreviewing || !canPreview ? 0.7 : 1,
+              cursor: isSubmitting || isPreviewing || !canPreview ? "not-allowed" : "pointer",
             }}
           >
             {isPreviewing
               ? "Parsing..."
-              : ingestionMode === "URL"
+              : isUrlMode
                 ? "Fetch & preview"
                 : "Preview parse"}
           </button>
@@ -405,14 +414,14 @@ export default function JobIngestionPage() {
 
           <button
             type="submit"
-            disabled={isSubmitting || isPreviewing}
+            disabled={!canSubmit}
             style={{
               ...ttrComponents.primaryButton,
               width: "fit-content",
               padding: "12px 14px",
               fontSize: 13,
-              opacity: isSubmitting || isPreviewing ? 0.7 : 1,
-              cursor: isSubmitting || isPreviewing ? "not-allowed" : "pointer",
+              opacity: !canSubmit ? 0.7 : 1,
+              cursor: !canSubmit ? "not-allowed" : "pointer",
             }}
           >
             {isSubmitting ? "Saving..." : "Save job description"}
