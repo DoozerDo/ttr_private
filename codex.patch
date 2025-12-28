@@ -1,9 +1,60 @@
 diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
-index ff2656b9c56c0a877533c22afd7f441224cd02b9..5320c6b735684ea8db7b7064716071137e882962 100644
+index 5320c6b735684ea8db7b7064716071137e882962..93a836006ae6ef6e313a779cd9e89dab1235fd21 100644
 --- a/apps/web/app/analyze/page.tsx
 +++ b/apps/web/app/analyze/page.tsx
-@@ -812,51 +812,54 @@ export default function AnalyzePage() {
-                       background: "rgba(251,191,36,0.06)",
+@@ -156,50 +156,51 @@ export default function AnalyzePage() {
+   const [baselineError, setBaselineError] = useState<string | null>(null);
+ 
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobsLoading, setJobsLoading] = useState(true);
+   const [jobsError, setJobsError] = useState<string | null>(null);
+ 
+   const [jobDescription, setJobDescription] = useState("");
+   const [result, setResult] = useState<AnalysisResult | null>(null);
+   const [restoredAt, setRestoredAt] = useState<string | null>(null);
+ 
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [animatedScore, setAnimatedScore] = useState(0);
+   const [showRaw, setShowRaw] = useState(false);
+   const [restoreError, setRestoreError] = useState<string | null>(null);
+ 
+   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+   const router = useRouter();
+ 
+   const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
+   const hasSelectedJob = jobId.trim().length > 0;
+   const hasJobDescription = jobDescription.trim().length > 0;
+   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
++  const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
+ 
+   useEffect(() => {
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineLoading(true);
+       setBaselineError(null);
+ 
+       try {
+         const response = await fetch("/api/baselines", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
+         }
+ 
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
+ 
+         setBaselines(data);
+ 
+         if (data.length > 0) {
+           setBaselineId((prev) => {
+             if (prev && data.some((b) => b.id === prev)) return prev;
+             return data[0].id;
+           });
+@@ -813,51 +814,51 @@ export default function AnalyzePage() {
                      }}
                    >
                      <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
@@ -28,11 +79,11 @@ index ff2656b9c56c0a877533c22afd7f441224cd02b9..5320c6b735684ea8db7b706471607113
                  ) : null}
  
                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
--                  <Link href="/results" style={ttrComponents.quietButton}>
-+                  <Link
-+                    href={result?.jobId ? `/results?jobId=${result.jobId}` : "/results"}
-+                    style={ttrComponents.quietButton}
-+                  >
+                   <Link
+-                    href={result?.jobId ? `/results?jobId=${result.jobId}` : "/results"}
++                    href={resultsHref}
+                     style={ttrComponents.quietButton}
+                   >
                      View in Results
                    </Link>
  
@@ -56,5 +107,3 @@ index ff2656b9c56c0a877533c22afd7f441224cd02b9..5320c6b735684ea8db7b706471607113
                  {showRaw ? (
                    <pre
                      style={{
-                       margin: 0,
-                       marginTop: 6,

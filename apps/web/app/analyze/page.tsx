@@ -178,6 +178,7 @@ export default function AnalyzePage() {
   const hasSelectedJob = jobId.trim().length > 0;
   const hasJobDescription = jobDescription.trim().length > 0;
   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
+  const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
 
   useEffect(() => {
     let cancelled = false;
@@ -835,7 +836,7 @@ export default function AnalyzePage() {
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
                   <Link
-                    href={result?.jobId ? `/results?jobId=${result.jobId}` : "/results"}
+                    href={resultsHref}
                     style={ttrComponents.quietButton}
                   >
                     View in Results
