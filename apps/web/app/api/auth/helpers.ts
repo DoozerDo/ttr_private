@@ -1,12 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const ACCESS_TOKEN_COOKIE = "auth_token";
+const AUTH_COOKIE_NAME = "ttr_token";
 
 function getApiBaseUrl() {
   const serverBaseUrl = process.env.API_BASE_URL;
   const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
   return serverBaseUrl ?? clientBaseUrl ?? null;
+}
+
+export function getAuthCookieName(): string {
+  return AUTH_COOKIE_NAME;
 }
 
 function buildErrorMessage(message: unknown): string {
@@ -19,6 +23,72 @@ function buildErrorMessage(message: unknown): string {
   }
 
   return "Authentication failed";
+}
+
+export function setAuthCookie(response: NextResponse, token: string): void {
+  response.cookies.set({
+    name: AUTH_COOKIE_NAME,
+    value: token,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
+}
+
+export function clearAuthCookie(response: NextResponse): void {
+  response.cookies.set({
+    name: AUTH_COOKIE_NAME,
+    value: "",
+    path: "/",
+    httpOnly: true,
+    maxAge: 0,
+  });
+}
+
+export type RequireAuthTokenSuccess = {
+  token: string;
+  error?: never;
+};
+
+export type RequireAuthTokenFailure = {
+  token?: never;
+  error: NextResponse;
+};
+
+export type RequireAuthTokenResult =
+  | RequireAuthTokenSuccess
+  | RequireAuthTokenFailure;
+
+function extractBearerToken(authHeader: string | null): string {
+  if (!authHeader) {
+    return "";
+  }
+
+  return authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : "";
+}
+
+export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
+  const headerToken = extractBearerToken(
+    req.headers.get("authorization") ?? req.headers.get("Authorization"),
+  );
+
+  const cookieToken = req.cookies.get(AUTH_COOKIE_NAME)?.value ?? "";
+  const token = headerToken || cookieToken;
+
+  if (!token) {
+    return {
+      error: NextResponse.json(
+        { error: "Missing Authorization token" },
+        { status: 401 },
+      ),
+    };
+  }
+
+  return { token };
 }
 
 export async function forwardAuthRequest(
@@ -47,8 +117,13 @@ export async function forwardAuthRequest(
     return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
   }
 
-  type AuthApiResponse = {
+type AuthApiResponse = {
+    token?: string;
     accessToken?: string;
+    data?: {
+      token?: string;
+      accessToken?: string;
+    };
     user?: unknown;
     message?: unknown;
   } | null;
@@ -68,28 +143,16 @@ export async function forwardAuthRequest(
 
   const response = NextResponse.json({ user: data?.user ?? null });
 
-  if (data?.accessToken) {
-    response.cookies.set({
-      name: ACCESS_TOKEN_COOKIE,
-      value: data.accessToken,
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-    });
+  const token =
+    data?.accessToken ??
+    data?.token ??
+    data?.data?.token ??
+    data?.data?.accessToken ??
+    "";
+
+  if (token) {
+    setAuthCookie(response, token);
   }
 
-  return response;
-}
-
-export function clearAuthCookie() {
-  const response = NextResponse.json({ success: true });
-  response.cookies.set({
-    name: ACCESS_TOKEN_COOKIE,
-    value: "",
-    path: "/",
-    httpOnly: true,
-    maxAge: 0,
-  });
   return response;
 }

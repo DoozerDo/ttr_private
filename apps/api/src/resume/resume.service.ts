@@ -20,7 +20,7 @@ import { Job } from '../jobs/job.entity';
 
 export type GenerateResumeRequest = {
   baselineId: string;
-  baselineVersionId: string;
+  baselineVersionId?: string;
   jobId?: string | null;
 };
 
@@ -64,16 +64,16 @@ export class ResumeService {
   }
 
   async generateResume(userId: string, request: GenerateResumeRequest) {
-    if (!request.baselineId) {
+    const baselineId = request.baselineId?.trim();
+    const baselineVersionId = request.baselineVersionId?.trim();
+    const jobId = request.jobId?.trim();
+
+    if (!baselineId) {
       throw new BadRequestException('baselineId is required');
     }
 
-    if (!request.baselineVersionId) {
-      throw new BadRequestException('baselineVersionId is required');
-    }
-
     const baseline = await this.baselineRepository.findOne({
-      where: { id: request.baselineId, userId },
+      where: { id: baselineId, userId },
       relations: ['sections'],
       order: { sections: { order: 'ASC' } },
     });
@@ -82,8 +82,23 @@ export class ResumeService {
       throw new NotFoundException('Baseline not found');
     }
 
+    let targetBaselineVersionId = baselineVersionId;
+
+    if (!targetBaselineVersionId) {
+      const latestVersion = await this.baselineVersionRepository.findOne({
+        where: { baselineId: baseline.id },
+        order: { versionNumber: 'DESC', createdAt: 'DESC' },
+      });
+
+      targetBaselineVersionId = latestVersion?.id;
+    }
+
+    if (!targetBaselineVersionId) {
+      throw new NotFoundException('Baseline version not found');
+    }
+
     const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { id: request.baselineVersionId, baselineId: baseline.id },
+      where: { id: targetBaselineVersionId, baselineId: baseline.id },
     });
 
     if (!baselineVersion) {
@@ -111,13 +126,13 @@ export class ResumeService {
       source: 'baseline',
     }));
 
-    const job = request.jobId
+    const job = jobId
       ? await this.jobsRepository.findOne({
-          where: { id: request.jobId, userId },
+          where: { id: jobId, userId },
         })
       : null;
 
-    if (request.jobId && !job) {
+    if (jobId && !job) {
       throw new NotFoundException('Job not found');
     }
 
@@ -151,7 +166,7 @@ export class ResumeService {
       ok: true,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
-      jobId: request.jobId ?? null,
+      jobId: jobId ?? null,
       sections,
       compliance_flags: complianceFlags,
       audit_id: audit.id,

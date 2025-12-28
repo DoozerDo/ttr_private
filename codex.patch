@@ -1,32 +1,256 @@
-diff --git a/apps/web/app/api/analysis/fit-assessments/route.ts b/apps/web/app/api/analysis/fit-assessments/route.ts
---- a/apps/web/app/api/analysis/fit-assessments/route.ts
-+++ b/apps/web/app/api/analysis/fit-assessments/route.ts
-@@ -1,24 +1,23 @@
- import { NextRequest } from "next/server";
- import { requireAuthToken } from "../../baselines/helpers";
+diff --git a/apps/web/app/api/auth/helpers.ts b/apps/web/app/api/auth/helpers.ts
+index bfb510f6c52202cd7518c1da759be030608ee14b..6ce78e068a08212edeb212c8f52fc4df2efc6879 100644
+--- a/apps/web/app/api/auth/helpers.ts
++++ b/apps/web/app/api/auth/helpers.ts
+@@ -1,95 +1,158 @@
+-import { NextResponse } from "next/server";
++import { NextRequest, NextResponse } from "next/server";
  
- export async function POST(req: NextRequest) {
--  const auth = requireAuthToken(req);
--
--  if (!auth.token) {
--    return auth.error;
+-const ACCESS_TOKEN_COOKIE = "auth_token";
++const AUTH_COOKIE_NAME = "ttr_token";
+ 
+ function getApiBaseUrl() {
+   const serverBaseUrl = process.env.API_BASE_URL;
+   const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+ 
+   return serverBaseUrl ?? clientBaseUrl ?? null;
+ }
+ 
++export function getAuthCookieName(): string {
++  return AUTH_COOKIE_NAME;
++}
++
+ function buildErrorMessage(message: unknown): string {
+   if (typeof message === "string") {
+     return message;
+   }
+ 
+   if (Array.isArray(message)) {
+     return message.join(", ");
+   }
+ 
+   return "Authentication failed";
+ }
+ 
++export function setAuthCookie(response: NextResponse, token: string): void {
++  response.cookies.set({
++    name: AUTH_COOKIE_NAME,
++    value: token,
++    httpOnly: true,
++    sameSite: "lax",
++    secure: process.env.NODE_ENV === "production",
++    path: "/",
++    maxAge: 60 * 60 * 24 * 7,
++  });
++}
++
++export function clearAuthCookie(response: NextResponse): void {
++  response.cookies.set({
++    name: AUTH_COOKIE_NAME,
++    value: "",
++    path: "/",
++    httpOnly: true,
++    maxAge: 0,
++  });
++}
++
++export type RequireAuthTokenSuccess = {
++  token: string;
++  error?: never;
++};
++
++export type RequireAuthTokenFailure = {
++  token?: never;
++  error: NextResponse;
++};
++
++export type RequireAuthTokenResult =
++  | RequireAuthTokenSuccess
++  | RequireAuthTokenFailure;
++
++function extractBearerToken(authHeader: string | null): string {
++  if (!authHeader) {
++    return "";
++  }
++
++  return authHeader.startsWith("Bearer ")
++    ? authHeader.slice("Bearer ".length).trim()
++    : "";
++}
++
++export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
++  const headerToken = extractBearerToken(
++    req.headers.get("authorization") ?? req.headers.get("Authorization"),
++  );
++
++  const cookieToken = req.cookies.get(AUTH_COOKIE_NAME)?.value ?? "";
++  const token = headerToken || cookieToken;
++
++  if (!token) {
++    return {
++      error: NextResponse.json(
++        { error: "Missing Authorization token" },
++        { status: 401 },
++      ),
++    };
++  }
++
++  return { token };
++}
++
+ export async function forwardAuthRequest(
+   endpoint: string,
+   body: Record<string, unknown>,
+ ) {
+   const baseUrl = getApiBaseUrl();
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   let apiResponse: Response;
+ 
+   try {
+     apiResponse = await fetch(`${baseUrl}${endpoint}`, {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify(body),
+     });
+   } catch (error) {
+     console.error("Auth request failed", error);
+     return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
+   }
+ 
+-  type AuthApiResponse = {
++type AuthApiResponse = {
++    token?: string;
+     accessToken?: string;
++    data?: {
++      token?: string;
++      accessToken?: string;
++    };
+     user?: unknown;
+     message?: unknown;
+   } | null;
+ 
+   let data: AuthApiResponse = null;
+ 
+   try {
+     data = await apiResponse.json();
+   } catch (error) {
+     console.error("Failed to parse auth response", error);
+   }
+ 
+   if (!apiResponse.ok) {
+     const errorMessage = buildErrorMessage(data?.message);
+     return NextResponse.json({ error: errorMessage }, { status: apiResponse.status });
+   }
+ 
+   const response = NextResponse.json({ user: data?.user ?? null });
+ 
+-  if (data?.accessToken) {
+-    response.cookies.set({
+-      name: ACCESS_TOKEN_COOKIE,
+-      value: data.accessToken,
+-      httpOnly: true,
+-      sameSite: "lax",
+-      secure: process.env.NODE_ENV === "production",
+-      path: "/",
+-    });
 -  }
-+  const { token, error } = requireAuthToken(req);
-+  if (error) {
-+    return error;
++  const token =
++    data?.accessToken ??
++    data?.token ??
++    data?.data?.token ??
++    data?.data?.accessToken ??
++    "";
+ 
+-  return response;
+-}
++  if (token) {
++    setAuthCookie(response, token);
 +  }
  
-   const baseUrl = process.env.API_BASE_URL || "http://api:3001";
- 
-   const response = await fetch(`${baseUrl}/analysis/fit-assessments`, {
-     method: "POST",
-     headers: {
-       "Content-Type": "application/json",
--      Authorization: `Bearer ${auth.token}`,
-+      Authorization: `Bearer ${token}`,
-     },
-     body: await req.text(),
-   });
- 
+-export function clearAuthCookie() {
+-  const response = NextResponse.json({ success: true });
+-  response.cookies.set({
+-    name: ACCESS_TOKEN_COOKIE,
+-    value: "",
+-    path: "/",
+-    httpOnly: true,
+-    maxAge: 0,
+-  });
    return response;
  }
+diff --git a/apps/web/app/api/auth/logout/route.ts b/apps/web/app/api/auth/logout/route.ts
+index 22541a03255da023857d2725b9d0765572d6467b..411f2a94a90ec011af19fc70b7614e8c8e91eda6 100644
+--- a/apps/web/app/api/auth/logout/route.ts
++++ b/apps/web/app/api/auth/logout/route.ts
+@@ -1,5 +1,9 @@
++import { NextResponse } from "next/server";
++
+ import { clearAuthCookie } from "../helpers";
+ 
+ export async function POST() {
+-  return clearAuthCookie();
++  const response = NextResponse.json({ success: true });
++  clearAuthCookie(response);
++  return response;
+ }
+diff --git a/apps/web/app/api/baselines/helpers.ts b/apps/web/app/api/baselines/helpers.ts
+index c9fe3397515158c126940bbdd91d8e76fab6a648..4cb393b0bb1b7039d3e70b75e26e024307604fb1 100644
+--- a/apps/web/app/api/baselines/helpers.ts
++++ b/apps/web/app/api/baselines/helpers.ts
+@@ -1,42 +1,24 @@
+-import { NextRequest, NextResponse } from "next/server";
++import { NextResponse } from "next/server";
+ 
+ export function getApiBaseUrl(): string | undefined {
+   return process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
+ }
+ 
+ export async function relayApiResponse(response: Response) {
+   const contentType = response.headers.get("content-type") || "";
+ 
+   if (contentType.includes("application/json")) {
+     const json = await response.json();
+     return NextResponse.json(json, { status: response.status });
+   }
+ 
+   const text = await response.text();
+   return new NextResponse(text, { status: response.status });
+ }
+ 
+-export type RequireAuthTokenSuccess = {
+-  token: string;
+-  error?: never;
+-};
+-
+-export type RequireAuthTokenFailure = {
+-  token?: never;
+-  error: NextResponse;
+-};
+-
+-export type RequireAuthTokenResult = RequireAuthTokenSuccess | RequireAuthTokenFailure;
+-
+-export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
+-  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization") ?? "";
+-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+-
+-  if (!token) {
+-    return {
+-      error: NextResponse.json({ error: "Missing Authorization token" }, { status: 401 }),
+-    };
+-  }
+-
+-  return { token };
+-}
++export {
++  requireAuthToken,
++  type RequireAuthTokenFailure,
++  type RequireAuthTokenResult,
++  type RequireAuthTokenSuccess,
++} from "../auth/helpers";

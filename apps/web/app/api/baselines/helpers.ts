@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export function getApiBaseUrl(): string | undefined {
   return process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -16,27 +16,9 @@ export async function relayApiResponse(response: Response) {
   return new NextResponse(text, { status: response.status });
 }
 
-export type RequireAuthTokenSuccess = {
-  token: string;
-  error?: never;
-};
-
-export type RequireAuthTokenFailure = {
-  token?: never;
-  error: NextResponse;
-};
-
-export type RequireAuthTokenResult = RequireAuthTokenSuccess | RequireAuthTokenFailure;
-
-export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
-  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
-
-  if (!token) {
-    return {
-      error: NextResponse.json({ error: "Missing Authorization token" }, { status: 401 }),
-    };
-  }
-
-  return { token };
-}
+export {
+  requireAuthToken,
+  type RequireAuthTokenFailure,
+  type RequireAuthTokenResult,
+  type RequireAuthTokenSuccess,
+} from "../auth/helpers";
