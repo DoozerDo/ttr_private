@@ -1,103 +1,66 @@
-﻿diff --git a/apps/web/app/api/resume/route.ts b/apps/web/app/api/resume/route.ts
-index 5ad956090de7d431e9348045e8dae61019ef7c22..4d208a665b6c6c946cb4978d1bd1f78a5e6addca 100644
---- a/apps/web/app/api/resume/route.ts
-+++ b/apps/web/app/api/resume/route.ts
-@@ -1,32 +1,38 @@
- import { NextRequest, NextResponse } from "next/server";
- 
--import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
-+import { getApiBaseUrl, requireAuthToken } from "../baselines/helpers";
- 
- export async function POST(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const { token, error } = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!token) {
-     return error;
-   }
- 
-   const body = await req.json();
- 
--  const response = await fetch(`${baseUrl}/resume/generate`, {
-+  const response = await fetch(`${baseUrl}/resume`, {
-     method: "POST",
-     headers: {
-       Authorization: `Bearer ${token}`,
-       "Content-Type": "application/json",
-     },
-     body: JSON.stringify(body),
-   });
- 
--  return relayApiResponse(response);
-+  const headers = new Headers(response.headers);
+﻿diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
+index 7463d3a351b9ca53e41ce7668004938ea898c898..38dec7f669d56e7cc4c8028157765b0c1c183691 100644
+--- a/apps/api/src/resume/resume.controller.ts
++++ b/apps/api/src/resume/resume.controller.ts
+@@ -1,41 +1,42 @@
+ import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import type { Request } from 'express';
+-import { ResumeService } from './resume.service';
 +
-+  return new NextResponse(response.body, {
-+    status: response.status,
-+    statusText: response.statusText,
-+    headers,
-+  });
++interface ResumeRequestBody {
++  baselineId?: string;
++  jobId?: string;
++}
+ 
+ @Controller('resume')
+ @UseGuards(AuthGuard('jwt'))
+ export class ResumeController {
+-  constructor(private readonly resumeService: ResumeService) {}
+-
+-  @Post('generate')
+-  async generate(
+-    @Body()
+-    body: {
+-      baselineId?: string;
+-      baselineVersionId?: string;
+-      jobId?: string;
+-    },
++  @Post()
++  async createResumeRequest(
++    @Body() body: ResumeRequestBody,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+-    if (!body.baselineId) {
++    const baselineId = body.baselineId?.trim();
++    const jobId = body.jobId?.trim();
++
++    if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
+     }
+ 
+-    if (!body.baselineVersionId) {
+-      throw new BadRequestException('baselineVersionId is required');
++    if (!jobId) {
++      throw new BadRequestException('jobId is required');
+     }
+ 
+-    return this.resumeService.generateResume(userId, {
+-      baselineId: body.baselineId,
+-      baselineVersionId: body.baselineVersionId,
+-      jobId: body.jobId ?? null,
+-    });
++    return {
++      ok: true,
++      baselineId,
++      jobId,
++      message: 'Resume generation request received',
++    };
+   }
  }
-diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index 58f8da8bee9357aaa78a988372aa6721b800127b..b09b5acb7200fa1ea3953b4a1c9df74f27dd8d09 100644
---- a/apps/web/app/results/page.tsx
-+++ b/apps/web/app/results/page.tsx
-@@ -189,51 +189,51 @@ export default function Results() {
- 
-     // API surface indicates: GET /api/analysis/job/:jobId/latest
-     const res = await apiFetch<unknown>(`/api/analysis/job/${encodeURIComponent(jobId)}/latest`, { method: 'GET' });
- 
-     if (!res.ok) {
-       setBannerError(`Latest analysis: ${res.status} ${res.errorText}`);
-       setLoadingLatest(false);
-       return;
-     }
- 
-     setLatestAnalysisText(safeStringify(res.data));
-     setLoadingLatest(false);
-   }
- 
-   async function onGenerateResume() {
-     setBannerError('');
-     setResumeResponseText('');
- 
-     if (!baselineId || !jobId) {
-       setBannerError('Select both a baseline and a job.');
-       return;
-     }
- 
-     setGeneratingResume(true);
- 
--    // Proxy inventory indicates: POST /api/resume -> /resume/generate
-+    // Proxy inventory indicates: POST /api/resume -> /resume
-     const payload = { baselineId, jobId };
-     const res = await apiPostForDownloadOrJson('/api/resume', payload);
- 
-     if (!res.ok) {
-       setBannerError(`Resume: ${res.status} ${res.errorText}`);
-       setGeneratingResume(false);
-       return;
-     }
- 
-     if (res.kind === 'file') {
-       downloadBlob(res.blob, res.filename);
-       setResumeResponseText(`Downloaded: ${res.filename}`);
-     } else {
-       setResumeResponseText(safeStringify(res.data));
-     }
- 
-     setGeneratingResume(false);
-   }
- 
-   const quickContext = useMemo(() => {
-     return {
-       baseline: selectedBaseline ? pickBaselineLabel(selectedBaseline) : '(none)',
-       job: selectedJob ? pickJobLabel(selectedJob) : '(none)',
-     };
-   }, [selectedBaseline, selectedJob]);
