@@ -1,3 +1,5 @@
+export const AUTH_COOKIE_NAME = "ttr_token";
+
 export type JwtPayload = {
   sub?: string;
   email?: string;

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
+
 import {
   BaselineDto,
   BaselineSectionDto,
@@ -155,7 +157,7 @@ export default async function BaselineDetailPage({
 }) {
   const resolvedParams = await params;
   const cookieStore = await cookies();
-  const token = cookieStore.get("auth_token")?.value;
+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
 
   if (!token) {
     redirect("/auth/login");

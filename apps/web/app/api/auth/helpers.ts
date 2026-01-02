@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const AUTH_COOKIE_NAME = "ttr_token";
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 function getApiBaseUrl() {
   const serverBaseUrl = process.env.API_BASE_URL;

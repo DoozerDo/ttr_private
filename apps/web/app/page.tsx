@@ -6,13 +6,13 @@ import Link from "next/link";
 import { AuthStatus } from "./components/auth-status";
 import { LastAnalysisCard } from "./components/last-analysis-card";
 import { NextStepCard } from "./components/next-step-card";
-import { decodeJwt } from "../lib/auth";
+import { AUTH_COOKIE_NAME, decodeJwt } from "../lib/auth";
 
 import { ttrComponents, ttrLayout, ttrTypography } from "./ui/ttrStyles";
 
 export default async function Home() {
   const cookieStore = await cookies();
-  const token = cookieStore.get("auth_token")?.value;
+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
 
   if (!token) {
     redirect("/auth/login");
