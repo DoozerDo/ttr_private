@@ -1,97 +1,243 @@
-diff --git a/apps/web/app/api/cover-letters/[id]/route.ts b/apps/web/app/api/cover-letters/[id]/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..7ac1a53b6f117a6426fba69fb3d2b9025264bc51
---- /dev/null
-+++ b/apps/web/app/api/cover-letters/[id]/route.ts
-@@ -0,0 +1,91 @@
-+import { NextRequest, NextResponse } from "next/server";
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+index f6d87fcb5428c83f58f3955b37af29c3b96dfb71..7fe0322ea27a8780aa8c72b982405fb68205bb1b 100644
+--- a/apps/api/src/auth/auth.controller.ts
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -1,26 +1,49 @@
+-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
++import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
++import { ConfigService } from '@nestjs/config';
++import { Response } from 'express';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ 
+ @Controller('auth')
+ export class AuthController {
+-  constructor(private readonly authService: AuthService) {}
++  constructor(
++    private readonly authService: AuthService,
++    private readonly configService: ConfigService,
++  ) {}
+ 
+   @Post('register')
+-  register(@Body() payload: RegisterDto) {
+-    return this.authService.register(payload);
++  async register(@Body() payload: RegisterDto, @Res({ passthrough: true }) res: Response) {
++    const result = await this.authService.register(payload);
++    this.setAuthCookie(res, result.accessToken);
 +
-+import {
-+  getApiBaseUrl,
-+  relayApiResponse,
-+  requireAuthToken,
-+} from "../../baselines/helpers";
++    return result;
+   }
+ 
+   @Post('login')
+-  login(@Body() payload: LoginDto) {
+-    return this.authService.login(payload);
++  async login(@Body() payload: LoginDto, @Res({ passthrough: true }) res: Response) {
++    const result = await this.authService.login(payload);
++    this.setAuthCookie(res, result.accessToken);
 +
-+export const runtime = "nodejs";
++    return result;
+   }
+ 
+   @UseGuards(AuthGuard('jwt'))
+   @Get('me')
+   me(@Req() request: { user?: unknown }) {
+     return { user: request.user };
+   }
 +
-+export async function GET(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
++  private setAuthCookie(response: Response, token: string) {
++    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
 +
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
++    response.cookie('auth_token', token, {
++      httpOnly: true,
++      sameSite: 'lax',
++      secure: isProduction,
++      path: '/',
++      maxAge: 1000 * 60 * 60 * 24 * 7,
++    });
 +  }
-+
-+  if (!auth.token) {
-+    return auth.error;
-+  }
-+
-+  const { id } = await context.params;
-+
-+  if (!id) {
-+    return NextResponse.json(
-+      { error: "Missing id parameter" },
-+      { status: 400 },
-+    );
-+  }
-+
-+  const response = await fetch(
-+    `${baseUrl}/cover-letters/${encodeURIComponent(id)}`,
-+    {
-+      method: "GET",
-+      cache: "no-store",
-+      headers: {
-+        Authorization: `Bearer ${auth.token}`,
-+      },
-+    },
-+  );
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function DELETE(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!auth.token) {
-+    return auth.error;
-+  }
-+
-+  const { id } = await context.params;
-+
-+  if (!id) {
-+    return NextResponse.json(
-+      { error: "Missing id parameter" },
-+      { status: 400 },
-+    );
-+  }
-+
-+  const response = await fetch(
-+    `${baseUrl}/cover-letters/${encodeURIComponent(id)}`,
-+    {
-+      method: "DELETE",
-+      cache: "no-store",
-+      headers: {
-+        Authorization: `Bearer ${auth.token}`,
-+      },
-+    },
-+  );
-+
-+  return relayApiResponse(response);
-+}
+ }
+diff --git a/apps/api/src/main.ts b/apps/api/src/main.ts
+index 36331dee5036262c3993a3b3349d08d18abd85e8..63c2bf3bda78376c3a2f9286ec19714378089a03 100644
+--- a/apps/api/src/main.ts
++++ b/apps/api/src/main.ts
+@@ -1,20 +1,22 @@
+ import { NestFactory } from '@nestjs/core';
+ import { AppModule } from './app.module';
+ import { ConfigService } from '@nestjs/config';
+ 
+ async function bootstrap() {
+   const app = await NestFactory.create(AppModule);
+   const config = app.get(ConfigService);
+ 
+   const corsOrigin =
+     config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
+ 
+   app.enableCors({
+     origin: corsOrigin,
++    credentials: true,
++    allowedHeaders: ['Content-Type', 'Authorization'],
+   });
+ 
+   const port = config.get<number>('PORT') ?? 3001;
+ 
+   await app.listen(port);
+ }
+ bootstrap();
+diff --git a/apps/web/.env.local b/apps/web/.env.local
+index 790a72144349f222ec1b0976877f55cc6b38b767..ad66ac5a330ecb88418ae71bebfc13d92ff7b628 100644
+--- a/apps/web/.env.local
++++ b/apps/web/.env.local
+@@ -1,4 +1,4 @@
+-API_BASE_URL=http://api:3001
++API_BASE_URL=http://localhost:3001
+ 
+ # client-side (browser)
+-NEXT_PUBLIC_API_BASE_URL=http://api:3001
+\ No newline at end of file
++NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
+diff --git a/apps/web/app/api/auth/helpers.ts b/apps/web/app/api/auth/helpers.ts
+index 6ce78e068a08212edeb212c8f52fc4df2efc6879..52c811eb646ee36f9351763f0a1cc931615b5cd3 100644
+--- a/apps/web/app/api/auth/helpers.ts
++++ b/apps/web/app/api/auth/helpers.ts
+@@ -1,28 +1,28 @@
+ import { NextRequest, NextResponse } from "next/server";
+ 
+-const AUTH_COOKIE_NAME = "ttr_token";
++const AUTH_COOKIE_NAME = "auth_token";
+ 
+ function getApiBaseUrl() {
+   const serverBaseUrl = process.env.API_BASE_URL;
+   const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+ 
+   return serverBaseUrl ?? clientBaseUrl ?? null;
+ }
+ 
+ export function getAuthCookieName(): string {
+   return AUTH_COOKIE_NAME;
+ }
+ 
+ function buildErrorMessage(message: unknown): string {
+   if (typeof message === "string") {
+     return message;
+   }
+ 
+   if (Array.isArray(message)) {
+     return message.join(", ");
+   }
+ 
+   return "Authentication failed";
+ }
+ 
+ export function setAuthCookie(response: NextResponse, token: string): void {
+diff --git a/apps/web/app/auth/_components/auth-form.tsx b/apps/web/app/auth/_components/auth-form.tsx
+index 116b6da7ea9d7e2dd7d20b7eb5a0fdd337f01205..fec49dbfde20fa4932fe9f2d9b6da5642eaafaaa 100644
+--- a/apps/web/app/auth/_components/auth-form.tsx
++++ b/apps/web/app/auth/_components/auth-form.tsx
+@@ -17,50 +17,51 @@ export function AuthForm({ mode }: AuthFormProps) {
+ 
+   const isLogin = mode === "login";
+   const title = isLogin ? "Log in" : "Create an account";
+   const actionLabel = isLogin ? "Log in" : "Register";
+   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
+   const helperHref = isLogin ? "/auth/register" : "/auth/login";
+   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
+   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+ 
+   const onSubmit = async (event: FormEvent) => {
+     event.preventDefault();
+     setError(null);
+ 
+     const trimmedEmail = email.trim();
+     if (!trimmedEmail || !password) {
+       setError("Email and password are required.");
+       return;
+     }
+ 
+     setIsSubmitting(true);
+ 
+     try {
+       const response = await fetch(endpoint, {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
++        credentials: "include",
+         body: JSON.stringify({ email: trimmedEmail, password }),
+       });
+ 
+       let data: any = null;
+ 
+       // Try to parse JSON if there is a body; ignore parse errors
+       const text = await response.text();
+       if (text) {
+         try {
+           data = JSON.parse(text);
+         } catch {
+           // non-JSON body (e.g. 404 HTML) – data stays null
+         }
+       }
+ 
+       if (!response.ok) {
+         const messageFromApi =
+           (typeof data?.message === "string" && data.message) ||
+           (Array.isArray(data?.message) && data.message.join(", ")) ||
+           (typeof data?.error === "string" && data.error) ||
+           (isLogin ? "Login failed" : "Registration failed");
+ 
+         setError(messageFromApi);
+         return;
+       }
+diff --git a/apps/web/app/components/auth-status.tsx b/apps/web/app/components/auth-status.tsx
+index 8f5215ff5a80d146c1a6a4a23c6a7321fafe3e05..48c5a23c2bcfffc3180b8c3884f857ba5e33f142 100644
+--- a/apps/web/app/components/auth-status.tsx
++++ b/apps/web/app/components/auth-status.tsx
+@@ -1,45 +1,48 @@
+ "use client";
+ 
+ import { useRouter } from "next/navigation";
+ import { useState } from "react";
+ 
+ interface AuthStatusProps {
+   email: string;
+ }
+ 
+ export function AuthStatus({ email }: AuthStatusProps) {
+   const router = useRouter();
+   const [isLoggingOut, setIsLoggingOut] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const handleLogout = async () => {
+     setIsLoggingOut(true);
+     setError(null);
+ 
+     try {
+-      const response = await fetch("/api/auth/logout", { method: "POST" });
++      const response = await fetch("/api/auth/logout", {
++        method: "POST",
++        credentials: "include",
++      });
+ 
+       if (!response.ok) {
+         const data = await response.json();
+         setError(data?.error ?? "Logout failed");
+         return;
+       }
+ 
+       router.push("/auth/login");
+     } catch (logoutError) {
+       console.error("Logout failed", logoutError);
+       setError("Unable to log out right now");
+     } finally {
+       setIsLoggingOut(false);
+     }
+   };
+ 
+   return (
+     <div
+       className="
+         flex flex-col gap-3 rounded-xl
+         border border-white/10
+         bg-gradient-to-br from-slate-900/60 to-slate-800/40
+         p-5 shadow-lg
+         sm:flex-row sm:items-center sm:justify-between
+       "

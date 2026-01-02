@@ -17,7 +17,10 @@ export function AuthStatus({ email }: AuthStatusProps) {
     setError(null);
 
     try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
 
       if (!response.ok) {
         const data = await response.json();
