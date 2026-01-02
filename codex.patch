@@ -1,286 +1,117 @@
-diff --git a/apps/web/app/api/auth/helpers.ts b/apps/web/app/api/auth/helpers.ts
-index 6ce78e068a08212edeb212c8f52fc4df2efc6879..f69279dbbb75bbb0742d563b5608948c885722d6 100644
---- a/apps/web/app/api/auth/helpers.ts
-+++ b/apps/web/app/api/auth/helpers.ts
-@@ -1,28 +1,28 @@
+diff --git a/apps/web/app/api/baselines/[id]/blocks/route.ts b/apps/web/app/api/baselines/[id]/blocks/route.ts
+index b56491a159a4c5382923d2feae938b5f7efd1449..bf7390fad274660126ca26a477733e3763c6ac88 100644
+--- a/apps/web/app/api/baselines/[id]/blocks/route.ts
++++ b/apps/web/app/api/baselines/[id]/blocks/route.ts
+@@ -1,74 +1,111 @@
  import { NextRequest, NextResponse } from "next/server";
  
--const AUTH_COOKIE_NAME = "ttr_token";
-+import { AUTH_COOKIE_NAME } from "@/lib/auth";
- 
- function getApiBaseUrl() {
-   const serverBaseUrl = process.env.API_BASE_URL;
-   const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
- 
-   return serverBaseUrl ?? clientBaseUrl ?? null;
- }
- 
- export function getAuthCookieName(): string {
-   return AUTH_COOKIE_NAME;
- }
- 
- function buildErrorMessage(message: unknown): string {
-   if (typeof message === "string") {
-     return message;
-   }
- 
-   if (Array.isArray(message)) {
-     return message.join(", ");
-   }
- 
-   return "Authentication failed";
- }
- 
- export function setAuthCookie(response: NextResponse, token: string): void {
-diff --git a/apps/web/app/baseline/[id]/page.tsx b/apps/web/app/baseline/[id]/page.tsx
-index 5a83a2179d48fe8ee4b212b31d58dff0b6392b7e..ae3865c6a45cdf3cac2d43d43ee8cce9d32e9170 100644
---- a/apps/web/app/baseline/[id]/page.tsx
-+++ b/apps/web/app/baseline/[id]/page.tsx
-@@ -1,29 +1,31 @@
- import Link from "next/link";
- import { cookies, headers } from "next/headers";
- import { notFound, redirect } from "next/navigation";
- 
-+import { AUTH_COOKIE_NAME } from "@/lib/auth";
-+
  import {
-   BaselineDto,
-   BaselineSectionDto,
-   BaselineVersionDto,
- } from "../../../lib/baselines";
- import { formatDateTime } from "../../../lib/format-date";
- import { BaselinePolicyEditor } from "./baseline-policy-editor";
+   getApiBaseUrl,
+   relayApiResponse,
+   requireAuthToken,
+ } from "../../helpers";
  
- async function buildInternalApiUrl(path: string) {
-   const headerList = await headers();
-   const protocol = headerList.get("x-forwarded-proto") ?? "http";
-   const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+ export const runtime = "nodejs";
  
-   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+ export async function GET(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ): Promise<Response> {
+   const { id } = await context.params;
++  const searchParams = req.nextUrl.searchParams.toString();
  
-   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
- }
+   const baseUrl = getApiBaseUrl();
+   const auth = requireAuthToken(req);
  
- async function buildInternalFetchOptions(): Promise<RequestInit> {
-   const headerList = await headers();
-   const cookieHeader = headerList.get("cookie");
- 
-   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
- 
-@@ -133,51 +135,51 @@ function renderContentSections(groupedSections: Record<string, BaselineSectionDt
-         {groupedSections[type].map((section) => (
-           <article
-             key={section.id}
-             className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
-           >
-             <div className="mb-2 text-xs font-semibold uppercase text-gray-600">
-               {section.title || friendlyTitles[type] || type}
-             </div>
-             <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-               {section.content}
-             </pre>
-           </article>
-         ))}
-       </div>
-     </div>
-   ));
- }
- 
- export default async function BaselineDetailPage({
-   params,
- }: {
-   params: Promise<{ id: string }>;
- }) {
-   const resolvedParams = await params;
-   const cookieStore = await cookies();
--  const token = cookieStore.get("auth_token")?.value;
-+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
-   }
- 
-   if (!resolvedParams?.id) {
-     notFound();
-   }
- 
-   const baseline = await fetchBaseline(resolvedParams.id);
-   const versions = await fetchBaselineVersions(resolvedParams.id);
- 
-   if (!baseline) {
-     notFound();
-   }
- 
-   const sortedVersions =
-     versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
-   const latestVersionId = sortedVersions[0]?.id ?? "";
- 
-   const groupedSections = organizeSections(baseline.sections ?? []);
-   const hasRenderableSections = Object.values(groupedSections).some(
-     (sections) => sections.length > 0,
-   );
- 
-diff --git a/apps/web/app/baseline/page.tsx b/apps/web/app/baseline/page.tsx
-index 78fae9244a3a2ff659c324401d0559763b5cd3dd..02c4a46ecc96f6507201120b8d41fe7a70e9787c 100644
---- a/apps/web/app/baseline/page.tsx
-+++ b/apps/web/app/baseline/page.tsx
-@@ -1,29 +1,30 @@
- import { cookies, headers } from "next/headers";
- import { redirect } from "next/navigation";
- import Link from "next/link";
- 
-+import { AUTH_COOKIE_NAME } from "@/lib/auth";
- import type { BaselineDto } from "../../lib/baselines";
- import { BaselineDashboard } from "./baseline-dashboard";
- import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
- import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
- 
- export const dynamic = "force-dynamic";
- 
- async function buildInternalApiUrl(path: string) {
-   const headerList = await headers();
-   const protocol = headerList.get("x-forwarded-proto") ?? "http";
-   const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
- 
-   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
- 
-   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
- }
- 
- async function buildInternalFetchOptions(): Promise<RequestInit> {
-   const headerList = await headers();
-   const cookieHeader = headerList.get("cookie");
- 
-   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
- 
-   return {
-@@ -35,51 +36,51 @@ async function buildInternalFetchOptions(): Promise<RequestInit> {
- 
- async function fetchBaselines(): Promise<BaselineDto[]> {
-   try {
-     const res = await fetch(
-       await buildInternalApiUrl("/api/baselines"),
-       await buildInternalFetchOptions(),
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
      );
- 
-     if (res.status === 401) {
-       redirect("/auth/login");
-     }
- 
-     if (!res.ok) {
-       return [];
-     }
- 
-     return (await res.json()) as BaselineDto[];
-   } catch (error) {
-     console.error("Failed to fetch baselines", error);
-     return [];
-   }
- }
- 
- export default async function BaselinePage() {
-   const cookieStore = await cookies();
--  const token = cookieStore.get("auth_token")?.value;
-+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
    }
  
-   const baselines = await fetchBaselines();
- 
-   const rightSlot = (
-     <Link
-       href="/analyze"
-       style={ttrComponents.secondaryButton}
-     >
-       Analyze a role
-     </Link>
-   );
- 
-   return (
-     <InstrumentPanelShell
-       kicker="Baseline console"
-       title="Baseline library"
-       rightSlot={rightSlot}
-     >
-       <section style={ttrComponents.basePanel}>
-         <div
-           style={{
-diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
-index d205eec1392e294e4f73f49473a31b320f906be6..10c83ec6e8b6c6e2b79ef9208fcd5acd34c30403 100644
---- a/apps/web/app/page.tsx
-+++ b/apps/web/app/page.tsx
-@@ -1,40 +1,40 @@
- // apps/web/app/page.tsx
- import { cookies } from "next/headers";
- import { redirect } from "next/navigation";
- import Link from "next/link";
- 
- import { AuthStatus } from "./components/auth-status";
- import { LastAnalysisCard } from "./components/last-analysis-card";
- import { NextStepCard } from "./components/next-step-card";
--import { decodeJwt } from "../lib/auth";
-+import { AUTH_COOKIE_NAME, decodeJwt } from "../lib/auth";
- 
- import { ttrComponents, ttrLayout, ttrTypography } from "./ui/ttrStyles";
- 
- export default async function Home() {
-   const cookieStore = await cookies();
--  const token = cookieStore.get("auth_token")?.value;
-+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
+   if (!auth.token) {
+     return auth.error as Response;
    }
  
-   const payload = decodeJwt(token);
- 
-   if (!payload?.email) {
-     redirect("/auth/login");
-   }
- 
-   const pageShellStyle: React.CSSProperties = ttrLayout.shell;
-   const pageContainerStyle: React.CSSProperties = {
-     ...ttrLayout.container,
-     maxWidth: 1120,
-   };
- 
-   const headerCardStyle: React.CSSProperties = ttrComponents.headerCard;
- 
-   const basePanelStyle: React.CSSProperties = ttrComponents.basePanel;
- 
-   const topNavPill: React.CSSProperties = {
-     display: "inline-flex",
-     alignItems: "center",
-     justifyContent: "center",
-diff --git a/apps/web/lib/auth.ts b/apps/web/lib/auth.ts
-index fede7394d2716f1674f935a57d6e22324b7e2ef3..5aaeda078de61a3a4853a8385cb6f1302fea9ed9 100644
---- a/apps/web/lib/auth.ts
-+++ b/apps/web/lib/auth.ts
-@@ -1,21 +1,23 @@
-+export const AUTH_COOKIE_NAME = "ttr_token";
+-  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
++  const query = searchParams ? `?${searchParams}` : "";
 +
- export type JwtPayload = {
-   sub?: string;
-   email?: string;
-   exp?: number;
- };
++  const response = await fetch(`${baseUrl}/baselines/${id}/blocks${query}`, {
+     method: "GET",
+     cache: "no-store",
+     headers: {
+       Authorization: `Bearer ${auth.token}`,
+     },
+   });
  
- export function decodeJwt(token: string): JwtPayload | null {
-   try {
-     const [, payload] = token.split(".");
- 
-     if (!payload) {
-       return null;
-     }
- 
-     const decoded = Buffer.from(payload, "base64").toString("utf8");
-     return JSON.parse(decoded) as JwtPayload;
-   } catch (error) {
-     console.error("Failed to decode JWT", error);
-     return null;
-   }
+   return relayApiResponse(response);
  }
+ 
+ export async function POST(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ): Promise<Response> {
+   const { id } = await context.params;
+ 
+   const baseUrl = getApiBaseUrl();
+   const auth = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!auth.token) {
+     return auth.error as Response;
+   }
+ 
+   const body = await req.json();
+ 
+   const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${auth.token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
+ 
+   return relayApiResponse(response);
+ }
++
++export async function PATCH(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++): Promise<Response> {
++  const { id } = await context.params;
++
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
++  }
++
++  if (!auth.token) {
++    return auth.error as Response;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
++    method: "PATCH",
++    headers: {
++      Authorization: `Bearer ${auth.token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}

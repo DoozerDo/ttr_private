@@ -13,6 +13,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params;
+  const searchParams = req.nextUrl.searchParams.toString();
 
   const baseUrl = getApiBaseUrl();
   const auth = requireAuthToken(req);
@@ -28,7 +29,9 @@ export async function GET(
     return auth.error as Response;
   }
 
-  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+  const query = searchParams ? `?${searchParams}` : "";
+
+  const response = await fetch(`${baseUrl}/baselines/${id}/blocks${query}`, {
     method: "GET",
     cache: "no-store",
     headers: {
@@ -63,6 +66,40 @@ export async function POST(
 
   const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return relayApiResponse(response);
+}
+
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await context.params;
+
+  const baseUrl = getApiBaseUrl();
+  const auth = requireAuthToken(req);
+
+  if (!baseUrl) {
+    return NextResponse.json(
+      { error: "API base URL is not configured" },
+      { status: 500 },
+    );
+  }
+
+  if (!auth.token) {
+    return auth.error as Response;
+  }
+
+  const body = await req.json();
+
+  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+    method: "PATCH",
     headers: {
       Authorization: `Bearer ${auth.token}`,
       "Content-Type": "application/json",
