@@ -616,19 +616,19 @@ export class BaselineService {
       await manager.save(policyEntities);
 
       baseline.version = nextVersionNumber;
-      baseline.sections = sections.map((section) => {
+      const updatedSections = sections.map((section) => {
         const applied = nextPolicies.find(
           (policy) => policy.baselineSectionId === section.id,
         );
 
-        return {
-          ...section,
-          includePolicy: applied?.includePolicy ?? section.includePolicy,
-          order: applied?.order ?? section.order,
-        } as BaselineSection;
+        section.includePolicy = applied?.includePolicy ?? section.includePolicy;
+        section.order =
+          applied?.order ?? section.order ?? section.orderIndex ?? 0;
+
+        return section;
       });
 
-      await manager.save(baseline.sections);
+      await manager.save(BaselineSection, updatedSections);
       await manager.save(baseline);
 
       return {

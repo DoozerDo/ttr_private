@@ -1,117 +1,65 @@
-diff --git a/apps/web/app/api/baselines/[id]/blocks/route.ts b/apps/web/app/api/baselines/[id]/blocks/route.ts
-index b56491a159a4c5382923d2feae938b5f7efd1449..bf7390fad274660126ca26a477733e3763c6ac88 100644
---- a/apps/web/app/api/baselines/[id]/blocks/route.ts
-+++ b/apps/web/app/api/baselines/[id]/blocks/route.ts
-@@ -1,74 +1,111 @@
- import { NextRequest, NextResponse } from "next/server";
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index 048b10528f443512f6dc0f4eeeee11cb7f2cf4cd..e6bfce22321fb566e3b1ba0f523145733614baf3 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -594,53 +594,53 @@ export class BaselineService {
+     const nextVersionNumber =
+       (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
  
- import {
-   getApiBaseUrl,
-   relayApiResponse,
-   requireAuthToken,
- } from "../../helpers";
+     return this.baselineRepository.manager.transaction(async (manager) => {
+       const newVersion = manager.create(BaselineVersion, {
+         baselineId: baseline.id,
+         versionNumber: nextVersionNumber,
+         fileHash: newVersionHash,
+         storagePath: baseline.storagePath,
+       });
  
- export const runtime = "nodejs";
+       const savedVersion = await manager.save(newVersion);
  
- export async function GET(
-   req: NextRequest,
-   context: { params: Promise<{ id: string }> },
- ): Promise<Response> {
-   const { id } = await context.params;
-+  const searchParams = req.nextUrl.searchParams.toString();
+       const policyEntities = nextPolicies.map((policy) =>
+         manager.create(BaselineBlockPolicy, {
+           baselineVersionId: savedVersion.id,
+           baselineSectionId: policy.baselineSectionId,
+           includePolicy: policy.includePolicy,
+           order: policy.order,
+         }),
+       );
  
-   const baseUrl = getApiBaseUrl();
-   const auth = requireAuthToken(req);
+       await manager.save(policyEntities);
  
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
+       baseline.version = nextVersionNumber;
+-      baseline.sections = sections.map((section) => {
++      const updatedSections = sections.map((section) => {
+         const applied = nextPolicies.find(
+           (policy) => policy.baselineSectionId === section.id,
+         );
  
-   if (!auth.token) {
-     return auth.error as Response;
-   }
- 
--  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
-+  const query = searchParams ? `?${searchParams}` : "";
+-        return {
+-          ...section,
+-          includePolicy: applied?.includePolicy ?? section.includePolicy,
+-          order: applied?.order ?? section.order,
+-        } as BaselineSection;
++        section.includePolicy = applied?.includePolicy ?? section.includePolicy;
++        section.order =
++          applied?.order ?? section.order ?? section.orderIndex ?? 0;
 +
-+  const response = await fetch(`${baseUrl}/baselines/${id}/blocks${query}`, {
-     method: "GET",
-     cache: "no-store",
-     headers: {
-       Authorization: `Bearer ${auth.token}`,
-     },
-   });
++        return section;
+       });
  
-   return relayApiResponse(response);
+-      await manager.save(baseline.sections);
++      await manager.save(BaselineSection, updatedSections);
+       await manager.save(baseline);
+ 
+       return {
+         baseline_version_id: baselineVersionId,
+         updated_blocks: nextPolicies.map((policy) => ({
+           id: policy.baselineSectionId,
+           include_tag: policy.includePolicy,
+           order_index: policy.order,
+         })),
+         new_version_id: savedVersion.id,
+         hash: savedVersion.fileHash,
+       };
+     });
+   }
  }
- 
- export async function POST(
-   req: NextRequest,
-   context: { params: Promise<{ id: string }> },
- ): Promise<Response> {
-   const { id } = await context.params;
- 
-   const baseUrl = getApiBaseUrl();
-   const auth = requireAuthToken(req);
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   if (!auth.token) {
-     return auth.error as Response;
-   }
- 
-   const body = await req.json();
- 
-   const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
-     method: "POST",
-     headers: {
-       Authorization: `Bearer ${auth.token}`,
-       "Content-Type": "application/json",
-     },
-     body: JSON.stringify(body),
-   });
- 
-   return relayApiResponse(response);
- }
-+
-+export async function PATCH(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+): Promise<Response> {
-+  const { id } = await context.params;
-+
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!auth.token) {
-+    return auth.error as Response;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
-+    method: "PATCH",
-+    headers: {
-+      Authorization: `Bearer ${auth.token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
-+}
