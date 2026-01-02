@@ -25,3 +25,11 @@ Function Update-NPM {
     npm install
     cd C:\Users\decla\Documents\GitHub\TargetThisRole
 }
+
+Function Reset-Env {
+    git reset --hard
+    git clean -xfd
+
+    docker compose -f infra\docker\docker-compose.dev.yml down -v
+    docker builder prune -af
+}
