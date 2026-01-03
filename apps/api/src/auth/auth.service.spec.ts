@@ -40,6 +40,10 @@ describe('AuthService', () => {
       id: 'user-id',
       email: payload.email,
       passwordHash: '',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: 'free',
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -56,7 +60,12 @@ describe('AuthService', () => {
 
     expect(hashedPasswordArg).not.toEqual(payload.password);
     expect(result.accessToken).toEqual('signed-token');
-    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      email: savedUser.email,
+      role: 'user',
+      subscriptionTier: 'free',
+    });
     expect(result.user).not.toHaveProperty('passwordHash');
   });
 
@@ -67,6 +76,10 @@ describe('AuthService', () => {
       id: 'user-id',
       email: payload.email,
       passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: 'free',
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -76,6 +89,11 @@ describe('AuthService', () => {
     const result = await service.login(payload);
 
     expect(result.accessToken).toEqual('signed-token');
-    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      email: savedUser.email,
+      role: 'user',
+      subscriptionTier: 'free',
+    });
   });
 });

@@ -17,6 +17,8 @@ export class UsersService {
       // VERIFY: Confirm null calibration defaults are desired on signup.
       calibrationProfileName: null,
       calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: 'free',
     });
     return this.usersRepository.save(user);
   }

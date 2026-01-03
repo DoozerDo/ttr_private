@@ -15,6 +15,8 @@ export type CalibrationWeights = {
   dimensionE: number;
 };
 
+export type UserRole = 'user' | 'coach' | 'admin';
+
 // VERIFY: Confirm calibration dimension labels and structure.
 
 @Entity({ name: 'users' })
@@ -35,6 +37,12 @@ export class User {
   // VERIFY: Ensure null defaults are acceptable for calibration weights.
   @Column({ type: 'jsonb', nullable: true })
   calibrationWeights!: CalibrationWeights | null;
+
+  @Column({ type: 'character varying', length: 50, default: 'user' })
+  role!: UserRole;
+
+  @Column({ type: 'character varying', length: 50, default: 'free' })
+  subscriptionTier!: string;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
