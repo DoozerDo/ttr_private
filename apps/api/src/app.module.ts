@@ -13,6 +13,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { CoverLettersModule } from './cover-letters/cover-letters.module';
 import { ResumeModule } from './resume/resume.module';
 import { SearchSetsModule } from './search-sets/search-sets.module';
+import { StarStoriesModule } from './star-stories/star-stories.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     SearchSetsModule,
     ResumeModule,
     CoverLettersModule,
+    StarStoriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

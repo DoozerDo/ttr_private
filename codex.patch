@@ -1,211 +1,1023 @@
-diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
-index eb585d3fd80d8a3e4dfbc7a9b37d1fe535782d20..1f81e64e6e434f8a68f1b652c68a4b00f9f5a047 100644
---- a/apps/api/src/auth/auth.service.spec.ts
-+++ b/apps/api/src/auth/auth.service.spec.ts
-@@ -18,64 +18,82 @@ describe('AuthService', () => {
-         AuthService,
-         JwtService,
-         {
-           provide: UsersService,
-           useValue: {
-             findByEmail: jest.fn(),
-             findById: jest.fn(),
-             create: jest.fn(),
-           },
-         },
-       ],
-     }).compile();
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index a335c63297d37eed7c40381bf01ca4db5d5c9d10..1cfbf38180decbdfc2fbc3fc861c1ded6ad477b4 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -1,53 +1,55 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { AppController } from './app.controller';
+ import { AppService } from './app.service';
+ import { AuthModule } from './auth/auth.module';
+ import { AnalysisModule } from './analysis/analysis.module';
+ import { ApplicationsModule } from './applications/applications.module';
+ import { BaselineModule } from './baseline/baseline.module';
+ import { ComplianceModule } from './compliance/compliance.module';
+ import { InterviewsModule } from './interviews/interviews.module';
+ import { JobsModule } from './jobs/jobs.module';
+ import { CoverLettersModule } from './cover-letters/cover-letters.module';
+ import { ResumeModule } from './resume/resume.module';
+ import { SearchSetsModule } from './search-sets/search-sets.module';
++import { StarStoriesModule } from './star-stories/star-stories.module';
+ import { User } from './users/user.entity';
+ import { UsersModule } from './users/users.module';
  
-     service = module.get<AuthService>(AuthService);
-     usersService = module.get(UsersService);
-     jwtService = module.get(JwtService);
-     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
-   });
- 
-   it('registers a user and returns a token', async () => {
-     const payload: RegisterDto = { email: 'user@example.com', password: 'Password123' };
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       passwordHash: '',
-+      calibrationProfileName: null,
-+      calibrationWeights: null,
-+      role: 'user',
-+      subscriptionTier: 'free',
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(null);
-     usersService.create.mockImplementation(async (email, passwordHash) => ({
-       ...savedUser,
-       email,
-       passwordHash,
-     }));
- 
-     const result = await service.register(payload);
-     const hashedPasswordArg = usersService.create.mock.calls[0][1];
- 
-     expect(hashedPasswordArg).not.toEqual(payload.password);
-     expect(result.accessToken).toEqual('signed-token');
--    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
-+    expect(result.user).toMatchObject({
-+      id: savedUser.id,
-+      email: savedUser.email,
-+      role: 'user',
-+      subscriptionTier: 'free',
-+    });
-     expect(result.user).not.toHaveProperty('passwordHash');
-   });
- 
-   it('logs in a user with valid credentials', async () => {
-     const payload: LoginDto = { email: 'user@example.com', password: 'Password123' };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       passwordHash,
-+      calibrationProfileName: null,
-+      calibrationWeights: null,
-+      role: 'user',
-+      subscriptionTier: 'free',
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     const result = await service.login(payload);
- 
-     expect(result.accessToken).toEqual('signed-token');
--    expect(result.user).toMatchObject({ id: savedUser.id, email: savedUser.email });
-+    expect(result.user).toMatchObject({
-+      id: savedUser.id,
-+      email: savedUser.email,
-+      role: 'user',
-+      subscriptionTier: 'free',
-+    });
-   });
- });
-diff --git a/apps/api/src/migrations/1810000000000-UserRoleAndSubscriptionTier.ts b/apps/api/src/migrations/1810000000000-UserRoleAndSubscriptionTier.ts
+ @Module({
+   imports: [
+     ConfigModule.forRoot({
+       isGlobal: true,
+       envFilePath: ['.env.development.local', '.env.local', '.env'],
+     }),
+     TypeOrmModule.forRootAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         type: 'postgres',
+         url:
+           configService.get<string>('DATABASE_URL') ??
+           'postgresql://postgres:postgres@db:5432/targetthisrole',
+         entities: [User],
+         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
+         autoLoadEntities: true,
+       }),
+     }),
+     UsersModule,
+     AuthModule,
+     AnalysisModule,
+     ApplicationsModule,
+     BaselineModule,
+     ComplianceModule,
+     InterviewsModule,
+     JobsModule,
+     SearchSetsModule,
+     ResumeModule,
+     CoverLettersModule,
++    StarStoriesModule,
+   ],
+   controllers: [AppController],
+   providers: [AppService],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/interviews/dto/create-interview.dto.ts b/apps/api/src/interviews/dto/create-interview.dto.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6109f226130ca56b7bfe4eb7d19bb4c85a3027f6
+index 0000000000000000000000000000000000000000..795e50d01f004d02b491a8a7639910dbba84ac4c
 --- /dev/null
-+++ b/apps/api/src/migrations/1810000000000-UserRoleAndSubscriptionTier.ts
-@@ -0,0 +1,21 @@
++++ b/apps/api/src/interviews/dto/create-interview.dto.ts
+@@ -0,0 +1,8 @@
++export class CreateInterviewRecordDto {
++  jobId!: string;
++  gapList?: string[];
++  questions?: string[];
++  responses?: string[];
++  validationResults?: Record<string, unknown>;
++  recommendedAdditions?: string[];
++}
+diff --git a/apps/api/src/interviews/dto/update-interview.dto.ts b/apps/api/src/interviews/dto/update-interview.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6783b8c4cae081ae5bddb8fdf1b7e33f0591925f
+--- /dev/null
++++ b/apps/api/src/interviews/dto/update-interview.dto.ts
+@@ -0,0 +1,8 @@
++export class UpdateInterviewRecordDto {
++  jobId?: string;
++  gapList?: string[];
++  questions?: string[];
++  responses?: string[];
++  validationResults?: Record<string, unknown>;
++  recommendedAdditions?: string[];
++}
+diff --git a/apps/api/src/interviews/interview-records.controller.ts b/apps/api/src/interviews/interview-records.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..036ddbcdf20ffd1cfa99c4d7e39e468985c48c90
+--- /dev/null
++++ b/apps/api/src/interviews/interview-records.controller.ts
+@@ -0,0 +1,93 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Delete,
++  Get,
++  Param,
++  Patch,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { CreateInterviewRecordDto } from './dto/create-interview.dto';
++import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
++import { InterviewRecordsService } from './interview-records.service';
++
++@Controller('interview-records')
++@UseGuards(AuthGuard('jwt'))
++export class InterviewRecordsController {
++  constructor(private readonly interviewRecordsService: InterviewRecordsService) {}
++
++  @Post()
++  async createInterviewRecord(
++    @Body() body: CreateInterviewRecordDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.createInterviewRecord(userId, body);
++  }
++
++  @Get()
++  async listInterviewRecords(
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.listInterviewRecordsForUser(userId);
++  }
++
++  @Get(':id')
++  async getInterviewRecord(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.getInterviewRecordForUser(id, userId);
++  }
++
++  @Patch(':id')
++  async updateInterviewRecord(
++    @Param('id') id: string,
++    @Body() body: UpdateInterviewRecordDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
++  }
++
++  @Delete(':id')
++  async deleteInterviewRecord(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.deleteInterviewRecord(id, userId);
++  }
++}
+diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..60570bf032d9201ec94b7a79ff3cfb8f89ca6d12
+--- /dev/null
++++ b/apps/api/src/interviews/interview-records.service.spec.ts
+@@ -0,0 +1,133 @@
++import { BadRequestException, NotFoundException } from '@nestjs/common';
++import { Interview } from './interview.entity';
++import { InterviewRecordsService } from './interview-records.service';
++
++describe('InterviewRecordsService', () => {
++  const mockInterview: Interview = {
++    id: 'interview-1',
++    userId: 'user-1',
++    jobId: 'job-1',
++    gapList: ['gap'],
++    questions: ['q1'],
++    responses: ['r1'],
++    validationResults: { ok: true },
++    recommendedAdditions: ['add'],
++    createdAt: new Date('2024-01-01T00:00:00Z'),
++    updatedAt: new Date('2024-01-01T00:00:00Z'),
++  };
++
++  const createMockRepository = () => ({
++    create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
++    save: jest.fn(async (data: Interview) => data),
++    find: jest.fn(),
++    findOne: jest.fn(),
++    remove: jest.fn(async (data: Interview) => data),
++  });
++
++  const createService = (repository = createMockRepository()) =>
++    new InterviewRecordsService(repository as never);
++
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  it('creates an interview record with required jobId and sanitization', async () => {
++    const repository = createMockRepository();
++    const service = createService(repository);
++
++    const result = await service.createInterviewRecord('user-1', {
++      jobId: ' job-2 ',
++      gapList: [' gap1 ', ''],
++      questions: [' q '],
++      responses: [' a '],
++      recommendedAdditions: [' add '],
++    });
++
++    expect(repository.create).toHaveBeenCalledWith(
++      expect.objectContaining({
++        userId: 'user-1',
++        jobId: 'job-2',
++        gapList: ['gap1'],
++        questions: ['q'],
++        responses: ['a'],
++        recommendedAdditions: ['add'],
++      }),
++    );
++    expect(result.jobId).toBe('job-2');
++  });
++
++  it('lists interview records for a user', async () => {
++    const repository = createMockRepository();
++    repository.find.mockResolvedValue([mockInterview]);
++    const service = createService(repository);
++
++    const records = await service.listInterviewRecordsForUser('user-1');
++
++    expect(repository.find).toHaveBeenCalledWith({
++      where: { userId: 'user-1' },
++      order: { createdAt: 'DESC' },
++    });
++    expect(records).toEqual([mockInterview]);
++  });
++
++  it('retrieves an interview record for a user', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockInterview);
++    const service = createService(repository);
++
++    const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
++
++    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
++    expect(record).toEqual(mockInterview);
++  });
++
++  it('throws when interview record not found', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(null);
++    const service = createService(repository);
++
++    await expect(
++      service.getInterviewRecordForUser('missing', 'user-1'),
++    ).rejects.toBeInstanceOf(NotFoundException);
++  });
++
++  it('updates an interview record with validation', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({ ...mockInterview });
++    const service = createService(repository);
++
++    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
++      jobId: ' job-3 ',
++      gapList: [' gap2 '],
++      validationResults: { ok: false },
++      recommendedAdditions: [' new '],
++    });
++
++    expect(repository.save).toHaveBeenCalled();
++    expect(result.jobId).toBe('job-3');
++    expect(result.gapList).toEqual(['gap2']);
++    expect(result.validationResults).toEqual({ ok: false });
++    expect(result.recommendedAdditions).toEqual(['new']);
++  });
++
++  it('throws when updating with empty jobId', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({ ...mockInterview });
++    const service = createService(repository);
++
++    await expect(
++      service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
++
++  it('deletes an interview record', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockInterview);
++    const service = createService(repository);
++
++    const result = await service.deleteInterviewRecord('interview-1', 'user-1');
++
++    expect(repository.remove).toHaveBeenCalledWith(mockInterview);
++    expect(result).toEqual({ deleted: true, id: 'interview-1' });
++  });
++});
+diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2366f25be51516336212c4dc409a6d67eeb01540
+--- /dev/null
++++ b/apps/api/src/interviews/interview-records.service.ts
+@@ -0,0 +1,98 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { CreateInterviewRecordDto } from './dto/create-interview.dto';
++import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
++import { Interview } from './interview.entity';
++
++@Injectable()
++export class InterviewRecordsService {
++  constructor(
++    @InjectRepository(Interview)
++    private readonly interviewRepository: Repository<Interview>,
++  ) {}
++
++  private sanitizeStringArray(values?: string[]) {
++    return (values ?? []).map((value) => value.trim()).filter(Boolean);
++  }
++
++  async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto) {
++    if (!dto.jobId?.trim()) {
++      throw new BadRequestException('Job ID is required.');
++    }
++
++    const interview = this.interviewRepository.create({
++      userId,
++      jobId: dto.jobId.trim(),
++      gapList: this.sanitizeStringArray(dto.gapList),
++      questions: this.sanitizeStringArray(dto.questions),
++      responses: this.sanitizeStringArray(dto.responses),
++      validationResults: dto.validationResults ?? {},
++      recommendedAdditions: this.sanitizeStringArray(dto.recommendedAdditions),
++    });
++
++    return this.interviewRepository.save(interview);
++  }
++
++  async listInterviewRecordsForUser(userId: string) {
++    return this.interviewRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++  }
++
++  async getInterviewRecordForUser(id: string, userId: string) {
++    const interview = await this.interviewRepository.findOne({ where: { id, userId } });
++
++    if (!interview) {
++      throw new NotFoundException('Interview not found');
++    }
++
++    return interview;
++  }
++
++  async updateInterviewRecord(
++    id: string,
++    userId: string,
++    dto: UpdateInterviewRecordDto,
++  ) {
++    const interview = await this.getInterviewRecordForUser(id, userId);
++
++    if (dto.jobId !== undefined) {
++      if (!dto.jobId?.trim()) {
++        throw new BadRequestException('Job ID is required.');
++      }
++      interview.jobId = dto.jobId.trim();
++    }
++
++    if (dto.gapList !== undefined) {
++      interview.gapList = this.sanitizeStringArray(dto.gapList);
++    }
++
++    if (dto.questions !== undefined) {
++      interview.questions = this.sanitizeStringArray(dto.questions);
++    }
++
++    if (dto.responses !== undefined) {
++      interview.responses = this.sanitizeStringArray(dto.responses);
++    }
++
++    if (dto.validationResults !== undefined) {
++      interview.validationResults = dto.validationResults ?? {};
++    }
++
++    if (dto.recommendedAdditions !== undefined) {
++      interview.recommendedAdditions = this.sanitizeStringArray(dto.recommendedAdditions);
++    }
++
++    return this.interviewRepository.save(interview);
++  }
++
++  async deleteInterviewRecord(id: string, userId: string) {
++    const interview = await this.getInterviewRecordForUser(id, userId);
++
++    await this.interviewRepository.remove(interview);
++
++    return { deleted: true, id };
++  }
++}
+diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0b43e9cf5a12539015002b5a2d0152bebd6915ec
+--- /dev/null
++++ b/apps/api/src/interviews/interview.entity.ts
+@@ -0,0 +1,40 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++
++@Entity({ name: 'interviews' })
++export class Interview {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Column()
++  userId!: string;
++
++  @Column({ type: 'varchar', length: 255 })
++  jobId!: string;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  gapList!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  questions!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  responses!: string[];
++
++  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
++  validationResults!: Record<string, unknown>;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  recommendedAdditions!: string[];
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
+diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
+index 039ca366310170e8e5e8eded76b6b0127dd8c622..388b8eb6e92402fcb7b6489c64d11640f6619284 100644
+--- a/apps/api/src/interviews/interviews.module.ts
++++ b/apps/api/src/interviews/interviews.module.ts
+@@ -1,14 +1,17 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
++import { Interview } from './interview.entity';
++import { InterviewRecordsController } from './interview-records.controller';
++import { InterviewRecordsService } from './interview-records.service';
+ import { InterviewResponse } from './interview-response.entity';
+ import { InterviewSession } from './interview-session.entity';
+ import { InterviewsController } from './interviews.controller';
+ import { InterviewsService } from './interviews.service';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse])],
+-  controllers: [InterviewsController],
+-  providers: [InterviewsService],
+-  exports: [InterviewsService],
++  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse, Interview])],
++  controllers: [InterviewsController, InterviewRecordsController],
++  providers: [InterviewsService, InterviewRecordsService],
++  exports: [InterviewsService, InterviewRecordsService],
+ })
+ export class InterviewsModule {}
+diff --git a/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts b/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4186bc335a7f95086bd40c20165cb9f710034ac1
+--- /dev/null
++++ b/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts
+@@ -0,0 +1,57 @@
 +import { MigrationInterface, QueryRunner } from 'typeorm';
 +
-+export class UserRoleAndSubscriptionTier1810000000000
-+  implements MigrationInterface
-+{
-+  name = 'UserRoleAndSubscriptionTier1810000000000';
++export class InterviewRecordsAndStarStories1820000000000 implements MigrationInterface {
++  name = 'InterviewRecordsAndStarStories1820000000000';
 +
 +  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++
++    await queryRunner.query(`
++      CREATE TABLE "interviews" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" character varying(255) NOT NULL,
++        "jobId" character varying(255) NOT NULL,
++        "gapList" jsonb NOT NULL DEFAULT '[]',
++        "questions" jsonb NOT NULL DEFAULT '[]',
++        "responses" jsonb NOT NULL DEFAULT '[]',
++        "validationResults" jsonb NOT NULL DEFAULT '{}',
++        "recommendedAdditions" jsonb NOT NULL DEFAULT '[]',
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_interviews_id" PRIMARY KEY ("id")
++      )
++    `);
++
 +    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "role" character varying(50) NOT NULL DEFAULT 'user'`,
++      `CREATE INDEX "IDX_interviews_userId" ON "interviews" ("userId")`,
 +    );
++
++    await queryRunner.query(`
++      CREATE TABLE "star_stories" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" character varying(255) NOT NULL,
++        "title" character varying(255) NOT NULL,
++        "situation" text NOT NULL,
++        "task" text NOT NULL,
++        "action" text NOT NULL,
++        "result" text NOT NULL,
++        "reflections" text,
++        "competencies" jsonb NOT NULL DEFAULT '[]',
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_star_stories_id" PRIMARY KEY ("id")
++      )
++    `);
++
 +    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "subscriptionTier" character varying(50) NOT NULL DEFAULT 'free'`,
++      `CREATE INDEX "IDX_star_stories_userId" ON "star_stories" ("userId")`,
 +    );
 +  }
 +
 +  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "subscriptionTier"`);
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "role"`);
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_star_stories_userId"`);
++    await queryRunner.query(`DROP TABLE "star_stories"`);
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_interviews_userId"`);
++    await queryRunner.query(`DROP TABLE "interviews"`);
 +  }
 +}
-diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
-index 2e731eb4f37d9e6e187e506c1dbdadf721e0274a..1fb4658e418308cd3dd7c473802ad0d8360272fb 100644
---- a/apps/api/src/users/user.entity.ts
-+++ b/apps/api/src/users/user.entity.ts
-@@ -1,44 +1,52 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   Index,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
- 
- export type CalibrationWeights = {
-   dimensionA: number;
-   dimensionB: number;
-   dimensionC: number;
-   dimensionD: number;
-   dimensionE: number;
- };
- 
-+export type UserRole = 'user' | 'coach' | 'admin';
+diff --git a/apps/api/src/star-stories/dto/create-star-story.dto.ts b/apps/api/src/star-stories/dto/create-star-story.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..56670e96f2da0515dc88fa5b4ffb40a842530e91
+--- /dev/null
++++ b/apps/api/src/star-stories/dto/create-star-story.dto.ts
+@@ -0,0 +1,9 @@
++export class CreateStarStoryDto {
++  title!: string;
++  situation!: string;
++  task!: string;
++  action!: string;
++  result!: string;
++  reflections?: string | null;
++  competencies?: string[];
++}
+diff --git a/apps/api/src/star-stories/dto/update-star-story.dto.ts b/apps/api/src/star-stories/dto/update-star-story.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..36659e6b38e5b9499df61c82f11e168bb5326ca6
+--- /dev/null
++++ b/apps/api/src/star-stories/dto/update-star-story.dto.ts
+@@ -0,0 +1,9 @@
++export class UpdateStarStoryDto {
++  title?: string;
++  situation?: string;
++  task?: string;
++  action?: string;
++  result?: string;
++  reflections?: string | null;
++  competencies?: string[];
++}
+diff --git a/apps/api/src/star-stories/star-stories.controller.ts b/apps/api/src/star-stories/star-stories.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba5ad20191340d6d8e680d93725d783f9b260faa
+--- /dev/null
++++ b/apps/api/src/star-stories/star-stories.controller.ts
+@@ -0,0 +1,91 @@
++import {
++  BadRequestException,
++  Body,
++  Controller,
++  Delete,
++  Get,
++  Param,
++  Patch,
++  Post,
++  Req,
++  UseGuards,
++} from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { CreateStarStoryDto } from './dto/create-star-story.dto';
++import { UpdateStarStoryDto } from './dto/update-star-story.dto';
++import { StarStoriesService } from './star-stories.service';
 +
- // VERIFY: Confirm calibration dimension labels and structure.
- 
- @Entity({ name: 'users' })
- export class User {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Index({ unique: true })
-   @Column({ unique: true })
-   email!: string;
- 
-   @Column()
-   passwordHash!: string;
- 
-   @Column({ type: 'character varying', length: 255, nullable: true })
-   calibrationProfileName!: string | null;
- 
-   // VERIFY: Ensure null defaults are acceptable for calibration weights.
-   @Column({ type: 'jsonb', nullable: true })
-   calibrationWeights!: CalibrationWeights | null;
- 
-+  @Column({ type: 'character varying', length: 50, default: 'user' })
-+  role!: UserRole;
++@Controller('star-stories')
++@UseGuards(AuthGuard('jwt'))
++export class StarStoriesController {
++  constructor(private readonly starStoriesService: StarStoriesService) {}
 +
-+  @Column({ type: 'character varying', length: 50, default: 'free' })
-+  subscriptionTier!: string;
++  @Post()
++  async createStarStory(
++    @Body() body: CreateStarStoryDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
 +
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
-index 7b73e3bfa1a5608d99abf2c62aae2aff76fe4932..99064009722ab96a459854e2f2cbc9594756252c 100644
---- a/apps/api/src/users/users.service.ts
-+++ b/apps/api/src/users/users.service.ts
-@@ -1,31 +1,33 @@
- import { Injectable } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import { User } from './user.entity';
- 
- @Injectable()
- export class UsersService {
-   constructor(
-     @InjectRepository(User)
-     private readonly usersRepository: Repository<User>,
-   ) {}
- 
-   async create(email: string, passwordHash: string): Promise<User> {
-     const user = this.usersRepository.create({
-       email,
-       passwordHash,
-       // VERIFY: Confirm null calibration defaults are desired on signup.
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      role: 'user',
-+      subscriptionTier: 'free',
-     });
-     return this.usersRepository.save(user);
-   }
- 
-   findByEmail(email: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { email } });
-   }
- 
-   findById(id: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { id } });
-   }
- }
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.starStoriesService.createStarStory(userId, body);
++  }
++
++  @Get()
++  async listStarStories(@Req() request: Request & { user?: { id?: string } }) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.starStoriesService.listStarStoriesForUser(userId);
++  }
++
++  @Get(':id')
++  async getStarStory(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.starStoriesService.getStarStoryForUser(id, userId);
++  }
++
++  @Patch(':id')
++  async updateStarStory(
++    @Param('id') id: string,
++    @Body() body: UpdateStarStoryDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.starStoriesService.updateStarStory(id, userId, body);
++  }
++
++  @Delete(':id')
++  async deleteStarStory(
++    @Param('id') id: string,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.starStoriesService.deleteStarStory(id, userId);
++  }
++}
+diff --git a/apps/api/src/star-stories/star-stories.module.ts b/apps/api/src/star-stories/star-stories.module.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..41010467a172905a7329b12349b2f06dbc162c00
+--- /dev/null
++++ b/apps/api/src/star-stories/star-stories.module.ts
+@@ -0,0 +1,13 @@
++import { Module } from '@nestjs/common';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { StarStoriesController } from './star-stories.controller';
++import { StarStoriesService } from './star-stories.service';
++import { StarStory } from './star-story.entity';
++
++@Module({
++  imports: [TypeOrmModule.forFeature([StarStory])],
++  controllers: [StarStoriesController],
++  providers: [StarStoriesService],
++  exports: [StarStoriesService],
++})
++export class StarStoriesModule {}
+diff --git a/apps/api/src/star-stories/star-stories.service.spec.ts b/apps/api/src/star-stories/star-stories.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..07cece4a89e693bfe930fc390e549612eb4f75c1
+--- /dev/null
++++ b/apps/api/src/star-stories/star-stories.service.spec.ts
+@@ -0,0 +1,138 @@
++import { BadRequestException, NotFoundException } from '@nestjs/common';
++import { StarStory } from './star-story.entity';
++import { StarStoriesService } from './star-stories.service';
++
++describe('StarStoriesService', () => {
++  const mockStory: StarStory = {
++    id: 'story-1',
++    userId: 'user-1',
++    title: 'Launch project',
++    situation: 'System reliability was poor',
++    task: 'Improve uptime',
++    action: 'Led migration to HA setup',
++    result: '99.9% uptime achieved',
++    reflections: 'Need earlier monitoring',
++    competencies: ['leadership'],
++    createdAt: new Date('2024-01-01T00:00:00Z'),
++    updatedAt: new Date('2024-01-01T00:00:00Z'),
++  };
++
++  const createMockRepository = () => ({
++    create: jest.fn((data: Partial<StarStory>) => ({ ...mockStory, ...data })),
++    save: jest.fn(async (data: StarStory) => data),
++    find: jest.fn(),
++    findOne: jest.fn(),
++    remove: jest.fn(async (data: StarStory) => data),
++  });
++
++  const createService = (repository = createMockRepository()) =>
++    new StarStoriesService(repository as never);
++
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  it('creates a STAR story with required fields', async () => {
++    const repository = createMockRepository();
++    const service = createService(repository);
++
++    const result = await service.createStarStory('user-1', {
++      title: ' Reliability fix ',
++      situation: ' Outages ',
++      task: ' Stabilize ',
++      action: ' Added alerts ',
++      result: ' Reduced incidents ',
++      competencies: [' ops '],
++      reflections: '  More runbooks  ',
++    });
++
++    expect(repository.create).toHaveBeenCalledWith(
++      expect.objectContaining({
++        userId: 'user-1',
++        title: 'Reliability fix',
++        situation: 'Outages',
++        task: 'Stabilize',
++        action: 'Added alerts',
++        result: 'Reduced incidents',
++        reflections: 'More runbooks',
++        competencies: ['ops'],
++      }),
++    );
++    expect(result.title).toBe('Reliability fix');
++  });
++
++  it('lists stories for a user', async () => {
++    const repository = createMockRepository();
++    repository.find.mockResolvedValue([mockStory]);
++    const service = createService(repository);
++
++    const stories = await service.listStarStoriesForUser('user-1');
++
++    expect(repository.find).toHaveBeenCalledWith({
++      where: { userId: 'user-1' },
++      order: { createdAt: 'DESC' },
++    });
++    expect(stories).toEqual([mockStory]);
++  });
++
++  it('retrieves a story for a user', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockStory);
++    const service = createService(repository);
++
++    const story = await service.getStarStoryForUser('story-1', 'user-1');
++
++    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'story-1', userId: 'user-1' } });
++    expect(story).toEqual(mockStory);
++  });
++
++  it('throws when story not found', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(null);
++    const service = createService(repository);
++
++    await expect(service.getStarStoryForUser('missing', 'user-1')).rejects.toBeInstanceOf(
++      NotFoundException,
++    );
++  });
++
++  it('updates a story with validation', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({ ...mockStory });
++    const service = createService(repository);
++
++    const result = await service.updateStarStory('story-1', 'user-1', {
++      title: ' Updated ',
++      result: ' Better outcomes ',
++      competencies: [' leadership ', ''],
++      reflections: null,
++    });
++
++    expect(repository.save).toHaveBeenCalled();
++    expect(result.title).toBe('Updated');
++    expect(result.result).toBe('Better outcomes');
++    expect(result.competencies).toEqual(['leadership']);
++    expect(result.reflections).toBeNull();
++  });
++
++  it('throws when updating with empty required field', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({ ...mockStory });
++    const service = createService(repository);
++
++    await expect(
++      service.updateStarStory('story-1', 'user-1', { title: '' }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
++
++  it('deletes a story', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue(mockStory);
++    const service = createService(repository);
++
++    const result = await service.deleteStarStory('story-1', 'user-1');
++
++    expect(repository.remove).toHaveBeenCalledWith(mockStory);
++    expect(result).toEqual({ deleted: true, id: 'story-1' });
++  });
++});
+diff --git a/apps/api/src/star-stories/star-stories.service.ts b/apps/api/src/star-stories/star-stories.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f49929db76bb756d933d0a2a2ec49a792582c0c
+--- /dev/null
++++ b/apps/api/src/star-stories/star-stories.service.ts
+@@ -0,0 +1,113 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { CreateStarStoryDto } from './dto/create-star-story.dto';
++import { UpdateStarStoryDto } from './dto/update-star-story.dto';
++import { StarStory } from './star-story.entity';
++
++@Injectable()
++export class StarStoriesService {
++  constructor(
++    @InjectRepository(StarStory)
++    private readonly starStoryRepository: Repository<StarStory>,
++  ) {}
++
++  private sanitizeString(value?: string | null) {
++    if (value === undefined) return value;
++    const trimmed = value?.trim() ?? '';
++    return trimmed.length ? trimmed : null;
++  }
++
++  private sanitizeStringArray(values?: string[]) {
++    return (values ?? []).map((value) => value.trim()).filter(Boolean);
++  }
++
++  private validateRequiredFields(dto: CreateStarStoryDto | UpdateStarStoryDto) {
++    const required = ['title', 'situation', 'task', 'action', 'result'] as const;
++
++    for (const field of required) {
++      const value = (dto as Record<string, unknown>)[field];
++      if (value !== undefined && typeof value === 'string' && !value.trim()) {
++        throw new BadRequestException(`${field} is required.`);
++      }
++    }
++  }
++
++  async createStarStory(userId: string, dto: CreateStarStoryDto) {
++    this.validateRequiredFields(dto);
++
++    if (!dto.title?.trim()) {
++      throw new BadRequestException('title is required.');
++    }
++    if (!dto.situation?.trim()) {
++      throw new BadRequestException('situation is required.');
++    }
++    if (!dto.task?.trim()) {
++      throw new BadRequestException('task is required.');
++    }
++    if (!dto.action?.trim()) {
++      throw new BadRequestException('action is required.');
++    }
++    if (!dto.result?.trim()) {
++      throw new BadRequestException('result is required.');
++    }
++
++    const story = this.starStoryRepository.create({
++      userId,
++      title: dto.title.trim(),
++      situation: dto.situation.trim(),
++      task: dto.task.trim(),
++      action: dto.action.trim(),
++      result: dto.result.trim(),
++      reflections: this.sanitizeString(dto.reflections) ?? null,
++      competencies: this.sanitizeStringArray(dto.competencies),
++    });
++
++    return this.starStoryRepository.save(story);
++  }
++
++  async listStarStoriesForUser(userId: string) {
++    return this.starStoryRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++  }
++
++  async getStarStoryForUser(id: string, userId: string) {
++    const story = await this.starStoryRepository.findOne({ where: { id, userId } });
++
++    if (!story) {
++      throw new NotFoundException('STAR story not found');
++    }
++
++    return story;
++  }
++
++  async updateStarStory(id: string, userId: string, dto: UpdateStarStoryDto) {
++    const story = await this.getStarStoryForUser(id, userId);
++
++    this.validateRequiredFields(dto);
++
++    if (dto.title !== undefined) story.title = dto.title.trim();
++    if (dto.situation !== undefined) story.situation = dto.situation.trim();
++    if (dto.task !== undefined) story.task = dto.task.trim();
++    if (dto.action !== undefined) story.action = dto.action.trim();
++    if (dto.result !== undefined) story.result = dto.result.trim();
++    if (dto.reflections !== undefined) {
++      story.reflections = this.sanitizeString(dto.reflections) ?? null;
++    }
++    if (dto.competencies !== undefined) {
++      story.competencies = this.sanitizeStringArray(dto.competencies);
++    }
++
++    return this.starStoryRepository.save(story);
++  }
++
++  async deleteStarStory(id: string, userId: string) {
++    const story = await this.getStarStoryForUser(id, userId);
++
++    await this.starStoryRepository.remove(story);
++
++    return { deleted: true, id };
++  }
++}
+diff --git a/apps/api/src/star-stories/star-story.entity.ts b/apps/api/src/star-stories/star-story.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5bae7be9303bfd5117c0f1604be565bfd80a40a1
+--- /dev/null
++++ b/apps/api/src/star-stories/star-story.entity.ts
+@@ -0,0 +1,43 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  PrimaryGeneratedColumn,
++  UpdateDateColumn,
++} from 'typeorm';
++
++@Entity({ name: 'star_stories' })
++export class StarStory {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Column()
++  userId!: string;
++
++  @Column({ type: 'varchar', length: 255 })
++  title!: string;
++
++  @Column({ type: 'text' })
++  situation!: string;
++
++  @Column({ type: 'text' })
++  task!: string;
++
++  @Column({ type: 'text' })
++  action!: string;
++
++  @Column({ type: 'text' })
++  result!: string;
++
++  @Column({ type: 'text', nullable: true })
++  reflections!: string | null;
++
++  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
++  competencies!: string[];
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
++}
