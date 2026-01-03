@@ -18,14 +18,6 @@ function Restart-All {
     docker compose -f infra\docker\docker-compose.dev.yml restart 
 }
 
-Function Update-NPM {
-    cd C:\Users\decla\Documents\GitHub\TargetThisRole\apps\api
-    npm install
-    cd C:\Users\decla\Documents\GitHub\TargetThisRole\apps\web
-    npm install
-    cd C:\Users\decla\Documents\GitHub\TargetThisRole
-}
-
 Function Reset-Env {
     git reset --hard
     git clean -xfd
@@ -33,3 +25,39 @@ Function Reset-Env {
     docker compose -f infra\docker\docker-compose.dev.yml down -v
     docker builder prune -af
 }
+
+
+Function Update-NPM {
+
+    If (-Not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Throw "Git is not installed or not available in PATH."
+    }
+
+    $gitRootRaw = git rev-parse --show-toplevel 2>$null
+    If (-Not $gitRootRaw) {
+        Throw "This directory is not inside a Git repository."
+    }
+
+    $gitRoot = (Resolve-Path $gitRootRaw.Trim()).Path
+    $current = (Resolve-Path $PWD.ProviderPath).Path
+
+    If ($gitRoot -ne $current) {
+        Throw "You must run this function from the root of the Git repository.`nExpected: $gitRoot`nCurrent:  $current"
+    }
+
+    $apiPath = Join-Path $gitRoot "apps\api"
+    $webPath = Join-Path $gitRoot "apps\web"
+
+    If (-Not (Test-Path $apiPath)) { Throw "Expected path not found: $apiPath" }
+    If (-Not (Test-Path $webPath)) { Throw "Expected path not found: $webPath" }
+
+    Push-Location $apiPath
+    npm install
+    Pop-Location
+
+    Push-Location $webPath
+    npm install
+    Pop-Location
+}
+
+
