@@ -1,12 +1,24 @@
-import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Param,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ResumeService } from './resume.service';
+
+type ResumeExportFormat = 'docx' | 'pdf';
 
 interface ResumeRequestBody {
   baselineId?: string;
   baselineVersionId?: string;
   jobId?: string;
+  format?: ResumeExportFormat;
 }
 
 @Controller('resume')
@@ -19,7 +31,7 @@ export class ResumeController {
     @Body() body: ResumeRequestBody,
     @Req() request: Request & { user?: { id?: string } },
   ) {
-    return this.handleResumeRequest(body, request);
+    return this.handleGenerate(body, request);
   }
 
   @Post()
@@ -27,35 +39,85 @@ export class ResumeController {
     @Body() body: ResumeRequestBody,
     @Req() request: Request & { user?: { id?: string } },
   ) {
-    return this.handleResumeRequest(body, request);
+    return this.handleGenerate(body, request);
   }
 
-  private async handleResumeRequest(
-    body: ResumeRequestBody,
-    request: Request & { user?: { id?: string } },
+  @Post('export')
+  async exportResume(
+    @Body() body: ResumeRequestBody,
+    @Req() request: Request & { user?: { id?: string } },
+    @Res() res: Response,
   ) {
+    const format: ResumeExportFormat = body.format ?? 'docx';
+    return this.handleExport(body, request, res, format);
+  }
+
+  @Post('export/:format')
+  async exportResumeWithFormat(
+    @Param('format') formatParam: string,
+    @Body() body: ResumeRequestBody,
+    @Req() request: Request & { user?: { id?: string } },
+    @Res() res: Response,
+  ) {
+    const format = this.normalizeFormat(formatParam);
+    return this.handleExport(body, request, res, format);
+  }
+
+  private normalizeFormat(value: string): ResumeExportFormat {
+    const normalized = (value ?? '').toLowerCase().trim();
+    if (normalized === 'pdf') return 'pdf';
+    if (normalized === 'docx') return 'docx';
+    throw new BadRequestException('Invalid format. Use docx or pdf.');
+  }
+
+  private getUserId(request: Request & { user?: { id?: string } }) {
     const userId = request.user?.id;
+    if (!userId) throw new BadRequestException('Invalid user context');
+    return userId;
+  }
 
-    if (!userId) {
-      throw new BadRequestException('Invalid user context');
-    }
-
+  private parsePayload(body: ResumeRequestBody) {
     const baselineId = body.baselineId?.trim();
     const baselineVersionId = body.baselineVersionId?.trim();
     const jobId = body.jobId?.trim();
 
-    if (!baselineId) {
-      throw new BadRequestException('baselineId is required');
-    }
+    if (!baselineId) throw new BadRequestException('baselineId is required');
+    if (!jobId) throw new BadRequestException('jobId is required');
 
-    if (!jobId) {
-      throw new BadRequestException('jobId is required');
-    }
-
-    return this.resumeService.generateResume(userId, {
+    return {
       baselineId,
       baselineVersionId: baselineVersionId ?? undefined,
       jobId,
-    });
+    };
+  }
+
+  private async handleGenerate(
+    body: ResumeRequestBody,
+    request: Request & { user?: { id?: string } },
+  ) {
+    const userId = this.getUserId(request);
+    const payload = this.parsePayload(body);
+    return this.resumeService.generateResume(userId, payload);
+  }
+
+  private async handleExport(
+    body: ResumeRequestBody,
+    request: Request & { user?: { id?: string } },
+    res: Response,
+    format: ResumeExportFormat,
+  ) {
+    const userId = this.getUserId(request);
+    const payload = this.parsePayload(body);
+
+    const file = await this.resumeService.exportResume(userId, payload, format);
+
+    const contentType =
+      format === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="resume.${format}"`);
+    res.send(file);
   }
 }

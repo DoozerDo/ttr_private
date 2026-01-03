@@ -3,6 +3,7 @@ import { ComplianceService } from './compliance.service';
 import {
   ComplianceAction,
   ComplianceFlagCode,
+  ComplianceFlagSeverity,
 } from './compliance.types';
 
 const buildAuditRepo = () => {
@@ -89,5 +90,19 @@ describe('ComplianceService', () => {
       ]),
     );
     expect(result.blocked).toBe(true);
+  });
+
+  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [{ content: 'Improved uptime by 10%' }],
+      generatedSections: [{ content: 'Improved uptime by 25%' }],
+    });
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+      }),
+    ]);
   });
 });

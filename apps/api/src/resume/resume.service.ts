@@ -14,6 +14,7 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
@@ -22,6 +23,7 @@ export type GenerateResumeRequest = {
   baselineId: string;
   baselineVersionId?: string;
   jobId?: string | null;
+  oneTap?: boolean;
 };
 
 @Injectable()
@@ -35,8 +37,66 @@ export class ResumeService {
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(Job)
     private readonly jobsRepository: Repository<Job>,
+    @InjectRepository(FitAssessment)
+    private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly complianceService: ComplianceService,
   ) {}
+
+  private async ensureOneTapAllowed(userId: string, jobId: string) {
+    const assessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, jobId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!assessment || assessment.overallScore < 92) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'fit_score_too_low',
+          message: 'One tap resume generation requires fit score >= 92.',
+          details: { last_score: assessment?.overallScore ?? null },
+        },
+      });
+    }
+  }
+
+  private buildResumeText(sections: Array<{ title: string | null; content: string }>) {
+    return sections
+      .map((section) => {
+        const title = section.title ? `${section.title}\n` : '';
+        return `${title}${section.content}`.trim();
+      })
+      .join('\n\n');
+  }
+
+  private buildPdfBuffer(content: string) {
+    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const escaped = sanitized.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
+    const pdfParts = [
+      '%PDF-1.4',
+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
+      `4 0 obj ${contentStream} endobj`,
+      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+      'xref',
+      '0 6',
+      '0000000000 65535 f ',
+      'trailer << /Size 6 /Root 1 0 R >>',
+      'startxref',
+      '0',
+      '%%EOF',
+    ];
+
+    return Buffer.from(pdfParts.join('\n'));
+  }
+
+  private buildDocxBuffer(content: string) {
+    const header = 'PK\u0003\u0004';
+    const body = `Resume\n\n${content}`;
+    return Buffer.from(header + body, 'utf-8');
+  }
 
   private applyPoliciesToSections(
     sections: BaselineSection[],
@@ -136,9 +196,18 @@ export class ResumeService {
       throw new NotFoundException('Job not found');
     }
 
+    if (request.oneTap && jobId) {
+      await this.ensureOneTapAllowed(userId, jobId);
+    }
+
     const outputHash = createHash('sha256')
       .update(JSON.stringify(sections))
       .digest('hex');
+
+    const writingFlags = this.complianceService.enforceResumeWritingRules({
+      baselineSections: baseline.sections ?? [],
+      generatedSections: sections,
+    });
 
     const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({
@@ -150,6 +219,7 @@ export class ResumeService {
         scopeInflationDetected: sections.some(
           (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
         ),
+        extraFlags: writingFlags,
       });
 
     if (blocked) {
@@ -170,6 +240,37 @@ export class ResumeService {
       sections,
       compliance_flags: complianceFlags,
       audit_id: audit.id,
+    };
+  }
+
+  async exportResume(
+    userId: string,
+    request: GenerateResumeRequest,
+    format: 'docx' | 'pdf',
+  ) {
+    const generation = await this.generateResume(userId, request);
+    const text = this.buildResumeText(
+      generation.sections.map((section) => ({
+        title: section.title,
+        content: section.content,
+      })),
+    );
+
+    const buffer =
+      format === 'pdf'
+        ? this.buildPdfBuffer(text)
+        : this.buildDocxBuffer(text);
+
+    const contentType =
+      format === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const filename = `resume.${format}`;
+
+    return {
+      buffer,
+      contentType,
+      filename,
     };
   }
 }
