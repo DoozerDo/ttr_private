@@ -257,15 +257,47 @@ export class ResumeService {
     );
 
     const buffer =
-      format === 'pdf'
-        ? this.buildPdfBuffer(text)
-        : this.buildDocxBuffer(text);
+      format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
 
     const contentType =
       format === 'pdf'
         ? 'application/pdf'
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const filename = `resume.${format}`;
+
+    const baselineVersion = await this.baselineVersionRepository.findOne({
+      where: { id: generation.baselineVersionId, baselineId: generation.baselineId },
+    });
+
+    if (!baselineVersion) {
+      throw new NotFoundException('Baseline version not found');
+    }
+
+    const job = generation.jobId
+      ? await this.jobsRepository.findOne({
+          where: { id: generation.jobId, userId },
+        })
+      : null;
+
+    const { complianceFlags, blocked } = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.RESUME_EXPORT,
+      actorId: userId,
+      baselineVersion,
+      job,
+      outputHash: createHash('sha256')
+        .update(`${format}:${text}`)
+        .digest('hex'),
+    });
+
+    if (blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'unprocessable',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: complianceFlags },
+        },
+      });
+    }
 
     return {
       buffer,

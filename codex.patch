@@ -1,546 +1,489 @@
-diff --git a/apps/api/src/search-sets/search-sets-runner.service.spec.ts b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
-index 3e5a1ae223fd1d940a13ccab1c36ef9abee02e2d..c11464bab6a600fe8cb52e53d1d3fd97ac279eaa 100644
---- a/apps/api/src/search-sets/search-sets-runner.service.spec.ts
-+++ b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
-@@ -102,95 +102,130 @@ describe('SearchSetsRunnerService', () => {
+diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
+index beeac1e3f0e51b275153515aade1e48c1f45f2ac..bf80d8e859fccfc978b1e2bc43a3c874c5e61b6c 100644
+--- a/apps/api/src/compliance/compliance.service.spec.ts
++++ b/apps/api/src/compliance/compliance.service.spec.ts
+@@ -83,26 +83,40 @@ describe('ComplianceService', () => {
+     });
  
-     const service = new SearchSetsRunnerService(
-       jobRepository as never,
-       searchSetsService,
-       fitAssessmentRepository as never,
+     const codes = result.complianceFlags.map((flag) => flag.code);
+     expect(codes).toEqual(
+       expect.arrayContaining([
+         ComplianceFlagCode.MISSING_BASELINE_HASH,
+         ComplianceFlagCode.UNKNOWN_COMPANY,
+       ]),
      );
+     expect(result.blocked).toBe(true);
+   });
  
-     return { service, jobRepository, fitAssessmentRepository, searchSetsService, qb };
-   };
- 
-   it('filters jobs by title pattern and attaches latest fit assessment', async () => {
-     const newerAssessment = createFitAssessment({
-       id: 'assessment-2',
-       createdAt: new Date('2024-01-02T00:00:00Z'),
-       overallScore: 95,
-       verdict: FitAssessmentVerdict.APPLY,
-     });
-     const olderAssessment = createFitAssessment({
-       id: 'assessment-1',
-       createdAt: new Date('2024-01-01T00:00:00Z'),
-       overallScore: 80,
-       verdict: FitAssessmentVerdict.CONSIDER,
+   it('blocks invented metrics when generated output includes numbers not in baseline', () => {
+     const flags = service.enforceResumeWritingRules({
+       baselineSections: [{ content: 'Improved uptime by 10%' }],
+       generatedSections: [{ content: 'Improved uptime by 25%' }],
      });
  
-     const { service, fitAssessmentRepository } = createService({
--      jobs: [createJob()],
-+      jobs: [createJob({ sourceUrl: 'https://example.com/apply' })],
-       assessments: [newerAssessment, olderAssessment],
-     });
- 
-     const results = await service.runSearchSet('set-1', 'user-1', 5);
- 
-     expect(fitAssessmentRepository.createQueryBuilder).toHaveBeenCalled();
-     expect(results).toEqual([
-       {
-         jobId: 'job-1',
-         title: 'Senior Engineer',
-         company: 'Acme Corp',
--        sourceUrl: null,
-+        applyUrl: 'https://example.com/apply',
-+        sourceUrl: 'https://example.com/apply',
-         fitScore: 95,
-         verdict: FitAssessmentVerdict.APPLY,
-       },
+     expect(flags).toEqual([
+       expect.objectContaining({
+         code: ComplianceFlagCode.INVENTED_METRIC,
+         severity: ComplianceFlagSeverity.BLOCK,
+       }),
      ]);
    });
- 
-   it('applies work mode and seniority filters', async () => {
-     const { service } = createService({
-       jobs: [
-         createJob({
-           id: 'job-remote',
-           title: 'Senior SRE',
-           rawDescription: 'Fully remote position',
-         }),
-         createJob({
-           id: 'job-onsite',
-           title: 'Junior Engineer',
-           rawDescription: 'Onsite role',
-         }),
-       ],
-       searchSet: {
-         ...baseSearchSet,
-         titlePatterns: ['Engineer'],
-         workMode: SearchSetWorkMode.REMOTE,
-         seniority: SearchSetSeniority.SENIOR,
-       },
-       assessments: [],
-     });
- 
-     const results = await service.runSearchSet('set-1', 'user-1', 10);
- 
-     expect(results).toHaveLength(1);
-     expect(results[0].jobId).toBe('job-remote');
-   });
- 
-   it('limits results to 10', async () => {
-     const jobs = Array.from({ length: 12 }).map((_, index) =>
-       createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
-     );
- 
-     const { service } = createService({ jobs, assessments: [] });
- 
-     const results = await service.runSearchSet('set-1', 'user-1', 20);
- 
-     expect(results).toHaveLength(10);
-   });
- 
-+  it('caps results at 10 even when limit below 1 or above 10', async () => {
-+    const jobs = Array.from({ length: 20 }).map((_, index) =>
-+      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
-+    );
 +
-+    const { service } = createService({ jobs, assessments: [] });
-+
-+    const highLimit = await service.runSearchSet('set-1', 'user-1', 50);
-+    const lowLimit = await service.runSearchSet('set-1', 'user-1', 0);
-+
-+    expect(highLimit).toHaveLength(10);
-+    expect(lowLimit).toHaveLength(1);
-+  });
-+
-+  it('derives applyUrl from sourceUrl and falls back to null when invalid', async () => {
-+    const { service } = createService({
-+      jobs: [
-+        createJob({ id: 'job-valid', sourceUrl: 'https://example.com/apply' }),
-+        createJob({ id: 'job-invalid', sourceUrl: 'notaurl' }),
-+        createJob({ id: 'job-missing', sourceUrl: null }),
-+      ],
-+      assessments: [],
++  it('blocks stylized punctuation in generated output', () => {
++    const flags = service.enforceResumeWritingRules({
++      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
++      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
 +    });
 +
-+    const results = await service.runSearchSet('set-1', 'user-1', 5);
-+
-+    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
-+
-+    expect(byId['job-valid'].applyUrl).toBe('https://example.com/apply');
-+    expect(byId['job-invalid'].applyUrl).toBeNull();
-+    expect(byId['job-missing'].applyUrl).toBeNull();
-+    expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
++    expect(flags).toEqual([
++      expect.objectContaining({
++        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++      }),
++    ]);
 +  });
-+
-   it('returns empty results when search set is inactive', async () => {
-     const { service } = createService({
-       searchSet: { ...baseSearchSet, isActive: false },
-     });
- 
-     const results = await service.runSearchSet('set-1', 'user-1');
- 
-     expect(results).toEqual([]);
-   });
  });
-diff --git a/apps/api/src/search-sets/search-sets-runner.service.ts b/apps/api/src/search-sets/search-sets-runner.service.ts
-index 10b451caf50a2b1266394adc9710a96acd36c740..7c4af6b632b8bdead2510eade4e9af79d6c06768 100644
---- a/apps/api/src/search-sets/search-sets-runner.service.ts
-+++ b/apps/api/src/search-sets/search-sets-runner.service.ts
-@@ -1,41 +1,42 @@
- import { Injectable } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { Job } from '../jobs/job.entity';
- import {
-   SearchSet,
-   SearchSetSeniority,
-   SearchSetWorkMode,
- } from './search-set.entity';
- import { SearchSetsService } from './search-sets.service';
- 
- type SearchSetRunResult = {
-   jobId: string;
-   title: string | null;
-   company: string | null;
-+  applyUrl: string | null;
-   sourceUrl: string | null;
-   fitScore: number | null;
-   verdict: FitAssessment['verdict'] | null;
- };
- 
- @Injectable()
- export class SearchSetsRunnerService {
-   constructor(
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-     private readonly searchSetsService: SearchSetsService,
-     @InjectRepository(FitAssessment)
-     private readonly fitAssessmentRepository: Repository<FitAssessment>,
-   ) {}
- 
-   async runSearchSet(searchSetId: string, userId: string, limit = 10) {
-     const searchSet = await this.searchSetsService.getSearchSetForUser(
-       searchSetId,
-       userId,
-     );
- 
-     if (!searchSet.isActive) {
-       return [];
-     }
- 
-@@ -43,57 +44,74 @@ export class SearchSetsRunnerService {
-       where: { userId },
-       order: { createdAt: 'DESC' },
+diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
+index b13dcb9b36ec84d977e664ec361f455ca48e0f2e..ed273497dc1632ef5bea9e44da143ad4579b89ba 100644
+--- a/apps/api/src/compliance/compliance.service.ts
++++ b/apps/api/src/compliance/compliance.service.ts
+@@ -77,81 +77,110 @@ export class ComplianceService {
+       jobHash: this.buildJobHash(context.job),
+       outputHash: context.outputHash ?? null,
+       complianceFlags,
+       passFail: !blocked,
      });
  
-     const filteredJobs = jobs.filter((job) =>
-       this.matchesSearchSet(job, searchSet),
-     );
-     const cappedLimit = Math.min(Math.max(limit ?? 10, 1), 10);
-     const selectedJobs = filteredJobs.slice(0, cappedLimit);
+     const saved = await this.auditsRepository.save(audit);
  
-     if (selectedJobs.length === 0) {
-       return [];
-     }
- 
-     const latestAssessments = await this.loadLatestAssessments(
-       selectedJobs.map((job) => job.id),
-       userId,
-     );
- 
-     return selectedJobs.map((job) => {
-       const assessment = latestAssessments.get(job.id);
-       return {
-         jobId: job.id,
-         title: job.title,
-         company: job.company,
-+        applyUrl: this.deriveApplyUrl(job),
-         sourceUrl: job.sourceUrl,
-         fitScore: assessment?.overallScore ?? null,
-         verdict: assessment?.verdict ?? null,
-       } satisfies SearchSetRunResult;
-     });
+     return {
+       complianceFlags,
+       blocked,
+       audit: saved,
+     };
    }
  
-+  private deriveApplyUrl(job: Job) {
-+    if (!job.sourceUrl) return null;
+   enforceResumeWritingRules({
+     baselineSections,
+     generatedSections,
+   }: {
+     baselineSections: Array<{ content: string; title?: string | null }>;
+     generatedSections: Array<{ content: string; title?: string | null }>;
+   }): ComplianceFlag[] {
+     const baselineText = this.mergeText(baselineSections);
+     const generatedText = this.mergeText(generatedSections);
+ 
+-    const baselineNumbers = this.extractNumbers(baselineText);
+-    const generatedNumbers = this.extractNumbers(generatedText);
++    const stylizedCharacters = this.findStylizedPunctuation(generatedText);
++    const normalizedBaselineText = this.normalizePunctuation(baselineText);
++    const normalizedGeneratedText = this.normalizePunctuation(generatedText);
+ 
+-    const baselineEntities = this.extractEntities(baselineText);
+-    const generatedEntities = this.extractEntities(generatedText);
++    const baselineNumbers = this.extractNumbers(normalizedBaselineText);
++    const generatedNumbers = this.extractNumbers(normalizedGeneratedText);
 +
-+    try {
-+      const parsed = new URL(job.sourceUrl);
-+      const protocol = parsed.protocol.toLowerCase();
-+      if (protocol === 'http:' || protocol === 'https:') {
-+        return parsed.toString();
-+      }
-+    } catch {
-+      // Ignore invalid URLs and fall back to null.
++    const baselineEntities = this.extractEntities(normalizedBaselineText);
++    const generatedEntities = this.extractEntities(normalizedGeneratedText);
+ 
+     const flags: ComplianceFlag[] = [];
+ 
++    if (stylizedCharacters.length > 0) {
++      flags.push({
++        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++        message: `Stylized punctuation (${stylizedCharacters.join(
++          '',
++        )}) detected; use plain punctuation only.`,
++      });
 +    }
 +
-+    return null;
+     for (const num of generatedNumbers) {
+       if (!baselineNumbers.has(num)) {
+         flags.push({
+           code: ComplianceFlagCode.INVENTED_METRIC,
+           severity: ComplianceFlagSeverity.BLOCK,
+           message: `Metric "${num}" not found in baseline.`,
+         });
+         break;
+       }
+     }
+ 
+     for (const entity of generatedEntities) {
+       if (!baselineEntities.has(entity)) {
+         const isRole = /manager|engineer|lead|director|chief|officer|vp|president|analyst|specialist|consultant|architect/i.test(
+           entity,
+         );
+         flags.push({
+           code: isRole
+             ? ComplianceFlagCode.INVENTED_ROLE
+             : ComplianceFlagCode.INVENTED_COMPANY,
+           severity: ComplianceFlagSeverity.BLOCK,
+           message: `${isRole ? 'Role' : 'Company'} "${entity}" not found in baseline.`,
+         });
+         break;
+       }
+     }
+ 
+     return flags;
+   }
+ 
+   private mergeText(sections: Array<{ content: string; title?: string | null }>) {
+     return sections
+       .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
+       .join('\n')
+       .replace(/\s+/g, ' ')
+       .trim();
+   }
+ 
+   private extractNumbers(text: string) {
+     const matches = text.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
+     return new Set(matches.map((match) => match.trim()));
+   }
+ 
+   private extractEntities(text: string) {
+     const candidates = text.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
+     return new Set(candidates.map((candidate) => candidate.trim()));
+   }
++
++  private normalizePunctuation(text: string) {
++    return text
++      .replace(/[\u2010-\u2015\u2212]/g, '-')
++      .replace(/\u2026/g, '...')
++      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '•')
++      .replace(/\s+/g, ' ')
++      .trim();
 +  }
 +
-   private matchesSearchSet(job: Job, searchSet: SearchSet) {
-     if (!this.matchesTitlePatterns(job.title, searchSet.titlePatterns)) {
-       return false;
-     }
- 
-     if (!this.matchesSeniority(job, searchSet.seniority)) {
-       return false;
-     }
- 
-     if (!this.matchesWorkMode(job, searchSet.workMode)) {
-       return false;
-     }
- 
-     if (!this.matchesIndustry(job, searchSet.industry)) {
-       return false;
-     }
- 
-     return true;
-   }
- 
-   private matchesTitlePatterns(title: string | null, patterns: string[]) {
-     if (!patterns || patterns.length === 0) {
-       return true;
-     }
- 
-diff --git a/apps/web/app/search-sets/page.tsx b/apps/web/app/search-sets/page.tsx
-index f9d4abe2f28112c665733f740e6e12ade7bbafc0..036591976f8aec1a3b3c0f3b3685f92ef7754fe3 100644
---- a/apps/web/app/search-sets/page.tsx
-+++ b/apps/web/app/search-sets/page.tsx
-@@ -19,50 +19,60 @@ enum SearchSetWorkMode {
-   ANY = 'ANY',
++  private findStylizedPunctuation(text: string) {
++    const matches =
++      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219]/g) ?? [];
++    return Array.from(new Set(matches));
++  }
+ }
+diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
+index b5e0cbc688ad8fbfc1217b98384935777cfa5328..c039f5bf72f45453f957faf718a1b3c108964806 100644
+--- a/apps/api/src/compliance/compliance.types.ts
++++ b/apps/api/src/compliance/compliance.types.ts
+@@ -1,25 +1,27 @@
+ export enum ComplianceAction {
+   FIT_SCORE = 'fit_score',
+   RESUME_GENERATION = 'resume_gen',
+   COVER_LETTER_GENERATION = 'cover_letter_gen',
+   APPLICATION_EXPORT = 'application_export',
++  RESUME_EXPORT = 'resume_export',
  }
  
- type SearchSet = {
-   id: string;
-   titlePatterns: string[];
-   seniority: SearchSetSeniority;
-   industry: string[];
-   workMode: SearchSetWorkMode;
-   sourceUrl: string | null;
-   urlBacked?: boolean;
-   parseWarning?: string | null;
-   isActive: boolean;
-   createdAt?: string;
-   updatedAt?: string;
+ export enum ComplianceFlagCode {
+   SCOPE_INFLATION = 'scope_inflation',
+   MISSING_BASELINE_HASH = 'missing_baseline_hash',
+   UNKNOWN_COMPANY = 'unknown_company',
+   INVENTED_COMPANY = 'invented_company',
+   INVENTED_ROLE = 'invented_role',
+   INVENTED_METRIC = 'invented_metric',
++  STYLIZED_PUNCTUATION = 'stylized_punctuation',
+ }
+ 
+ export enum ComplianceFlagSeverity {
+   BLOCK = 'block',
+ }
+ 
+ export type ComplianceFlag = {
+   code: ComplianceFlagCode;
+   severity: ComplianceFlagSeverity;
+   message: string;
+ };
+diff --git a/apps/api/src/migrations/1800000000000-ComplianceAudits.ts b/apps/api/src/migrations/1800000000000-ComplianceAudits.ts
+index 18775cf0b775fc40efc89135077d2048a35467da..70fda02486fbce9791f47b3e19e9447737dd9e53 100644
+--- a/apps/api/src/migrations/1800000000000-ComplianceAudits.ts
++++ b/apps/api/src/migrations/1800000000000-ComplianceAudits.ts
+@@ -1,35 +1,35 @@
+ import { MigrationInterface, QueryRunner } from 'typeorm';
+ 
+ export class ComplianceAudits1800000000000 implements MigrationInterface {
+   name = 'ComplianceAudits1800000000000';
+ 
+   public async up(queryRunner: QueryRunner): Promise<void> {
+     await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+ 
+     await queryRunner.query(`
+-      CREATE TYPE "compliance_audits_action_enum" AS ENUM('fit_score', 'resume_gen', 'cover_letter_gen', 'application_export')
++      CREATE TYPE "compliance_audits_action_enum" AS ENUM('fit_score', 'resume_gen', 'cover_letter_gen', 'application_export', 'resume_export')
+     `);
+ 
+     await queryRunner.query(`
+       CREATE TABLE "compliance_audits" (
+         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+         "actorId" character varying NOT NULL,
+         "action" "compliance_audits_action_enum" NOT NULL,
+         "baselineVersionHash" character varying(255),
+         "jobHash" character varying(255),
+         "outputHash" character varying(255),
+         "complianceFlags" jsonb NOT NULL DEFAULT '[]'::jsonb,
+         "passFail" boolean NOT NULL DEFAULT false,
+         "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+         CONSTRAINT "PK_compliance_audits_id" PRIMARY KEY ("id")
+       )
+     `);
+ 
+     await queryRunner.query(
+       `CREATE INDEX "IDX_compliance_audits_actorId" ON "compliance_audits" ("actorId")`,
+     );
+     await queryRunner.query(
+       `CREATE INDEX "IDX_compliance_audits_action" ON "compliance_audits" ("action")`,
+     );
+     await queryRunner.query(
+       `CREATE INDEX "IDX_compliance_audits_createdAt" ON "compliance_audits" ("createdAt")`,
+diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+index 400f5b7f54bd3030ad0b224e4843d62f562da38c..7844be9b57d572a2fbd07f5ca8c412a97f3e9ddf 100644
+--- a/apps/api/src/resume/resume.service.spec.ts
++++ b/apps/api/src/resume/resume.service.spec.ts
+@@ -1,90 +1,97 @@
+ import { UnprocessableEntityException } from '@nestjs/common';
+ import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
+ import { ComplianceService } from '../compliance/compliance.service';
++import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+ import { ResumeService } from './resume.service';
+ 
+ const mockBaseline = {
+   id: 'baseline-1',
+   userId: 'user-1',
+   sections: [
+     {
+       id: 'section-1',
+       sectionType: BaselineSectionType.EXPERIENCE,
+       title: 'Example Co',
+       content: 'Delivered results with 10% uptime improvement.',
+       includePolicy: BaselineIncludePolicy.ALWAYS,
+       order: 0,
+     },
+   ],
  };
  
- type ParsedUrlPreview = {
-   sourceUrl: string;
-   titlePatterns: string[];
-   seniority?: SearchSetSeniority;
-   workMode?: SearchSetWorkMode;
-   parseWarning: string | null;
+ const mockBaselineVersion = {
+   id: 'baseline-version-1',
+   baselineId: 'baseline-1',
+   hash: 'hash-1',
  };
  
-+type SearchSetRunResult = {
-+  jobId: string;
-+  title: string | null;
-+  company: string | null;
-+  applyUrl: string | null;
-+  sourceUrl: string | null;
-+  fitScore: number | null;
-+  verdict: string | null;
-+};
-+
- function safeString(v: unknown): string {
-   if (typeof v === 'string') return v;
-   if (typeof v === 'number') return String(v);
-   if (typeof v === 'boolean') return v ? 'true' : 'false';
-   if (v === null || v === undefined) return '';
-   try {
-     return JSON.stringify(v);
-   } catch {
-     return String(v);
-   }
- }
+ const mockJob = {
+   id: 'job-1',
+   userId: 'user-1',
+   company: 'Example Co',
+   rawDescription: 'Job description',
+ };
  
- function parseList(input: string): string[] {
-   const s = (input || '').trim();
-   if (!s) return [];
-   return s
-     .split(/[\n,]/)
-     .map((x) => x.trim())
-     .filter(Boolean)
-     .filter((value, index, arr) => arr.indexOf(value) === index);
- }
+ const buildRepository = (overrides: Record<string, any> = {}) => ({
+   findOne: jest.fn().mockResolvedValue(null),
+   find: jest.fn().mockResolvedValue([]),
+   ...overrides,
+ });
  
- function detectWorkMode(url: URL): SearchSetWorkMode | null {
-   const param =
-     url.searchParams.get('f_WT') ||
-@@ -201,51 +211,51 @@ function parseJobBoardUrlPreview(rawUrl: string): ParsedUrlPreview | null {
-     parseWarning,
+-const buildService = (fitScore: number, writingFlags: any[] = []) => {
++const buildService = (
++  fitScore: number,
++  writingFlags: any[] = [],
++  baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
++  complianceOverride: Partial<ComplianceService> = {},
++) => {
+   const baselineRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue(mockBaseline),
+   });
+   const baselineVersionRepository = buildRepository({
+-    findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
++    findOne: jest.fn().mockResolvedValue(baselineVersionOverride),
+   });
+   const baselineBlockPolicyRepository = buildRepository({
+     find: jest.fn().mockResolvedValue([]),
+   });
+   const jobsRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue(mockJob),
+   });
+   const fitAssessmentRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue({
+       id: 'fit-1',
+       overallScore: fitScore,
+     }),
+   });
+   const complianceService = {
+     enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
+     validateAndAudit: jest.fn().mockResolvedValue({
+       complianceFlags: writingFlags,
+       blocked: writingFlags.length > 0,
+       audit: { id: 'audit-1' },
+     }),
++    ...complianceOverride,
+   } as unknown as ComplianceService;
+ 
+   return {
+     service: new ResumeService(
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineVersionRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineBlockPolicyRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       jobsRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       fitAssessmentRepository,
+       complianceService,
+     ),
+     complianceService,
    };
- }
+ };
  
- export default function SearchSetsPage() {
-   const [items, setItems] = useState<SearchSet[]>([]);
-   const [loading, setLoading] = useState<boolean>(true);
-   const [busy, setBusy] = useState<boolean>(false);
+@@ -102,26 +109,65 @@ describe('ResumeService', () => {
+     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+       UnprocessableEntityException,
+     );
+   });
  
-   const [error, setError] = useState<string>('');
-   const [notice, setNotice] = useState<string>('');
+   it('allows one-tap generation when fit score is at least 92', async () => {
+     const { service } = buildService(92);
  
-   const [search, setSearch] = useState<string>('');
+     const result = await service.generateResume('user-1', request);
  
-   const [editingId, setEditingId] = useState<string | null>(null);
+     expect(result.ok).toBe(true);
+     expect(result.sections).toHaveLength(1);
+   });
  
-   const [titlePatternsInput, setTitlePatternsInput] = useState<string>('');
-   const [industryInput, setIndustryInput] = useState<string>('');
-   const [seniority, setSeniority] = useState<SearchSetSeniority>(SearchSetSeniority.ANY);
-   const [workMode, setWorkMode] = useState<SearchSetWorkMode>(SearchSetWorkMode.ANY);
-   const [sourceUrl, setSourceUrl] = useState<string>('');
-   const [isActive, setIsActive] = useState<boolean>(true);
-   const [parsePreview, setParsePreview] = useState<ParsedUrlPreview | null>(null);
+   it('exports DOCX content with headers and body', async () => {
+     const { service } = buildService(95, []);
  
-   const [detail, setDetail] = useState<SearchSet | null>(null);
--  const [runResult, setRunResult] = useState<unknown>(null);
-+  const [runResult, setRunResult] = useState<SearchSetRunResult[] | null>(null);
+     const exportResult = await service.exportResume('user-1', request, 'docx');
  
-   const filtered = useMemo(() => {
-     const q = (search || '').trim().toLowerCase();
-     if (!q) return items;
- 
-     return items.filter((s) => {
-       const hay = [
-         s.id,
-         ...(Array.isArray(s.titlePatterns) ? s.titlePatterns : []),
-         ...(Array.isArray(s.industry) ? s.industry : []),
-         s.seniority,
-         s.workMode,
-         s.sourceUrl,
-       ]
-         .map((v) => safeString(v).toLowerCase())
-         .join(' ');
-       return hay.includes(q);
-     });
-   }, [items, search]);
- 
-   async function loadList() {
-     setLoading(true);
-     setError('');
-     setNotice('');
-     try {
-@@ -366,55 +376,58 @@ export default function SearchSetsPage() {
+     expect(exportResult.contentType).toBe(
+       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+     );
+     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+     expect(exportResult.filename).toBe('resume.docx');
+   });
++
++  it('blocks generation when baseline hash is missing', async () => {
++    const complianceService = {
++      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
++      validateAndAudit: jest.fn().mockResolvedValue({
++        complianceFlags: [
++          {
++            code: ComplianceFlagCode.MISSING_BASELINE_HASH,
++            severity: ComplianceFlagSeverity.BLOCK,
++            message: 'Baseline version hash is required.',
++          },
++        ],
++        blocked: true,
++        audit: { id: 'audit-1' },
++      }),
++    } as unknown as ComplianceService;
++
++    const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
++
++    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
++      UnprocessableEntityException,
++    );
++  });
++
++  it('audits resume export actions', async () => {
++    const { service, complianceService } = buildService(95);
++
++    await service.exportResume('user-1', request, 'pdf');
++
++    expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
++      expect.objectContaining({
++        action: ComplianceAction.RESUME_EXPORT,
++        actorId: 'user-1',
++        baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
++        job: expect.objectContaining({ id: 'job-1' }),
++        outputHash: expect.any(String),
++      }),
++    );
++  });
+ });
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index dad84338aa4102ac33a0e0ba52ccf713063e476d..0a60743a1eddccd833e5153beea73280bf94e74b 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -235,42 +235,74 @@ export class ResumeService {
+     return {
+       ok: true,
+       baselineId: baseline.id,
+       baselineVersionId: baselineVersion.id,
+       jobId: jobId ?? null,
+       sections,
+       compliance_flags: complianceFlags,
+       audit_id: audit.id,
+     };
    }
  
-   async function deleteSearchSet(id: string) {
-     setBusy(true);
-     setError('');
-     setNotice('');
-     setRunResult(null);
-     try {
-       await apiFetchJson(`/api/search-sets/${id}`, { method: 'DELETE' });
-       setNotice('Search set deleted');
-       await loadList();
-       if (editingId === id) clearForm();
-     } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to delete search set');
-     } finally {
-       setBusy(false);
-     }
-   }
+   async exportResume(
+     userId: string,
+     request: GenerateResumeRequest,
+     format: 'docx' | 'pdf',
+   ) {
+     const generation = await this.generateResume(userId, request);
+     const text = this.buildResumeText(
+       generation.sections.map((section) => ({
+         title: section.title,
+         content: section.content,
+       })),
+     );
  
-   async function runSearchSet(id: string) {
-     setBusy(true);
-     setError('');
-     setNotice('');
-     setRunResult(null);
-     try {
--      const data = await apiFetchJson<unknown>(`/api/search-sets/${id}/run`, {
-+      const data = await apiFetchJson<SearchSetRunResult[]>(
-+        `/api/search-sets/${id}/run`,
-+        {
-         method: 'POST',
-         body: JSON.stringify({}),
--      });
--      setRunResult(data);
+     const buffer =
+-      format === 'pdf'
+-        ? this.buildPdfBuffer(text)
+-        : this.buildDocxBuffer(text);
++      format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
+ 
+     const contentType =
+       format === 'pdf'
+         ? 'application/pdf'
+         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+     const filename = `resume.${format}`;
+ 
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: generation.baselineVersionId, baselineId: generation.baselineId },
++    });
++
++    if (!baselineVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const job = generation.jobId
++      ? await this.jobsRepository.findOne({
++          where: { id: generation.jobId, userId },
++        })
++      : null;
++
++    const { complianceFlags, blocked } = await this.complianceService.validateAndAudit({
++      action: ComplianceAction.RESUME_EXPORT,
++      actorId: userId,
++      baselineVersion,
++      job,
++      outputHash: createHash('sha256')
++        .update(`${format}:${text}`)
++        .digest('hex'),
++    });
++
++    if (blocked) {
++      throw new UnprocessableEntityException({
++        error: {
++          code: 'unprocessable',
++          message: 'Compliance validation failed.',
++          details: { compliance_flags: complianceFlags },
 +        },
-+      );
-+      setRunResult(Array.isArray(data) ? data : []);
-       setNotice('Search set run completed');
-     } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to run search set');
-     } finally {
-       setBusy(false);
-     }
++      });
++    }
++
+     return {
+       buffer,
+       contentType,
+       filename,
+     };
    }
- 
-   useEffect(() => {
-     setParsePreview(parseJobBoardUrlPreview(sourceUrl));
-   }, [sourceUrl]);
- 
-   const formModeLabel = editingId ? 'Update Search Set' : 'Create Search Set';
- 
-   return (
-     <div className="mx-auto w-full max-w-6xl px-4 py-6">
-       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-         <div>
-           <h1 className="text-2xl font-semibold">Search Sets</h1>
-           <p className="text-sm text-gray-600">Create, manage, and run saved searches.</p>
-         </div>
- 
-         <div className="flex flex-wrap gap-2">
-           <button
-             type="button"
-@@ -532,53 +545,103 @@ export default function SearchSetsPage() {
-                             Delete
-                           </button>
-                         </div>
-                       </td>
-                     </tr>
-                   ))}
-                 </tbody>
-               </table>
-             </div>
-           </div>
- 
-           <div className="mt-6 rounded border p-4">
-             <h2 className="text-lg font-semibold">Record detail</h2>
-             <p className="mt-1 text-xs text-gray-600">Select a row and click Edit.</p>
- 
-             <pre className="mt-3 max-h-[220px] overflow-auto rounded bg-gray-50 p-3 text-xs">
-               {detail ? JSON.stringify(detail, null, 2) : '{}'}
-             </pre>
-             {detail?.parseWarning && (
-               <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                 Parsing note: {detail.parseWarning}
-               </div>
-             )}
- 
-             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
--            <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
--              {runResult ? JSON.stringify(runResult, null, 2) : '{}'}
--            </pre>
-+            <div className="mt-2 rounded border">
-+              {runResult === null && (
-+                <div className="px-3 py-2 text-xs text-gray-600">No run yet.</div>
-+              )}
-+
-+              {Array.isArray(runResult) && runResult.length === 0 && (
-+                <div className="px-3 py-2 text-xs text-gray-700">No matching jobs found.</div>
-+              )}
-+
-+              {Array.isArray(runResult) && runResult.length > 0 && (
-+                <div className="overflow-auto">
-+                  <table className="w-full border-collapse text-xs">
-+                    <thead className="bg-gray-50 text-left">
-+                      <tr>
-+                        <th className="whitespace-nowrap px-3 py-2">Company</th>
-+                        <th className="whitespace-nowrap px-3 py-2">Title</th>
-+                        <th className="whitespace-nowrap px-3 py-2">Fit Score</th>
-+                        <th className="whitespace-nowrap px-3 py-2">Verdict</th>
-+                        <th className="whitespace-nowrap px-3 py-2">Apply</th>
-+                      </tr>
-+                    </thead>
-+                    <tbody>
-+                      {runResult.map((item) => {
-+                        const link = item.applyUrl || item.sourceUrl;
-+                        const hasApply = Boolean(item.applyUrl);
-+                        return (
-+                          <tr key={item.jobId} className="border-t">
-+                            <td className="px-3 py-2">{item.company || 'Unknown'}</td>
-+                            <td className="px-3 py-2">{item.title || 'Untitled role'}</td>
-+                            <td className="px-3 py-2">{item.fitScore ?? '—'}</td>
-+                            <td className="px-3 py-2">{item.verdict ?? '—'}</td>
-+                            <td className="px-3 py-2">
-+                              {link ? (
-+                                <a
-+                                  className="text-blue-700 underline"
-+                                  href={link}
-+                                  target="_blank"
-+                                  rel="noopener noreferrer"
-+                                >
-+                                  {hasApply ? 'Apply' : 'View source'}
-+                                </a>
-+                              ) : (
-+                                <span className="text-gray-500">No link available</span>
-+                              )}
-+                            </td>
-+                          </tr>
-+                        );
-+                      })}
-+                    </tbody>
-+                  </table>
-+                </div>
-+              )}
-+            </div>
-           </div>
-         </div>
- 
-         <div className="lg:col-span-2">
-           <div className="rounded border p-4">
-             <h2 className="text-lg font-semibold">{formModeLabel}</h2>
- 
-             <div className="mt-4 space-y-3">
-               <div>
-                 <label className="block text-sm font-medium text-gray-700">Title patterns</label>
-                 <textarea
-                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={titlePatternsInput}
-                   onChange={(e) => setTitlePatternsInput(e.target.value)}
-                   placeholder="Engineer\nProduct Manager"
-                   rows={4}
-                   disabled={busy}
-                 />
-                 <div className="mt-1 text-xs text-gray-500">
-                   One per line or comma separated. Will be auto-filled when parsing a URL.
-                 </div>
-               </div>
- 
-               <div>
-                 <label className="block text-sm font-medium text-gray-700">Industry tags</label>
+ }

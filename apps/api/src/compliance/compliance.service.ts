@@ -99,13 +99,27 @@ export class ComplianceService {
     const baselineText = this.mergeText(baselineSections);
     const generatedText = this.mergeText(generatedSections);
 
-    const baselineNumbers = this.extractNumbers(baselineText);
-    const generatedNumbers = this.extractNumbers(generatedText);
+    const stylizedCharacters = this.findStylizedPunctuation(generatedText);
+    const normalizedBaselineText = this.normalizePunctuation(baselineText);
+    const normalizedGeneratedText = this.normalizePunctuation(generatedText);
 
-    const baselineEntities = this.extractEntities(baselineText);
-    const generatedEntities = this.extractEntities(generatedText);
+    const baselineNumbers = this.extractNumbers(normalizedBaselineText);
+    const generatedNumbers = this.extractNumbers(normalizedGeneratedText);
+
+    const baselineEntities = this.extractEntities(normalizedBaselineText);
+    const generatedEntities = this.extractEntities(normalizedGeneratedText);
 
     const flags: ComplianceFlag[] = [];
+
+    if (stylizedCharacters.length > 0) {
+      flags.push({
+        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: `Stylized punctuation (${stylizedCharacters.join(
+          '',
+        )}) detected; use plain punctuation only.`,
+      });
+    }
 
     for (const num of generatedNumbers) {
       if (!baselineNumbers.has(num)) {
@@ -153,5 +167,20 @@ export class ComplianceService {
   private extractEntities(text: string) {
     const candidates = text.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
     return new Set(candidates.map((candidate) => candidate.trim()));
+  }
+
+  private normalizePunctuation(text: string) {
+    return text
+      .replace(/[\u2010-\u2015\u2212]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '•')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private findStylizedPunctuation(text: string) {
+    const matches =
+      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219]/g) ?? [];
+    return Array.from(new Set(matches));
   }
 }

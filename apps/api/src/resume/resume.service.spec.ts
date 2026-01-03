@@ -1,6 +1,7 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { ResumeService } from './resume.service';
 
 const mockBaseline = {
@@ -37,12 +38,17 @@ const buildRepository = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
-const buildService = (fitScore: number, writingFlags: any[] = []) => {
+const buildService = (
+  fitScore: number,
+  writingFlags: any[] = [],
+  baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
+  complianceOverride: Partial<ComplianceService> = {},
+) => {
   const baselineRepository = buildRepository({
     findOne: jest.fn().mockResolvedValue(mockBaseline),
   });
   const baselineVersionRepository = buildRepository({
-    findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    findOne: jest.fn().mockResolvedValue(baselineVersionOverride),
   });
   const baselineBlockPolicyRepository = buildRepository({
     find: jest.fn().mockResolvedValue([]),
@@ -63,6 +69,7 @@ const buildService = (fitScore: number, writingFlags: any[] = []) => {
       blocked: writingFlags.length > 0,
       audit: { id: 'audit-1' },
     }),
+    ...complianceOverride,
   } as unknown as ComplianceService;
 
   return {
@@ -123,5 +130,44 @@ describe('ResumeService', () => {
     );
     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
     expect(exportResult.filename).toBe('resume.docx');
+  });
+
+  it('blocks generation when baseline hash is missing', async () => {
+    const complianceService = {
+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      validateAndAudit: jest.fn().mockResolvedValue({
+        complianceFlags: [
+          {
+            code: ComplianceFlagCode.MISSING_BASELINE_HASH,
+            severity: ComplianceFlagSeverity.BLOCK,
+            message: 'Baseline version hash is required.',
+          },
+        ],
+        blocked: true,
+        audit: { id: 'audit-1' },
+      }),
+    } as unknown as ComplianceService;
+
+    const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
+
+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('audits resume export actions', async () => {
+    const { service, complianceService } = buildService(95);
+
+    await service.exportResume('user-1', request, 'pdf');
+
+    expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: 'user-1',
+        baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
+        job: expect.objectContaining({ id: 'job-1' }),
+        outputHash: expect.any(String),
+      }),
+    );
   });
 });

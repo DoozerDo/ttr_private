@@ -105,4 +105,18 @@ describe('ComplianceService', () => {
       }),
     ]);
   });
+
+  it('blocks stylized punctuation in generated output', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
+      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
+    });
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
+        severity: ComplianceFlagSeverity.BLOCK,
+      }),
+    ]);
+  });
 });
