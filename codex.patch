@@ -1,1333 +1,546 @@
-diff --git a/apps/api/src/cover-letters/closing-templates.ts b/apps/api/src/cover-letters/closing-templates.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..a5be802f1daee7de0b8a90480b435677f214de88
---- /dev/null
-+++ b/apps/api/src/cover-letters/closing-templates.ts
-@@ -0,0 +1,26 @@
-+import { CoverLetterClosingTemplate } from './generators/cover-letter-generator.interface';
-+
-+export const COVER_LETTER_CLOSING_TEMPLATES: CoverLetterClosingTemplate[] = [
-+  {
-+    key: 'steady',
-+    text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
-+  },
-+  {
-+    key: 'impact',
-+    text: 'I will stay focused on measurable impact while keeping every claim anchored to verified baseline material.',
-+  },
-+  {
-+    key: 'collaborative',
-+    text: 'I look forward to collaborating closely, checking expectations early, and sharing progress in transparent updates.',
-+  },
-+];
-+
-+export const DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY =
-+  COVER_LETTER_CLOSING_TEMPLATES[0].key;
-+
-+export function resolveClosingTemplate(key?: string | null) {
-+  return (
-+    COVER_LETTER_CLOSING_TEMPLATES.find((template) => template.key === key) ??
-+    COVER_LETTER_CLOSING_TEMPLATES[0]
-+  );
-+}
-diff --git a/apps/api/src/cover-letters/cover-letter.entity.ts b/apps/api/src/cover-letters/cover-letter.entity.ts
-index 7c5e7e05e19d2118e91e9b7ed7a7fe7ebe684785..8d136a519ba210f5302c10a5a0714ce106b4cae9 100644
---- a/apps/api/src/cover-letters/cover-letter.entity.ts
-+++ b/apps/api/src/cover-letters/cover-letter.entity.ts
-@@ -1,38 +1,41 @@
- import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.spec.ts b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+index 3e5a1ae223fd1d940a13ccab1c36ef9abee02e2d..c11464bab6a600fe8cb52e53d1d3fd97ac279eaa 100644
+--- a/apps/api/src/search-sets/search-sets-runner.service.spec.ts
++++ b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+@@ -102,95 +102,130 @@ describe('SearchSetsRunnerService', () => {
  
- @Entity({ name: 'cover_letters' })
- export class CoverLetter {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
+     const service = new SearchSetsRunnerService(
+       jobRepository as never,
+       searchSetsService,
+       fitAssessmentRepository as never,
+     );
  
-   @Index()
-   @Column({ type: 'uuid' })
-   userId!: string;
+     return { service, jobRepository, fitAssessmentRepository, searchSetsService, qb };
+   };
  
-   @Index()
-   @Column({ type: 'uuid' })
-   jobId!: string;
+   it('filters jobs by title pattern and attaches latest fit assessment', async () => {
+     const newerAssessment = createFitAssessment({
+       id: 'assessment-2',
+       createdAt: new Date('2024-01-02T00:00:00Z'),
+       overallScore: 95,
+       verdict: FitAssessmentVerdict.APPLY,
+     });
+     const olderAssessment = createFitAssessment({
+       id: 'assessment-1',
+       createdAt: new Date('2024-01-01T00:00:00Z'),
+       overallScore: 80,
+       verdict: FitAssessmentVerdict.CONSIDER,
+     });
  
-   @Index()
-   @Column({ type: 'uuid' })
-   baselineId!: string;
+     const { service, fitAssessmentRepository } = createService({
+-      jobs: [createJob()],
++      jobs: [createJob({ sourceUrl: 'https://example.com/apply' })],
+       assessments: [newerAssessment, olderAssessment],
+     });
  
-   @Column({ type: 'varchar', default: 'template' })
-   generatorType!: string;
+     const results = await service.runSearchSet('set-1', 'user-1', 5);
  
-   @Column({ type: 'varchar', default: 'v1' })
-   generatorVersion!: string;
+     expect(fitAssessmentRepository.createQueryBuilder).toHaveBeenCalled();
+     expect(results).toEqual([
+       {
+         jobId: 'job-1',
+         title: 'Senior Engineer',
+         company: 'Acme Corp',
+-        sourceUrl: null,
++        applyUrl: 'https://example.com/apply',
++        sourceUrl: 'https://example.com/apply',
+         fitScore: 95,
+         verdict: FitAssessmentVerdict.APPLY,
+       },
+     ]);
+   });
  
-+  @Column({ type: 'varchar', length: 50, default: 'steady' })
-+  closingTemplateKey!: string;
-+
-   @Column({ type: 'text' })
-   content!: string;
+   it('applies work mode and seniority filters', async () => {
+     const { service } = createService({
+       jobs: [
+         createJob({
+           id: 'job-remote',
+           title: 'Senior SRE',
+           rawDescription: 'Fully remote position',
+         }),
+         createJob({
+           id: 'job-onsite',
+           title: 'Junior Engineer',
+           rawDescription: 'Onsite role',
+         }),
+       ],
+       searchSet: {
+         ...baseSearchSet,
+         titlePatterns: ['Engineer'],
+         workMode: SearchSetWorkMode.REMOTE,
+         seniority: SearchSetSeniority.SENIOR,
+       },
+       assessments: [],
+     });
  
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   generationInputsHash!: string | null;
+     const results = await service.runSearchSet('set-1', 'user-1', 10);
  
-   @Index()
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
+     expect(results).toHaveLength(1);
+     expect(results[0].jobId).toBe('job-remote');
+   });
  
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/cover-letters/cover-letters.module.ts b/apps/api/src/cover-letters/cover-letters.module.ts
-index dd93bc9bfe827dfbe386a942e36ad0bccf067e13..299d889ca6a7678da256aace87113744e869bdfa 100644
---- a/apps/api/src/cover-letters/cover-letters.module.ts
-+++ b/apps/api/src/cover-letters/cover-letters.module.ts
-@@ -1,12 +1,13 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
-+import { ComplianceModule } from '../compliance/compliance.module';
- import { CoverLetter } from './cover-letter.entity';
- import { CoverLettersController } from './cover-letters.controller';
- import { CoverLettersService } from './cover-letters.service';
+   it('limits results to 10', async () => {
+     const jobs = Array.from({ length: 12 }).map((_, index) =>
+       createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
+     );
  
- @Module({
--  imports: [TypeOrmModule.forFeature([CoverLetter])],
-+  imports: [TypeOrmModule.forFeature([CoverLetter]), ComplianceModule],
-   controllers: [CoverLettersController],
-   providers: [CoverLettersService],
- })
- export class CoverLettersModule {}
-diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..5e0ff43cc7c09567e60e366d51415de2ad043182
---- /dev/null
-+++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-@@ -0,0 +1,137 @@
-+import { UnprocessableEntityException } from '@nestjs/common';
-+import { DataSource } from 'typeorm';
-+import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
-+import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
-+import { CoverLettersService } from './cover-letters.service';
-+
-+type MockRepository<T extends Record<string, any>> = {
-+  findOne: jest.Mock;
-+  find: jest.Mock;
-+  create: jest.Mock;
-+  save: jest.Mock;
-+  remove: jest.Mock;
-+};
-+
-+function buildRepository<T extends Record<string, any>>(initial?: T): MockRepository<T> {
-+  let saved = initial;
-+
-+  return {
-+    findOne: jest.fn(async () => saved ?? null),
-+    find: jest.fn(async () => []),
-+    create: jest.fn((payload: Partial<T>) => ({ ...payload } as T)),
-+    save: jest.fn(async (payload: T) => {
-+      saved = { ...payload, id: payload['id'] ?? 'saved-id', createdAt: new Date(), updatedAt: new Date() } as T;
-+      return saved as T;
-+    }),
-+    remove: jest.fn(async (payload: T) => payload),
-+  };
-+}
-+
-+describe('CoverLettersService', () => {
-+  const coverLetterRepository = buildRepository<any>();
-+  const baselineRepository = buildRepository<any>({
-+    id: 'baseline-1',
-+    userId: 'user-1',
-+    sections: [
-+      {
-+        id: 'section-1',
-+        title: 'Experience',
-+        content: 'Delivered 15% efficiency improvement with verified metrics.',
-+        includePolicy: BaselineIncludePolicy.ALWAYS,
-+        order: 0,
-+        sectionType: BaselineSectionType.EXPERIENCE,
-+      },
-+    ],
-+  });
-+  const baselineVersionRepository = buildRepository<any>({
-+    id: 'baseline-version-1',
-+    baselineId: 'baseline-1',
-+    hash: 'baseline-hash',
-+  });
-+  const baselineBlockPolicyRepository = buildRepository<any>();
-+  const jobRepository = buildRepository<any>({
-+    id: 'job-1',
-+    userId: 'user-1',
-+    title: 'Program Manager',
-+    company: 'Acme Corp',
-+    normalizedResponsibilities: ['Improve processes by 10%.'],
-+    normalizedRequirements: ['Deliver measurable impact.'],
-+  });
-+
-+  const complianceService = {
-+    enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-+    validateAndAudit: jest.fn(async (ctx: any) => ({
-+      complianceFlags: ctx.extraFlags ?? [],
-+      blocked: (ctx.extraFlags ?? []).some(
-+        (flag: { severity: ComplianceFlagSeverity }) => flag.severity === ComplianceFlagSeverity.BLOCK,
-+      ),
-+      audit: { id: 'audit-1' },
-+    })),
-+  };
-+
-+  const dataSource = {
-+    getRepository: jest.fn((entity) => {
-+      switch ((entity as any)?.name) {
-+        case 'CoverLetter':
-+          return coverLetterRepository;
-+        case 'Baseline':
-+          return baselineRepository;
-+        case 'BaselineVersion':
-+          return baselineVersionRepository;
-+        case 'BaselineBlockPolicy':
-+          return baselineBlockPolicyRepository;
-+        case 'Job':
-+          return jobRepository;
-+        default:
-+          throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
-+      }
-+    }),
-+  } as unknown as DataSource;
-+
-+  beforeEach(() => {
-+    jest.clearAllMocks();
-+  });
-+
-+  it('persists a chosen closing template and reuses it for the next generation', async () => {
-+    const service = new CoverLettersService(dataSource, complianceService as any);
-+
-+    await service.generateCoverLetter('user-1', {
-+      baselineId: 'baseline-1',
-+      jobId: 'job-1',
-+      closingTemplateKey: 'collaborative',
-+    });
-+
-+    expect(coverLetterRepository.save).toHaveBeenCalledWith(
-+      expect.objectContaining({ closingTemplateKey: 'collaborative' }),
+     const { service } = createService({ jobs, assessments: [] });
+ 
+     const results = await service.runSearchSet('set-1', 'user-1', 20);
+ 
+     expect(results).toHaveLength(10);
+   });
+ 
++  it('caps results at 10 even when limit below 1 or above 10', async () => {
++    const jobs = Array.from({ length: 20 }).map((_, index) =>
++      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
 +    );
 +
-+    // Simulate subsequent call without providing a template key.
-+    const second = await service.generateCoverLetter('user-1', {
-+      baselineId: 'baseline-1',
-+      jobId: 'job-1',
++    const { service } = createService({ jobs, assessments: [] });
++
++    const highLimit = await service.runSearchSet('set-1', 'user-1', 50);
++    const lowLimit = await service.runSearchSet('set-1', 'user-1', 0);
++
++    expect(highLimit).toHaveLength(10);
++    expect(lowLimit).toHaveLength(1);
++  });
++
++  it('derives applyUrl from sourceUrl and falls back to null when invalid', async () => {
++    const { service } = createService({
++      jobs: [
++        createJob({ id: 'job-valid', sourceUrl: 'https://example.com/apply' }),
++        createJob({ id: 'job-invalid', sourceUrl: 'notaurl' }),
++        createJob({ id: 'job-missing', sourceUrl: null }),
++      ],
++      assessments: [],
 +    });
 +
-+    expect(second.closingTemplateKey).toBe('collaborative');
++    const results = await service.runSearchSet('set-1', 'user-1', 5);
++
++    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
++
++    expect(byId['job-valid'].applyUrl).toBe('https://example.com/apply');
++    expect(byId['job-invalid'].applyUrl).toBeNull();
++    expect(byId['job-missing'].applyUrl).toBeNull();
++    expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
 +  });
 +
-+  it('blocks invented metrics through compliance checks', async () => {
-+    complianceService.enforceResumeWritingRules.mockReturnValueOnce([
-+      {
-+        code: ComplianceFlagCode.INVENTED_METRIC,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Metric not found in baseline.',
-+      },
-+    ]);
-+
-+    const service = new CoverLettersService(dataSource, complianceService as any);
-+
-+    await expect(
-+      service.generateCoverLetter('user-1', {
-+        baselineId: 'baseline-1',
-+        jobId: 'job-1',
-+      }),
-+    ).rejects.toThrow(UnprocessableEntityException);
-+
-+    expect(complianceService.validateAndAudit).toHaveBeenCalled();
-+  });
-+});
-diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
-index 4d8a60edc333b325560404ac19d6f9e71a618a99..c4b23c6f25c6f817e41c4af450f55c6b2162f836 100644
---- a/apps/api/src/cover-letters/cover-letters.service.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.ts
-@@ -1,60 +1,71 @@
- import {
-   BadRequestException,
-   Injectable,
-   NotFoundException,
-+  UnprocessableEntityException,
- } from '@nestjs/common';
- import { InjectDataSource } from '@nestjs/typeorm';
- import { createHash } from 'node:crypto';
- import { DataSource, Repository } from 'typeorm';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
-   BaselineSectionType,
- } from '../baseline/baseline-section.entity';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceService } from '../compliance/compliance.service';
-+import { ComplianceAction } from '../compliance/compliance.types';
+   it('returns empty results when search set is inactive', async () => {
+     const { service } = createService({
+       searchSet: { ...baseSearchSet, isActive: false },
+     });
+ 
+     const results = await service.runSearchSet('set-1', 'user-1');
+ 
+     expect(results).toEqual([]);
+   });
+ });
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.ts b/apps/api/src/search-sets/search-sets-runner.service.ts
+index 10b451caf50a2b1266394adc9710a96acd36c740..7c4af6b632b8bdead2510eade4e9af79d6c06768 100644
+--- a/apps/api/src/search-sets/search-sets-runner.service.ts
++++ b/apps/api/src/search-sets/search-sets-runner.service.ts
+@@ -1,41 +1,42 @@
+ import { Injectable } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { FitAssessment } from '../analysis/fit-assessment.entity';
  import { Job } from '../jobs/job.entity';
-+import {
-+  COVER_LETTER_CLOSING_TEMPLATES,
-+  DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY,
-+  resolveClosingTemplate,
-+} from './closing-templates';
- import { CoverLetter } from './cover-letter.entity';
- import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
  import {
-   AllowedBaselineBlock,
-   CoverLetterGenerator,
- } from './generators/cover-letter-generator.interface';
- import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
+   SearchSet,
+   SearchSetSeniority,
+   SearchSetWorkMode,
+ } from './search-set.entity';
+ import { SearchSetsService } from './search-sets.service';
+ 
+ type SearchSetRunResult = {
+   jobId: string;
+   title: string | null;
+   company: string | null;
++  applyUrl: string | null;
+   sourceUrl: string | null;
+   fitScore: number | null;
+   verdict: FitAssessment['verdict'] | null;
+ };
  
  @Injectable()
- export class CoverLettersService {
-   private readonly coverLetterRepository: Repository<CoverLetter>;
-   private readonly baselineRepository: Repository<Baseline>;
-   private readonly baselineVersionRepository: Repository<BaselineVersion>;
-   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
-   private readonly jobRepository: Repository<Job>;
-   private readonly generator: CoverLetterGenerator;
+ export class SearchSetsRunnerService {
+   constructor(
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+     private readonly searchSetsService: SearchSetsService,
+     @InjectRepository(FitAssessment)
+     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+   ) {}
  
--  constructor(@InjectDataSource() private readonly dataSource: DataSource) {
-+  constructor(
-+    @InjectDataSource() private readonly dataSource: DataSource,
-+    private readonly complianceService: ComplianceService,
-+  ) {
-     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
-     this.baselineRepository = this.dataSource.getRepository(Baseline);
-     this.baselineVersionRepository =
-       this.dataSource.getRepository(BaselineVersion);
-     this.baselineBlockPolicyRepository = this.dataSource.getRepository(
-       BaselineBlockPolicy,
-     );
-     this.jobRepository = this.dataSource.getRepository(Job);
-     this.generator = new TemplateCoverLetterGenerator();
-   }
- 
-   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: input.baselineId, userId },
-       relations: ['sections'],
-       order: { sections: { order: 'ASC' } },
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
-@@ -63,87 +74,131 @@ export class CoverLettersService {
-       where: { id: input.jobId, userId },
-     });
- 
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     const baselineVersion = await this.baselineVersionRepository.findOne({
-       where: { baselineId: baseline.id },
-       order: { versionNumber: 'DESC', createdAt: 'DESC' },
-     });
- 
-     const policies = baselineVersion
-       ? await this.baselineBlockPolicyRepository.find({
-           where: { baselineVersionId: baselineVersion.id },
-           relations: ['baselineSection'],
-           order: { order: 'ASC' },
-         })
-       : [];
- 
-     const sections = this.applyPoliciesToSections(
-       baseline.sections ?? [],
-       policies,
-     );
- 
-+    const closingTemplateKey = await this.resolveClosingTemplateKey(
-+      userId,
-+      input.closingTemplateKey,
-+    );
-+    const closingTemplate = resolveClosingTemplate(closingTemplateKey);
-+
-     const allowedSections = sections.filter(
-       (section) =>
-         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
-         BaselineIncludePolicy.NEVER,
-     );
- 
-     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
-     const jobContext = {
-       id: job.id,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: this.sanitizeList(job.normalizedResponsibilities),
-       requirements: this.sanitizeList(job.normalizedRequirements),
-     };
- 
-     const generationInputsHash = this.computeGenerationInputsHash(
-       baseline.id,
-       job.id,
-       allowedBlocks,
-       jobContext,
-+      closingTemplateKey,
-     );
- 
-     const generation = this.generator.generate({
-       baselineId: baseline.id,
-       jobId: job.id,
-       allowedBaselineBlocks: allowedBlocks,
-       job: jobContext,
-+      closingTemplate,
-       maxWords: input.maxWords,
-       tone: input.tone,
-     });
- 
-+    const complianceBaselineSections = this.buildComplianceBaselineSections(
-+      allowedBlocks,
-+      jobContext,
-+    );
-+
-+    const writingFlags = this.complianceService.enforceResumeWritingRules({
-+      baselineSections: complianceBaselineSections,
-+      generatedSections: [
-+        { title: 'Cover Letter', content: generation.content },
-+      ],
-+    });
-+
-+    const { complianceFlags, blocked } =
-+      await this.complianceService.validateAndAudit({
-+        action: ComplianceAction.COVER_LETTER_GENERATION,
-+        actorId: userId,
-+        baselineVersion,
-+        job,
-+        outputHash: createHash('sha256')
-+          .update(generation.content)
-+          .digest('hex'),
-+        extraFlags: writingFlags,
-+        scopeInflationDetected: false,
-+      });
-+
-+    if (blocked) {
-+      throw new UnprocessableEntityException({
-+        error: {
-+          code: 'unprocessable',
-+          message: 'Compliance validation failed.',
-+          details: { compliance_flags: complianceFlags },
-+        },
-+      });
-+    }
-+
-     const coverLetter = this.coverLetterRepository.create({
+   async runSearchSet(searchSetId: string, userId: string, limit = 10) {
+     const searchSet = await this.searchSetsService.getSearchSetForUser(
+       searchSetId,
        userId,
-       baselineId: baseline.id,
-       jobId: job.id,
-       generatorType: 'template',
-       generatorVersion: 'v1',
-+      closingTemplateKey,
-       content: generation.content,
-       generationInputsHash,
-     });
+     );
  
-     return this.coverLetterRepository.save(coverLetter);
-   }
+     if (!searchSet.isActive) {
+       return [];
+     }
  
-   async listCoverLetters(userId: string) {
-     return this.coverLetterRepository.find({
+@@ -43,57 +44,74 @@ export class SearchSetsRunnerService {
        where: { userId },
        order: { createdAt: 'DESC' },
      });
-   }
  
-   async getCoverLetter(userId: string, id: string) {
-     const coverLetter = await this.coverLetterRepository.findOne({
-       where: { id, userId },
+     const filteredJobs = jobs.filter((job) =>
+       this.matchesSearchSet(job, searchSet),
+     );
+     const cappedLimit = Math.min(Math.max(limit ?? 10, 1), 10);
+     const selectedJobs = filteredJobs.slice(0, cappedLimit);
+ 
+     if (selectedJobs.length === 0) {
+       return [];
+     }
+ 
+     const latestAssessments = await this.loadLatestAssessments(
+       selectedJobs.map((job) => job.id),
+       userId,
+     );
+ 
+     return selectedJobs.map((job) => {
+       const assessment = latestAssessments.get(job.id);
+       return {
+         jobId: job.id,
+         title: job.title,
+         company: job.company,
++        applyUrl: this.deriveApplyUrl(job),
+         sourceUrl: job.sourceUrl,
+         fitScore: assessment?.overallScore ?? null,
+         verdict: assessment?.verdict ?? null,
+       } satisfies SearchSetRunResult;
      });
+   }
  
-     if (!coverLetter) {
-       throw new NotFoundException('Cover letter not found');
++  private deriveApplyUrl(job: Job) {
++    if (!job.sourceUrl) return null;
++
++    try {
++      const parsed = new URL(job.sourceUrl);
++      const protocol = parsed.protocol.toLowerCase();
++      if (protocol === 'http:' || protocol === 'https:') {
++        return parsed.toString();
++      }
++    } catch {
++      // Ignore invalid URLs and fall back to null.
++    }
++
++    return null;
++  }
++
+   private matchesSearchSet(job: Job, searchSet: SearchSet) {
+     if (!this.matchesTitlePatterns(job.title, searchSet.titlePatterns)) {
+       return false;
      }
  
-     return coverLetter;
-   }
-@@ -211,55 +266,109 @@ export class CoverLettersService {
-       .replace(/\r\n/g, '\n')
-       .replace(/\r/g, '\n')
-       .replace(/\t/g, ' ')
-       .replace(/\u00a0/g, ' ')
-       .replace(/\s+/g, ' ')
-       .trim();
-   }
+     if (!this.matchesSeniority(job, searchSet.seniority)) {
+       return false;
+     }
  
-   private sanitizeList(values?: string[] | null) {
-     return (values ?? [])
-       .map((value) => this.cleanText(value))
-       .filter((value) => value.length > 0);
+     if (!this.matchesWorkMode(job, searchSet.workMode)) {
+       return false;
+     }
+ 
+     if (!this.matchesIndustry(job, searchSet.industry)) {
+       return false;
+     }
+ 
+     return true;
    }
  
-   private computeGenerationInputsHash(
-     baselineId: string,
-     jobId: string,
-     allowedBlocks: AllowedBaselineBlock[],
-     job: {
-       id: string;
-       title: string | null;
-       company: string | null;
-       responsibilities: string[];
-       requirements: string[];
-     },
-+    closingTemplateKey: string,
-   ) {
-     const normalizedBaseline = allowedBlocks
-       .map((block, index) => ({
-         id: block.id,
-         title: block.title ?? null,
-         order: block.order ?? index,
-         includePolicy: block.includePolicy,
-         sectionType: block.sectionType,
-         content: this.cleanText(block.content),
-       }))
-       .sort((a, b) => a.order - b.order);
+   private matchesTitlePatterns(title: string | null, patterns: string[]) {
+     if (!patterns || patterns.length === 0) {
+       return true;
+     }
  
-     const normalizedJob = {
-       id: job.id,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: this.sanitizeList(job.responsibilities),
-       requirements: this.sanitizeList(job.requirements),
-     };
- 
-     const normalizedString = [
-       `baselineId:${baselineId}`,
-       `jobId:${jobId}`,
-       `baseline:${JSON.stringify(normalizedBaseline)}`,
-       `job:${JSON.stringify(normalizedJob)}`,
-+      `closing:${closingTemplateKey}`,
-     ].join('|');
- 
-     return createHash('sha256').update(normalizedString).digest('hex');
-   }
-+
-+  private async resolveClosingTemplateKey(
-+    userId: string,
-+    requested?: string | null,
-+  ) {
-+    const validRequested = this.normalizeClosingTemplateKey(requested);
-+    if (validRequested) {
-+      return validRequested;
-+    }
-+
-+    const lastCoverLetter = await this.coverLetterRepository.findOne({
-+      where: { userId },
-+      order: { createdAt: 'DESC' },
-+    });
-+
-+    const lastKey = this.normalizeClosingTemplateKey(
-+      lastCoverLetter?.closingTemplateKey,
-+    );
-+
-+    return lastKey ?? DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY;
-+  }
-+
-+  private normalizeClosingTemplateKey(key?: string | null) {
-+    if (!key) return null;
-+    return COVER_LETTER_CLOSING_TEMPLATES.some((template) => template.key === key)
-+      ? key
-+      : null;
-+  }
-+
-+  private buildComplianceBaselineSections(
-+    allowedBlocks: AllowedBaselineBlock[],
-+    job: {
-+      title: string | null;
-+      company: string | null;
-+    },
-+  ) {
-+    const baselineSections = allowedBlocks.map((block) => ({
-+      title: this.cleanText(block.title),
-+      content: this.cleanText(block.content),
-+    }));
-+
-+    const jobContext = [job.title, job.company]
-+      .map((value) => this.cleanText(value))
-+      .filter(Boolean)
-+      .join(' ');
-+
-+    if (jobContext.length > 0) {
-+      baselineSections.push({ title: 'Job Context', content: jobContext });
-+    }
-+
-+    return baselineSections;
-+  }
+diff --git a/apps/web/app/search-sets/page.tsx b/apps/web/app/search-sets/page.tsx
+index f9d4abe2f28112c665733f740e6e12ade7bbafc0..036591976f8aec1a3b3c0f3b3685f92ef7754fe3 100644
+--- a/apps/web/app/search-sets/page.tsx
++++ b/apps/web/app/search-sets/page.tsx
+@@ -19,50 +19,60 @@ enum SearchSetWorkMode {
+   ANY = 'ANY',
  }
-diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-index 33b1655c56c546567fc4c765201b959a67987cd5..aa0d315d283f934e2738049eebeafedc2f557e6f 100644
---- a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-+++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-@@ -1,9 +1,11 @@
- export class GenerateCoverLetterDto {
-   baselineId!: string;
  
-   jobId!: string;
- 
-+  closingTemplateKey?: string;
-+
-   maxWords?: number;
- 
-   tone?: string;
- }
-diff --git a/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
-index 972c340ca3fb708211ee067cd002cafdff2311fd..967e8c5a131d4510452d460bdf5eff23815255dd 100644
---- a/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
-+++ b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
-@@ -1,39 +1,45 @@
- import {
-   BaselineIncludePolicy,
-   BaselineSectionType,
- } from '../../baseline/baseline-section.entity';
- 
- export type AllowedBaselineBlock = {
+ type SearchSet = {
    id: string;
-   title: string | null;
-   content: string;
-   includePolicy: BaselineIncludePolicy;
-   order: number;
-   sectionType: BaselineSectionType;
+   titlePatterns: string[];
+   seniority: SearchSetSeniority;
+   industry: string[];
+   workMode: SearchSetWorkMode;
+   sourceUrl: string | null;
+   urlBacked?: boolean;
+   parseWarning?: string | null;
+   isActive: boolean;
+   createdAt?: string;
+   updatedAt?: string;
  };
  
- export type CoverLetterJobContext = {
-   id: string;
-   title: string | null;
-   company: string | null;
-   responsibilities: string[];
-   requirements: string[];
+ type ParsedUrlPreview = {
+   sourceUrl: string;
+   titlePatterns: string[];
+   seniority?: SearchSetSeniority;
+   workMode?: SearchSetWorkMode;
+   parseWarning: string | null;
  };
  
-+export type CoverLetterClosingTemplate = {
-+  key: string;
-+  text: string;
++type SearchSetRunResult = {
++  jobId: string;
++  title: string | null;
++  company: string | null;
++  applyUrl: string | null;
++  sourceUrl: string | null;
++  fitScore: number | null;
++  verdict: string | null;
 +};
 +
- export type CoverLetterGenerationInput = {
-   baselineId: string;
-   jobId: string;
-   allowedBaselineBlocks: AllowedBaselineBlock[];
-   job: CoverLetterJobContext;
-+  closingTemplate: CoverLetterClosingTemplate;
-   maxWords?: number;
-   tone?: string;
- };
- 
- export type CoverLetterGenerationResult = {
-   content: string;
-   wordCount: number;
- };
- 
- export interface CoverLetterGenerator {
-   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult;
- }
-diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-index 8b7d398fe43a4ca77b35b725899e1828a719bea6..d47836cced7b237826bc67a50a83b955ccae09d4 100644
---- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-+++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-@@ -26,72 +26,81 @@ describe('TemplateCoverLetterGenerator', () => {
-         title: 'Director, Customer Support Operations',
-         company: 'Acme Corp',
-         responsibilities: [
-           'Build and scale support programs and operating rhythms.',
-           'Partner with Product and Engineering to reduce defects.',
-         ],
-         requirements: [
-           'Experience leading cross functional programs.',
-           'Strong metrics and continuous improvement mindset.',
-         ],
-       },
-       allowedBaselineBlocks: [
-         {
-           title: 'Summary',
-           content:
-             'Customer operations leader with experience building scalable support programs. Led cross functional initiatives to improve customer experience and operational outcomes.',
-           order: 0,
-         },
-         {
-           title: 'Experience',
-           content:
-             'Implemented dashboards and operating cadences to drive visibility and accountability. Focused on measurable outcomes and clear stakeholder communication.',
-           order: 1,
-         },
-       ],
-+      closingTemplate: {
-+        key: 'steady',
-+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
-+      },
-       tone: 'neutral',
-       maxWords: 350,
-     };
- 
-     const output1 = generator.generate(input as any);
-     const output2 = generator.generate(input as any);
- 
-     expect(output1).toEqual(output2);
-     expect(typeof output1.content).toBe('string');
-     expect(output1.content.length).toBeGreaterThan(0);
- 
-+    expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
-     expect(countParagraphs(output1.content)).toBe(4);
--    expect(countWords(output1.content)).toBeLessThanOrEqual(400);
-+    expect(countWords(output1.content)).toBeLessThanOrEqual(350);
-   });
- 
-   it('does not include disallowed baseline content when it is not provided', () => {
-     const generator = new TemplateCoverLetterGenerator();
- 
-     const disallowed = 'DO_NOT_INCLUDE_THIS';
- 
-     const input = {
-       job: {
-         title: 'Manager, Support Programs',
-         company: 'Example Inc',
-         responsibilities: ['Own support mechanisms and continuous improvement.'],
-         requirements: ['Program management and stakeholder alignment.'],
-       },
-       // Intentionally do NOT include the sentinel in allowedBaselineBlocks.
-       allowedBaselineBlocks: [
-         {
-           title: 'Allowed',
-           content:
-             'Built support operating rhythms and improved internal handoffs. Documented outcomes in plain language and kept commitments modest and clear.',
-           order: 0,
-         },
-       ],
-+      closingTemplate: {
-+        key: 'steady',
-+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
-+      },
-       tone: 'neutral',
-       maxWords: 300,
-     };
- 
-     const output = generator.generate(input as any);
- 
-     expect(output.content).not.toContain(disallowed);
-     expect(countParagraphs(output.content)).toBe(4);
--    expect(countWords(output.content)).toBeLessThanOrEqual(400);
-+    expect(countWords(output.content)).toBeLessThanOrEqual(350);
-   });
- });
-diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-index 8314e1fc8670adf91e006c8794633bc32323accc..b5984237bf5fe91c1f4287f138596d1a31872560 100644
---- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-+++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-@@ -1,85 +1,99 @@
- import {
-   AllowedBaselineBlock,
-   CoverLetterGenerationInput,
-   CoverLetterGenerationResult,
-   CoverLetterGenerator,
-   CoverLetterJobContext,
- } from './cover-letter-generator.interface';
- 
- type NormalizedJob = CoverLetterJobContext & {
-   title: string | null;
-   company: string | null;
-   responsibilities: string[];
-   requirements: string[];
- };
- 
- type NormalizedBlock = AllowedBaselineBlock & {
-   content: string;
-   title: string | null;
- };
- 
- export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
--  private readonly hardCap = 400;
-+  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
-+  private readonly hardCap = 350;
- 
-   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
-     const targetWords = this.resolveTargetWords(input.maxWords);
-     const job = this.normalizeJob(input.job);
-     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
-     const baselineStatements = this.extractBaselineStatements(baselineBlocks);
-     const focusAreas = this.buildFocusAreas(job);
-     const tone = input.tone?.trim() || null;
- 
-     const paragraphs = [
-       this.composeIntro(job, tone),
-       this.composeStrengths(baselineStatements, tone),
-       this.composeExecution(job, focusAreas, baselineStatements),
--      this.composeClosing(job, tone),
-+      this.composeClosing(job, tone, input.closingTemplate.text),
-     ].filter((paragraph) => paragraph.length > 0);
- 
-     let content = paragraphs
-       .map((paragraph) => paragraph.trim())
-       .filter(Boolean)
-       .join('\n\n')
-       .trim();
- 
-+    content = this.ensureGreeting(content);
-+
-     let wordCount = this.countWords(content);
- 
-     if (wordCount > this.hardCap) {
-       content = this.trimToWordLimit(content, this.hardCap);
-       wordCount = this.countWords(content);
-     } else if (wordCount > targetWords) {
-       content = this.trimToWordLimit(content, targetWords);
-       wordCount = this.countWords(content);
-     }
- 
-     return {
-       content,
-       wordCount,
-     };
+ function safeString(v: unknown): string {
+   if (typeof v === 'string') return v;
+   if (typeof v === 'number') return String(v);
+   if (typeof v === 'boolean') return v ? 'true' : 'false';
+   if (v === null || v === undefined) return '';
+   try {
+     return JSON.stringify(v);
+   } catch {
+     return String(v);
    }
- 
-+  private ensureGreeting(body: string) {
-+    const greeting = 'Dear Hiring Team,';
-+    const normalized = body.trimStart();
-+
-+    if (normalized.startsWith(greeting)) {
-+      return normalized;
-+    }
-+
-+    return `${greeting} ${normalized}`.trim();
-+  }
-+
-   private resolveTargetWords(maxWords?: number | null) {
-     if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
-       return 320;
-     }
- 
-     const clamped = Math.min(Math.max(Math.floor(maxWords), 250), this.hardCap);
-     return clamped;
-   }
- 
-   private normalizeJob(job: CoverLetterJobContext): NormalizedJob {
-     const sanitizeList = (items?: string[]) =>
-       (items ?? [])
-         .map((item) => this.cleanText(item))
-         .filter((item): item is string => Boolean(item));
- 
-     return {
-       ...job,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: sanitizeList(job.responsibilities),
-       requirements: sanitizeList(job.requirements),
-     };
-   }
- 
-   private normalizeBlocks(blocks: AllowedBaselineBlock[]): NormalizedBlock[] {
-@@ -154,58 +168,58 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
- 
-   private composeExecution(
-     job: NormalizedJob,
-     focusAreas: string[],
-     statements: string[],
-   ) {
-     const priorities =
-       focusAreas.length > 0
-         ? this.formatList(focusAreas)
-         : 'the listed responsibilities and requirements';
-     const references = statements.slice(3, 7);
-     const referenceLine = references.length
-       ? ` When expectations align, I will reference passages such as ${this.formatList(references)} to show direct support.`
-       : ' When expectations align, I will point back to the specific baseline passages that cover the work.';
- 
-     const neutralGuardrail =
-       ' If any responsibility sits outside the documented baseline text, I will call out the gap immediately, ask for context, and proceed without implying experience I cannot prove.';
- 
-     const collaborationLine = job.company
-       ? ` At ${job.company}, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.`
-       : ' I will confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.';
- 
-     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
-   }
- 
--  private composeClosing(job: NormalizedJob, tone: string | null) {
-+  private composeClosing(job: NormalizedJob, tone: string | null, closingTemplate: string) {
-     const roleDescriptor = this.describeRole(job);
-     const toneLine = tone ? ` I will continue to communicate in the same ${tone} style.` : '';
-     const companyLine = job.company
-       ? ` I appreciate your consideration and am ready to share any additional approved excerpts that help ${job.company} make a confident decision.`
-       : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
- 
--    return `Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine} Please let me know a good time to connect, and I will come prepared with the most relevant baseline highlights.`;
-+    return `${closingTemplate} Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine}`.trim();
-   }
- 
-   private describeRole(job: NormalizedJob) {
-     if (job.title && job.company) {
-       return `the ${job.title} role at ${job.company}`;
-     }
- 
-     if (job.title) {
-       return `the ${job.title} role`;
-     }
- 
-     if (job.company) {
-       return `an opening at ${job.company}`;
-     }
- 
-     return 'the role you described';
-   }
- 
-   private formatList(items: string[]) {
-     const cleaned = items.map((item) => this.cleanText(item)).filter(Boolean);
- 
-     if (cleaned.length === 0) {
-       return '';
-     }
- 
-diff --git a/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts b/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..edd9ba77d718513fb7d4a664782c236b84241b60
---- /dev/null
-+++ b/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts
-@@ -0,0 +1,17 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class CoverLetterClosingTemplate1810000000001 implements MigrationInterface {
-+  name = 'CoverLetterClosingTemplate1810000000001';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "cover_letters" ADD "closingTemplateKey" character varying(50) NOT NULL DEFAULT 'steady'`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "cover_letters" DROP COLUMN "closingTemplateKey"`,
-+    );
-+  }
-+}
-diff --git a/apps/web/app/api/cover-letters/route.ts b/apps/web/app/api/cover-letters/route.ts
-index 348ec8f6e08aca61d18c963ad05c1ac33793cfca..df4cf37893de19a43578916728079b24d9e58270 100644
---- a/apps/web/app/api/cover-letters/route.ts
-+++ b/apps/web/app/api/cover-letters/route.ts
-@@ -6,36 +6,36 @@ export const runtime = "nodejs";
- export async function GET(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const auth = requireAuthToken(req);
- 
-   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-   if (!auth.token) return auth.error;
- 
-   const response = await fetch(`${baseUrl}/cover-letters`, {
-     method: "GET",
-     cache: "no-store",
-     headers: { Authorization: `Bearer ${auth.token}` },
-   });
- 
-   return relayApiResponse(response);
  }
  
- export async function POST(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const auth = requireAuthToken(req);
- 
-   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-   if (!auth.token) return auth.error;
- 
-   const body = await req.json();
- 
--  const response = await fetch(`${baseUrl}/cover-letters`, {
-+  const response = await fetch(`${baseUrl}/cover-letters/generate`, {
-     method: "POST",
-     headers: {
-       Authorization: `Bearer ${auth.token}`,
-       "Content-Type": "application/json",
-     },
-     body: JSON.stringify(body),
-   });
- 
-   return relayApiResponse(response);
- }
-diff --git a/apps/web/app/cover-letters/page.tsx b/apps/web/app/cover-letters/page.tsx
-index ddc9b8ac8c75a80f435064ba240409f78fbfc13c..fbd201d47a45a30bd30353003d62b2f0c54c0662 100644
---- a/apps/web/app/cover-letters/page.tsx
-+++ b/apps/web/app/cover-letters/page.tsx
-@@ -1,89 +1,93 @@
- // apps/web/app/cover-letters/page.tsx
- "use client";
- 
- import Link from "next/link";
- import { useEffect, useMemo, useState } from "react";
- 
- import type { BaselineDto } from "../../lib/baselines";
- import type { JobDto } from "../../lib/jobs";
-+import { coverLetterClosingTemplates, defaultClosingTemplateKey } from "../../lib/coverLetters";
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
- 
- type CoverLetterDto = {
-   id: string;
-   baselineId: string;
-   jobId: string;
-   content: string;
-   createdAt: string;
-   generatorType?: string;
-   generatorVersion?: string;
-+  closingTemplateKey?: string;
- };
- 
- type LoadState = "idle" | "loading" | "error";
- 
- type SelectOption = { value: string; label: string };
- 
- function formatJob(job: JobDto | undefined) {
-   if (!job) return "Untitled job";
-   if (job.title && job.company) return `${job.title} @ ${job.company}`;
-   if (job.title) return job.title;
-   if (job.company) return job.company;
-   return "Untitled job";
+ function parseList(input: string): string[] {
+   const s = (input || '').trim();
+   if (!s) return [];
+   return s
+     .split(/[\n,]/)
+     .map((x) => x.trim())
+     .filter(Boolean)
+     .filter((value, index, arr) => arr.indexOf(value) === index);
  }
  
- function formatDate(value: string) {
-   const date = new Date(value);
-   if (Number.isNaN(date.getTime())) return "Unknown date";
-   return date.toLocaleString(undefined, {
-     month: "short",
-     day: "numeric",
-     hour: "numeric",
-     minute: "2-digit",
-   });
- }
- 
- export default function CoverLettersPage() {
-   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
-   const [baselineId, setBaselineId] = useState("");
-   const [baselineState, setBaselineState] = useState<LoadState>("loading");
-   const [baselineError, setBaselineError] = useState<string | null>(null);
- 
-   const [jobs, setJobs] = useState<JobDto[]>([]);
-   const [jobId, setJobId] = useState("");
-   const [jobState, setJobState] = useState<LoadState>("loading");
-   const [jobError, setJobError] = useState<string | null>(null);
- 
-   const [history, setHistory] = useState<CoverLetterDto[]>([]);
-   const [historyState, setHistoryState] = useState<LoadState>("loading");
-   const [historyError, setHistoryError] = useState<string | null>(null);
- 
-   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
- 
-   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-   const [isGenerating, setIsGenerating] = useState(false);
-+  const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
-+  const [complianceFlags, setComplianceFlags] = useState<string[]>([]);
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const loadBaselines = async () => {
-       setBaselineState("loading");
-       setBaselineError(null);
- 
-       try {
-         const response = await fetch("/api/baselines", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load baselines.");
-         }
- 
-         const data = (await response.json()) as BaselineDto[];
-         if (cancelled) return;
- 
-         setBaselines(data);
-         setBaselineId((current) => {
-           if (current && data.some((baseline) => baseline.id === current)) return current;
-           return data[0]?.id ?? "";
-         });
-         setBaselineState("idle");
-       } catch (error) {
-@@ -138,50 +142,52 @@ export default function CoverLettersPage() {
-     loadJobs();
-     return () => {
-       cancelled = true;
-     };
-   }, []);
- 
-   useEffect(() => {
-     let cancelled = false;
- 
-     const loadHistory = async () => {
-       setHistoryState("loading");
-       setHistoryError(null);
- 
-       try {
-         const response = await fetch("/api/cover-letters", { cache: "no-store" });
-         if (!response.ok) {
-           const message = await response.text();
-           throw new Error(message || "Unable to load history.");
-         }
- 
-         const data = (await response.json()) as CoverLetterDto[];
-         if (cancelled) return;
- 
-         setHistory(data);
-         setHistoryState("idle");
-+        const latestTemplate = data[0]?.closingTemplateKey;
-+        setClosingTemplateKey((current) => current || latestTemplate || defaultClosingTemplateKey);
-       } catch (error) {
-         if (cancelled) return;
-         const message = error instanceof Error ? error.message : "Unable to load history.";
-         setHistory([]);
-         setHistoryState("error");
-         setHistoryError(message);
-         setStatusMessage(null);
-         setErrorMessage(message);
-       }
-     };
- 
-     loadHistory();
-     return () => {
-       cancelled = true;
-     };
-   }, []);
- 
-   const sortedHistory = useMemo(
-     () => [...history].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-     [history],
-   );
- 
-   useEffect(() => {
-     if (sortedHistory.length === 0) {
-       setSelectedLetterId(null);
-@@ -195,76 +201,107 @@ export default function CoverLettersPage() {
-   }, [sortedHistory]);
- 
-   const selectedLetter = useMemo(
-     () => sortedHistory.find((item) => item.id === selectedLetterId) ?? null,
-     [sortedHistory, selectedLetterId],
-   );
- 
-   const baselineLabel = useMemo(() => {
-     if (baselineState === "loading") return "Loading baselines...";
-     if (baselineState === "error") return "Baselines unavailable";
-     return baselines.length ? "Choose a baseline" : "No baselines available";
-   }, [baselineState, baselines.length]);
- 
-   const jobLabel = useMemo(() => {
-     if (jobState === "loading") return "Loading jobs...";
-     if (jobState === "error") return "Jobs unavailable";
-     return jobs.length ? "Choose a job" : "No jobs available";
-   }, [jobState, jobs.length]);
- 
-   const canGenerate = Boolean(baselineId && jobId && !isGenerating);
- 
-   const handleGenerate = async () => {
-     if (!baselineId || !jobId) {
-       setStatusMessage(null);
-       setErrorMessage("Select a baseline and job to generate a cover letter.");
-+      setComplianceFlags([]);
-       return;
-     }
- 
-     setIsGenerating(true);
-     setStatusMessage(null);
-     setErrorMessage(null);
-+    setComplianceFlags([]);
- 
-     try {
-       const response = await fetch("/api/cover-letters", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
--        body: JSON.stringify({ baselineId, jobId }),
-+        body: JSON.stringify({ baselineId, jobId, closingTemplateKey }),
-       });
- 
-       if (!response.ok) {
--        const message = await response.text();
--        throw new Error(message || "Unable to generate a cover letter right now.");
-+        const text = await response.text();
-+        let parsed: any = null;
-+
-+        try {
-+          parsed = JSON.parse(text);
-+        } catch (error) {
-+          // ignore parsing issues and use fallback messaging
-+        }
-+
-+        const message =
-+          parsed?.error?.message ||
-+          parsed?.message ||
-+          (typeof parsed === "string" ? parsed : null) ||
-+          text ||
-+          "Unable to generate a cover letter right now.";
-+
-+        const flags =
-+          parsed?.error?.details?.compliance_flags ||
-+          parsed?.details?.compliance_flags ||
-+          parsed?.complianceFlags ||
-+          [];
-+
-+        setComplianceFlags(
-+          Array.isArray(flags)
-+            ? flags.map((flag: any) => flag?.message || flag?.code || "Compliance validation failed.")
-+            : [],
-+        );
-+
-+        throw new Error(message);
-       }
- 
-       const data = (await response.json()) as CoverLetterDto;
-       setHistory((current) => {
-         const filtered = current.filter((item) => item.id !== data.id);
-         return [data, ...filtered];
-       });
-       setSelectedLetterId(data.id);
-       setStatusMessage("Cover letter generated successfully.");
-+      setClosingTemplateKey(data.closingTemplateKey || closingTemplateKey);
-+      setComplianceFlags([]);
-     } catch (error) {
-       const message = error instanceof Error ? error.message : "Unable to generate.";
-       setErrorMessage(message);
-       setStatusMessage(null);
-     } finally {
-       setIsGenerating(false);
-     }
+ function detectWorkMode(url: URL): SearchSetWorkMode | null {
+   const param =
+     url.searchParams.get('f_WT') ||
+@@ -201,51 +211,51 @@ function parseJobBoardUrlPreview(rawUrl: string): ParsedUrlPreview | null {
+     parseWarning,
    };
+ }
  
-   const renderSelect = (label: string, value: string, options: SelectOption[], onChange: (next: string) => void, disabled: boolean) => (
-     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-       <label style={ttrComponents.fieldLabel}>{label}</label>
-       <select
-         value={value}
-         onChange={(event) => onChange(event.target.value)}
-         style={{
-           ...ttrComponents.input,
-           background: "rgba(0,0,0,0.35)",
-           cursor: disabled ? "not-allowed" : "pointer",
-         }}
-         disabled={disabled}
-       >
-         {options.length === 0 ? <option value="">No options</option> : null}
-         {options.map((option) => (
-           <option key={option.value} value={option.value}>
-@@ -345,71 +382,94 @@ export default function CoverLettersPage() {
-               baselines.map((baseline) => ({ value: baseline.id, label: baseline.originalFilename || "Untitled baseline" })),
-               setBaselineId,
-               baselineState !== "idle",
-             )}
-             {baselineState === "error" && baselineError ? <div style={ttrComponents.dangerBox}>{baselineError}</div> : null}
-             {baselineState === "idle" && baselines.length === 0 ? (
-               <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
-                 No baselines available. Upload a baseline to start generating cover letters.
-               </div>
-             ) : null}
+ export default function SearchSetsPage() {
+   const [items, setItems] = useState<SearchSet[]>([]);
+   const [loading, setLoading] = useState<boolean>(true);
+   const [busy, setBusy] = useState<boolean>(false);
  
-             {renderSelect(
-               jobLabel,
-               jobId,
-               jobs.map((job) => ({ value: job.id, label: formatJob(job) })),
-               setJobId,
-               jobState !== "idle",
-             )}
-             {jobState === "error" && jobError ? <div style={ttrComponents.dangerBox}>{jobError}</div> : null}
-             {jobState === "idle" && jobs.length === 0 ? (
-               <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
-                 No jobs found. Add a job to generate a tailored cover letter.
-               </div>
-             ) : null}
+   const [error, setError] = useState<string>('');
+   const [notice, setNotice] = useState<string>('');
  
-+            {renderSelect(
-+              "Choose a closing template",
-+              closingTemplateKey,
-+              coverLetterClosingTemplates.map((template) => ({
-+                value: template.key,
-+                label: `${template.label} – ${template.text}`,
-+              })),
-+              setClosingTemplateKey,
-+              false,
-+            )}
-+
-             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-               <button
-                 type="button"
-                 onClick={handleGenerate}
-                 disabled={!canGenerate}
-                 style={{
-                   ...ttrComponents.primaryButton,
-                   opacity: canGenerate ? 1 : 0.6,
-                   cursor: canGenerate ? "pointer" : "not-allowed",
-                   minWidth: 180,
-                 }}
-               >
-                 {isGenerating ? "Generating..." : "Generate"}
-               </button>
-               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
-                 Uses your latest baseline version automatically.
-               </span>
+   const [search, setSearch] = useState<string>('');
+ 
+   const [editingId, setEditingId] = useState<string | null>(null);
+ 
+   const [titlePatternsInput, setTitlePatternsInput] = useState<string>('');
+   const [industryInput, setIndustryInput] = useState<string>('');
+   const [seniority, setSeniority] = useState<SearchSetSeniority>(SearchSetSeniority.ANY);
+   const [workMode, setWorkMode] = useState<SearchSetWorkMode>(SearchSetWorkMode.ANY);
+   const [sourceUrl, setSourceUrl] = useState<string>('');
+   const [isActive, setIsActive] = useState<boolean>(true);
+   const [parsePreview, setParsePreview] = useState<ParsedUrlPreview | null>(null);
+ 
+   const [detail, setDetail] = useState<SearchSet | null>(null);
+-  const [runResult, setRunResult] = useState<unknown>(null);
++  const [runResult, setRunResult] = useState<SearchSetRunResult[] | null>(null);
+ 
+   const filtered = useMemo(() => {
+     const q = (search || '').trim().toLowerCase();
+     if (!q) return items;
+ 
+     return items.filter((s) => {
+       const hay = [
+         s.id,
+         ...(Array.isArray(s.titlePatterns) ? s.titlePatterns : []),
+         ...(Array.isArray(s.industry) ? s.industry : []),
+         s.seniority,
+         s.workMode,
+         s.sourceUrl,
+       ]
+         .map((v) => safeString(v).toLowerCase())
+         .join(' ');
+       return hay.includes(q);
+     });
+   }, [items, search]);
+ 
+   async function loadList() {
+     setLoading(true);
+     setError('');
+     setNotice('');
+     try {
+@@ -366,55 +376,58 @@ export default function SearchSetsPage() {
+   }
+ 
+   async function deleteSearchSet(id: string) {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     setRunResult(null);
+     try {
+       await apiFetchJson(`/api/search-sets/${id}`, { method: 'DELETE' });
+       setNotice('Search set deleted');
+       await loadList();
+       if (editingId === id) clearForm();
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to delete search set');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   async function runSearchSet(id: string) {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     setRunResult(null);
+     try {
+-      const data = await apiFetchJson<unknown>(`/api/search-sets/${id}/run`, {
++      const data = await apiFetchJson<SearchSetRunResult[]>(
++        `/api/search-sets/${id}/run`,
++        {
+         method: 'POST',
+         body: JSON.stringify({}),
+-      });
+-      setRunResult(data);
++        },
++      );
++      setRunResult(Array.isArray(data) ? data : []);
+       setNotice('Search set run completed');
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to run search set');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   useEffect(() => {
+     setParsePreview(parseJobBoardUrlPreview(sourceUrl));
+   }, [sourceUrl]);
+ 
+   const formModeLabel = editingId ? 'Update Search Set' : 'Create Search Set';
+ 
+   return (
+     <div className="mx-auto w-full max-w-6xl px-4 py-6">
+       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+         <div>
+           <h1 className="text-2xl font-semibold">Search Sets</h1>
+           <p className="text-sm text-gray-600">Create, manage, and run saved searches.</p>
+         </div>
+ 
+         <div className="flex flex-wrap gap-2">
+           <button
+             type="button"
+@@ -532,53 +545,103 @@ export default function SearchSetsPage() {
+                             Delete
+                           </button>
+                         </div>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
              </div>
- 
-             {statusMessage ? <div style={ttrComponents.successBox}>{statusMessage}</div> : null}
-             {errorMessage ? <div style={ttrComponents.dangerBox}>{errorMessage}</div> : null}
-+            {complianceFlags.length ? (
-+              <div style={{ ...ttrComponents.dangerBox, display: "flex", flexDirection: "column", gap: 6 }}>
-+                <div style={{ fontWeight: 700 }}>Compliance flags</div>
-+                <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2 }}>
-+                  {complianceFlags.map((flag, index) => (
-+                    <li key={`${flag}-${index}`} style={{ fontSize: 13, lineHeight: 1.5 }}>
-+                      {flag}
-+                    </li>
-+                  ))}
-+                </ul>
-+              </div>
-+            ) : null}
-           </div>
-         </section>
- 
-         <section style={{ ...ttrComponents.basePanel, flex: "1 1 320px" }}>
-           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
-             <span style={ttrTypography.subtleLabel}>History</span>
-             <h2 style={ttrTypography.h2}>Recent cover letters</h2>
-             <p style={ttrTypography.paragraph}>
-               Tap an entry to load it into the viewer. Newest items appear first.
-             </p>
            </div>
  
-           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-             {historyState === "loading" ? (
-               <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>Loading history...</div>
-             ) : null}
-             {historyState === "error" ? (
-               <div style={ttrComponents.dangerBox}>{historyError || "Unable to load history right now."}</div>
-             ) : null}
-             {historyState === "idle" && sortedHistory.length === 0 ? (
-               <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>No cover letters yet. Generate one to see it listed here.</div>
-             ) : null}
+           <div className="mt-6 rounded border p-4">
+             <h2 className="text-lg font-semibold">Record detail</h2>
+             <p className="mt-1 text-xs text-gray-600">Select a row and click Edit.</p>
  
-             {sortedHistory.map((item) => renderHistoryItem(item))}
-           </div>
-diff --git a/apps/web/lib/coverLetters.ts b/apps/web/lib/coverLetters.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..edbffe04ec378f25345e86b282ab66abe484ad1e
---- /dev/null
-+++ b/apps/web/lib/coverLetters.ts
-@@ -0,0 +1,25 @@
-+export type CoverLetterClosingTemplate = {
-+  key: string;
-+  label: string;
-+  text: string;
-+};
+             <pre className="mt-3 max-h-[220px] overflow-auto rounded bg-gray-50 p-3 text-xs">
+               {detail ? JSON.stringify(detail, null, 2) : '{}'}
+             </pre>
+             {detail?.parseWarning && (
+               <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                 Parsing note: {detail.parseWarning}
+               </div>
+             )}
+ 
+             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
+-            <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
+-              {runResult ? JSON.stringify(runResult, null, 2) : '{}'}
+-            </pre>
++            <div className="mt-2 rounded border">
++              {runResult === null && (
++                <div className="px-3 py-2 text-xs text-gray-600">No run yet.</div>
++              )}
 +
-+export const coverLetterClosingTemplates: CoverLetterClosingTemplate[] = [
-+  {
-+    key: "steady",
-+    label: "Steady delivery",
-+    text: "I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.",
-+  },
-+  {
-+    key: "impact",
-+    label: "Impact-focused",
-+    text: "I will stay focused on measurable impact while keeping every claim anchored to verified baseline material.",
-+  },
-+  {
-+    key: "collaborative",
-+    label: "Collaborative",
-+    text: "I look forward to collaborating closely, checking expectations early, and sharing progress in transparent updates.",
-+  },
-+];
++              {Array.isArray(runResult) && runResult.length === 0 && (
++                <div className="px-3 py-2 text-xs text-gray-700">No matching jobs found.</div>
++              )}
 +
-+export const defaultClosingTemplateKey = coverLetterClosingTemplates[0].key;
++              {Array.isArray(runResult) && runResult.length > 0 && (
++                <div className="overflow-auto">
++                  <table className="w-full border-collapse text-xs">
++                    <thead className="bg-gray-50 text-left">
++                      <tr>
++                        <th className="whitespace-nowrap px-3 py-2">Company</th>
++                        <th className="whitespace-nowrap px-3 py-2">Title</th>
++                        <th className="whitespace-nowrap px-3 py-2">Fit Score</th>
++                        <th className="whitespace-nowrap px-3 py-2">Verdict</th>
++                        <th className="whitespace-nowrap px-3 py-2">Apply</th>
++                      </tr>
++                    </thead>
++                    <tbody>
++                      {runResult.map((item) => {
++                        const link = item.applyUrl || item.sourceUrl;
++                        const hasApply = Boolean(item.applyUrl);
++                        return (
++                          <tr key={item.jobId} className="border-t">
++                            <td className="px-3 py-2">{item.company || 'Unknown'}</td>
++                            <td className="px-3 py-2">{item.title || 'Untitled role'}</td>
++                            <td className="px-3 py-2">{item.fitScore ?? '—'}</td>
++                            <td className="px-3 py-2">{item.verdict ?? '—'}</td>
++                            <td className="px-3 py-2">
++                              {link ? (
++                                <a
++                                  className="text-blue-700 underline"
++                                  href={link}
++                                  target="_blank"
++                                  rel="noopener noreferrer"
++                                >
++                                  {hasApply ? 'Apply' : 'View source'}
++                                </a>
++                              ) : (
++                                <span className="text-gray-500">No link available</span>
++                              )}
++                            </td>
++                          </tr>
++                        );
++                      })}
++                    </tbody>
++                  </table>
++                </div>
++              )}
++            </div>
+           </div>
+         </div>
+ 
+         <div className="lg:col-span-2">
+           <div className="rounded border p-4">
+             <h2 className="text-lg font-semibold">{formModeLabel}</h2>
+ 
+             <div className="mt-4 space-y-3">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Title patterns</label>
+                 <textarea
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={titlePatternsInput}
+                   onChange={(e) => setTitlePatternsInput(e.target.value)}
+                   placeholder="Engineer\nProduct Manager"
+                   rows={4}
+                   disabled={busy}
+                 />
+                 <div className="mt-1 text-xs text-gray-500">
+                   One per line or comma separated. Will be auto-filled when parsing a URL.
+                 </div>
+               </div>
+ 
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Industry tags</label>
