@@ -53,6 +53,12 @@ export class SearchSet {
   @Column({ type: 'varchar', length: 2048, nullable: true })
   sourceUrl!: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  urlBacked!: boolean;
+
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  parseWarning!: string | null;
+
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 

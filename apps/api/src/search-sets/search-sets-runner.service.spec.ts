@@ -17,6 +17,8 @@ describe('SearchSetsRunnerService', () => {
     industry: [],
     workMode: SearchSetWorkMode.ANY,
     sourceUrl: null,
+    urlBacked: false,
+    parseWarning: null,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),

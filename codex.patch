@@ -1,119 +1,572 @@
-diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
-index fb0ba2b4ed9c4134281da479fd29419b58ef0064..ab67bc05db3533d56b55fdb7bd17c398c0bfd961 100644
---- a/apps/api/src/applications/applications.service.spec.ts
-+++ b/apps/api/src/applications/applications.service.spec.ts
-@@ -154,50 +154,71 @@ describe('ApplicationsService', () => {
-     it('enforces ownership', async () => {
-       const repository = createMockRepository();
-       repository.findOne.mockResolvedValue(null);
-       const service = createService(repository);
+diff --git a/apps/api/src/migrations/1810000000000-SearchSetUrlSupport.ts b/apps/api/src/migrations/1810000000000-SearchSetUrlSupport.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc0cbeb27757035075363033374d91870e424398
+--- /dev/null
++++ b/apps/api/src/migrations/1810000000000-SearchSetUrlSupport.ts
+@@ -0,0 +1,19 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class SearchSetUrlSupport1810000000000 implements MigrationInterface {
++  name = 'SearchSetUrlSupport1810000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "search_sets" ADD "urlBacked" boolean NOT NULL DEFAULT false`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "search_sets" ADD "parseWarning" character varying(1024)`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "search_sets" DROP COLUMN "parseWarning"`);
++    await queryRunner.query(`ALTER TABLE "search_sets" DROP COLUMN "urlBacked"`);
++  }
++}
+diff --git a/apps/api/src/search-sets/search-set.entity.ts b/apps/api/src/search-sets/search-set.entity.ts
+index cc190e9221fc14f0cc73c9a229345631daa80826..e2d9899db80cce1930ae3c6c26a5bb922d268893 100644
+--- a/apps/api/src/search-sets/search-set.entity.ts
++++ b/apps/api/src/search-sets/search-set.entity.ts
+@@ -31,34 +31,40 @@ export class SearchSet {
+   userId!: string;
  
-       await expect(service.getApplicationForUser('app-1', 'other-user')).rejects.toThrow(
-         'Application not found',
-       );
-     });
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+   titlePatterns!: string[];
+ 
+   @Column({
+     type: 'enum',
+     enum: SearchSetSeniority,
+     default: SearchSetSeniority.ANY,
+   })
+   seniority!: SearchSetSeniority;
+ 
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+   industry!: string[];
+ 
+   @Column({
+     type: 'enum',
+     enum: SearchSetWorkMode,
+     default: SearchSetWorkMode.ANY,
+   })
+   workMode!: SearchSetWorkMode;
+ 
+   @Column({ type: 'varchar', length: 2048, nullable: true })
+   sourceUrl!: string | null;
+ 
++  @Column({ type: 'boolean', default: false })
++  urlBacked!: boolean;
++
++  @Column({ type: 'varchar', length: 1024, nullable: true })
++  parseWarning!: string | null;
++
+   @Column({ type: 'boolean', default: true })
+   isActive!: boolean;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
+ }
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.spec.ts b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+index 290edb76b1ca5adb5b216ad166a1cc7065432603..3e5a1ae223fd1d940a13ccab1c36ef9abee02e2d 100644
+--- a/apps/api/src/search-sets/search-sets-runner.service.spec.ts
++++ b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+@@ -1,44 +1,46 @@
+ import { FitAssessment, FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
+ import { Job, JobIngestionMethod } from '../jobs/job.entity';
+ import {
+   SearchSet,
+   SearchSetSeniority,
+   SearchSetWorkMode,
+ } from './search-set.entity';
+ import { SearchSetsRunnerService } from './search-sets-runner.service';
+ import { SearchSetsService } from './search-sets.service';
+ 
+ describe('SearchSetsRunnerService', () => {
+   const baseSearchSet: SearchSet = {
+     id: 'set-1',
+     userId: 'user-1',
+     titlePatterns: ['Engineer'],
+     seniority: SearchSetSeniority.ANY,
+     industry: [],
+     workMode: SearchSetWorkMode.ANY,
+     sourceUrl: null,
++    urlBacked: false,
++    parseWarning: null,
+     isActive: true,
+     createdAt: new Date(),
+     updatedAt: new Date(),
+   };
+ 
+   const createJob = (overrides: Partial<Job> = {}): Job =>
+     ({
+       id: overrides.id ?? 'job-1',
+       userId: overrides.userId ?? 'user-1',
+       title: overrides.title ?? 'Senior Engineer',
+       company: overrides.company ?? 'Acme Corp',
+       rawDescription: overrides.rawDescription ?? 'Remote friendly role',
+       sourceUrl: overrides.sourceUrl ?? null,
+       normalizedResponsibilities: overrides.normalizedResponsibilities ?? [],
+       normalizedRequirements: overrides.normalizedRequirements ?? [],
+       jdIngestionMethod: overrides.jdIngestionMethod ?? JobIngestionMethod.PASTE,
+       jdParsedAt: overrides.jdParsedAt ?? new Date(),
+       createdAt: overrides.createdAt ?? new Date(),
+       updatedAt: overrides.updatedAt ?? new Date(),
+     } as Job);
+ 
+   const createFitAssessment = (overrides: Partial<FitAssessment>): FitAssessment =>
+     ({
+       id: overrides.id ?? 'assessment-1',
+       userId: overrides.userId ?? 'user-1',
+diff --git a/apps/api/src/search-sets/search-sets.service.spec.ts b/apps/api/src/search-sets/search-sets.service.spec.ts
+index a568c2aa10e16c4c488e099f95dd060b727bc427..a1a50a5d71bb5fcdffb077ec377b48305a008163 100644
+--- a/apps/api/src/search-sets/search-sets.service.spec.ts
++++ b/apps/api/src/search-sets/search-sets.service.spec.ts
+@@ -1,86 +1,120 @@
+ import { NotFoundException } from '@nestjs/common';
+ import {
+   SearchSet,
+   SearchSetSeniority,
+   SearchSetWorkMode,
+ } from './search-set.entity';
+ import { SearchSetsService } from './search-sets.service';
+ 
+ describe('SearchSetsService', () => {
+   const mockSearchSet: SearchSet = {
+     id: 'set-1',
+     userId: 'user-1',
+     titlePatterns: ['Engineer'],
+     seniority: SearchSetSeniority.ANY,
+     industry: [],
+     workMode: SearchSetWorkMode.ANY,
+     sourceUrl: null,
++    urlBacked: false,
++    parseWarning: null,
+     isActive: true,
+     createdAt: new Date(),
+     updatedAt: new Date(),
+   };
+ 
+   const createMockRepository = () => ({
+     create: jest.fn((data: Partial<SearchSet>) => ({ ...mockSearchSet, ...data })),
+     save: jest.fn(async (data: SearchSet) => data),
+     find: jest.fn(),
+     findOne: jest.fn(),
+     remove: jest.fn(async (data: SearchSet) => data),
    });
  
-   describe('updateApplication', () => {
-     it('updates application fields', async () => {
-       const repository = createMockRepository();
-       repository.findOne.mockResolvedValue({ ...mockApplication });
-       const service = createService(repository);
+   const createService = (repository = createMockRepository()) =>
+     new SearchSetsService(repository as never);
  
-       const result = await service.updateApplication('app-1', 'user-1', {
-         stage: ApplicationStage.INTERVIEWING,
-         notes: 'Had phone screen',
-       });
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
  
-       expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
-       expect(result.notes).toBe('Had phone screen');
+   it('creates a search set with sanitized values', async () => {
+     const repository = createMockRepository();
+     const service = createService(repository);
+ 
+     const result = await service.createSearchSet('user-1', {
+       titlePatterns: ['  Senior Engineer  ', ''],
+       industry: [' fintech '],
+       sourceUrl: ' https://example.com ',
      });
+ 
+     expect(repository.create).toHaveBeenCalledWith(
+       expect.objectContaining({
+         userId: 'user-1',
+         titlePatterns: ['Senior Engineer'],
+         industry: ['fintech'],
+         sourceUrl: 'https://example.com',
+         seniority: SearchSetSeniority.ANY,
+         workMode: SearchSetWorkMode.ANY,
++        urlBacked: false,
++        parseWarning: null,
+         isActive: true,
+       }),
+     );
+     expect(result.titlePatterns).toEqual(['Senior Engineer']);
+   });
+ 
++  it('parses a LinkedIn search URL into filters', async () => {
++    const repository = createMockRepository();
++    const service = createService(repository);
 +
-+    it('persists a stage-only change', async () => {
-+      const repository = createMockRepository();
-+      const existing = { ...mockApplication, stage: ApplicationStage.SCREENING };
-+      repository.findOne.mockResolvedValue(existing);
-+      const service = createService(repository);
-+
-+      const result = await service.updateApplication('app-1', 'user-1', {
-+        stage: ApplicationStage.OFFER,
-+      });
-+
-+      expect(repository.save).toHaveBeenCalledWith(
-+        expect.objectContaining({
-+          id: 'app-1',
-+          stage: ApplicationStage.OFFER,
-+          company: existing.company,
-+          title: existing.title,
-+        }),
-+      );
-+      expect(result.stage).toBe(ApplicationStage.OFFER);
++    const result = await service.createSearchSet('user-1', {
++      sourceUrl:
++        'https://www.linkedin.com/jobs/search?keywords=Product%20Manager&f_E=4&f_WT=2',
 +    });
-   });
++
++    expect(result.urlBacked).toBe(true);
++    expect(result.titlePatterns).toEqual(['Product Manager']);
++    expect(result.seniority).toBe(SearchSetSeniority.SENIOR);
++    expect(result.workMode).toBe(SearchSetWorkMode.REMOTE);
++    expect(result.parseWarning).toBeNull();
++  });
++
++  it('stores raw URL with warning when parsing yields no filters', async () => {
++    const repository = createMockRepository();
++    const service = createService(repository);
++
++    const result = await service.createSearchSet('user-1', {
++      sourceUrl: 'https://jobs.example.com/listings?page=2',
++    });
++
++    expect(result.urlBacked).toBe(true);
++    expect(result.sourceUrl).toBe('https://jobs.example.com/listings?page=2');
++    expect(result.titlePatterns).toEqual([]);
++    expect(result.parseWarning).toContain('Stored URL');
++  });
++
+   it('lists search sets for a user', async () => {
+     const repository = createMockRepository();
+     repository.find.mockResolvedValue([mockSearchSet]);
+     const service = createService(repository);
  
-   describe('deleteApplication', () => {
-     it('deletes application', async () => {
-       const repository = createMockRepository();
-       repository.findOne.mockResolvedValue(mockApplication);
-       const service = createService(repository);
+     const result = await service.listSearchSetsForUser('user-1');
  
-       const result = await service.deleteApplication('app-1', 'user-1');
- 
-       expect(repository.remove).toHaveBeenCalled();
-       expect(result).toEqual({ deleted: true, id: 'app-1' });
+     expect(repository.find).toHaveBeenCalledWith({
+       where: { userId: 'user-1' },
+       order: { createdAt: 'DESC' },
      });
+     expect(result).toEqual([mockSearchSet]);
    });
  
-   describe('exportApplicationsToCsv', () => {
-     it('exports applications and audits compliance', async () => {
-       const repository = createMockRepository();
-       const complianceService = createMockComplianceService();
+   it('retrieves a search set for a user', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue(mockSearchSet);
+     const service = createService(repository);
  
-       repository.find.mockResolvedValue([
-         {
-           ...mockApplication,
-           appliedDate: new Date('2024-01-01T00:00:00.000Z'),
-           fitScore: 80,
-diff --git a/apps/web/app/applications/page.tsx b/apps/web/app/applications/page.tsx
-index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8908588f3 100644
---- a/apps/web/app/applications/page.tsx
-+++ b/apps/web/app/applications/page.tsx
-@@ -1,181 +1,231 @@
+     const result = await service.getSearchSetForUser('set-1', 'user-1');
+ 
+     expect(result).toEqual(mockSearchSet);
+   });
+ 
+   it('throws when search set is not found', async () => {
+diff --git a/apps/api/src/search-sets/search-sets.service.ts b/apps/api/src/search-sets/search-sets.service.ts
+index 05137c9e5c4c39d3d4d5bee544031cb75fb89ee1..2a27153ef228f171abbeb683ed0918aecd6c9a16 100644
+--- a/apps/api/src/search-sets/search-sets.service.ts
++++ b/apps/api/src/search-sets/search-sets.service.ts
+@@ -1,88 +1,256 @@
+ import { Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { CreateSearchSetDto } from './dto/create-search-set.dto';
+ import { UpdateSearchSetDto } from './dto/update-search-set.dto';
+ import {
+   SearchSet,
+   SearchSetSeniority,
+   SearchSetWorkMode,
+ } from './search-set.entity';
+ 
+ @Injectable()
+ export class SearchSetsService {
+   constructor(
+     @InjectRepository(SearchSet)
+     private readonly searchSetRepository: Repository<SearchSet>,
+   ) {}
+ 
+-  private sanitizeList(values?: string[]) {
+-    return values?.map((value) => value.trim()).filter((value) => value.length > 0) ?? [];
++  private sanitizeList(values?: string[] | null) {
++    return values
++      ?.map((value) => value.trim())
++      .filter((value) => value.length > 0)
++      .filter((value, index, arr) => arr.indexOf(value) === index) ?? [];
++  }
++
++  private detectWorkMode(url: URL): SearchSetWorkMode | null {
++    const workTypeParam =
++      url.searchParams.get('f_WT') ||
++      url.searchParams.get('workplaceType') ||
++      url.searchParams.get('remoteWorkplaceType');
++
++    const workTypeMap: Record<string, SearchSetWorkMode> = {
++      '1': SearchSetWorkMode.ONSITE,
++      '2': SearchSetWorkMode.REMOTE,
++      '3': SearchSetWorkMode.HYBRID,
++      onsite: SearchSetWorkMode.ONSITE,
++      remote: SearchSetWorkMode.REMOTE,
++      hybrid: SearchSetWorkMode.HYBRID,
++    };
++
++    if (workTypeParam) {
++      for (const token of workTypeParam.split(',').map((v) => v.trim())) {
++        const mapped = workTypeMap[token.toLowerCase()];
++        if (mapped) {
++          return mapped;
++        }
++      }
++    }
++
++    const haystack = `${url.searchParams.toString()} ${url.pathname}`.toLowerCase();
++    if (haystack.includes('remote')) return SearchSetWorkMode.REMOTE;
++    if (haystack.includes('hybrid')) return SearchSetWorkMode.HYBRID;
++    if (haystack.includes('onsite') || haystack.includes('on-site')) return SearchSetWorkMode.ONSITE;
++
++    return null;
++  }
++
++  private detectSeniority(url: URL): SearchSetSeniority | null {
++    const experienceParam =
++      url.searchParams.get('f_E') || url.searchParams.get('experience') || url.searchParams.get('level');
++
++    const experienceMap: Record<string, SearchSetSeniority> = {
++      '1': SearchSetSeniority.ENTRY,
++      '2': SearchSetSeniority.ENTRY,
++      '3': SearchSetSeniority.MID,
++      '4': SearchSetSeniority.SENIOR,
++      '5': SearchSetSeniority.LEAD,
++      '6': SearchSetSeniority.EXECUTIVE,
++      entry: SearchSetSeniority.ENTRY,
++      junior: SearchSetSeniority.ENTRY,
++      associate: SearchSetSeniority.MID,
++      mid: SearchSetSeniority.MID,
++      senior: SearchSetSeniority.SENIOR,
++      lead: SearchSetSeniority.LEAD,
++      director: SearchSetSeniority.EXECUTIVE,
++      executive: SearchSetSeniority.EXECUTIVE,
++      vp: SearchSetSeniority.EXECUTIVE,
++    };
++
++    if (experienceParam) {
++      for (const token of experienceParam.split(',').map((v) => v.trim())) {
++        const mapped = experienceMap[token.toLowerCase()];
++        if (mapped) {
++          return mapped;
++        }
++      }
++    }
++
++    const haystack = decodeURIComponent(url.search).toLowerCase();
++    for (const [key, value] of Object.entries(experienceMap)) {
++      if (haystack.includes(key)) {
++        return value;
++      }
++    }
++
++    return null;
++  }
++
++  private detectTitlePatterns(url: URL) {
++    const candidates = ['keywords', 'keyword', 'title', 'q', 'query', 'position'];
++    const patterns: string[] = [];
++
++    for (const key of candidates) {
++      const value = url.searchParams.get(key);
++      if (value) {
++        patterns.push(...value.split(/[,|]/));
++      }
++    }
++
++    return this.sanitizeList(patterns);
++  }
++
++  private parseJobBoardUrl(rawUrl?: string | null) {
++    const cleaned = rawUrl?.trim();
++    if (!cleaned) return null;
++
++    const result = {
++      sourceUrl: cleaned,
++      urlBacked: true,
++      parseWarning: null as string | null,
++    };
++
++    let parsedUrl: URL;
++    try {
++      parsedUrl = new URL(cleaned);
++    } catch {
++      return {
++        ...result,
++        parseWarning: 'Stored URL but could not parse its parameters.',
++      };
++    }
++
++    const titlePatterns = this.detectTitlePatterns(parsedUrl);
++    const seniority = this.detectSeniority(parsedUrl);
++    const workMode = this.detectWorkMode(parsedUrl);
++
++    const parsedFields: string[] = [];
++    const missingFields: string[] = [];
++
++    if (titlePatterns.length > 0) {
++      parsedFields.push('titles');
++    } else {
++      missingFields.push('titles');
++    }
++
++    if (seniority) {
++      parsedFields.push('seniority');
++    } else {
++      missingFields.push('seniority');
++    }
++
++    if (workMode) {
++      parsedFields.push('work mode');
++    } else {
++      missingFields.push('work mode');
++    }
++
++    let parseWarning: string | null = null;
++    if (missingFields.length === 3) {
++      parseWarning = 'Stored URL but did not recognize keywords or filters.';
++    } else if (missingFields.length > 0) {
++      parseWarning = `Parsed ${parsedFields.join(', ')}; missing ${missingFields.join(
++        ', ',
++      )} from URL.`;
++    }
++
++    return {
++      ...result,
++      sourceUrl: parsedUrl.toString(),
++      titlePatterns,
++      seniority: seniority ?? undefined,
++      workMode: workMode ?? undefined,
++      parseWarning,
++    };
+   }
+ 
+   async createSearchSet(userId: string, dto: CreateSearchSetDto) {
++    const parsedFromUrl = this.parseJobBoardUrl(dto.sourceUrl);
++
+     const searchSet = this.searchSetRepository.create({
+       userId,
+-      titlePatterns: this.sanitizeList(dto.titlePatterns),
+-      seniority: dto.seniority ?? SearchSetSeniority.ANY,
++      titlePatterns: this.sanitizeList(dto.titlePatterns ?? parsedFromUrl?.titlePatterns),
++      seniority: dto.seniority ?? parsedFromUrl?.seniority ?? SearchSetSeniority.ANY,
+       industry: this.sanitizeList(dto.industry),
+-      workMode: dto.workMode ?? SearchSetWorkMode.ANY,
+-      sourceUrl: dto.sourceUrl?.trim() || null,
++      workMode: dto.workMode ?? parsedFromUrl?.workMode ?? SearchSetWorkMode.ANY,
++      sourceUrl: parsedFromUrl?.sourceUrl ?? dto.sourceUrl?.trim() || null,
++      urlBacked: parsedFromUrl?.urlBacked ?? false,
++      parseWarning: parsedFromUrl?.parseWarning ?? null,
+       isActive: dto.isActive ?? true,
+     });
+ 
+     return this.searchSetRepository.save(searchSet);
+   }
+ 
+   async listSearchSetsForUser(userId: string) {
+     return this.searchSetRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
+ 
+   async getSearchSetForUser(id: string, userId: string) {
+     const searchSet = await this.searchSetRepository.findOne({
+       where: { id, userId },
+     });
+ 
+     if (!searchSet) {
+       throw new NotFoundException('Search set not found');
+     }
+ 
+     return searchSet;
+   }
+ 
+   async updateSearchSet(id: string, userId: string, dto: UpdateSearchSetDto) {
+     const searchSet = await this.getSearchSetForUser(id, userId);
++    const parsedFromUrl =
++      dto.sourceUrl !== undefined ? this.parseJobBoardUrl(dto.sourceUrl) : null;
+ 
+     if (dto.titlePatterns !== undefined) {
+       searchSet.titlePatterns = this.sanitizeList(dto.titlePatterns);
++    } else if (parsedFromUrl?.titlePatterns) {
++      searchSet.titlePatterns = this.sanitizeList(parsedFromUrl.titlePatterns);
+     }
+     if (dto.seniority !== undefined) {
+       searchSet.seniority = dto.seniority;
++    } else if (parsedFromUrl?.seniority) {
++      searchSet.seniority = parsedFromUrl.seniority;
+     }
+     if (dto.industry !== undefined) {
+       searchSet.industry = this.sanitizeList(dto.industry);
+     }
+     if (dto.workMode !== undefined) {
+       searchSet.workMode = dto.workMode;
++    } else if (parsedFromUrl?.workMode) {
++      searchSet.workMode = parsedFromUrl.workMode;
+     }
+     if (dto.sourceUrl !== undefined) {
+-      searchSet.sourceUrl = dto.sourceUrl?.trim() || null;
++      searchSet.sourceUrl = parsedFromUrl?.sourceUrl ?? dto.sourceUrl?.trim() || null;
++      searchSet.urlBacked = parsedFromUrl?.urlBacked ?? false;
++      searchSet.parseWarning = parsedFromUrl?.parseWarning ?? null;
+     }
+     if (dto.isActive !== undefined) {
+       searchSet.isActive = dto.isActive;
+     }
+ 
+     return this.searchSetRepository.save(searchSet);
+   }
+ 
+   async deleteSearchSet(id: string, userId: string) {
+     const searchSet = await this.getSearchSetForUser(id, userId);
+ 
+     await this.searchSetRepository.remove(searchSet);
+ 
+     return { deleted: true, id };
+   }
+ }
+diff --git a/apps/web/app/search-sets/page.tsx b/apps/web/app/search-sets/page.tsx
+index a5c1d434b71d81d282c15db0526046dca2d62937..f9d4abe2f28112c665733f740e6e12ade7bbafc0 100644
+--- a/apps/web/app/search-sets/page.tsx
++++ b/apps/web/app/search-sets/page.tsx
+@@ -1,213 +1,375 @@
  'use client';
  
  import React, { useEffect, useMemo, useState } from 'react';
- import { apiFetchJson, downloadBlob } from '../lib/api';
+ import { apiFetchJson } from '../lib/api';
  
- type AnyRecord = Record<string, unknown>;
+-type AnyRecord = Record<string, unknown>;
++enum SearchSetSeniority {
++  ENTRY = 'ENTRY',
++  MID = 'MID',
++  SENIOR = 'SENIOR',
++  LEAD = 'LEAD',
++  EXECUTIVE = 'EXECUTIVE',
++  ANY = 'ANY',
++}
++
++enum SearchSetWorkMode {
++  REMOTE = 'REMOTE',
++  HYBRID = 'HYBRID',
++  ONSITE = 'ONSITE',
++  ANY = 'ANY',
++}
  
- type Application = {
+ type SearchSet = {
    id: string;
-   company?: string;
-   title?: string;
-   roleTitle?: string;
-   stage?: string;
-   status?: string;
-   link?: string;
-   appliedDate?: string;
-   notes?: string;
-   extra?: unknown;
-   extraJson?: unknown;
+-  name?: string;
+-  query?: string;
+-  location?: string;
+-  remoteOk?: boolean;
+-  sources?: string[];
++  titlePatterns: string[];
++  seniority: SearchSetSeniority;
++  industry: string[];
++  workMode: SearchSetWorkMode;
++  sourceUrl: string | null;
++  urlBacked?: boolean;
++  parseWarning?: string | null;
++  isActive: boolean;
    createdAt?: string;
    updatedAt?: string;
- } & AnyRecord;
+-} & AnyRecord;
++};
++
++type ParsedUrlPreview = {
++  sourceUrl: string;
++  titlePatterns: string[];
++  seniority?: SearchSetSeniority;
++  workMode?: SearchSetWorkMode;
++  parseWarning: string | null;
++};
  
-+const STAGE_OPTIONS = [
-+  { value: 'SAVED', label: 'Saved' },
-+  { value: 'APPLIED', label: 'Applied' },
-+  { value: 'SCREENING', label: 'Screening' },
-+  { value: 'INTERVIEWING', label: 'Interviewing' },
-+  { value: 'OFFER', label: 'Offer' },
-+  { value: 'REJECTED', label: 'Rejected' },
-+  { value: 'WITHDRAWN', label: 'Withdrawn' },
-+] as const;
-+
-+type StageValue = (typeof STAGE_OPTIONS)[number]['value'];
-+
  function safeString(v: unknown): string {
    if (typeof v === 'string') return v;
    if (typeof v === 'number') return String(v);
@@ -126,56 +579,160 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
    }
  }
  
--function normalizeStage(input: string): string {
--  const s = (input || '').trim();
--  if (!s) return 'APPLIED';
--  return s.toUpperCase();
-+function normalizeStage(input: string, fallback: StageValue = 'APPLIED'): StageValue {
-+  const s = (input || '').trim().toUpperCase();
-+  const found = STAGE_OPTIONS.find((option) => option.value === s);
-+  return found ? found.value : fallback;
+-function parseCsvList(input: string): string[] {
++function parseList(input: string): string[] {
+   const s = (input || '').trim();
+   if (!s) return [];
+   return s
+-    .split(',')
++    .split(/[\n,]/)
+     .map((x) => x.trim())
+-    .filter(Boolean);
++    .filter(Boolean)
++    .filter((value, index, arr) => arr.indexOf(value) === index);
 +}
 +
-+function stageLabel(stage: string | undefined): string {
-+  if (!stage) return 'Unknown';
-+  const found = STAGE_OPTIONS.find((option) => option.value === stage);
-+  if (found) return found.label;
-+  const pretty = stage.toLowerCase().replace(/(^|\s)\w/g, (m) => m.toUpperCase());
-+  return pretty || 'Unknown';
- }
- 
- function parseJsonOrEmpty(input: string): unknown {
-   const trimmed = (input || '').trim();
-   if (!trimmed) return {};
-   try {
-     return JSON.parse(trimmed);
-   } catch {
-     throw new Error('Extra JSON must be valid JSON.');
-   }
- }
- 
- function looksLikeIsoDateOnly(s: string): boolean {
-   return /^\d{4}-\d{2}-\d{2}$/.test(s);
- }
- 
- function toIsoDateIfNeeded(s: string): string {
-   const trimmed = (s || '').trim();
-   if (!trimmed) return '';
-   if (looksLikeIsoDateOnly(trimmed)) return trimmed;
-   const d = new Date(trimmed);
-   if (Number.isNaN(d.getTime())) return trimmed;
-   return d.toISOString();
- }
- 
-+function formatDateDisplay(value: string | undefined): string {
-+  if (!value) return '';
-+  const d = new Date(value);
-+  if (Number.isNaN(d.getTime())) return value;
-+  return d.toLocaleDateString();
++function detectWorkMode(url: URL): SearchSetWorkMode | null {
++  const param =
++    url.searchParams.get('f_WT') ||
++    url.searchParams.get('workplaceType') ||
++    url.searchParams.get('remoteWorkplaceType');
++  const map: Record<string, SearchSetWorkMode> = {
++    '1': SearchSetWorkMode.ONSITE,
++    '2': SearchSetWorkMode.REMOTE,
++    '3': SearchSetWorkMode.HYBRID,
++    onsite: SearchSetWorkMode.ONSITE,
++    remote: SearchSetWorkMode.REMOTE,
++    hybrid: SearchSetWorkMode.HYBRID,
++  };
++
++  if (param) {
++    for (const token of param.split(',').map((v) => v.trim().toLowerCase())) {
++      if (map[token]) {
++        return map[token];
++      }
++    }
++  }
++
++  const haystack = `${url.searchParams.toString()} ${url.pathname}`.toLowerCase();
++  if (haystack.includes('remote')) return SearchSetWorkMode.REMOTE;
++  if (haystack.includes('hybrid')) return SearchSetWorkMode.HYBRID;
++  if (haystack.includes('onsite') || haystack.includes('on-site')) return SearchSetWorkMode.ONSITE;
++  return null;
 +}
 +
- export default function ApplicationsPage() {
-   const [items, setItems] = useState<Application[]>([]);
++function detectSeniority(url: URL): SearchSetSeniority | null {
++  const param = url.searchParams.get('f_E') || url.searchParams.get('experience') || url.searchParams.get('level');
++  const map: Record<string, SearchSetSeniority> = {
++    '1': SearchSetSeniority.ENTRY,
++    '2': SearchSetSeniority.ENTRY,
++    '3': SearchSetSeniority.MID,
++    '4': SearchSetSeniority.SENIOR,
++    '5': SearchSetSeniority.LEAD,
++    '6': SearchSetSeniority.EXECUTIVE,
++    entry: SearchSetSeniority.ENTRY,
++    junior: SearchSetSeniority.ENTRY,
++    associate: SearchSetSeniority.MID,
++    mid: SearchSetSeniority.MID,
++    senior: SearchSetSeniority.SENIOR,
++    lead: SearchSetSeniority.LEAD,
++    director: SearchSetSeniority.EXECUTIVE,
++    executive: SearchSetSeniority.EXECUTIVE,
++    vp: SearchSetSeniority.EXECUTIVE,
++  };
++
++  if (param) {
++    for (const token of param.split(',').map((v) => v.trim().toLowerCase())) {
++      if (map[token]) {
++        return map[token];
++      }
++    }
++  }
++
++  const haystack = decodeURIComponent(url.search).toLowerCase();
++  for (const [key, value] of Object.entries(map)) {
++    if (haystack.includes(key)) {
++      return value;
++    }
++  }
++
++  return null;
++}
++
++function detectTitlePatterns(url: URL) {
++  const candidates = ['keywords', 'keyword', 'title', 'q', 'query', 'position'];
++  const patterns: string[] = [];
++
++  for (const key of candidates) {
++    const value = url.searchParams.get(key);
++    if (value) {
++      patterns.push(...value.split(/[,|]/));
++    }
++  }
++
++  return parseList(patterns.join(','));
++}
++
++function parseJobBoardUrlPreview(rawUrl: string): ParsedUrlPreview | null {
++  const cleaned = rawUrl.trim();
++  if (!cleaned) return null;
++
++  let parsed: URL | null = null;
++  try {
++    parsed = new URL(cleaned);
++  } catch {
++    return {
++      sourceUrl: cleaned,
++      titlePatterns: [],
++      parseWarning: 'Stored URL but could not parse its parameters.',
++    };
++  }
++
++  const titlePatterns = detectTitlePatterns(parsed);
++  const seniority = detectSeniority(parsed) ?? undefined;
++  const workMode = detectWorkMode(parsed) ?? undefined;
++
++  const parsedFields: string[] = [];
++  const missingFields: string[] = [];
++
++  if (titlePatterns.length > 0) {
++    parsedFields.push('titles');
++  } else {
++    missingFields.push('titles');
++  }
++
++  if (seniority) {
++    parsedFields.push('seniority');
++  } else {
++    missingFields.push('seniority');
++  }
++
++  if (workMode) {
++    parsedFields.push('work mode');
++  } else {
++    missingFields.push('work mode');
++  }
++
++  let parseWarning: string | null = null;
++  if (missingFields.length === 3) {
++    parseWarning = 'Stored URL but did not recognize keywords or filters.';
++  } else if (missingFields.length > 0) {
++    parseWarning = `Parsed ${parsedFields.join(', ')}; missing ${missingFields.join(
++      ', ',
++    )} from URL.`;
++  }
++
++  return {
++    sourceUrl: parsed.toString(),
++    titlePatterns,
++    seniority,
++    workMode,
++    parseWarning,
++  };
+ }
+ 
+ export default function SearchSetsPage() {
+   const [items, setItems] = useState<SearchSet[]>([]);
    const [loading, setLoading] = useState<boolean>(true);
    const [busy, setBusy] = useState<boolean>(false);
  
@@ -186,33 +743,38 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
  
    const [editingId, setEditingId] = useState<string | null>(null);
  
-   const [company, setCompany] = useState<string>('');
-   const [title, setTitle] = useState<string>('');
--  const [stage, setStage] = useState<string>('APPLIED');
-+  const [stage, setStage] = useState<StageValue>('APPLIED');
-   const [link, setLink] = useState<string>('');
-   const [appliedDate, setAppliedDate] = useState<string>('');
-   const [notes, setNotes] = useState<string>('');
-   const [extraJsonText, setExtraJsonText] = useState<string>(
-     '{ "cxFitScore": 94, "source": "LinkedIn" }',
-   );
+-  const [name, setName] = useState<string>('');
+-  const [query, setQuery] = useState<string>('');
+-  const [location, setLocation] = useState<string>('');
+-  const [remoteOk, setRemoteOk] = useState<boolean>(true);
+-  const [sourcesCsv, setSourcesCsv] = useState<string>('linkedin, greenhouse');
++  const [titlePatternsInput, setTitlePatternsInput] = useState<string>('');
++  const [industryInput, setIndustryInput] = useState<string>('');
++  const [seniority, setSeniority] = useState<SearchSetSeniority>(SearchSetSeniority.ANY);
++  const [workMode, setWorkMode] = useState<SearchSetWorkMode>(SearchSetWorkMode.ANY);
++  const [sourceUrl, setSourceUrl] = useState<string>('');
++  const [isActive, setIsActive] = useState<boolean>(true);
++  const [parsePreview, setParsePreview] = useState<ParsedUrlPreview | null>(null);
  
-   const [detail, setDetail] = useState<Application | null>(null);
-+  const [stageUpdatingId, setStageUpdatingId] = useState<string | null>(null);
+   const [detail, setDetail] = useState<SearchSet | null>(null);
+   const [runResult, setRunResult] = useState<unknown>(null);
  
    const filtered = useMemo(() => {
      const q = (search || '').trim().toLowerCase();
      if (!q) return items;
  
-     return items.filter((a) => {
+     return items.filter((s) => {
        const hay = [
-         a.id,
-         a.company,
-         a.title,
-         a.roleTitle,
-         a.stage,
-         a.status,
-         a.link,
+         s.id,
+-        s.name,
+-        s.query,
+-        s.location,
+-        ...(Array.isArray(s.sources) ? s.sources : []),
++        ...(Array.isArray(s.titlePatterns) ? s.titlePatterns : []),
++        ...(Array.isArray(s.industry) ? s.industry : []),
++        s.seniority,
++        s.workMode,
++        s.sourceUrl,
        ]
          .map((v) => safeString(v).toLowerCase())
          .join(' ');
@@ -220,39 +782,15 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
      });
    }, [items, search]);
  
-+  const stageFromApplication = (app: Application): StageValue =>
-+    normalizeStage(safeString(app.stage || app.status || ''), 'SAVED');
-+
-+  const applicationsByStage = useMemo(() => {
-+    const buckets = STAGE_OPTIONS.map((option) => ({
-+      value: option.value,
-+      label: option.label,
-+      applications: [] as Application[],
-+    }));
-+    const bucketMap = new Map<StageValue, (typeof buckets)[number]>(
-+      buckets.map((bucket) => [bucket.value, bucket]),
-+    );
-+
-+    filtered.forEach((app) => {
-+      const normalized = stageFromApplication(app);
-+      const target = bucketMap.get(normalized) ?? buckets[0];
-+      target.applications.push(app);
-+    });
-+
-+    return buckets;
-+  }, [filtered]);
-+
    async function loadList() {
      setLoading(true);
      setError('');
      setNotice('');
      try {
-       const data = await apiFetchJson<Application[]>('/api/applications', {
-         method: 'GET',
-       });
+       const data = await apiFetchJson<SearchSet[]>('/api/search-sets', { method: 'GET' });
        setItems(Array.isArray(data) ? data : []);
      } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to load applications');
+       setError(e instanceof Error ? e.message : 'Failed to load search sets');
      } finally {
        setLoading(false);
      }
@@ -264,14 +802,20 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
  
    function clearForm() {
      setEditingId(null);
-     setCompany('');
-     setTitle('');
-     setStage('APPLIED');
-     setLink('');
-     setAppliedDate('');
-     setNotes('');
-     setExtraJsonText('{ "cxFitScore": 94, "source": "LinkedIn" }');
+-    setName('');
+-    setQuery('');
+-    setLocation('');
+-    setRemoteOk(true);
+-    setSourcesCsv('linkedin, greenhouse');
++    setTitlePatternsInput('');
++    setIndustryInput('');
++    setSeniority(SearchSetSeniority.ANY);
++    setWorkMode(SearchSetWorkMode.ANY);
++    setSourceUrl('');
++    setIsActive(true);
++    setParsePreview(null);
      setDetail(null);
+     setRunResult(null);
      setError('');
      setNotice('');
    }
@@ -280,129 +824,181 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
      setBusy(true);
      setError('');
      setNotice('');
+     setRunResult(null);
      try {
-       const data = await apiFetchJson<Application>(`/api/applications/${id}`, {
-         method: 'GET',
-       });
+       const data = await apiFetchJson<SearchSet>(`/api/search-sets/${id}`, { method: 'GET' });
        setDetail(data);
  
        setEditingId(id);
-       setCompany(safeString(data.company));
-       setTitle(safeString(data.title || data.roleTitle));
--      setStage(normalizeStage(safeString(data.stage || data.status || 'APPLIED')));
-+      setStage(stageFromApplication(data));
-       setLink(safeString(data.link));
-       setAppliedDate(safeString(data.appliedDate));
-       setNotes(safeString(data.notes));
+-      setName(safeString(data.name));
+-      setQuery(safeString(data.query));
+-      setLocation(safeString(data.location));
+-      setRemoteOk(Boolean(data.remoteOk));
+-      setSourcesCsv(Array.isArray(data.sources) ? data.sources.join(', ') : safeString(data.sources));
++      setTitlePatternsInput(Array.isArray(data.titlePatterns) ? data.titlePatterns.join('\n') : '');
++      setIndustryInput(Array.isArray(data.industry) ? data.industry.join(', ') : '');
++      setSeniority((data.seniority as SearchSetSeniority) ?? SearchSetSeniority.ANY);
++      setWorkMode((data.workMode as SearchSetWorkMode) ?? SearchSetWorkMode.ANY);
++      setSourceUrl(data.sourceUrl ?? '');
++      setIsActive(Boolean(data.isActive));
++      setParsePreview(parseJobBoardUrlPreview(data.sourceUrl ?? ''));
  
-       const extra = data.extra ?? data.extraJson ?? {};
-       const text =
-         extra && typeof extra === 'object'
-           ? JSON.stringify(extra, null, 2)
-           : safeString(extra);
-       setExtraJsonText(text || '{}');
- 
-       setNotice('Loaded application into form');
+       setNotice('Loaded search set into form');
      } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to load application');
+       setError(e instanceof Error ? e.message : 'Failed to load search set');
      } finally {
        setBusy(false);
      }
    }
  
-   async function createApplication() {
+   async function createSearchSet() {
      setBusy(true);
      setError('');
      setNotice('');
+     setRunResult(null);
      try {
-       const t = title.trim();
-@@ -229,50 +279,72 @@ export default function ApplicationsPage() {
-         title: t,
-         roleTitle: t,
-         stage: normalizeStage(stage),
-         status: normalizeStage(stage),
-         link: link.trim() || undefined,
-         appliedDate: appliedDate.trim() ? toIsoDateIfNeeded(appliedDate) : undefined,
-         notes: notes.trim() || undefined,
-         extra: parseJsonOrEmpty(extraJsonText),
+-      const n = name.trim();
+-      if (!n) {
+-        setError('Name is required.');
+-        return;
+-      }
+-
+       const payload: Record<string, unknown> = {
+-        name: n,
+-        query: query.trim() || undefined,
+-        location: location.trim() || undefined,
+-        remoteOk,
+-        sources: parseCsvList(sourcesCsv),
++        titlePatterns: parseList(titlePatternsInput),
++        industry: parseList(industryInput),
++        seniority,
++        workMode,
++        sourceUrl: sourceUrl.trim() || null,
++        isActive,
        };
  
-       await apiFetchJson(`/api/applications/${editingId}`, {
+       await apiFetchJson('/api/search-sets', {
+         method: 'POST',
+         body: JSON.stringify(payload),
+       });
+ 
+       setNotice('Search set created');
+       await loadList();
+       clearForm();
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to create search set');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   async function updateSearchSet() {
+     if (!editingId) return;
+ 
+     setBusy(true);
+     setError('');
+     setNotice('');
+     setRunResult(null);
+     try {
+-      const n = name.trim();
+-      if (!n) {
+-        setError('Name is required.');
+-        return;
+-      }
+-
+       const payload: Record<string, unknown> = {
+-        name: n,
+-        query: query.trim() || undefined,
+-        location: location.trim() || undefined,
+-        remoteOk,
+-        sources: parseCsvList(sourcesCsv),
++        titlePatterns: parseList(titlePatternsInput),
++        industry: parseList(industryInput),
++        seniority,
++        workMode,
++        sourceUrl: sourceUrl.trim() || null,
++        isActive,
+       };
+ 
+       await apiFetchJson(`/api/search-sets/${editingId}`, {
          method: 'PATCH',
          body: JSON.stringify(payload),
        });
  
-       setNotice('Application updated');
+       setNotice('Search set updated');
        await loadList();
        await loadDetail(editingId);
      } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to update application');
+       setError(e instanceof Error ? e.message : 'Failed to update search set');
      } finally {
        setBusy(false);
      }
    }
  
-+  async function updateApplicationStage(id: string, nextStage: StageValue) {
-+    setStageUpdatingId(id);
-+    setError('');
-+    setNotice('');
-+    try {
-+      await apiFetchJson(`/api/applications/${id}`, {
-+        method: 'PATCH',
-+        body: JSON.stringify({ stage: normalizeStage(nextStage, nextStage) }),
-+      });
-+
-+      await loadList();
-+      if (editingId === id) {
-+        await loadDetail(id);
-+      }
-+      setNotice('Stage updated');
-+    } catch (e) {
-+      setError(e instanceof Error ? e.message : 'Failed to update stage');
-+    } finally {
-+      setStageUpdatingId(null);
-+    }
-+  }
-+
-   async function deleteApplication(id: string) {
+   async function deleteSearchSet(id: string) {
      setBusy(true);
      setError('');
      setNotice('');
+     setRunResult(null);
      try {
-       await apiFetchJson(`/api/applications/${id}`, { method: 'DELETE' });
-       setNotice('Application deleted');
-       await loadList();
-       if (editingId === id) clearForm();
-     } catch (e) {
-       setError(e instanceof Error ? e.message : 'Failed to delete application');
+       await apiFetchJson(`/api/search-sets/${id}`, { method: 'DELETE' });
+       setNotice('Search set deleted');
+@@ -217,50 +379,54 @@ export default function SearchSetsPage() {
+       setError(e instanceof Error ? e.message : 'Failed to delete search set');
      } finally {
        setBusy(false);
      }
    }
  
-   async function exportApplications() {
+   async function runSearchSet(id: string) {
      setBusy(true);
      setError('');
      setNotice('');
+     setRunResult(null);
      try {
-       const res = await fetch('/api/applications/export', {
-         method: 'GET',
-         cache: 'no-store',
+       const data = await apiFetchJson<unknown>(`/api/search-sets/${id}/run`, {
+         method: 'POST',
+         body: JSON.stringify({}),
        });
-@@ -331,99 +403,201 @@ export default function ApplicationsPage() {
+       setRunResult(data);
+       setNotice('Search set run completed');
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to run search set');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
++  useEffect(() => {
++    setParsePreview(parseJobBoardUrlPreview(sourceUrl));
++  }, [sourceUrl]);
++
+   const formModeLabel = editingId ? 'Update Search Set' : 'Create Search Set';
+ 
+   return (
+     <div className="mx-auto w-full max-w-6xl px-4 py-6">
+       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+         <div>
+           <h1 className="text-2xl font-semibold">Search Sets</h1>
+           <p className="text-sm text-gray-600">Create, manage, and run saved searches.</p>
+         </div>
+ 
+         <div className="flex flex-wrap gap-2">
+           <button
+             type="button"
+             onClick={() => void loadList()}
+             className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+             disabled={loading || busy}
+           >
+             Refresh
+           </button>
+ 
+           <button
              type="button"
              onClick={() => clearForm()}
              className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
              disabled={busy}
-           >
-             New
-           </button>
-         </div>
-       </div>
- 
-       {(error || notice) && (
-         <div className="mt-4 space-y-2">
-           {error && (
+@@ -276,197 +442,252 @@ export default function SearchSetsPage() {
              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                {error}
              </div>
@@ -415,124 +1011,21 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
          </div>
        )}
  
-+      <div className="mt-6 rounded border p-4">
-+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-+          <div>
-+            <h2 className="text-lg font-semibold">Pipeline</h2>
-+            <p className="text-xs text-gray-600">
-+              Applications grouped by stage. Use the dropdown to move items between stages.
-+            </p>
-+          </div>
-+          <div className="text-xs text-gray-600">
-+            Showing <span className="font-mono">{filtered.length}</span> of{' '}
-+            <span className="font-mono">{items.length}</span> records
-+          </div>
-+        </div>
-+
-+        <div className="mt-4 overflow-x-auto pb-2">
-+          <div className="flex min-w-[920px] gap-4">
-+            {applicationsByStage.map((bucket) => (
-+              <div
-+                key={bucket.value}
-+                className="flex w-64 flex-shrink-0 flex-col rounded border bg-white shadow-sm"
-+              >
-+                <div className="flex items-center justify-between border-b px-3 py-2">
-+                  <div className="text-sm font-semibold">{bucket.label}</div>
-+                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium">
-+                    {bucket.applications.length}
-+                  </span>
-+                </div>
-+
-+                <div className="flex-1 space-y-3 p-3">
-+                  {bucket.applications.length === 0 ? (
-+                    <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
-+                      {loading ? 'Loading...' : 'No applications in this stage'}
-+                    </div>
-+                  ) : (
-+                    bucket.applications.map((app) => {
-+                      const appStage = stageFromApplication(app);
-+                      return (
-+                        <div
-+                          key={app.id}
-+                          className="rounded border bg-gray-50 p-3 text-sm shadow-sm"
-+                        >
-+                          <div className="font-semibold leading-tight">
-+                            {safeString(app.title || app.roleTitle) || 'Untitled role'}
-+                          </div>
-+                          <div className="text-xs text-gray-600">
-+                            {safeString(app.company) || 'Unknown company'}
-+                          </div>
-+                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
-+                            <span>Applied</span>
-+                            <span className="font-mono">
-+                              {formatDateDisplay(safeString(app.appliedDate)) || '—'}
-+                            </span>
-+                          </div>
-+                          <div className="mt-3">
-+                            <label className="text-[11px] font-medium text-gray-700">Stage</label>
-+                            <select
-+                              className="mt-1 w-full rounded border px-2 py-1 text-sm"
-+                              value={appStage}
-+                              onChange={(e) =>
-+                                void updateApplicationStage(
-+                                  app.id,
-+                                  normalizeStage(e.target.value, appStage),
-+                                )
-+                              }
-+                              disabled={stageUpdatingId === app.id || busy}
-+                            >
-+                              {STAGE_OPTIONS.map((option) => (
-+                                <option key={option.value} value={option.value}>
-+                                  {option.label}
-+                                </option>
-+                              ))}
-+                            </select>
-+                          </div>
-+                          <div className="mt-3 flex gap-2">
-+                            <button
-+                              type="button"
-+                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
-+                              onClick={() => void loadDetail(app.id)}
-+                              disabled={busy}
-+                            >
-+                              Load in form
-+                            </button>
-+                            <button
-+                              type="button"
-+                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
-+                              onClick={() => void deleteApplication(app.id)}
-+                              disabled={busy}
-+                            >
-+                              Delete
-+                            </button>
-+                          </div>
-+                        </div>
-+                      );
-+                    })
-+                  )}
-+                </div>
-+              </div>
-+            ))}
-+          </div>
-+        </div>
-+      </div>
-+
        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
          <div className="lg:col-span-3">
            <div className="rounded border p-4">
              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                <div>
                  <h2 className="text-lg font-semibold">List</h2>
-                 <p className="text-xs text-gray-600">
-                   Use Edit to load a record into the form.
-                 </p>
+                 <p className="text-xs text-gray-600">Use Edit to load a record into the form.</p>
                </div>
                <div className="w-full sm:w-[320px]">
                  <input
                    value={search}
                    onChange={(e) => setSearch(e.target.value)}
                    className="w-full rounded border px-3 py-2 text-sm"
-                   placeholder="Filter by company, role, stage, link, or id"
+-                  placeholder="Filter by name, query, location, sources, or id"
++                  placeholder="Filter by title, industry, mode, URL, or id"
                  />
                </div>
              </div>
@@ -542,38 +1035,50 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
                  <thead className="bg-gray-50 text-left">
                    <tr>
                      <th className="whitespace-nowrap px-3 py-2">id</th>
-                     <th className="whitespace-nowrap px-3 py-2">company</th>
-                     <th className="whitespace-nowrap px-3 py-2">title</th>
-                     <th className="whitespace-nowrap px-3 py-2">stage</th>
-                     <th className="whitespace-nowrap px-3 py-2">createdAt</th>
+-                    <th className="whitespace-nowrap px-3 py-2">name</th>
+-                    <th className="whitespace-nowrap px-3 py-2">query</th>
+-                    <th className="whitespace-nowrap px-3 py-2">location</th>
++                    <th className="whitespace-nowrap px-3 py-2">title patterns</th>
++                    <th className="whitespace-nowrap px-3 py-2">seniority</th>
++                    <th className="whitespace-nowrap px-3 py-2">work mode</th>
++                    <th className="whitespace-nowrap px-3 py-2">source URL</th>
                      <th className="whitespace-nowrap px-3 py-2">Actions</th>
                    </tr>
                  </thead>
                  <tbody>
                    {filtered.length === 0 && (
                      <tr>
-                       <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
-                         {loading ? 'Loading...' : 'No applications found.'}
+-                      <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
++                      <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
+                         {loading ? 'Loading...' : 'No search sets found.'}
                        </td>
                      </tr>
                    )}
  
-                   {filtered.map((a) => (
-                     <tr key={a.id} className="border-t">
+                   {filtered.map((s) => (
+                     <tr key={s.id} className="border-t">
                        <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs">
-                         {a.id}
+                         {s.id}
                        </td>
-                       <td className="px-3 py-2">{safeString(a.company)}</td>
-                       <td className="px-3 py-2">{safeString(a.title || a.roleTitle)}</td>
--                      <td className="px-3 py-2">{safeString(a.stage || a.status)}</td>
-+                      <td className="px-3 py-2">{stageLabel(stageFromApplication(a))}</td>
-                       <td className="px-3 py-2">{safeString(a.createdAt || '')}</td>
+-                      <td className="px-3 py-2">{safeString(s.name)}</td>
+-                      <td className="px-3 py-2">{safeString(s.query)}</td>
+-                      <td className="px-3 py-2">{safeString(s.location)}</td>
++                      <td className="px-3 py-2">
++                        {Array.isArray(s.titlePatterns) && s.titlePatterns.length > 0
++                          ? s.titlePatterns.join(', ')
++                          : '—'}
++                      </td>
++                      <td className="px-3 py-2">{safeString(s.seniority)}</td>
++                      <td className="px-3 py-2">{safeString(s.workMode)}</td>
++                      <td className="max-w-[220px] truncate px-3 py-2 text-xs text-gray-700">
++                        {safeString(s.sourceUrl || '')}
++                      </td>
                        <td className="px-3 py-2">
                          <div className="flex gap-2">
                            <button
                              type="button"
                              className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
-                             onClick={() => void loadDetail(a.id)}
+                             onClick={() => void loadDetail(s.id)}
                              disabled={busy}
                            >
                              Edit
@@ -581,7 +1086,15 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
                            <button
                              type="button"
                              className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
-                             onClick={() => void deleteApplication(a.id)}
+                             onClick={() => void runSearchSet(s.id)}
+                             disabled={busy}
+                           >
+                             Run
+                           </button>
+                           <button
+                             type="button"
+                             className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+                             onClick={() => void deleteSearchSet(s.id)}
                              disabled={busy}
                            >
                              Delete
@@ -592,68 +1105,189 @@ index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8
                    ))}
                  </tbody>
                </table>
-@@ -451,58 +625,58 @@ export default function ApplicationsPage() {
+             </div>
+           </div>
+ 
+           <div className="mt-6 rounded border p-4">
+             <h2 className="text-lg font-semibold">Record detail</h2>
+             <p className="mt-1 text-xs text-gray-600">Select a row and click Edit.</p>
+ 
+             <pre className="mt-3 max-h-[220px] overflow-auto rounded bg-gray-50 p-3 text-xs">
+               {detail ? JSON.stringify(detail, null, 2) : '{}'}
+             </pre>
++            {detail?.parseWarning && (
++              <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
++                Parsing note: {detail.parseWarning}
++              </div>
++            )}
+ 
+             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
+             <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
+               {runResult ? JSON.stringify(runResult, null, 2) : '{}'}
+             </pre>
+           </div>
+         </div>
+ 
+         <div className="lg:col-span-2">
+           <div className="rounded border p-4">
+             <h2 className="text-lg font-semibold">{formModeLabel}</h2>
+ 
+             <div className="mt-4 space-y-3">
+               <div>
+-                <label className="block text-sm font-medium text-gray-700">Name</label>
+-                <input
++                <label className="block text-sm font-medium text-gray-700">Title patterns</label>
++                <textarea
                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={company}
-                   onChange={(e) => setCompany(e.target.value)}
-                   placeholder="Company"
+-                  value={name}
+-                  onChange={(e) => setName(e.target.value)}
+-                  placeholder="Search set name"
++                  value={titlePatternsInput}
++                  onChange={(e) => setTitlePatternsInput(e.target.value)}
++                  placeholder="Engineer\nProduct Manager"
++                  rows={4}
+                   disabled={busy}
+                 />
+-                <div className="mt-1 text-xs text-gray-500">Required.</div>
++                <div className="mt-1 text-xs text-gray-500">
++                  One per line or comma separated. Will be auto-filled when parsing a URL.
++                </div>
+               </div>
+ 
+               <div>
+-                <label className="block text-sm font-medium text-gray-700">Query</label>
+-                <textarea
++                <label className="block text-sm font-medium text-gray-700">Industry tags</label>
++                <input
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+-                  value={query}
+-                  onChange={(e) => setQuery(e.target.value)}
+-                  placeholder="Role keywords"
+-                  rows={3}
++                  value={industryInput}
++                  onChange={(e) => setIndustryInput(e.target.value)}
++                  placeholder="fintech, healthcare"
                    disabled={busy}
                  />
                </div>
  
                <div>
-                 <label className="block text-sm font-medium text-gray-700">Role Title</label>
-                 <input
+-                <label className="block text-sm font-medium text-gray-700">Location</label>
+-                <input
++                <label className="block text-sm font-medium text-gray-700">Seniority</label>
++                <select
                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={title}
-                   onChange={(e) => setTitle(e.target.value)}
-                   placeholder="Role title"
+-                  value={location}
+-                  onChange={(e) => setLocation(e.target.value)}
+-                  placeholder="e.g., Seattle, WA"
++                  value={seniority}
++                  onChange={(e) => setSeniority(e.target.value as SearchSetSeniority)}
                    disabled={busy}
-                 />
-                 <div className="mt-1 text-xs text-gray-500">Required.</div>
-               </div>
- 
-               <div>
-                 <label className="block text-sm font-medium text-gray-700">Stage</label>
-                 <select
-                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={stage}
--                  onChange={(e) => setStage(e.target.value)}
-+                  onChange={(e) => setStage(normalizeStage(e.target.value, stage))}
-                   disabled={busy}
-                 >
--                  <option value="APPLIED">APPLIED</option>
--                  <option value="SCREENING">SCREENING</option>
--                  <option value="INTERVIEWING">INTERVIEWING</option>
--                  <option value="OFFER">OFFER</option>
--                  <option value="REJECTED">REJECTED</option>
-+                  {STAGE_OPTIONS.map((option) => (
-+                    <option key={option.value} value={option.value}>
-+                      {option.label}
+-                />
++                >
++                  {Object.values(SearchSetSeniority).map((option) => (
++                    <option key={option} value={option}>
++                      {option}
 +                    </option>
 +                  ))}
-                 </select>
++                </select>
+               </div>
+ 
+-              <div className="flex items-center gap-2">
+-                <input
+-                  id="remoteOk"
+-                  type="checkbox"
+-                  checked={remoteOk}
+-                  onChange={(e) => setRemoteOk(e.target.checked)}
++              <div>
++                <label className="block text-sm font-medium text-gray-700">Work mode</label>
++                <select
++                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
++                  value={workMode}
++                  onChange={(e) => setWorkMode(e.target.value as SearchSetWorkMode)}
+                   disabled={busy}
+-                />
+-                <label htmlFor="remoteOk" className="text-sm text-gray-700">
+-                  Remote OK
+-                </label>
++                >
++                  {Object.values(SearchSetWorkMode).map((option) => (
++                    <option key={option} value={option}>
++                      {option}
++                    </option>
++                  ))}
++                </select>
                </div>
  
                <div>
-                 <label className="block text-sm font-medium text-gray-700">Link</label>
+                 <label className="block text-sm font-medium text-gray-700">
+-                  Sources (comma separated)
++                  Job board search URL (optional)
+                 </label>
                  <input
                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={link}
-                   onChange={(e) => setLink(e.target.value)}
-                   placeholder="Job link"
+-                  value={sourcesCsv}
+-                  onChange={(e) => setSourcesCsv(e.target.value)}
+-                  placeholder="linkedin, greenhouse, lever"
++                  value={sourceUrl}
++                  onChange={(e) => setSourceUrl(e.target.value)}
++                  placeholder="Paste a LinkedIn or job board search URL"
                    disabled={busy}
                  />
++                {parsePreview && (
++                  <div className="mt-2 rounded border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
++                    <div className="font-semibold">URL parse preview</div>
++                    <div className="mt-1">
++                      Titles: <span className="font-mono">{parsePreview.titlePatterns.join(', ') || '—'}</span>
++                    </div>
++                    <div>
++                      Seniority: <span className="font-mono">{parsePreview.seniority ?? '—'}</span>
++                    </div>
++                    <div>
++                      Work mode: <span className="font-mono">{parsePreview.workMode ?? '—'}</span>
++                    </div>
++                    {parsePreview.parseWarning ? (
++                      <div className="mt-2 text-amber-700">{parsePreview.parseWarning}</div>
++                    ) : (
++                      <div className="mt-2 text-green-700">Parsed filters will be applied on save.</div>
++                    )}
++                  </div>
++                )}
++              </div>
++
++              <div className="flex items-center gap-2">
++                <input
++                  id="isActive"
++                  type="checkbox"
++                  checked={isActive}
++                  onChange={(e) => setIsActive(e.target.checked)}
++                  disabled={busy}
++                />
++                <label htmlFor="isActive" className="text-sm text-gray-700">
++                  Active
++                </label>
                </div>
  
-               <div>
-                 <label className="block text-sm font-medium text-gray-700">Applied Date</label>
-                 <input
-                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                   value={appliedDate}
-                   onChange={(e) => setAppliedDate(e.target.value)}
-                   placeholder="2025-12-27 or ISO timestamp"
-                   disabled={busy}
-                 />
-               </div>
+               <div className="flex gap-2 pt-2">
+                 {!editingId ? (
+                   <button
+                     type="button"
+                     onClick={() => void createSearchSet()}
+                     className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
+                     disabled={busy}
+                   >
+                     Create
+                   </button>
+                 ) : (
+                   <button
+                     type="button"
+                     onClick={() => void updateSearchSet()}
+                     className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
+                     disabled={busy}
+                   >
+                     Save
+                   </button>
+                 )}
  
+                 <button
+                   type="button"

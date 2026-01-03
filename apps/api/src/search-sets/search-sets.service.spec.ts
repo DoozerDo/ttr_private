@@ -15,6 +15,8 @@ describe('SearchSetsService', () => {
     industry: [],
     workMode: SearchSetWorkMode.ANY,
     sourceUrl: null,
+    urlBacked: false,
+    parseWarning: null,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -53,10 +55,42 @@ describe('SearchSetsService', () => {
         sourceUrl: 'https://example.com',
         seniority: SearchSetSeniority.ANY,
         workMode: SearchSetWorkMode.ANY,
+        urlBacked: false,
+        parseWarning: null,
         isActive: true,
       }),
     );
     expect(result.titlePatterns).toEqual(['Senior Engineer']);
+  });
+
+  it('parses a LinkedIn search URL into filters', async () => {
+    const repository = createMockRepository();
+    const service = createService(repository);
+
+    const result = await service.createSearchSet('user-1', {
+      sourceUrl:
+        'https://www.linkedin.com/jobs/search?keywords=Product%20Manager&f_E=4&f_WT=2',
+    });
+
+    expect(result.urlBacked).toBe(true);
+    expect(result.titlePatterns).toEqual(['Product Manager']);
+    expect(result.seniority).toBe(SearchSetSeniority.SENIOR);
+    expect(result.workMode).toBe(SearchSetWorkMode.REMOTE);
+    expect(result.parseWarning).toBeNull();
+  });
+
+  it('stores raw URL with warning when parsing yields no filters', async () => {
+    const repository = createMockRepository();
+    const service = createService(repository);
+
+    const result = await service.createSearchSet('user-1', {
+      sourceUrl: 'https://jobs.example.com/listings?page=2',
+    });
+
+    expect(result.urlBacked).toBe(true);
+    expect(result.sourceUrl).toBe('https://jobs.example.com/listings?page=2');
+    expect(result.titlePatterns).toEqual([]);
+    expect(result.parseWarning).toContain('Stored URL');
   });
 
   it('lists search sets for a user', async () => {

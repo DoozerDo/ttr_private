@@ -3,18 +3,43 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiFetchJson } from '../lib/api';
 
-type AnyRecord = Record<string, unknown>;
+enum SearchSetSeniority {
+  ENTRY = 'ENTRY',
+  MID = 'MID',
+  SENIOR = 'SENIOR',
+  LEAD = 'LEAD',
+  EXECUTIVE = 'EXECUTIVE',
+  ANY = 'ANY',
+}
+
+enum SearchSetWorkMode {
+  REMOTE = 'REMOTE',
+  HYBRID = 'HYBRID',
+  ONSITE = 'ONSITE',
+  ANY = 'ANY',
+}
 
 type SearchSet = {
   id: string;
-  name?: string;
-  query?: string;
-  location?: string;
-  remoteOk?: boolean;
-  sources?: string[];
+  titlePatterns: string[];
+  seniority: SearchSetSeniority;
+  industry: string[];
+  workMode: SearchSetWorkMode;
+  sourceUrl: string | null;
+  urlBacked?: boolean;
+  parseWarning?: string | null;
+  isActive: boolean;
   createdAt?: string;
   updatedAt?: string;
-} & AnyRecord;
+};
+
+type ParsedUrlPreview = {
+  sourceUrl: string;
+  titlePatterns: string[];
+  seniority?: SearchSetSeniority;
+  workMode?: SearchSetWorkMode;
+  parseWarning: string | null;
+};
 
 function safeString(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -28,13 +53,153 @@ function safeString(v: unknown): string {
   }
 }
 
-function parseCsvList(input: string): string[] {
+function parseList(input: string): string[] {
   const s = (input || '').trim();
   if (!s) return [];
   return s
-    .split(',')
+    .split(/[\n,]/)
     .map((x) => x.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function detectWorkMode(url: URL): SearchSetWorkMode | null {
+  const param =
+    url.searchParams.get('f_WT') ||
+    url.searchParams.get('workplaceType') ||
+    url.searchParams.get('remoteWorkplaceType');
+  const map: Record<string, SearchSetWorkMode> = {
+    '1': SearchSetWorkMode.ONSITE,
+    '2': SearchSetWorkMode.REMOTE,
+    '3': SearchSetWorkMode.HYBRID,
+    onsite: SearchSetWorkMode.ONSITE,
+    remote: SearchSetWorkMode.REMOTE,
+    hybrid: SearchSetWorkMode.HYBRID,
+  };
+
+  if (param) {
+    for (const token of param.split(',').map((v) => v.trim().toLowerCase())) {
+      if (map[token]) {
+        return map[token];
+      }
+    }
+  }
+
+  const haystack = `${url.searchParams.toString()} ${url.pathname}`.toLowerCase();
+  if (haystack.includes('remote')) return SearchSetWorkMode.REMOTE;
+  if (haystack.includes('hybrid')) return SearchSetWorkMode.HYBRID;
+  if (haystack.includes('onsite') || haystack.includes('on-site')) return SearchSetWorkMode.ONSITE;
+  return null;
+}
+
+function detectSeniority(url: URL): SearchSetSeniority | null {
+  const param = url.searchParams.get('f_E') || url.searchParams.get('experience') || url.searchParams.get('level');
+  const map: Record<string, SearchSetSeniority> = {
+    '1': SearchSetSeniority.ENTRY,
+    '2': SearchSetSeniority.ENTRY,
+    '3': SearchSetSeniority.MID,
+    '4': SearchSetSeniority.SENIOR,
+    '5': SearchSetSeniority.LEAD,
+    '6': SearchSetSeniority.EXECUTIVE,
+    entry: SearchSetSeniority.ENTRY,
+    junior: SearchSetSeniority.ENTRY,
+    associate: SearchSetSeniority.MID,
+    mid: SearchSetSeniority.MID,
+    senior: SearchSetSeniority.SENIOR,
+    lead: SearchSetSeniority.LEAD,
+    director: SearchSetSeniority.EXECUTIVE,
+    executive: SearchSetSeniority.EXECUTIVE,
+    vp: SearchSetSeniority.EXECUTIVE,
+  };
+
+  if (param) {
+    for (const token of param.split(',').map((v) => v.trim().toLowerCase())) {
+      if (map[token]) {
+        return map[token];
+      }
+    }
+  }
+
+  const haystack = decodeURIComponent(url.search).toLowerCase();
+  for (const [key, value] of Object.entries(map)) {
+    if (haystack.includes(key)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function detectTitlePatterns(url: URL) {
+  const candidates = ['keywords', 'keyword', 'title', 'q', 'query', 'position'];
+  const patterns: string[] = [];
+
+  for (const key of candidates) {
+    const value = url.searchParams.get(key);
+    if (value) {
+      patterns.push(...value.split(/[,|]/));
+    }
+  }
+
+  return parseList(patterns.join(','));
+}
+
+function parseJobBoardUrlPreview(rawUrl: string): ParsedUrlPreview | null {
+  const cleaned = rawUrl.trim();
+  if (!cleaned) return null;
+
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(cleaned);
+  } catch {
+    return {
+      sourceUrl: cleaned,
+      titlePatterns: [],
+      parseWarning: 'Stored URL but could not parse its parameters.',
+    };
+  }
+
+  const titlePatterns = detectTitlePatterns(parsed);
+  const seniority = detectSeniority(parsed) ?? undefined;
+  const workMode = detectWorkMode(parsed) ?? undefined;
+
+  const parsedFields: string[] = [];
+  const missingFields: string[] = [];
+
+  if (titlePatterns.length > 0) {
+    parsedFields.push('titles');
+  } else {
+    missingFields.push('titles');
+  }
+
+  if (seniority) {
+    parsedFields.push('seniority');
+  } else {
+    missingFields.push('seniority');
+  }
+
+  if (workMode) {
+    parsedFields.push('work mode');
+  } else {
+    missingFields.push('work mode');
+  }
+
+  let parseWarning: string | null = null;
+  if (missingFields.length === 3) {
+    parseWarning = 'Stored URL but did not recognize keywords or filters.';
+  } else if (missingFields.length > 0) {
+    parseWarning = `Parsed ${parsedFields.join(', ')}; missing ${missingFields.join(
+      ', ',
+    )} from URL.`;
+  }
+
+  return {
+    sourceUrl: parsed.toString(),
+    titlePatterns,
+    seniority,
+    workMode,
+    parseWarning,
+  };
 }
 
 export default function SearchSetsPage() {
@@ -49,11 +214,13 @@ export default function SearchSetsPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const [name, setName] = useState<string>('');
-  const [query, setQuery] = useState<string>('');
-  const [location, setLocation] = useState<string>('');
-  const [remoteOk, setRemoteOk] = useState<boolean>(true);
-  const [sourcesCsv, setSourcesCsv] = useState<string>('linkedin, greenhouse');
+  const [titlePatternsInput, setTitlePatternsInput] = useState<string>('');
+  const [industryInput, setIndustryInput] = useState<string>('');
+  const [seniority, setSeniority] = useState<SearchSetSeniority>(SearchSetSeniority.ANY);
+  const [workMode, setWorkMode] = useState<SearchSetWorkMode>(SearchSetWorkMode.ANY);
+  const [sourceUrl, setSourceUrl] = useState<string>('');
+  const [isActive, setIsActive] = useState<boolean>(true);
+  const [parsePreview, setParsePreview] = useState<ParsedUrlPreview | null>(null);
 
   const [detail, setDetail] = useState<SearchSet | null>(null);
   const [runResult, setRunResult] = useState<unknown>(null);
@@ -65,10 +232,11 @@ export default function SearchSetsPage() {
     return items.filter((s) => {
       const hay = [
         s.id,
-        s.name,
-        s.query,
-        s.location,
-        ...(Array.isArray(s.sources) ? s.sources : []),
+        ...(Array.isArray(s.titlePatterns) ? s.titlePatterns : []),
+        ...(Array.isArray(s.industry) ? s.industry : []),
+        s.seniority,
+        s.workMode,
+        s.sourceUrl,
       ]
         .map((v) => safeString(v).toLowerCase())
         .join(' ');
@@ -96,11 +264,13 @@ export default function SearchSetsPage() {
 
   function clearForm() {
     setEditingId(null);
-    setName('');
-    setQuery('');
-    setLocation('');
-    setRemoteOk(true);
-    setSourcesCsv('linkedin, greenhouse');
+    setTitlePatternsInput('');
+    setIndustryInput('');
+    setSeniority(SearchSetSeniority.ANY);
+    setWorkMode(SearchSetWorkMode.ANY);
+    setSourceUrl('');
+    setIsActive(true);
+    setParsePreview(null);
     setDetail(null);
     setRunResult(null);
     setError('');
@@ -117,11 +287,13 @@ export default function SearchSetsPage() {
       setDetail(data);
 
       setEditingId(id);
-      setName(safeString(data.name));
-      setQuery(safeString(data.query));
-      setLocation(safeString(data.location));
-      setRemoteOk(Boolean(data.remoteOk));
-      setSourcesCsv(Array.isArray(data.sources) ? data.sources.join(', ') : safeString(data.sources));
+      setTitlePatternsInput(Array.isArray(data.titlePatterns) ? data.titlePatterns.join('\n') : '');
+      setIndustryInput(Array.isArray(data.industry) ? data.industry.join(', ') : '');
+      setSeniority((data.seniority as SearchSetSeniority) ?? SearchSetSeniority.ANY);
+      setWorkMode((data.workMode as SearchSetWorkMode) ?? SearchSetWorkMode.ANY);
+      setSourceUrl(data.sourceUrl ?? '');
+      setIsActive(Boolean(data.isActive));
+      setParsePreview(parseJobBoardUrlPreview(data.sourceUrl ?? ''));
 
       setNotice('Loaded search set into form');
     } catch (e) {
@@ -137,18 +309,13 @@ export default function SearchSetsPage() {
     setNotice('');
     setRunResult(null);
     try {
-      const n = name.trim();
-      if (!n) {
-        setError('Name is required.');
-        return;
-      }
-
       const payload: Record<string, unknown> = {
-        name: n,
-        query: query.trim() || undefined,
-        location: location.trim() || undefined,
-        remoteOk,
-        sources: parseCsvList(sourcesCsv),
+        titlePatterns: parseList(titlePatternsInput),
+        industry: parseList(industryInput),
+        seniority,
+        workMode,
+        sourceUrl: sourceUrl.trim() || null,
+        isActive,
       };
 
       await apiFetchJson('/api/search-sets', {
@@ -174,18 +341,13 @@ export default function SearchSetsPage() {
     setNotice('');
     setRunResult(null);
     try {
-      const n = name.trim();
-      if (!n) {
-        setError('Name is required.');
-        return;
-      }
-
       const payload: Record<string, unknown> = {
-        name: n,
-        query: query.trim() || undefined,
-        location: location.trim() || undefined,
-        remoteOk,
-        sources: parseCsvList(sourcesCsv),
+        titlePatterns: parseList(titlePatternsInput),
+        industry: parseList(industryInput),
+        seniority,
+        workMode,
+        sourceUrl: sourceUrl.trim() || null,
+        isActive,
       };
 
       await apiFetchJson(`/api/search-sets/${editingId}`, {
@@ -238,6 +400,10 @@ export default function SearchSetsPage() {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    setParsePreview(parseJobBoardUrlPreview(sourceUrl));
+  }, [sourceUrl]);
 
   const formModeLabel = editingId ? 'Update Search Set' : 'Create Search Set';
 
@@ -298,7 +464,7 @@ export default function SearchSetsPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full rounded border px-3 py-2 text-sm"
-                  placeholder="Filter by name, query, location, sources, or id"
+                  placeholder="Filter by title, industry, mode, URL, or id"
                 />
               </div>
             </div>
@@ -308,16 +474,17 @@ export default function SearchSetsPage() {
                 <thead className="bg-gray-50 text-left">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2">id</th>
-                    <th className="whitespace-nowrap px-3 py-2">name</th>
-                    <th className="whitespace-nowrap px-3 py-2">query</th>
-                    <th className="whitespace-nowrap px-3 py-2">location</th>
+                    <th className="whitespace-nowrap px-3 py-2">title patterns</th>
+                    <th className="whitespace-nowrap px-3 py-2">seniority</th>
+                    <th className="whitespace-nowrap px-3 py-2">work mode</th>
+                    <th className="whitespace-nowrap px-3 py-2">source URL</th>
                     <th className="whitespace-nowrap px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 && (
                     <tr>
-                      <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
+                      <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
                         {loading ? 'Loading...' : 'No search sets found.'}
                       </td>
                     </tr>
@@ -328,9 +495,16 @@ export default function SearchSetsPage() {
                       <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs">
                         {s.id}
                       </td>
-                      <td className="px-3 py-2">{safeString(s.name)}</td>
-                      <td className="px-3 py-2">{safeString(s.query)}</td>
-                      <td className="px-3 py-2">{safeString(s.location)}</td>
+                      <td className="px-3 py-2">
+                        {Array.isArray(s.titlePatterns) && s.titlePatterns.length > 0
+                          ? s.titlePatterns.join(', ')
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2">{safeString(s.seniority)}</td>
+                      <td className="px-3 py-2">{safeString(s.workMode)}</td>
+                      <td className="max-w-[220px] truncate px-3 py-2 text-xs text-gray-700">
+                        {safeString(s.sourceUrl || '')}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
                           <button
@@ -373,6 +547,11 @@ export default function SearchSetsPage() {
             <pre className="mt-3 max-h-[220px] overflow-auto rounded bg-gray-50 p-3 text-xs">
               {detail ? JSON.stringify(detail, null, 2) : '{}'}
             </pre>
+            {detail?.parseWarning && (
+              <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Parsing note: {detail.parseWarning}
+              </div>
+            )}
 
             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
             <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
@@ -387,64 +566,106 @@ export default function SearchSetsPage() {
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Name</label>
-                <input
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Search set name"
-                  disabled={busy}
-                />
-                <div className="mt-1 text-xs text-gray-500">Required.</div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Query</label>
+                <label className="block text-sm font-medium text-gray-700">Title patterns</label>
                 <textarea
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Role keywords"
-                  rows={3}
+                  value={titlePatternsInput}
+                  onChange={(e) => setTitlePatternsInput(e.target.value)}
+                  placeholder="Engineer\nProduct Manager"
+                  rows={4}
+                  disabled={busy}
+                />
+                <div className="mt-1 text-xs text-gray-500">
+                  One per line or comma separated. Will be auto-filled when parsing a URL.
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Industry tags</label>
+                <input
+                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={industryInput}
+                  onChange={(e) => setIndustryInput(e.target.value)}
+                  placeholder="fintech, healthcare"
                   disabled={busy}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Location</label>
-                <input
+                <label className="block text-sm font-medium text-gray-700">Seniority</label>
+                <select
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g., Seattle, WA"
+                  value={seniority}
+                  onChange={(e) => setSeniority(e.target.value as SearchSetSeniority)}
                   disabled={busy}
-                />
+                >
+                  {Object.values(SearchSetSeniority).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="flex items-center gap-2">
-                <input
-                  id="remoteOk"
-                  type="checkbox"
-                  checked={remoteOk}
-                  onChange={(e) => setRemoteOk(e.target.checked)}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Work mode</label>
+                <select
+                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  value={workMode}
+                  onChange={(e) => setWorkMode(e.target.value as SearchSetWorkMode)}
                   disabled={busy}
-                />
-                <label htmlFor="remoteOk" className="text-sm text-gray-700">
-                  Remote OK
-                </label>
+                >
+                  {Object.values(SearchSetWorkMode).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
-                  Sources (comma separated)
+                  Job board search URL (optional)
                 </label>
                 <input
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={sourcesCsv}
-                  onChange={(e) => setSourcesCsv(e.target.value)}
-                  placeholder="linkedin, greenhouse, lever"
+                  value={sourceUrl}
+                  onChange={(e) => setSourceUrl(e.target.value)}
+                  placeholder="Paste a LinkedIn or job board search URL"
                   disabled={busy}
                 />
+                {parsePreview && (
+                  <div className="mt-2 rounded border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                    <div className="font-semibold">URL parse preview</div>
+                    <div className="mt-1">
+                      Titles: <span className="font-mono">{parsePreview.titlePatterns.join(', ') || '—'}</span>
+                    </div>
+                    <div>
+                      Seniority: <span className="font-mono">{parsePreview.seniority ?? '—'}</span>
+                    </div>
+                    <div>
+                      Work mode: <span className="font-mono">{parsePreview.workMode ?? '—'}</span>
+                    </div>
+                    {parsePreview.parseWarning ? (
+                      <div className="mt-2 text-amber-700">{parsePreview.parseWarning}</div>
+                    ) : (
+                      <div className="mt-2 text-green-700">Parsed filters will be applied on save.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="isActive"
+                  type="checkbox"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                  disabled={busy}
+                />
+                <label htmlFor="isActive" className="text-sm text-gray-700">
+                  Active
+                </label>
               </div>
 
               <div className="flex gap-2 pt-2">
