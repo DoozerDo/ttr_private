@@ -67,3 +67,35 @@ docker compose -f infra\docker\docker-compose.dev.yml logs -f --timestamps
 Docker Container Check: 
 docker compose -f infra/docker/docker-compose.dev.yml ps 
 
+DB
+Connect:
+docker exec -it docker-db-1 psql -U postgres -d targetthisrole
+
+Cmds: 
+\dt
+
+SELECT COUNT(*) AS users FROM users;
+SELECT COUNT(*) AS baselines FROM baselines;
+SELECT COUNT(*) AS sections FROM baseline_sections;
+SELECT COUNT(*) AS jobs FROM jobs;
+SELECT COUNT(*) AS fits FROM fit_assessments;
+SELECT COUNT(*) AS interviews FROM interviews;
+SELECT COUNT(*) AS drafts FROM resume_drafts;
+SELECT COUNT(*) AS audit FROM audit_logs;
+
+
+SELECT id, email
+FROM users
+LIMIT 10;
+
+SELECT *
+FROM users
+LIMIT 10;
+
+SELECT *
+FROM users
+ORDER BY "createdAt" DESC
+LIMIT 10;
+
+SELECT "id", "userId"
+FROM resume_drafts;
