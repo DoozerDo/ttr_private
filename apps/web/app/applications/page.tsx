@@ -21,6 +21,18 @@ type Application = {
   updatedAt?: string;
 } & AnyRecord;
 
+const STAGE_OPTIONS = [
+  { value: 'SAVED', label: 'Saved' },
+  { value: 'APPLIED', label: 'Applied' },
+  { value: 'SCREENING', label: 'Screening' },
+  { value: 'INTERVIEWING', label: 'Interviewing' },
+  { value: 'OFFER', label: 'Offer' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'WITHDRAWN', label: 'Withdrawn' },
+] as const;
+
+type StageValue = (typeof STAGE_OPTIONS)[number]['value'];
+
 function safeString(v: unknown): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'number') return String(v);
@@ -33,10 +45,18 @@ function safeString(v: unknown): string {
   }
 }
 
-function normalizeStage(input: string): string {
-  const s = (input || '').trim();
-  if (!s) return 'APPLIED';
-  return s.toUpperCase();
+function normalizeStage(input: string, fallback: StageValue = 'APPLIED'): StageValue {
+  const s = (input || '').trim().toUpperCase();
+  const found = STAGE_OPTIONS.find((option) => option.value === s);
+  return found ? found.value : fallback;
+}
+
+function stageLabel(stage: string | undefined): string {
+  if (!stage) return 'Unknown';
+  const found = STAGE_OPTIONS.find((option) => option.value === stage);
+  if (found) return found.label;
+  const pretty = stage.toLowerCase().replace(/(^|\s)\w/g, (m) => m.toUpperCase());
+  return pretty || 'Unknown';
 }
 
 function parseJsonOrEmpty(input: string): unknown {
@@ -62,6 +82,13 @@ function toIsoDateIfNeeded(s: string): string {
   return d.toISOString();
 }
 
+function formatDateDisplay(value: string | undefined): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString();
+}
+
 export default function ApplicationsPage() {
   const [items, setItems] = useState<Application[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -76,7 +103,7 @@ export default function ApplicationsPage() {
 
   const [company, setCompany] = useState<string>('');
   const [title, setTitle] = useState<string>('');
-  const [stage, setStage] = useState<string>('APPLIED');
+  const [stage, setStage] = useState<StageValue>('APPLIED');
   const [link, setLink] = useState<string>('');
   const [appliedDate, setAppliedDate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -85,6 +112,7 @@ export default function ApplicationsPage() {
   );
 
   const [detail, setDetail] = useState<Application | null>(null);
+  const [stageUpdatingId, setStageUpdatingId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = (search || '').trim().toLowerCase();
@@ -105,6 +133,28 @@ export default function ApplicationsPage() {
       return hay.includes(q);
     });
   }, [items, search]);
+
+  const stageFromApplication = (app: Application): StageValue =>
+    normalizeStage(safeString(app.stage || app.status || ''), 'SAVED');
+
+  const applicationsByStage = useMemo(() => {
+    const buckets = STAGE_OPTIONS.map((option) => ({
+      value: option.value,
+      label: option.label,
+      applications: [] as Application[],
+    }));
+    const bucketMap = new Map<StageValue, (typeof buckets)[number]>(
+      buckets.map((bucket) => [bucket.value, bucket]),
+    );
+
+    filtered.forEach((app) => {
+      const normalized = stageFromApplication(app);
+      const target = bucketMap.get(normalized) ?? buckets[0];
+      target.applications.push(app);
+    });
+
+    return buckets;
+  }, [filtered]);
 
   async function loadList() {
     setLoading(true);
@@ -153,7 +203,7 @@ export default function ApplicationsPage() {
       setEditingId(id);
       setCompany(safeString(data.company));
       setTitle(safeString(data.title || data.roleTitle));
-      setStage(normalizeStage(safeString(data.stage || data.status || 'APPLIED')));
+      setStage(stageFromApplication(data));
       setLink(safeString(data.link));
       setAppliedDate(safeString(data.appliedDate));
       setNotes(safeString(data.notes));
@@ -248,6 +298,28 @@ export default function ApplicationsPage() {
       setError(e instanceof Error ? e.message : 'Failed to update application');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function updateApplicationStage(id: string, nextStage: StageValue) {
+    setStageUpdatingId(id);
+    setError('');
+    setNotice('');
+    try {
+      await apiFetchJson(`/api/applications/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ stage: normalizeStage(nextStage, nextStage) }),
+      });
+
+      await loadList();
+      if (editingId === id) {
+        await loadDetail(id);
+      }
+      setNotice('Stage updated');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update stage');
+    } finally {
+      setStageUpdatingId(null);
     }
   }
 
@@ -353,6 +425,108 @@ export default function ApplicationsPage() {
         </div>
       )}
 
+      <div className="mt-6 rounded border p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Pipeline</h2>
+            <p className="text-xs text-gray-600">
+              Applications grouped by stage. Use the dropdown to move items between stages.
+            </p>
+          </div>
+          <div className="text-xs text-gray-600">
+            Showing <span className="font-mono">{filtered.length}</span> of{' '}
+            <span className="font-mono">{items.length}</span> records
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto pb-2">
+          <div className="flex min-w-[920px] gap-4">
+            {applicationsByStage.map((bucket) => (
+              <div
+                key={bucket.value}
+                className="flex w-64 flex-shrink-0 flex-col rounded border bg-white shadow-sm"
+              >
+                <div className="flex items-center justify-between border-b px-3 py-2">
+                  <div className="text-sm font-semibold">{bucket.label}</div>
+                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium">
+                    {bucket.applications.length}
+                  </span>
+                </div>
+
+                <div className="flex-1 space-y-3 p-3">
+                  {bucket.applications.length === 0 ? (
+                    <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
+                      {loading ? 'Loading...' : 'No applications in this stage'}
+                    </div>
+                  ) : (
+                    bucket.applications.map((app) => {
+                      const appStage = stageFromApplication(app);
+                      return (
+                        <div
+                          key={app.id}
+                          className="rounded border bg-gray-50 p-3 text-sm shadow-sm"
+                        >
+                          <div className="font-semibold leading-tight">
+                            {safeString(app.title || app.roleTitle) || 'Untitled role'}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {safeString(app.company) || 'Unknown company'}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
+                            <span>Applied</span>
+                            <span className="font-mono">
+                              {formatDateDisplay(safeString(app.appliedDate)) || '—'}
+                            </span>
+                          </div>
+                          <div className="mt-3">
+                            <label className="text-[11px] font-medium text-gray-700">Stage</label>
+                            <select
+                              className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                              value={appStage}
+                              onChange={(e) =>
+                                void updateApplicationStage(
+                                  app.id,
+                                  normalizeStage(e.target.value, appStage),
+                                )
+                              }
+                              disabled={stageUpdatingId === app.id || busy}
+                            >
+                              {STAGE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
+                              onClick={() => void loadDetail(app.id)}
+                              disabled={busy}
+                            >
+                              Load in form
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
+                              onClick={() => void deleteApplication(app.id)}
+                              disabled={busy}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <div className="rounded border p-4">
@@ -401,7 +575,7 @@ export default function ApplicationsPage() {
                       </td>
                       <td className="px-3 py-2">{safeString(a.company)}</td>
                       <td className="px-3 py-2">{safeString(a.title || a.roleTitle)}</td>
-                      <td className="px-3 py-2">{safeString(a.stage || a.status)}</td>
+                      <td className="px-3 py-2">{stageLabel(stageFromApplication(a))}</td>
                       <td className="px-3 py-2">{safeString(a.createdAt || '')}</td>
                       <td className="px-3 py-2">
                         <div className="flex gap-2">
@@ -473,14 +647,14 @@ export default function ApplicationsPage() {
                 <select
                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
                   value={stage}
-                  onChange={(e) => setStage(e.target.value)}
+                  onChange={(e) => setStage(normalizeStage(e.target.value, stage))}
                   disabled={busy}
                 >
-                  <option value="APPLIED">APPLIED</option>
-                  <option value="SCREENING">SCREENING</option>
-                  <option value="INTERVIEWING">INTERVIEWING</option>
-                  <option value="OFFER">OFFER</option>
-                  <option value="REJECTED">REJECTED</option>
+                  {STAGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 

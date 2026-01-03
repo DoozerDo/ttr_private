@@ -176,6 +176,27 @@ describe('ApplicationsService', () => {
       expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
       expect(result.notes).toBe('Had phone screen');
     });
+
+    it('persists a stage-only change', async () => {
+      const repository = createMockRepository();
+      const existing = { ...mockApplication, stage: ApplicationStage.SCREENING };
+      repository.findOne.mockResolvedValue(existing);
+      const service = createService(repository);
+
+      const result = await service.updateApplication('app-1', 'user-1', {
+        stage: ApplicationStage.OFFER,
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'app-1',
+          stage: ApplicationStage.OFFER,
+          company: existing.company,
+          title: existing.title,
+        }),
+      );
+      expect(result.stage).toBe(ApplicationStage.OFFER);
+    });
   });
 
   describe('deleteApplication', () => {

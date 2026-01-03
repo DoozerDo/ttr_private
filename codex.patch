@@ -1,46 +1,659 @@
-diff --git a/apps/web/app/api/fit-scores/route.ts b/apps/web/app/api/fit-scores/route.ts
-index 9ca059a77a16f9b180f122cc5f15da2659277b7d..33487817d80d24cfb3c05d638abca7fe27d2b824 100644
---- a/apps/web/app/api/fit-scores/route.ts
-+++ b/apps/web/app/api/fit-scores/route.ts
-@@ -1,20 +1,41 @@
- import { NextRequest, NextResponse } from "next/server";
- import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+diff --git a/apps/api/src/applications/applications.service.spec.ts b/apps/api/src/applications/applications.service.spec.ts
+index fb0ba2b4ed9c4134281da479fd29419b58ef0064..ab67bc05db3533d56b55fdb7bd17c398c0bfd961 100644
+--- a/apps/api/src/applications/applications.service.spec.ts
++++ b/apps/api/src/applications/applications.service.spec.ts
+@@ -154,50 +154,71 @@ describe('ApplicationsService', () => {
+     it('enforces ownership', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue(null);
+       const service = createService(repository);
  
- export const runtime = "nodejs";
- 
- export async function GET(req: NextRequest) {
-   const baseUrl = getApiBaseUrl();
-   const auth = requireAuthToken(req);
- 
-   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-   if (!auth.token) return auth.error;
- 
-   const response = await fetch(`${baseUrl}/analysis/fit-scores`, {
-     method: "GET",
-     cache: "no-store",
-     headers: { Authorization: `Bearer ${auth.token}` },
+       await expect(service.getApplicationForUser('app-1', 'other-user')).rejects.toThrow(
+         'Application not found',
+       );
+     });
    });
  
-   return relayApiResponse(response);
+   describe('updateApplication', () => {
+     it('updates application fields', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue({ ...mockApplication });
+       const service = createService(repository);
+ 
+       const result = await service.updateApplication('app-1', 'user-1', {
+         stage: ApplicationStage.INTERVIEWING,
+         notes: 'Had phone screen',
+       });
+ 
+       expect(result.stage).toBe(ApplicationStage.INTERVIEWING);
+       expect(result.notes).toBe('Had phone screen');
+     });
++
++    it('persists a stage-only change', async () => {
++      const repository = createMockRepository();
++      const existing = { ...mockApplication, stage: ApplicationStage.SCREENING };
++      repository.findOne.mockResolvedValue(existing);
++      const service = createService(repository);
++
++      const result = await service.updateApplication('app-1', 'user-1', {
++        stage: ApplicationStage.OFFER,
++      });
++
++      expect(repository.save).toHaveBeenCalledWith(
++        expect.objectContaining({
++          id: 'app-1',
++          stage: ApplicationStage.OFFER,
++          company: existing.company,
++          title: existing.title,
++        }),
++      );
++      expect(result.stage).toBe(ApplicationStage.OFFER);
++    });
+   });
+ 
+   describe('deleteApplication', () => {
+     it('deletes application', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue(mockApplication);
+       const service = createService(repository);
+ 
+       const result = await service.deleteApplication('app-1', 'user-1');
+ 
+       expect(repository.remove).toHaveBeenCalled();
+       expect(result).toEqual({ deleted: true, id: 'app-1' });
+     });
+   });
+ 
+   describe('exportApplicationsToCsv', () => {
+     it('exports applications and audits compliance', async () => {
+       const repository = createMockRepository();
+       const complianceService = createMockComplianceService();
+ 
+       repository.find.mockResolvedValue([
+         {
+           ...mockApplication,
+           appliedDate: new Date('2024-01-01T00:00:00.000Z'),
+           fitScore: 80,
+diff --git a/apps/web/app/applications/page.tsx b/apps/web/app/applications/page.tsx
+index dd47dc47bc92bbcc6ca9b4b1244f0b6c938f2243..c63c7e3032c54d81885f32291cc715a8908588f3 100644
+--- a/apps/web/app/applications/page.tsx
++++ b/apps/web/app/applications/page.tsx
+@@ -1,181 +1,231 @@
+ 'use client';
+ 
+ import React, { useEffect, useMemo, useState } from 'react';
+ import { apiFetchJson, downloadBlob } from '../lib/api';
+ 
+ type AnyRecord = Record<string, unknown>;
+ 
+ type Application = {
+   id: string;
+   company?: string;
+   title?: string;
+   roleTitle?: string;
+   stage?: string;
+   status?: string;
+   link?: string;
+   appliedDate?: string;
+   notes?: string;
+   extra?: unknown;
+   extraJson?: unknown;
+   createdAt?: string;
+   updatedAt?: string;
+ } & AnyRecord;
+ 
++const STAGE_OPTIONS = [
++  { value: 'SAVED', label: 'Saved' },
++  { value: 'APPLIED', label: 'Applied' },
++  { value: 'SCREENING', label: 'Screening' },
++  { value: 'INTERVIEWING', label: 'Interviewing' },
++  { value: 'OFFER', label: 'Offer' },
++  { value: 'REJECTED', label: 'Rejected' },
++  { value: 'WITHDRAWN', label: 'Withdrawn' },
++] as const;
++
++type StageValue = (typeof STAGE_OPTIONS)[number]['value'];
++
+ function safeString(v: unknown): string {
+   if (typeof v === 'string') return v;
+   if (typeof v === 'number') return String(v);
+   if (typeof v === 'boolean') return v ? 'true' : 'false';
+   if (v === null || v === undefined) return '';
+   try {
+     return JSON.stringify(v);
+   } catch {
+     return String(v);
+   }
  }
-+
-+export async function POST(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
-+
-+  if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-+  if (!auth.token) return auth.error;
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/fit-scores`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${auth.token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
+ 
+-function normalizeStage(input: string): string {
+-  const s = (input || '').trim();
+-  if (!s) return 'APPLIED';
+-  return s.toUpperCase();
++function normalizeStage(input: string, fallback: StageValue = 'APPLIED'): StageValue {
++  const s = (input || '').trim().toUpperCase();
++  const found = STAGE_OPTIONS.find((option) => option.value === s);
++  return found ? found.value : fallback;
 +}
++
++function stageLabel(stage: string | undefined): string {
++  if (!stage) return 'Unknown';
++  const found = STAGE_OPTIONS.find((option) => option.value === stage);
++  if (found) return found.label;
++  const pretty = stage.toLowerCase().replace(/(^|\s)\w/g, (m) => m.toUpperCase());
++  return pretty || 'Unknown';
+ }
+ 
+ function parseJsonOrEmpty(input: string): unknown {
+   const trimmed = (input || '').trim();
+   if (!trimmed) return {};
+   try {
+     return JSON.parse(trimmed);
+   } catch {
+     throw new Error('Extra JSON must be valid JSON.');
+   }
+ }
+ 
+ function looksLikeIsoDateOnly(s: string): boolean {
+   return /^\d{4}-\d{2}-\d{2}$/.test(s);
+ }
+ 
+ function toIsoDateIfNeeded(s: string): string {
+   const trimmed = (s || '').trim();
+   if (!trimmed) return '';
+   if (looksLikeIsoDateOnly(trimmed)) return trimmed;
+   const d = new Date(trimmed);
+   if (Number.isNaN(d.getTime())) return trimmed;
+   return d.toISOString();
+ }
+ 
++function formatDateDisplay(value: string | undefined): string {
++  if (!value) return '';
++  const d = new Date(value);
++  if (Number.isNaN(d.getTime())) return value;
++  return d.toLocaleDateString();
++}
++
+ export default function ApplicationsPage() {
+   const [items, setItems] = useState<Application[]>([]);
+   const [loading, setLoading] = useState<boolean>(true);
+   const [busy, setBusy] = useState<boolean>(false);
+ 
+   const [error, setError] = useState<string>('');
+   const [notice, setNotice] = useState<string>('');
+ 
+   const [search, setSearch] = useState<string>('');
+ 
+   const [editingId, setEditingId] = useState<string | null>(null);
+ 
+   const [company, setCompany] = useState<string>('');
+   const [title, setTitle] = useState<string>('');
+-  const [stage, setStage] = useState<string>('APPLIED');
++  const [stage, setStage] = useState<StageValue>('APPLIED');
+   const [link, setLink] = useState<string>('');
+   const [appliedDate, setAppliedDate] = useState<string>('');
+   const [notes, setNotes] = useState<string>('');
+   const [extraJsonText, setExtraJsonText] = useState<string>(
+     '{ "cxFitScore": 94, "source": "LinkedIn" }',
+   );
+ 
+   const [detail, setDetail] = useState<Application | null>(null);
++  const [stageUpdatingId, setStageUpdatingId] = useState<string | null>(null);
+ 
+   const filtered = useMemo(() => {
+     const q = (search || '').trim().toLowerCase();
+     if (!q) return items;
+ 
+     return items.filter((a) => {
+       const hay = [
+         a.id,
+         a.company,
+         a.title,
+         a.roleTitle,
+         a.stage,
+         a.status,
+         a.link,
+       ]
+         .map((v) => safeString(v).toLowerCase())
+         .join(' ');
+       return hay.includes(q);
+     });
+   }, [items, search]);
+ 
++  const stageFromApplication = (app: Application): StageValue =>
++    normalizeStage(safeString(app.stage || app.status || ''), 'SAVED');
++
++  const applicationsByStage = useMemo(() => {
++    const buckets = STAGE_OPTIONS.map((option) => ({
++      value: option.value,
++      label: option.label,
++      applications: [] as Application[],
++    }));
++    const bucketMap = new Map<StageValue, (typeof buckets)[number]>(
++      buckets.map((bucket) => [bucket.value, bucket]),
++    );
++
++    filtered.forEach((app) => {
++      const normalized = stageFromApplication(app);
++      const target = bucketMap.get(normalized) ?? buckets[0];
++      target.applications.push(app);
++    });
++
++    return buckets;
++  }, [filtered]);
++
+   async function loadList() {
+     setLoading(true);
+     setError('');
+     setNotice('');
+     try {
+       const data = await apiFetchJson<Application[]>('/api/applications', {
+         method: 'GET',
+       });
+       setItems(Array.isArray(data) ? data : []);
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to load applications');
+     } finally {
+       setLoading(false);
+     }
+   }
+ 
+   useEffect(() => {
+     void loadList();
+   }, []);
+ 
+   function clearForm() {
+     setEditingId(null);
+     setCompany('');
+     setTitle('');
+     setStage('APPLIED');
+     setLink('');
+     setAppliedDate('');
+     setNotes('');
+     setExtraJsonText('{ "cxFitScore": 94, "source": "LinkedIn" }');
+     setDetail(null);
+     setError('');
+     setNotice('');
+   }
+ 
+   async function loadDetail(id: string) {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     try {
+       const data = await apiFetchJson<Application>(`/api/applications/${id}`, {
+         method: 'GET',
+       });
+       setDetail(data);
+ 
+       setEditingId(id);
+       setCompany(safeString(data.company));
+       setTitle(safeString(data.title || data.roleTitle));
+-      setStage(normalizeStage(safeString(data.stage || data.status || 'APPLIED')));
++      setStage(stageFromApplication(data));
+       setLink(safeString(data.link));
+       setAppliedDate(safeString(data.appliedDate));
+       setNotes(safeString(data.notes));
+ 
+       const extra = data.extra ?? data.extraJson ?? {};
+       const text =
+         extra && typeof extra === 'object'
+           ? JSON.stringify(extra, null, 2)
+           : safeString(extra);
+       setExtraJsonText(text || '{}');
+ 
+       setNotice('Loaded application into form');
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to load application');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   async function createApplication() {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     try {
+       const t = title.trim();
+@@ -229,50 +279,72 @@ export default function ApplicationsPage() {
+         title: t,
+         roleTitle: t,
+         stage: normalizeStage(stage),
+         status: normalizeStage(stage),
+         link: link.trim() || undefined,
+         appliedDate: appliedDate.trim() ? toIsoDateIfNeeded(appliedDate) : undefined,
+         notes: notes.trim() || undefined,
+         extra: parseJsonOrEmpty(extraJsonText),
+       };
+ 
+       await apiFetchJson(`/api/applications/${editingId}`, {
+         method: 'PATCH',
+         body: JSON.stringify(payload),
+       });
+ 
+       setNotice('Application updated');
+       await loadList();
+       await loadDetail(editingId);
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to update application');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
++  async function updateApplicationStage(id: string, nextStage: StageValue) {
++    setStageUpdatingId(id);
++    setError('');
++    setNotice('');
++    try {
++      await apiFetchJson(`/api/applications/${id}`, {
++        method: 'PATCH',
++        body: JSON.stringify({ stage: normalizeStage(nextStage, nextStage) }),
++      });
++
++      await loadList();
++      if (editingId === id) {
++        await loadDetail(id);
++      }
++      setNotice('Stage updated');
++    } catch (e) {
++      setError(e instanceof Error ? e.message : 'Failed to update stage');
++    } finally {
++      setStageUpdatingId(null);
++    }
++  }
++
+   async function deleteApplication(id: string) {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     try {
+       await apiFetchJson(`/api/applications/${id}`, { method: 'DELETE' });
+       setNotice('Application deleted');
+       await loadList();
+       if (editingId === id) clearForm();
+     } catch (e) {
+       setError(e instanceof Error ? e.message : 'Failed to delete application');
+     } finally {
+       setBusy(false);
+     }
+   }
+ 
+   async function exportApplications() {
+     setBusy(true);
+     setError('');
+     setNotice('');
+     try {
+       const res = await fetch('/api/applications/export', {
+         method: 'GET',
+         cache: 'no-store',
+       });
+@@ -331,99 +403,201 @@ export default function ApplicationsPage() {
+             type="button"
+             onClick={() => clearForm()}
+             className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
+             disabled={busy}
+           >
+             New
+           </button>
+         </div>
+       </div>
+ 
+       {(error || notice) && (
+         <div className="mt-4 space-y-2">
+           {error && (
+             <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+               {error}
+             </div>
+           )}
+           {notice && (
+             <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+               {notice}
+             </div>
+           )}
+         </div>
+       )}
+ 
++      <div className="mt-6 rounded border p-4">
++        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
++          <div>
++            <h2 className="text-lg font-semibold">Pipeline</h2>
++            <p className="text-xs text-gray-600">
++              Applications grouped by stage. Use the dropdown to move items between stages.
++            </p>
++          </div>
++          <div className="text-xs text-gray-600">
++            Showing <span className="font-mono">{filtered.length}</span> of{' '}
++            <span className="font-mono">{items.length}</span> records
++          </div>
++        </div>
++
++        <div className="mt-4 overflow-x-auto pb-2">
++          <div className="flex min-w-[920px] gap-4">
++            {applicationsByStage.map((bucket) => (
++              <div
++                key={bucket.value}
++                className="flex w-64 flex-shrink-0 flex-col rounded border bg-white shadow-sm"
++              >
++                <div className="flex items-center justify-between border-b px-3 py-2">
++                  <div className="text-sm font-semibold">{bucket.label}</div>
++                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium">
++                    {bucket.applications.length}
++                  </span>
++                </div>
++
++                <div className="flex-1 space-y-3 p-3">
++                  {bucket.applications.length === 0 ? (
++                    <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
++                      {loading ? 'Loading...' : 'No applications in this stage'}
++                    </div>
++                  ) : (
++                    bucket.applications.map((app) => {
++                      const appStage = stageFromApplication(app);
++                      return (
++                        <div
++                          key={app.id}
++                          className="rounded border bg-gray-50 p-3 text-sm shadow-sm"
++                        >
++                          <div className="font-semibold leading-tight">
++                            {safeString(app.title || app.roleTitle) || 'Untitled role'}
++                          </div>
++                          <div className="text-xs text-gray-600">
++                            {safeString(app.company) || 'Unknown company'}
++                          </div>
++                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
++                            <span>Applied</span>
++                            <span className="font-mono">
++                              {formatDateDisplay(safeString(app.appliedDate)) || '—'}
++                            </span>
++                          </div>
++                          <div className="mt-3">
++                            <label className="text-[11px] font-medium text-gray-700">Stage</label>
++                            <select
++                              className="mt-1 w-full rounded border px-2 py-1 text-sm"
++                              value={appStage}
++                              onChange={(e) =>
++                                void updateApplicationStage(
++                                  app.id,
++                                  normalizeStage(e.target.value, appStage),
++                                )
++                              }
++                              disabled={stageUpdatingId === app.id || busy}
++                            >
++                              {STAGE_OPTIONS.map((option) => (
++                                <option key={option.value} value={option.value}>
++                                  {option.label}
++                                </option>
++                              ))}
++                            </select>
++                          </div>
++                          <div className="mt-3 flex gap-2">
++                            <button
++                              type="button"
++                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
++                              onClick={() => void loadDetail(app.id)}
++                              disabled={busy}
++                            >
++                              Load in form
++                            </button>
++                            <button
++                              type="button"
++                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
++                              onClick={() => void deleteApplication(app.id)}
++                              disabled={busy}
++                            >
++                              Delete
++                            </button>
++                          </div>
++                        </div>
++                      );
++                    })
++                  )}
++                </div>
++              </div>
++            ))}
++          </div>
++        </div>
++      </div>
++
+       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+         <div className="lg:col-span-3">
+           <div className="rounded border p-4">
+             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+               <div>
+                 <h2 className="text-lg font-semibold">List</h2>
+                 <p className="text-xs text-gray-600">
+                   Use Edit to load a record into the form.
+                 </p>
+               </div>
+               <div className="w-full sm:w-[320px]">
+                 <input
+                   value={search}
+                   onChange={(e) => setSearch(e.target.value)}
+                   className="w-full rounded border px-3 py-2 text-sm"
+                   placeholder="Filter by company, role, stage, link, or id"
+                 />
+               </div>
+             </div>
+ 
+             <div className="mt-4 overflow-auto rounded border">
+               <table className="w-full border-collapse text-sm">
+                 <thead className="bg-gray-50 text-left">
+                   <tr>
+                     <th className="whitespace-nowrap px-3 py-2">id</th>
+                     <th className="whitespace-nowrap px-3 py-2">company</th>
+                     <th className="whitespace-nowrap px-3 py-2">title</th>
+                     <th className="whitespace-nowrap px-3 py-2">stage</th>
+                     <th className="whitespace-nowrap px-3 py-2">createdAt</th>
+                     <th className="whitespace-nowrap px-3 py-2">Actions</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   {filtered.length === 0 && (
+                     <tr>
+                       <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
+                         {loading ? 'Loading...' : 'No applications found.'}
+                       </td>
+                     </tr>
+                   )}
+ 
+                   {filtered.map((a) => (
+                     <tr key={a.id} className="border-t">
+                       <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs">
+                         {a.id}
+                       </td>
+                       <td className="px-3 py-2">{safeString(a.company)}</td>
+                       <td className="px-3 py-2">{safeString(a.title || a.roleTitle)}</td>
+-                      <td className="px-3 py-2">{safeString(a.stage || a.status)}</td>
++                      <td className="px-3 py-2">{stageLabel(stageFromApplication(a))}</td>
+                       <td className="px-3 py-2">{safeString(a.createdAt || '')}</td>
+                       <td className="px-3 py-2">
+                         <div className="flex gap-2">
+                           <button
+                             type="button"
+                             className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+                             onClick={() => void loadDetail(a.id)}
+                             disabled={busy}
+                           >
+                             Edit
+                           </button>
+                           <button
+                             type="button"
+                             className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
+                             onClick={() => void deleteApplication(a.id)}
+                             disabled={busy}
+                           >
+                             Delete
+                           </button>
+                         </div>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+@@ -451,58 +625,58 @@ export default function ApplicationsPage() {
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={company}
+                   onChange={(e) => setCompany(e.target.value)}
+                   placeholder="Company"
+                   disabled={busy}
+                 />
+               </div>
+ 
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Role Title</label>
+                 <input
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={title}
+                   onChange={(e) => setTitle(e.target.value)}
+                   placeholder="Role title"
+                   disabled={busy}
+                 />
+                 <div className="mt-1 text-xs text-gray-500">Required.</div>
+               </div>
+ 
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Stage</label>
+                 <select
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={stage}
+-                  onChange={(e) => setStage(e.target.value)}
++                  onChange={(e) => setStage(normalizeStage(e.target.value, stage))}
+                   disabled={busy}
+                 >
+-                  <option value="APPLIED">APPLIED</option>
+-                  <option value="SCREENING">SCREENING</option>
+-                  <option value="INTERVIEWING">INTERVIEWING</option>
+-                  <option value="OFFER">OFFER</option>
+-                  <option value="REJECTED">REJECTED</option>
++                  {STAGE_OPTIONS.map((option) => (
++                    <option key={option.value} value={option.value}>
++                      {option.label}
++                    </option>
++                  ))}
+                 </select>
+               </div>
+ 
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Link</label>
+                 <input
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={link}
+                   onChange={(e) => setLink(e.target.value)}
+                   placeholder="Job link"
+                   disabled={busy}
+                 />
+               </div>
+ 
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Applied Date</label>
+                 <input
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={appliedDate}
+                   onChange={(e) => setAppliedDate(e.target.value)}
+                   placeholder="2025-12-27 or ISO timestamp"
+                   disabled={busy}
+                 />
+               </div>
+ 
