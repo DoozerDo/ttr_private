@@ -22,7 +22,6 @@ describe('ResumeController', () => {
     await controller.exportResume(
       { baselineId: 'b', jobId: 'j' },
       { user: { id: 'user-1' } } as any,
-      'docx',
       response as any,
     );
 
@@ -34,6 +33,7 @@ describe('ResumeController', () => {
       'Content-Disposition',
       expect.stringContaining('resume.docx'),
     );
+    expect(setHeader).toHaveBeenCalledWith('Content-Length', expect.any(String));
     expect(send).toHaveBeenCalledWith(expect.any(Buffer));
   });
 });

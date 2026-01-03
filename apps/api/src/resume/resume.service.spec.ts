@@ -170,4 +170,37 @@ describe('ResumeService', () => {
       }),
     );
   });
+
+  it('blocks generation when invented metrics are present', async () => {
+    const inventedMetricFlag = [
+      {
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Metric not in baseline.',
+      },
+    ];
+    const { service } = buildService(95, inventedMetricFlag);
+
+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('blocks export when compliance flags are blocking', async () => {
+    const complianceService = {
+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      validateAndAudit: jest.fn().mockResolvedValue({
+        complianceFlags: [
+          { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
+        ],
+        blocked: true,
+        audit: { id: 'audit-2' },
+      }),
+    } as unknown as ComplianceService;
+    const { service } = buildService(95, [], mockBaselineVersion, complianceService);
+
+    await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+  });
 });

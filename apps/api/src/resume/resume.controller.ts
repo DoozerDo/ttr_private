@@ -19,6 +19,7 @@ interface ResumeRequestBody {
   baselineVersionId?: string;
   jobId?: string;
   format?: ResumeExportFormat;
+  oneTap?: boolean;
 }
 
 @Controller('resume')
@@ -80,6 +81,7 @@ export class ResumeController {
     const baselineId = body.baselineId?.trim();
     const baselineVersionId = body.baselineVersionId?.trim();
     const jobId = body.jobId?.trim();
+    const oneTap = Boolean(body.oneTap);
 
     if (!baselineId) throw new BadRequestException('baselineId is required');
     if (!jobId) throw new BadRequestException('jobId is required');
@@ -88,6 +90,7 @@ export class ResumeController {
       baselineId,
       baselineVersionId: baselineVersionId ?? undefined,
       jobId,
+      oneTap,
     };
   }
 
@@ -111,13 +114,9 @@ export class ResumeController {
 
     const file = await this.resumeService.exportResume(userId, payload, format);
 
-    const contentType =
-      format === 'pdf'
-        ? 'application/pdf'
-        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="resume.${format}"`);
-    res.send(file);
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.setHeader('Content-Length', String(file.buffer.byteLength));
+    res.send(file.buffer);
   }
 }
