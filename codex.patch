@@ -1,630 +1,135 @@
-diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index a335c63297d37eed7c40381bf01ca4db5d5c9d10..1cfbf38180decbdfc2fbc3fc861c1ded6ad477b4 100644
---- a/apps/api/src/app.module.ts
-+++ b/apps/api/src/app.module.ts
-@@ -1,53 +1,55 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { AppController } from './app.controller';
- import { AppService } from './app.service';
- import { AuthModule } from './auth/auth.module';
- import { AnalysisModule } from './analysis/analysis.module';
- import { ApplicationsModule } from './applications/applications.module';
- import { BaselineModule } from './baseline/baseline.module';
- import { ComplianceModule } from './compliance/compliance.module';
- import { InterviewsModule } from './interviews/interviews.module';
- import { JobsModule } from './jobs/jobs.module';
- import { CoverLettersModule } from './cover-letters/cover-letters.module';
- import { ResumeModule } from './resume/resume.module';
- import { SearchSetsModule } from './search-sets/search-sets.module';
-+import { StarStoriesModule } from './star-stories/star-stories.module';
- import { User } from './users/user.entity';
- import { UsersModule } from './users/users.module';
- 
- @Module({
-   imports: [
-     ConfigModule.forRoot({
-       isGlobal: true,
-       envFilePath: ['.env.development.local', '.env.local', '.env'],
-     }),
-     TypeOrmModule.forRootAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         type: 'postgres',
-         url:
-           configService.get<string>('DATABASE_URL') ??
-           'postgresql://postgres:postgres@db:5432/targetthisrole',
-         entities: [User],
-         synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
-         autoLoadEntities: true,
-       }),
-     }),
-     UsersModule,
-     AuthModule,
-     AnalysisModule,
-     ApplicationsModule,
-     BaselineModule,
-     ComplianceModule,
-     InterviewsModule,
-     JobsModule,
-     SearchSetsModule,
-     ResumeModule,
-     CoverLettersModule,
-+    StarStoriesModule,
-   ],
-   controllers: [AppController],
-   providers: [AppService],
- })
- export class AppModule {}
-diff --git a/apps/api/src/interviews/dto/create-interview.dto.ts b/apps/api/src/interviews/dto/create-interview.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..795e50d01f004d02b491a8a7639910dbba84ac4c
---- /dev/null
-+++ b/apps/api/src/interviews/dto/create-interview.dto.ts
-@@ -0,0 +1,8 @@
-+export class CreateInterviewRecordDto {
-+  jobId!: string;
-+  gapList?: string[];
-+  questions?: string[];
-+  responses?: string[];
-+  validationResults?: Record<string, unknown>;
-+  recommendedAdditions?: string[];
-+}
-diff --git a/apps/api/src/interviews/dto/update-interview.dto.ts b/apps/api/src/interviews/dto/update-interview.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..6783b8c4cae081ae5bddb8fdf1b7e33f0591925f
---- /dev/null
-+++ b/apps/api/src/interviews/dto/update-interview.dto.ts
-@@ -0,0 +1,8 @@
-+export class UpdateInterviewRecordDto {
-+  jobId?: string;
-+  gapList?: string[];
-+  questions?: string[];
-+  responses?: string[];
-+  validationResults?: Record<string, unknown>;
-+  recommendedAdditions?: string[];
-+}
-diff --git a/apps/api/src/interviews/interview-records.controller.ts b/apps/api/src/interviews/interview-records.controller.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..036ddbcdf20ffd1cfa99c4d7e39e468985c48c90
---- /dev/null
-+++ b/apps/api/src/interviews/interview-records.controller.ts
-@@ -0,0 +1,93 @@
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  Delete,
-+  Get,
-+  Param,
-+  Patch,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
-+import { CreateInterviewRecordDto } from './dto/create-interview.dto';
-+import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
-+import { InterviewRecordsService } from './interview-records.service';
-+
-+@Controller('interview-records')
-+@UseGuards(AuthGuard('jwt'))
-+export class InterviewRecordsController {
-+  constructor(private readonly interviewRecordsService: InterviewRecordsService) {}
-+
-+  @Post()
-+  async createInterviewRecord(
-+    @Body() body: CreateInterviewRecordDto,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.interviewRecordsService.createInterviewRecord(userId, body);
-+  }
-+
-+  @Get()
-+  async listInterviewRecords(
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.interviewRecordsService.listInterviewRecordsForUser(userId);
-+  }
-+
-+  @Get(':id')
-+  async getInterviewRecord(
-+    @Param('id') id: string,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.interviewRecordsService.getInterviewRecordForUser(id, userId);
-+  }
-+
-+  @Patch(':id')
-+  async updateInterviewRecord(
-+    @Param('id') id: string,
-+    @Body() body: UpdateInterviewRecordDto,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
-+  }
-+
-+  @Delete(':id')
-+  async deleteInterviewRecord(
-+    @Param('id') id: string,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.interviewRecordsService.deleteInterviewRecord(id, userId);
-+  }
-+}
-diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..60570bf032d9201ec94b7a79ff3cfb8f89ca6d12
---- /dev/null
-+++ b/apps/api/src/interviews/interview-records.service.spec.ts
-@@ -0,0 +1,133 @@
-+import { BadRequestException, NotFoundException } from '@nestjs/common';
-+import { Interview } from './interview.entity';
-+import { InterviewRecordsService } from './interview-records.service';
-+
-+describe('InterviewRecordsService', () => {
-+  const mockInterview: Interview = {
-+    id: 'interview-1',
-+    userId: 'user-1',
-+    jobId: 'job-1',
-+    gapList: ['gap'],
-+    questions: ['q1'],
-+    responses: ['r1'],
-+    validationResults: { ok: true },
-+    recommendedAdditions: ['add'],
-+    createdAt: new Date('2024-01-01T00:00:00Z'),
-+    updatedAt: new Date('2024-01-01T00:00:00Z'),
-+  };
-+
-+  const createMockRepository = () => ({
-+    create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
-+    save: jest.fn(async (data: Interview) => data),
-+    find: jest.fn(),
-+    findOne: jest.fn(),
-+    remove: jest.fn(async (data: Interview) => data),
-+  });
-+
-+  const createService = (repository = createMockRepository()) =>
-+    new InterviewRecordsService(repository as never);
-+
-+  afterEach(() => {
-+    jest.restoreAllMocks();
-+  });
-+
-+  it('creates an interview record with required jobId and sanitization', async () => {
-+    const repository = createMockRepository();
-+    const service = createService(repository);
-+
-+    const result = await service.createInterviewRecord('user-1', {
-+      jobId: ' job-2 ',
-+      gapList: [' gap1 ', ''],
-+      questions: [' q '],
-+      responses: [' a '],
-+      recommendedAdditions: [' add '],
-+    });
-+
-+    expect(repository.create).toHaveBeenCalledWith(
-+      expect.objectContaining({
-+        userId: 'user-1',
-+        jobId: 'job-2',
-+        gapList: ['gap1'],
-+        questions: ['q'],
-+        responses: ['a'],
-+        recommendedAdditions: ['add'],
-+      }),
-+    );
-+    expect(result.jobId).toBe('job-2');
-+  });
-+
-+  it('lists interview records for a user', async () => {
-+    const repository = createMockRepository();
-+    repository.find.mockResolvedValue([mockInterview]);
-+    const service = createService(repository);
-+
-+    const records = await service.listInterviewRecordsForUser('user-1');
-+
-+    expect(repository.find).toHaveBeenCalledWith({
-+      where: { userId: 'user-1' },
-+      order: { createdAt: 'DESC' },
-+    });
-+    expect(records).toEqual([mockInterview]);
-+  });
-+
-+  it('retrieves an interview record for a user', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(mockInterview);
-+    const service = createService(repository);
-+
-+    const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
-+
-+    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
-+    expect(record).toEqual(mockInterview);
-+  });
-+
-+  it('throws when interview record not found', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(null);
-+    const service = createService(repository);
-+
-+    await expect(
-+      service.getInterviewRecordForUser('missing', 'user-1'),
-+    ).rejects.toBeInstanceOf(NotFoundException);
-+  });
-+
-+  it('updates an interview record with validation', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({ ...mockInterview });
-+    const service = createService(repository);
-+
-+    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-+      jobId: ' job-3 ',
-+      gapList: [' gap2 '],
-+      validationResults: { ok: false },
-+      recommendedAdditions: [' new '],
-+    });
-+
-+    expect(repository.save).toHaveBeenCalled();
-+    expect(result.jobId).toBe('job-3');
-+    expect(result.gapList).toEqual(['gap2']);
-+    expect(result.validationResults).toEqual({ ok: false });
-+    expect(result.recommendedAdditions).toEqual(['new']);
-+  });
-+
-+  it('throws when updating with empty jobId', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({ ...mockInterview });
-+    const service = createService(repository);
-+
-+    await expect(
-+      service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
-+
-+  it('deletes an interview record', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(mockInterview);
-+    const service = createService(repository);
-+
-+    const result = await service.deleteInterviewRecord('interview-1', 'user-1');
-+
-+    expect(repository.remove).toHaveBeenCalledWith(mockInterview);
-+    expect(result).toEqual({ deleted: true, id: 'interview-1' });
-+  });
-+});
-diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..2366f25be51516336212c4dc409a6d67eeb01540
---- /dev/null
-+++ b/apps/api/src/interviews/interview-records.service.ts
-@@ -0,0 +1,98 @@
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
-+import { CreateInterviewRecordDto } from './dto/create-interview.dto';
-+import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
-+import { Interview } from './interview.entity';
-+
-+@Injectable()
-+export class InterviewRecordsService {
-+  constructor(
-+    @InjectRepository(Interview)
-+    private readonly interviewRepository: Repository<Interview>,
-+  ) {}
-+
-+  private sanitizeStringArray(values?: string[]) {
-+    return (values ?? []).map((value) => value.trim()).filter(Boolean);
-+  }
-+
-+  async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto) {
-+    if (!dto.jobId?.trim()) {
-+      throw new BadRequestException('Job ID is required.');
-+    }
-+
-+    const interview = this.interviewRepository.create({
-+      userId,
-+      jobId: dto.jobId.trim(),
-+      gapList: this.sanitizeStringArray(dto.gapList),
-+      questions: this.sanitizeStringArray(dto.questions),
-+      responses: this.sanitizeStringArray(dto.responses),
-+      validationResults: dto.validationResults ?? {},
-+      recommendedAdditions: this.sanitizeStringArray(dto.recommendedAdditions),
-+    });
-+
-+    return this.interviewRepository.save(interview);
-+  }
-+
-+  async listInterviewRecordsForUser(userId: string) {
-+    return this.interviewRepository.find({
-+      where: { userId },
-+      order: { createdAt: 'DESC' },
-+    });
-+  }
-+
-+  async getInterviewRecordForUser(id: string, userId: string) {
-+    const interview = await this.interviewRepository.findOne({ where: { id, userId } });
-+
-+    if (!interview) {
-+      throw new NotFoundException('Interview not found');
-+    }
-+
-+    return interview;
-+  }
-+
-+  async updateInterviewRecord(
-+    id: string,
-+    userId: string,
-+    dto: UpdateInterviewRecordDto,
-+  ) {
-+    const interview = await this.getInterviewRecordForUser(id, userId);
-+
-+    if (dto.jobId !== undefined) {
-+      if (!dto.jobId?.trim()) {
-+        throw new BadRequestException('Job ID is required.');
-+      }
-+      interview.jobId = dto.jobId.trim();
-+    }
-+
-+    if (dto.gapList !== undefined) {
-+      interview.gapList = this.sanitizeStringArray(dto.gapList);
-+    }
-+
-+    if (dto.questions !== undefined) {
-+      interview.questions = this.sanitizeStringArray(dto.questions);
-+    }
-+
-+    if (dto.responses !== undefined) {
-+      interview.responses = this.sanitizeStringArray(dto.responses);
-+    }
-+
-+    if (dto.validationResults !== undefined) {
-+      interview.validationResults = dto.validationResults ?? {};
-+    }
-+
-+    if (dto.recommendedAdditions !== undefined) {
-+      interview.recommendedAdditions = this.sanitizeStringArray(dto.recommendedAdditions);
-+    }
-+
-+    return this.interviewRepository.save(interview);
-+  }
-+
-+  async deleteInterviewRecord(id: string, userId: string) {
-+    const interview = await this.getInterviewRecordForUser(id, userId);
-+
-+    await this.interviewRepository.remove(interview);
-+
-+    return { deleted: true, id };
-+  }
-+}
-diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..0b43e9cf5a12539015002b5a2d0152bebd6915ec
---- /dev/null
-+++ b/apps/api/src/interviews/interview.entity.ts
-@@ -0,0 +1,40 @@
-+import {
-+  Column,
-+  CreateDateColumn,
-+  Entity,
-+  PrimaryGeneratedColumn,
-+  UpdateDateColumn,
-+} from 'typeorm';
-+
-+@Entity({ name: 'interviews' })
-+export class Interview {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @Column()
-+  userId!: string;
-+
-+  @Column({ type: 'varchar', length: 255 })
-+  jobId!: string;
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  gapList!: string[];
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  questions!: string[];
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  responses!: string[];
-+
-+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-+  validationResults!: Record<string, unknown>;
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  recommendedAdditions!: string[];
-+
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  createdAt!: Date;
-+
-+  @UpdateDateColumn({ type: 'timestamptz' })
-+  updatedAt!: Date;
-+}
-diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
-index 039ca366310170e8e5e8eded76b6b0127dd8c622..388b8eb6e92402fcb7b6489c64d11640f6619284 100644
---- a/apps/api/src/interviews/interviews.module.ts
-+++ b/apps/api/src/interviews/interviews.module.ts
-@@ -1,14 +1,17 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
-+import { Interview } from './interview.entity';
-+import { InterviewRecordsController } from './interview-records.controller';
-+import { InterviewRecordsService } from './interview-records.service';
- import { InterviewResponse } from './interview-response.entity';
- import { InterviewSession } from './interview-session.entity';
+diff --git a/apps/api/src/interviews/interviews.controller.spec.ts b/apps/api/src/interviews/interviews.controller.spec.ts
+index d204e3700fff6d82492a363a61c91b8974ec7b99..f09659e7478ccc1ec5e57c4c591cca98608b33da 100644
+--- a/apps/api/src/interviews/interviews.controller.spec.ts
++++ b/apps/api/src/interviews/interviews.controller.spec.ts
+@@ -1,82 +1,94 @@
+ import { BadRequestException } from '@nestjs/common';
  import { InterviewsController } from './interviews.controller';
  import { InterviewsService } from './interviews.service';
  
- @Module({
--  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse])],
--  controllers: [InterviewsController],
--  providers: [InterviewsService],
--  exports: [InterviewsService],
-+  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse, Interview])],
-+  controllers: [InterviewsController, InterviewRecordsController],
-+  providers: [InterviewsService, InterviewRecordsService],
-+  exports: [InterviewsService, InterviewRecordsService],
- })
- export class InterviewsModule {}
-diff --git a/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts b/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..4186bc335a7f95086bd40c20165cb9f710034ac1
---- /dev/null
-+++ b/apps/api/src/migrations/1820000000000-InterviewRecordsAndStarStories.ts
-@@ -0,0 +1,57 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
+ describe('InterviewsController', () => {
+   const createMockRequest = (userId?: string) =>
+     ({ user: userId ? { id: userId } : undefined } as { user?: { id?: string } });
+ 
+   const createMockService = () =>
+     ({
+       createInterview: jest.fn().mockResolvedValue({ id: 'interview-1' }),
+       listInterviewsForUser: jest.fn().mockResolvedValue([]),
+       getInterviewForUser: jest.fn().mockResolvedValue({ id: 'interview-1' }),
++      startInterviewFromFitReview: jest.fn().mockResolvedValue({ id: 'interview-1', jobId: 'job-1' }),
+       updateInterview: jest.fn().mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
+       deleteInterview: jest.fn().mockResolvedValue({ deleted: true, id: 'interview-1' }),
+     }) as unknown as InterviewsService;
+ 
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
+ 
+   it('throws when user is missing on create', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+ 
+     await expect(controller.createInterview({}, createMockRequest())).rejects.toThrow(
+       BadRequestException,
+     );
+   });
+ 
+   it('creates interview with user context', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+     const request = createMockRequest('user-1');
+     const body = { baselineId: 'baseline-1', date: '2024-02-01', type: 'phone' };
+ 
+     await controller.createInterview(body, request as any);
+ 
+     expect(service.createInterview).toHaveBeenCalledWith('user-1', body);
+   });
+ 
+   it('lists interviews for user', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+     const request = createMockRequest('user-1');
+ 
+     await controller.listInterviews(request as any);
+ 
+     expect(service.listInterviewsForUser).toHaveBeenCalledWith('user-1');
+   });
+ 
+   it('gets interview for user', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+     const request = createMockRequest('user-1');
+ 
+     await controller.getInterview('interview-1', request as any);
+ 
+     expect(service.getInterviewForUser).toHaveBeenCalledWith('interview-1', 'user-1');
+   });
+ 
++  it('starts interview from fit review', async () => {
++    const service = createMockService();
++    const controller = new InterviewsController(service);
++    const request = createMockRequest('user-1');
++    const body = { jobId: 'job-1', baselineId: 'baseline-1' };
 +
-+export class InterviewRecordsAndStarStories1820000000000 implements MigrationInterface {
-+  name = 'InterviewRecordsAndStarStories1820000000000';
++    await controller.startInterviewFromFitReview(body, request as any);
 +
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
++    expect(service.startInterviewFromFitReview).toHaveBeenCalledWith('user-1', body);
++  });
 +
-+    await queryRunner.query(`
-+      CREATE TABLE "interviews" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "userId" character varying(255) NOT NULL,
-+        "jobId" character varying(255) NOT NULL,
-+        "gapList" jsonb NOT NULL DEFAULT '[]',
-+        "questions" jsonb NOT NULL DEFAULT '[]',
-+        "responses" jsonb NOT NULL DEFAULT '[]',
-+        "validationResults" jsonb NOT NULL DEFAULT '{}',
-+        "recommendedAdditions" jsonb NOT NULL DEFAULT '[]',
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_interviews_id" PRIMARY KEY ("id")
-+      )
-+    `);
-+
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_interviews_userId" ON "interviews" ("userId")`,
-+    );
-+
-+    await queryRunner.query(`
-+      CREATE TABLE "star_stories" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "userId" character varying(255) NOT NULL,
-+        "title" character varying(255) NOT NULL,
-+        "situation" text NOT NULL,
-+        "task" text NOT NULL,
-+        "action" text NOT NULL,
-+        "result" text NOT NULL,
-+        "reflections" text,
-+        "competencies" jsonb NOT NULL DEFAULT '[]',
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        CONSTRAINT "PK_star_stories_id" PRIMARY KEY ("id")
-+      )
-+    `);
-+
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_star_stories_userId" ON "star_stories" ("userId")`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_star_stories_userId"`);
-+    await queryRunner.query(`DROP TABLE "star_stories"`);
-+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_interviews_userId"`);
-+    await queryRunner.query(`DROP TABLE "interviews"`);
-+  }
-+}
-diff --git a/apps/api/src/star-stories/dto/create-star-story.dto.ts b/apps/api/src/star-stories/dto/create-star-story.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..56670e96f2da0515dc88fa5b4ffb40a842530e91
---- /dev/null
-+++ b/apps/api/src/star-stories/dto/create-star-story.dto.ts
-@@ -0,0 +1,9 @@
-+export class CreateStarStoryDto {
-+  title!: string;
-+  situation!: string;
-+  task!: string;
-+  action!: string;
-+  result!: string;
-+  reflections?: string | null;
-+  competencies?: string[];
-+}
-diff --git a/apps/api/src/star-stories/dto/update-star-story.dto.ts b/apps/api/src/star-stories/dto/update-star-story.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..36659e6b38e5b9499df61c82f11e168bb5326ca6
---- /dev/null
-+++ b/apps/api/src/star-stories/dto/update-star-story.dto.ts
-@@ -0,0 +1,9 @@
-+export class UpdateStarStoryDto {
-+  title?: string;
-+  situation?: string;
-+  task?: string;
-+  action?: string;
-+  result?: string;
-+  reflections?: string | null;
-+  competencies?: string[];
-+}
-diff --git a/apps/api/src/star-stories/star-stories.controller.ts b/apps/api/src/star-stories/star-stories.controller.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..ba5ad20191340d6d8e680d93725d783f9b260faa
---- /dev/null
-+++ b/apps/api/src/star-stories/star-stories.controller.ts
-@@ -0,0 +1,91 @@
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  Delete,
-+  Get,
-+  Param,
-+  Patch,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import type { Request } from 'express';
-+import { CreateStarStoryDto } from './dto/create-star-story.dto';
-+import { UpdateStarStoryDto } from './dto/update-star-story.dto';
-+import { StarStoriesService } from './star-stories.service';
-+
-+@Controller('star-stories')
-+@UseGuards(AuthGuard('jwt'))
-+export class StarStoriesController {
-+  constructor(private readonly starStoriesService: StarStoriesService) {}
-+
-+  @Post()
-+  async createStarStory(
-+    @Body() body: CreateStarStoryDto,
+   it('updates interview for user', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+     const request = createMockRequest('user-1');
+     const update = { status: 'confirmed' };
+ 
+     await controller.updateInterview('interview-1', update, request as any);
+ 
+     expect(service.updateInterview).toHaveBeenCalledWith('interview-1', 'user-1', update);
+   });
+ 
+   it('deletes interview for user', async () => {
+     const service = createMockService();
+     const controller = new InterviewsController(service);
+     const request = createMockRequest('user-1');
+ 
+     await controller.deleteInterview('interview-1', request as any);
+ 
+     expect(service.deleteInterview).toHaveBeenCalledWith('interview-1', 'user-1');
+   });
+ });
+diff --git a/apps/api/src/interviews/interviews.controller.ts b/apps/api/src/interviews/interviews.controller.ts
+index 1963252ee9657b079a1eb9465273028e15a71981..5f23a3ad721de84f291ec8b707fa06d9895df250 100644
+--- a/apps/api/src/interviews/interviews.controller.ts
++++ b/apps/api/src/interviews/interviews.controller.ts
+@@ -37,50 +37,67 @@ export class InterviewsController {
+   @Get()
+   async listInterviews(@Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.listInterviewsForUser(userId);
+   }
+ 
+   @Get(':id')
+   async getInterview(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.getInterviewForUser(id, userId);
+   }
+ 
++  @Post('start')
++  async startInterviewFromFitReview(
++    @Body() body: { jobId?: string; baselineId?: string },
 +    @Req() request: Request & { user?: { id?: string } },
 +  ) {
 +    const userId = request.user?.id;
@@ -633,391 +138,1113 @@ index 0000000000000000000000000000000000000000..ba5ad20191340d6d8e680d93725d783f
 +      throw new BadRequestException('Invalid user context');
 +    }
 +
-+    return this.starStoriesService.createStarStory(userId, body);
++    return this.interviewsService.startInterviewFromFitReview(userId, {
++      jobId: body.jobId,
++      baselineId: body.baselineId,
++    });
 +  }
 +
-+  @Get()
-+  async listStarStories(@Req() request: Request & { user?: { id?: string } }) {
-+    const userId = request.user?.id;
+   @Patch(':id')
+   async updateInterview(
+     @Param('id') id: string,
+     @Body() body: any,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewsService.updateInterview(id, userId, body);
+   }
+ 
+   @Delete(':id')
+   async deleteInterview(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+diff --git a/apps/api/src/interviews/interviews.service.spec.ts b/apps/api/src/interviews/interviews.service.spec.ts
+index 8006373452baabfb11d52f3ad590f0f04aafdfba..523af64bd7d5beaa9a977f6cda10b412d23b5115 100644
+--- a/apps/api/src/interviews/interviews.service.spec.ts
++++ b/apps/api/src/interviews/interviews.service.spec.ts
+@@ -6,52 +6,59 @@ describe('InterviewsService', () => {
+   const mockInterview: InterviewSession = {
+     id: 'interview-1',
+     userId: 'user-1',
+     baselineId: 'baseline-1',
+     jobId: null,
+     status: 'scheduled',
+     createdAt: new Date('2024-01-01T00:00:00.000Z'),
+     updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+     responses: [],
+   };
+ 
+   const createMockRepository = () => ({
+     create: jest.fn((data: Partial<InterviewSession>) => ({ ...mockInterview, ...data })),
+     save: jest.fn((data: InterviewSession) =>
+       Promise.resolve({
+         ...mockInterview,
+         ...data,
+         id: data.id || 'new-id',
+       }),
+     ),
+     find: jest.fn(),
+     findOne: jest.fn(),
+     remove: jest.fn((data: InterviewSession) => Promise.resolve(data)),
+   });
+ 
+-  const createService = (repository = createMockRepository()) =>
+-    new InterviewsService(repository as never);
++  const createMockResponseRepository = () => ({
++    create: jest.fn(),
++    save: jest.fn(),
++  });
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
++  const createService = (
++    repository = createMockRepository(),
++    responseRepository = createMockResponseRepository(),
++  ) => new InterviewsService(repository as never, responseRepository as never);
+ 
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
+ 
+   describe('createInterview', () => {
+     it('creates interview with required fields', async () => {
+       const repository = createMockRepository();
+       const service = createService(repository);
+ 
+       const result = await service.createInterview('user-1', {
+         baselineId: 'baseline-1',
+         date: '2024-02-01',
+         type: 'phone',
+         jobId: 'job-1',
+       });
+ 
+       expect(repository.create).toHaveBeenCalledWith({
+         userId: 'user-1',
+         baselineId: 'baseline-1',
+         jobId: 'job-1',
+         status: 'phone',
+       });
+       expect(repository.save).toHaveBeenCalled();
+       expect(result.status).toBe('phone');
+@@ -69,50 +76,97 @@ describe('InterviewsService', () => {
+     it('throws when baselineId is missing', async () => {
+       const service = createService();
+ 
+       await expect(
+         service.createInterview('user-1', { date: '2024-02-01' }),
+       ).rejects.toThrow(BadRequestException);
+     });
+   });
+ 
+   describe('listInterviewsForUser', () => {
+     it('lists interviews for user ordered by createdAt', async () => {
+       const repository = createMockRepository();
+       repository.find.mockResolvedValue([mockInterview]);
+       const service = createService(repository);
+ 
+       const result = await service.listInterviewsForUser('user-1');
+ 
+       expect(repository.find).toHaveBeenCalledWith({
+         where: { userId: 'user-1' },
+         order: { createdAt: 'DESC' },
+       });
+       expect(result).toEqual([mockInterview]);
+     });
+   });
+ 
++  describe('startInterviewFromFitReview', () => {
++    it('requires jobId and baselineId', async () => {
++      const service = createService();
++
++      await expect(service.startInterviewFromFitReview('user-1', { jobId: '', baselineId: 'b-1' })).rejects.toThrow(
++        BadRequestException,
++      );
++      await expect(service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: '' })).rejects.toThrow(
++        BadRequestException,
++      );
++    });
++
++    it('returns existing session for same job', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(mockInterview);
++      const service = createService(repository);
++
++      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
++
++      expect(repository.findOne).toHaveBeenCalledWith({
++        where: { userId: 'user-1', jobId: 'job-1' },
++        order: { createdAt: 'DESC' },
++      });
++      expect(result).toEqual(mockInterview);
++      expect(repository.create).not.toHaveBeenCalled();
++    });
++
++    it('creates new session when none exists', async () => {
++      const repository = createMockRepository();
++      repository.findOne.mockResolvedValue(null);
++      const service = createService(repository);
++
++      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
++
++      expect(repository.create).toHaveBeenCalledWith({
++        userId: 'user-1',
++        jobId: 'job-1',
++        baselineId: 'baseline-1',
++        status: 'active',
++      });
++      expect(repository.save).toHaveBeenCalled();
++      expect(result.jobId).toBe('job-1');
++      expect(result.baselineId).toBe('baseline-1');
++      expect(result.status).toBe('active');
++    });
++  });
++
+   describe('getInterviewForUser', () => {
+     it('returns interview when found', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue(mockInterview);
+       const service = createService(repository);
+ 
+       const interview = await service.getInterviewForUser('interview-1', 'user-1');
+ 
+       expect(repository.findOne).toHaveBeenCalledWith({
+         where: { id: 'interview-1', userId: 'user-1' },
+       });
+       expect(interview).toEqual(mockInterview);
+     });
+ 
+     it('throws when interview not found', async () => {
+       const repository = createMockRepository();
+       repository.findOne.mockResolvedValue(null);
+       const service = createService(repository);
+ 
+       await expect(service.getInterviewForUser('interview-1', 'user-1')).rejects.toThrow(
+         NotFoundException,
+       );
+     });
+   });
+ 
+diff --git a/apps/api/src/interviews/interviews.service.ts b/apps/api/src/interviews/interviews.service.ts
+index 12df937148253a914384eed2f8a1a82de7e9c539..7222bdcdea0d9093164eb58378e45fa8f4a2098c 100644
+--- a/apps/api/src/interviews/interviews.service.ts
++++ b/apps/api/src/interviews/interviews.service.ts
+@@ -21,76 +21,111 @@ export class InterviewsService {
+   constructor(
+     @InjectRepository(InterviewSession)
+     private readonly interviewRepository: Repository<InterviewSession>,
+     @InjectRepository(InterviewResponse)
+     private readonly interviewResponseRepository: Repository<InterviewResponse>,
+   ) {}
+ 
+   private validateDate(date?: string | null) {
+     if (!date?.trim()) {
+       throw new BadRequestException('Interview date is required.');
+     }
+   }
+ 
+   private validateType(type?: string | null) {
+     if (type !== undefined && !type?.trim()) {
+       throw new BadRequestException('Interview type is required.');
+     }
+   }
+ 
+   private validateBaselineId(baselineId?: string | null) {
+     if (!baselineId?.trim()) {
+       throw new BadRequestException('Baseline ID is required.');
+     }
+   }
+ 
++  private validateJobId(jobId?: string | null) {
++    if (!jobId?.trim()) {
++      throw new BadRequestException('Job ID is required.');
 +    }
-+
-+    return this.starStoriesService.listStarStoriesForUser(userId);
 +  }
 +
-+  @Get(':id')
-+  async getStarStory(
-+    @Param('id') id: string,
-+    @Req() request: Request & { user?: { id?: string } },
+   async createInterview(userId: string, dto: CreateInterviewDto) {
+     this.validateDate(dto.date ?? null);
+     this.validateType(dto.type ?? null);
+     this.validateBaselineId(dto.baselineId ?? null);
+ 
+     const interview = this.interviewRepository.create({
+       userId,
+       baselineId: dto.baselineId!.trim(),
+       jobId: dto.jobId?.trim() || null,
+       status: dto.type?.trim() || 'scheduled',
+     });
+ 
+     if (dto.date) {
+       interview.createdAt = new Date(dto.date);
+     }
+ 
+     return this.interviewRepository.save(interview);
+   }
+ 
+   async listInterviewsForUser(userId: string) {
+     return this.interviewRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
+ 
++  async startInterviewFromFitReview(
++    userId: string,
++    dto: { jobId?: string | null; baselineId?: string | null },
 +  ) {
-+    const userId = request.user?.id;
++    this.validateJobId(dto.jobId ?? null);
++    this.validateBaselineId(dto.baselineId ?? null);
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
++    const jobId = dto.jobId!.trim();
++    const baselineId = dto.baselineId!.trim();
++
++    const existing = await this.interviewRepository.findOne({
++      where: { userId, jobId },
++      order: { createdAt: 'DESC' },
++    });
++
++    if (existing) {
++      return existing;
 +    }
 +
-+    return this.starStoriesService.getStarStoryForUser(id, userId);
++    const session = this.interviewRepository.create({
++      userId,
++      jobId,
++      baselineId,
++      status: 'active',
++    });
++
++    return this.interviewRepository.save(session);
 +  }
 +
-+  @Patch(':id')
-+  async updateStarStory(
-+    @Param('id') id: string,
-+    @Body() body: UpdateStarStoryDto,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
+   async getInterviewForUser(id: string, userId: string) {
+     const interview = await this.interviewRepository.findOne({
+       where: { id, userId },
+     });
+ 
+     if (!interview) {
+       throw new NotFoundException('Interview not found');
+     }
+ 
+     return interview;
+   }
+ 
+   async updateInterview(id: string, userId: string, dto: UpdateInterviewDto) {
+     const interview = await this.getInterviewForUser(id, userId);
+ 
+     if (dto.date !== undefined) {
+       this.validateDate(dto.date ?? null);
+       interview.createdAt = new Date(dto.date);
+     }
+ 
+     if (dto.type !== undefined) {
+       this.validateType(dto.type ?? null);
+       interview.status = dto.type?.trim() || interview.status;
+     }
+ 
+diff --git a/apps/web/app/analyze/page.tsx b/apps/web/app/analyze/page.tsx
+index 93a836006ae6ef6e313a779cd9e89dab1235fd21..b87c6504f01d8cb97b750f422161e9f09decf103 100644
+--- a/apps/web/app/analyze/page.tsx
++++ b/apps/web/app/analyze/page.tsx
+@@ -157,50 +157,51 @@ export default function AnalyzePage() {
+ 
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobsLoading, setJobsLoading] = useState(true);
+   const [jobsError, setJobsError] = useState<string | null>(null);
+ 
+   const [jobDescription, setJobDescription] = useState("");
+   const [result, setResult] = useState<AnalysisResult | null>(null);
+   const [restoredAt, setRestoredAt] = useState<string | null>(null);
+ 
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [animatedScore, setAnimatedScore] = useState(0);
+   const [showRaw, setShowRaw] = useState(false);
+   const [restoreError, setRestoreError] = useState<string | null>(null);
+ 
+   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
+   const router = useRouter();
+ 
+   const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
+   const hasSelectedJob = jobId.trim().length > 0;
+   const hasJobDescription = jobDescription.trim().length > 0;
+   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
+   const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
++  const fitReviewHref = result?.jobId ? `/fit-review?jobId=${result.jobId}` : "/fit-review";
+ 
+   useEffect(() => {
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineLoading(true);
+       setBaselineError(null);
+ 
+       try {
+         const response = await fetch("/api/baselines", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
+         }
+ 
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
+ 
+         setBaselines(data);
+ 
+         if (data.length > 0) {
+           setBaselineId((prev) => {
+             if (prev && data.some((b) => b.id === prev)) return prev;
+             return data[0].id;
+           });
+@@ -819,50 +820,56 @@ export default function AnalyzePage() {
+ 
+                     <ol
+                       style={{
+                         margin: 0,
+                         paddingLeft: 18,
+                         display: "grid",
+                         gap: 6,
+                         color: "rgba(241,245,249,0.9)",
+                         fontSize: 14,
+                       }}
+                     >
+                       {result.recommendedActions.map((item, index) => (
+                         <li key={`${item}-${index}`}>{item}</li>
+                       ))}
+                     </ol>
+                   </div>
+                 ) : null}
+ 
+                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+                   <Link
+                     href={resultsHref}
+                     style={ttrComponents.quietButton}
+                   >
+                     View in Results
+                   </Link>
++                  <Link
++                    href={fitReviewHref}
++                    style={ttrComponents.quietButton}
++                  >
++                    Open Fit Review
++                  </Link>
+ 
+                   <button
+                     type="button"
+                     onClick={() => setShowRaw((prev) => !prev)}
+                     style={{
+                       border: "1px solid rgba(255,255,255,0.12)",
+                       background: "rgba(255,255,255,0.04)",
+                       color: "rgba(255,255,255,0.75)",
+                       padding: "6px 10px",
+                       borderRadius: 10,
+                       fontSize: 12,
+                       cursor: "pointer",
+                     }}
+                   >
+                     {showRaw ? "Hide raw" : "View raw JSON"}
+                   </button>
+                 </div>
+ 
+                 {showRaw ? (
+                   <pre
+                     style={{
+                       margin: 0,
+                       marginTop: 6,
+                       padding: 12,
+                       borderRadius: 10,
+diff --git a/apps/web/app/api/interviews/start/route.ts b/apps/web/app/api/interviews/start/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..38046adadc3ce5e20011ad87a7bdb3034ce48689
+--- /dev/null
++++ b/apps/web/app/api/interviews/start/route.ts
+@@ -0,0 +1,31 @@
++import { NextRequest, NextResponse } from "next/server";
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
 +
-+    return this.starStoriesService.updateStarStory(id, userId, body);
++export const runtime = "nodejs";
++
++export async function POST(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
 +  }
 +
-+  @Delete(':id')
-+  async deleteStarStory(
-+    @Param('id') id: string,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    return this.starStoriesService.deleteStarStory(id, userId);
++  if (!auth.token) {
++    return auth.error;
 +  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/interviews/start`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${auth.token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
 +}
-diff --git a/apps/api/src/star-stories/star-stories.module.ts b/apps/api/src/star-stories/star-stories.module.ts
+diff --git a/apps/web/app/fit-review/page.tsx b/apps/web/app/fit-review/page.tsx
 new file mode 100644
-index 0000000000000000000000000000000000000000..41010467a172905a7329b12349b2f06dbc162c00
+index 0000000000000000000000000000000000000000..aa181e768cb09d4119ecb23294ceac1c80c6ae92
 --- /dev/null
-+++ b/apps/api/src/star-stories/star-stories.module.ts
-@@ -0,0 +1,13 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { StarStoriesController } from './star-stories.controller';
-+import { StarStoriesService } from './star-stories.service';
-+import { StarStory } from './star-story.entity';
++++ b/apps/web/app/fit-review/page.tsx
+@@ -0,0 +1,484 @@
++"use client";
 +
-+@Module({
-+  imports: [TypeOrmModule.forFeature([StarStory])],
-+  controllers: [StarStoriesController],
-+  providers: [StarStoriesService],
-+  exports: [StarStoriesService],
-+})
-+export class StarStoriesModule {}
-diff --git a/apps/api/src/star-stories/star-stories.service.spec.ts b/apps/api/src/star-stories/star-stories.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..07cece4a89e693bfe930fc390e549612eb4f75c1
---- /dev/null
-+++ b/apps/api/src/star-stories/star-stories.service.spec.ts
-@@ -0,0 +1,138 @@
-+import { BadRequestException, NotFoundException } from '@nestjs/common';
-+import { StarStory } from './star-story.entity';
-+import { StarStoriesService } from './star-stories.service';
++import { useEffect, useMemo, useState } from "react";
++import Link from "next/link";
++import { useRouter, useSearchParams } from "next/navigation";
 +
-+describe('StarStoriesService', () => {
-+  const mockStory: StarStory = {
-+    id: 'story-1',
-+    userId: 'user-1',
-+    title: 'Launch project',
-+    situation: 'System reliability was poor',
-+    task: 'Improve uptime',
-+    action: 'Led migration to HA setup',
-+    result: '99.9% uptime achieved',
-+    reflections: 'Need earlier monitoring',
-+    competencies: ['leadership'],
-+    createdAt: new Date('2024-01-01T00:00:00Z'),
-+    updatedAt: new Date('2024-01-01T00:00:00Z'),
++import { InstrumentShell } from "../ui/InstrumentShell";
++import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
++
++type FitDimensionScores = {
++  experienceAlignment?: number;
++  leadershipLevel?: number;
++  technicalPlatformFit?: number;
++  industryContext?: number;
++  strategicTacticalFit?: number;
++};
++
++type FitAssessment = {
++  jobId?: string;
++  baselineId?: string;
++  overallScore?: number;
++  score?: number;
++  dimensionScores?: FitDimensionScores;
++  breakdown?: {
++    experience_alignment?: number;
++    leadership_level?: number;
++    technical_platform_fit?: number;
++    industry_context?: number;
++    strategic_vs_tactical?: number;
++  };
++  strengths?: string[];
++  gaps?: string[];
++  complianceFlags?: string[] | Array<{ code?: string; message?: string }>;
++  compliance_flags?: Array<{ code?: string; message?: string }>;
++};
++
++const DIMENSION_LABELS: Record<keyof Required<FitDimensionScores>, string> = {
++  experienceAlignment: "Experience alignment",
++  leadershipLevel: "Leadership level",
++  technicalPlatformFit: "Technical platform fit",
++  industryContext: "Industry & context",
++  strategicTacticalFit: "Strategic vs tactical",
++};
++
++function normalizeDimensions(data?: FitAssessment | null): FitDimensionScores {
++  if (!data) return {};
++
++  if (data.dimensionScores) {
++    return data.dimensionScores;
++  }
++
++  if (data.breakdown) {
++    const breakdown = data.breakdown;
++    return {
++      experienceAlignment: breakdown.experience_alignment,
++      leadershipLevel: breakdown.leadership_level,
++      technicalPlatformFit: breakdown.technical_platform_fit,
++      industryContext: breakdown.industry_context,
++      strategicTacticalFit: breakdown.strategic_vs_tactical,
++    };
++  }
++
++  return {};
++}
++
++function normalizeComplianceFlags(flags?: FitAssessment["complianceFlags"]): string[] {
++  if (!flags) return [];
++  if (Array.isArray(flags) && typeof flags[0] === "string") return flags as string[];
++
++  if (Array.isArray(flags)) {
++    return (flags as Array<{ code?: string; message?: string }>)
++      .map((flag) => flag?.code || flag?.message)
++      .filter((item): item is string => Boolean(item));
++  }
++
++  return [];
++}
++
++const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
++  const radius = 72;
++  const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
++  const clampedScore = Math.min(Math.max(score, 0), 100);
++  const offset = circumference * (1 - clampedScore / 100);
++  const gradientId = "fitReviewScoreRingGradient";
++
++  return (
++    <div
++      style={{
++        position: "relative",
++        display: "flex",
++        height: 176,
++        width: 176,
++        alignItems: "center",
++        justifyContent: "center",
++      }}
++    >
++      <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
++        <defs>
++          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
++            <stop offset="0%" stopColor="#22c55e" />
++            <stop offset="50%" stopColor="#f59e0b" />
++            <stop offset="100%" stopColor="#f97316" />
++          </linearGradient>
++        </defs>
++        <circle
++          cx="100"
++          cy="100"
++          r={radius}
++          stroke="rgba(255,255,255,0.08)"
++          strokeWidth={14}
++          fill="none"
++        />
++        <circle
++          cx="100"
++          cy="100"
++          r={radius}
++          stroke={`url(#${gradientId})`}
++          strokeWidth={14}
++          fill="none"
++          strokeDasharray={circumference}
++          strokeDashoffset={loading ? circumference : offset}
++          strokeLinecap="round"
++          style={{
++            transition: "stroke-dashoffset 800ms ease-out",
++            filter: "drop-shadow(0 0 18px rgba(34,197,94,0.2))",
++          }}
++        />
++      </svg>
++
++      <div
++        style={{
++          position: "absolute",
++          inset: 0,
++          display: "flex",
++          flexDirection: "column",
++          alignItems: "center",
++          justifyContent: "center",
++          textAlign: "center",
++        }}
++      >
++        <div
++          style={{
++            fontSize: 36,
++            fontWeight: 800,
++            color: "#bbf7d0",
++            textShadow: "0 2px 14px rgba(0,0,0,0.35)",
++          }}
++        >
++          {Math.round(clampedScore)}
++        </div>
++        <span
++          style={{
++            marginTop: 6,
++            fontSize: 11,
++            letterSpacing: 2.5,
++            textTransform: "uppercase",
++            color: "rgba(187,247,208,0.8)",
++          }}
++        >
++          Fit score
++        </span>
++      </div>
++    </div>
++  );
++};
++
++export default function FitReviewPage() {
++  const searchParams = useSearchParams();
++  const router = useRouter();
++  const jobId = searchParams.get("jobId") ?? "";
++
++  const [assessment, setAssessment] = useState<FitAssessment | null>(null);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [starting, setStarting] = useState(false);
++  const [startError, setStartError] = useState<string | null>(null);
++  const [startedInterviewId, setStartedInterviewId] = useState<string | null>(null);
++
++  const dimensionScores = normalizeDimensions(assessment);
++  const complianceFlags = normalizeComplianceFlags(
++    assessment?.complianceFlags ?? assessment?.compliance_flags,
++  );
++  const fitScore =
++    assessment?.overallScore ??
++    assessment?.score ??
++    (typeof assessment?.overallScore === "number" ? assessment.overallScore : 0);
++
++  useEffect(() => {
++    if (!jobId) return;
++
++    let cancelled = false;
++    const load = async () => {
++      setLoading(true);
++      setError(null);
++      setAssessment(null);
++
++      try {
++        const response = await fetch(`/api/analysis/job/${encodeURIComponent(jobId)}/latest`, {
++          cache: "no-store",
++        });
++
++        if (!response.ok) {
++          const text = await response.text();
++          throw new Error(text || "Unable to load fit review data.");
++        }
++
++        const data = (await response.json()) as FitAssessment;
++        if (!cancelled) {
++          setAssessment(data);
++        }
++      } catch (loadError) {
++        if (!cancelled) {
++          const message =
++            loadError instanceof Error ? loadError.message : "Unable to load fit review data.";
++          setError(message);
++        }
++      } finally {
++        if (!cancelled) {
++          setLoading(false);
++        }
++      }
++    };
++
++    load();
++    return () => {
++      cancelled = true;
++    };
++  }, [jobId]);
++
++  const handleStartInterview = async () => {
++    if (!assessment?.jobId || !assessment?.baselineId) {
++      setStartError("Missing job or baseline context for this assessment.");
++      return;
++    }
++
++    setStarting(true);
++    setStartError(null);
++
++    try {
++      const response = await fetch("/api/interviews/start", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++          jobId: assessment.jobId,
++          baselineId: assessment.baselineId,
++        }),
++      });
++
++      if (!response.ok) {
++        const payload = await response.json().catch(() => null);
++        const message = payload?.error || payload?.message || "Unable to start an interview.";
++        throw new Error(typeof message === "string" ? message : "Unable to start an interview.");
++      }
++
++      const data = (await response.json()) as { id?: string };
++      const interviewId = data?.id;
++
++      if (interviewId) {
++        setStartedInterviewId(interviewId);
++        router.push(`/interviews/${interviewId}`);
++      } else {
++        setStartedInterviewId(null);
++      }
++    } catch (startIssue) {
++      const message =
++        startIssue instanceof Error ? startIssue.message : "Unable to start an interview.";
++      setStartError(message);
++    } finally {
++      setStarting(false);
++    }
 +  };
 +
-+  const createMockRepository = () => ({
-+    create: jest.fn((data: Partial<StarStory>) => ({ ...mockStory, ...data })),
-+    save: jest.fn(async (data: StarStory) => data),
-+    find: jest.fn(),
-+    findOne: jest.fn(),
-+    remove: jest.fn(async (data: StarStory) => data),
++  const dimensionEntries = Object.entries(DIMENSION_LABELS).map(([key, label]) => {
++    const value = dimensionScores[key as keyof FitDimensionScores] ?? null;
++    return { key, label, value };
 +  });
 +
-+  const createService = (repository = createMockRepository()) =>
-+    new StarStoriesService(repository as never);
-+
-+  afterEach(() => {
-+    jest.restoreAllMocks();
-+  });
-+
-+  it('creates a STAR story with required fields', async () => {
-+    const repository = createMockRepository();
-+    const service = createService(repository);
-+
-+    const result = await service.createStarStory('user-1', {
-+      title: ' Reliability fix ',
-+      situation: ' Outages ',
-+      task: ' Stabilize ',
-+      action: ' Added alerts ',
-+      result: ' Reduced incidents ',
-+      competencies: [' ops '],
-+      reflections: '  More runbooks  ',
-+    });
-+
-+    expect(repository.create).toHaveBeenCalledWith(
-+      expect.objectContaining({
-+        userId: 'user-1',
-+        title: 'Reliability fix',
-+        situation: 'Outages',
-+        task: 'Stabilize',
-+        action: 'Added alerts',
-+        result: 'Reduced incidents',
-+        reflections: 'More runbooks',
-+        competencies: ['ops'],
-+      }),
-+    );
-+    expect(result.title).toBe('Reliability fix');
-+  });
-+
-+  it('lists stories for a user', async () => {
-+    const repository = createMockRepository();
-+    repository.find.mockResolvedValue([mockStory]);
-+    const service = createService(repository);
-+
-+    const stories = await service.listStarStoriesForUser('user-1');
-+
-+    expect(repository.find).toHaveBeenCalledWith({
-+      where: { userId: 'user-1' },
-+      order: { createdAt: 'DESC' },
-+    });
-+    expect(stories).toEqual([mockStory]);
-+  });
-+
-+  it('retrieves a story for a user', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(mockStory);
-+    const service = createService(repository);
-+
-+    const story = await service.getStarStoryForUser('story-1', 'user-1');
-+
-+    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'story-1', userId: 'user-1' } });
-+    expect(story).toEqual(mockStory);
-+  });
-+
-+  it('throws when story not found', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(null);
-+    const service = createService(repository);
-+
-+    await expect(service.getStarStoryForUser('missing', 'user-1')).rejects.toBeInstanceOf(
-+      NotFoundException,
-+    );
-+  });
-+
-+  it('updates a story with validation', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({ ...mockStory });
-+    const service = createService(repository);
-+
-+    const result = await service.updateStarStory('story-1', 'user-1', {
-+      title: ' Updated ',
-+      result: ' Better outcomes ',
-+      competencies: [' leadership ', ''],
-+      reflections: null,
-+    });
-+
-+    expect(repository.save).toHaveBeenCalled();
-+    expect(result.title).toBe('Updated');
-+    expect(result.result).toBe('Better outcomes');
-+    expect(result.competencies).toEqual(['leadership']);
-+    expect(result.reflections).toBeNull();
-+  });
-+
-+  it('throws when updating with empty required field', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({ ...mockStory });
-+    const service = createService(repository);
-+
-+    await expect(
-+      service.updateStarStory('story-1', 'user-1', { title: '' }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
-+
-+  it('deletes a story', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue(mockStory);
-+    const service = createService(repository);
-+
-+    const result = await service.deleteStarStory('story-1', 'user-1');
-+
-+    expect(repository.remove).toHaveBeenCalledWith(mockStory);
-+    expect(result).toEqual({ deleted: true, id: 'story-1' });
-+  });
-+});
-diff --git a/apps/api/src/star-stories/star-stories.service.ts b/apps/api/src/star-stories/star-stories.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..0f49929db76bb756d933d0a2a2ec49a792582c0c
---- /dev/null
-+++ b/apps/api/src/star-stories/star-stories.service.ts
-@@ -0,0 +1,113 @@
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
-+import { CreateStarStoryDto } from './dto/create-star-story.dto';
-+import { UpdateStarStoryDto } from './dto/update-star-story.dto';
-+import { StarStory } from './star-story.entity';
-+
-+@Injectable()
-+export class StarStoriesService {
-+  constructor(
-+    @InjectRepository(StarStory)
-+    private readonly starStoryRepository: Repository<StarStory>,
-+  ) {}
-+
-+  private sanitizeString(value?: string | null) {
-+    if (value === undefined) return value;
-+    const trimmed = value?.trim() ?? '';
-+    return trimmed.length ? trimmed : null;
-+  }
-+
-+  private sanitizeStringArray(values?: string[]) {
-+    return (values ?? []).map((value) => value.trim()).filter(Boolean);
-+  }
-+
-+  private validateRequiredFields(dto: CreateStarStoryDto | UpdateStarStoryDto) {
-+    const required = ['title', 'situation', 'task', 'action', 'result'] as const;
-+
-+    for (const field of required) {
-+      const value = (dto as Record<string, unknown>)[field];
-+      if (value !== undefined && typeof value === 'string' && !value.trim()) {
-+        throw new BadRequestException(`${field} is required.`);
++  return (
++    <InstrumentShell
++      kicker="Fit Review"
++      title="Role alignment review"
++      subtitle="See how your baseline maps to the role and kick off an interview session."
++      rightSlot={
++        jobId ? (
++          <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>Job: {jobId}</span>
++        ) : null
 +      }
-+    }
-+  }
++    >
++      <div style={ttrLayout.panelsRow}>
++        <section style={{ ...ttrComponents.basePanel, flex: 0.95, position: "relative" }}>
++          <div
++            style={{
++              position: "absolute",
++              inset: 0,
++              background:
++                "radial-gradient(circle at 15% 0%, rgba(34,197,94,0.08), transparent 32%), radial-gradient(circle at 90% 16%, rgba(251,191,36,0.06), transparent 30%)",
++              pointerEvents: "none",
++            }}
++          />
 +
-+  async createStarStory(userId: string, dto: CreateStarStoryDto) {
-+    this.validateRequiredFields(dto);
++          <div style={{ position: "relative", display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
++            <ScoreRing score={fitScore ?? 0} loading={loading} />
 +
-+    if (!dto.title?.trim()) {
-+      throw new BadRequestException('title is required.');
-+    }
-+    if (!dto.situation?.trim()) {
-+      throw new BadRequestException('situation is required.');
-+    }
-+    if (!dto.task?.trim()) {
-+      throw new BadRequestException('task is required.');
-+    }
-+    if (!dto.action?.trim()) {
-+      throw new BadRequestException('action is required.');
-+    }
-+    if (!dto.result?.trim()) {
-+      throw new BadRequestException('result is required.');
-+    }
++            <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
++              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++                <span style={ttrTypography.subtleLabel}>Overview</span>
++                <h2 style={ttrTypography.h2}>Fit summary</h2>
++              </div>
 +
-+    const story = this.starStoryRepository.create({
-+      userId,
-+      title: dto.title.trim(),
-+      situation: dto.situation.trim(),
-+      task: dto.task.trim(),
-+      action: dto.action.trim(),
-+      result: dto.result.trim(),
-+      reflections: this.sanitizeString(dto.reflections) ?? null,
-+      competencies: this.sanitizeStringArray(dto.competencies),
-+    });
++              <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
++                {assessment?.summary ||
++                  "View the latest compatibility score and signals for this role."}
++              </p>
 +
-+    return this.starStoryRepository.save(story);
-+  }
++              {assessment?.baselineId ? (
++                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
++                  Baseline: {assessment.baselineId}
++                </div>
++              ) : null}
 +
-+  async listStarStoriesForUser(userId: string) {
-+    return this.starStoryRepository.find({
-+      where: { userId },
-+      order: { createdAt: 'DESC' },
-+    });
-+  }
++              {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
++              {!error && !loading && !assessment ? (
++                <div style={ttrComponents.warningBox}>Run an analysis first to view Fit Review.</div>
++              ) : null}
++            </div>
++          </div>
++        </section>
 +
-+  async getStarStoryForUser(id: string, userId: string) {
-+    const story = await this.starStoryRepository.findOne({ where: { id, userId } });
++        <section style={{ ...ttrComponents.basePanel, flex: 0.9 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++            <span style={ttrTypography.subtleLabel}>Action</span>
++            <h2 style={ttrTypography.h2}>Next steps</h2>
++          </div>
 +
-+    if (!story) {
-+      throw new NotFoundException('STAR story not found');
-+    }
++          <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
++            <p style={{ margin: 0, color: "rgba(226,232,240,0.8)", fontSize: 14 }}>
++              Ready to move forward? Start a structured interview session tied to this role.
++            </p>
 +
-+    return story;
-+  }
++            <button
++              type="button"
++              onClick={handleStartInterview}
++              disabled={starting || !assessment?.jobId || !assessment?.baselineId}
++              style={{
++                ...ttrComponents.primaryButton,
++                cursor: starting ? "not-allowed" : "pointer",
++                opacity: starting ? 0.7 : 1,
++              }}
++            >
++              {starting ? "Starting..." : "I think I’m qualified"}
++            </button>
 +
-+  async updateStarStory(id: string, userId: string, dto: UpdateStarStoryDto) {
-+    const story = await this.getStarStoryForUser(id, userId);
++            {startError ? <div style={ttrComponents.dangerBox}>{startError}</div> : null}
 +
-+    this.validateRequiredFields(dto);
++            {startedInterviewId ? (
++              <div style={ttrComponents.successBox}>
++                Interview created.{" "}
++                <Link
++                  href={`/interviews/${startedInterviewId}`}
++                  style={{ color: "#c084fc", textDecoration: "underline" }}
++                >
++                  Open interview
++                </Link>
++              </div>
++            ) : null}
++          </div>
++        </section>
++      </div>
 +
-+    if (dto.title !== undefined) story.title = dto.title.trim();
-+    if (dto.situation !== undefined) story.situation = dto.situation.trim();
-+    if (dto.task !== undefined) story.task = dto.task.trim();
-+    if (dto.action !== undefined) story.action = dto.action.trim();
-+    if (dto.result !== undefined) story.result = dto.result.trim();
-+    if (dto.reflections !== undefined) {
-+      story.reflections = this.sanitizeString(dto.reflections) ?? null;
-+    }
-+    if (dto.competencies !== undefined) {
-+      story.competencies = this.sanitizeStringArray(dto.competencies);
-+    }
++      <div style={ttrLayout.panelsRow}>
++        <section style={{ ...ttrComponents.basePanel, flex: 1.05 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++            <span style={ttrTypography.subtleLabel}>Breakdown</span>
++            <h2 style={ttrTypography.h2}>Five dimensions</h2>
++          </div>
 +
-+    return this.starStoryRepository.save(story);
-+  }
++          <div style={{ marginTop: 16, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
++            {dimensionEntries.map(({ key, label, value }) => (
++              <div
++                key={key}
++                style={{
++                  padding: "12px 14px",
++                  borderRadius: 12,
++                  border: "1px solid rgba(255,255,255,0.08)",
++                  background: "rgba(255,255,255,0.03)",
++                  display: "flex",
++                  flexDirection: "column",
++                  gap: 6,
++                }}
++              >
++                <span style={{ color: "rgba(226,232,240,0.75)", fontSize: 12 }}>{label}</span>
++                <span style={{ fontSize: 22, fontWeight: 800, color: "#e2e8f0" }}>
++                  {value ?? "—"}
++                </span>
++              </div>
++            ))}
++          </div>
++        </section>
 +
-+  async deleteStarStory(id: string, userId: string) {
-+    const story = await this.getStarStoryForUser(id, userId);
++        <section style={{ ...ttrComponents.basePanel, flex: 0.95 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++            <span style={ttrTypography.subtleLabel}>Signals</span>
++            <h2 style={ttrTypography.h2}>Strengths & gaps</h2>
++          </div>
 +
-+    await this.starStoryRepository.remove(story);
++          <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
++            <div>
++              <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#bbf7d0" }}>
++                Strengths
++              </p>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
++                {assessment?.strengths?.length ? (
++                  assessment.strengths.map((item, index) => (
++                    <span key={`${item}-${index}`} style={ttrComponents.chip}>
++                      {item}
++                    </span>
++                  ))
++                ) : (
++                  <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
++                    No strengths captured yet.
++                  </span>
++                )}
++              </div>
++            </div>
 +
-+    return { deleted: true, id };
-+  }
++            <div>
++              <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
++                Gaps
++              </p>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
++                {assessment?.gaps?.length ? (
++                  assessment.gaps.map((item, index) => (
++                    <span
++                      key={`${item}-${index}`}
++                      style={{
++                        ...ttrComponents.chip,
++                        background: "rgba(248,113,113,0.12)",
++                        border: "1px solid rgba(248,113,113,0.4)",
++                        color: "#fecdd3",
++                      }}
++                    >
++                      {item}
++                    </span>
++                  ))
++                ) : (
++                  <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
++                    No gaps identified.
++                  </span>
++                )}
++              </div>
++            </div>
++
++            <div>
++              <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
++                Compliance flags
++              </p>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
++                {complianceFlags.length ? (
++                  complianceFlags.map((flag, index) => (
++                    <span
++                      key={`${flag}-${index}`}
++                      style={{
++                        ...ttrComponents.chip,
++                        background: "rgba(251,191,36,0.12)",
++                        border: "1px solid rgba(251,191,36,0.4)",
++                        color: "#fef9c3",
++                      }}
++                    >
++                      {flag}
++                    </span>
++                  ))
++                ) : (
++                  <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
++                    No compliance flags.
++                  </span>
++                )}
++              </div>
++            </div>
++          </div>
++        </section>
++      </div>
++    </InstrumentShell>
++  );
 +}
-diff --git a/apps/api/src/star-stories/star-story.entity.ts b/apps/api/src/star-stories/star-story.entity.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..5bae7be9303bfd5117c0f1604be565bfd80a40a1
---- /dev/null
-+++ b/apps/api/src/star-stories/star-story.entity.ts
-@@ -0,0 +1,43 @@
-+import {
-+  Column,
-+  CreateDateColumn,
-+  Entity,
-+  PrimaryGeneratedColumn,
-+  UpdateDateColumn,
-+} from 'typeorm';
-+
-+@Entity({ name: 'star_stories' })
-+export class StarStory {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @Column()
-+  userId!: string;
-+
-+  @Column({ type: 'varchar', length: 255 })
-+  title!: string;
-+
-+  @Column({ type: 'text' })
-+  situation!: string;
-+
-+  @Column({ type: 'text' })
-+  task!: string;
-+
-+  @Column({ type: 'text' })
-+  action!: string;
-+
-+  @Column({ type: 'text' })
-+  result!: string;
-+
-+  @Column({ type: 'text', nullable: true })
-+  reflections!: string | null;
-+
-+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-+  competencies!: string[];
-+
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  createdAt!: Date;
-+
-+  @UpdateDateColumn({ type: 'timestamptz' })
-+  updatedAt!: Date;
-+}
+diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
+index aa36ebfadf384d034007bf17671f6461981dbf55..d852a212dc13ef740220ee2d5df1b064c5ca1fab 100644
+--- a/apps/web/app/results/page.tsx
++++ b/apps/web/app/results/page.tsx
+@@ -139,50 +139,64 @@ export default function ResultsPage() {
+           <div>
+             <label className="block text-sm">Job</label>
+             <input
+               className="border rounded w-full p-2"
+               value={jobId}
+               onChange={(e) => setJobId(e.target.value)}
+               placeholder="Job ID"
+             />
+           </div>
+ 
+           <button
+             onClick={loadLatest}
+             className="bg-gray-700 text-white px-4 py-2 rounded"
+             disabled={!jobId}
+           >
+             Load latest analysis
+           </button>
+ 
+           <div className="text-xs text-gray-500">
+             {latestEndpoint ? `Calling: ${latestEndpoint}` : ""}
+           </div>
+         </div>
+ 
+         <div className="border rounded p-4">
+           <h2 className="font-medium mb-2">Latest analysis</h2>
++          <div className="flex items-center gap-3 mb-3">
++            <button
++              className="text-sm text-blue-600 underline disabled:text-gray-400"
++              disabled={!latest?.jobId}
++              onClick={() => {
++                if (latest?.jobId) {
++                  window.location.href = `/fit-review?jobId=${encodeURIComponent(latest.jobId)}`;
++                }
++              }}
++            >
++              Open Fit Review
++            </button>
++            <span className="text-xs text-gray-500">Job: {latest?.jobId ?? "n/a"}</span>
++          </div>
+           <pre className="text-sm whitespace-pre-wrap">
+             {latest ? JSON.stringify(latest, null, 2) : ""}
+           </pre>
+         </div>
+       </div>
+ 
+       <div className="border rounded p-4 space-y-3">
+         <h2 className="font-medium">Generate resume</h2>
+ 
+         <button
+           onClick={generateResume}
+           disabled={!baselineId || !jobId || loading}
+           className="bg-gray-800 text-white px-4 py-2 rounded"
+         >
+           {loading ? "Generating..." : "Generate resume"}
+         </button>
+ 
+         <div>
+           <label className="block text-sm">Resume response</label>
+           <pre className="border rounded p-2 text-sm whitespace-pre-wrap">
+             {resumeResponse ? JSON.stringify(resumeResponse, null, 2) : ""}
+           </pre>
+         </div>
+       </div>
+     </div>
+diff --git a/apps/web/app/ui/ttrStyles.ts b/apps/web/app/ui/ttrStyles.ts
+index 412db62ffcd1e30a267999e168c121ec496ed59d..80a4e78bcd30df7526de11023a22f8aec8c5e6b4 100644
+--- a/apps/web/app/ui/ttrStyles.ts
++++ b/apps/web/app/ui/ttrStyles.ts
+@@ -167,50 +167,58 @@ export const ttrComponents: Record<string, CSSProperties> = {
+     margin: "0 8px 8px 0",
+     borderRadius: ttrRadii.pill,
+     border: "1px solid rgba(255,255,255,0.12)",
+     background: "rgba(255,255,255,0.06)",
+     color: "rgba(241,245,249,0.92)",
+     fontSize: 12,
+     fontWeight: 700,
+   },
+ 
+   dangerBox: {
+     borderRadius: 12,
+     border: `1px solid ${ttrColors.dangerBorder}`,
+     background: ttrColors.dangerBg,
+     color: ttrColors.dangerText,
+     padding: "10px 12px",
+     fontSize: 13,
+   },
+   successBox: {
+     borderRadius: 12,
+     border: "1px solid rgba(74,222,128,0.35)",
+     background: "rgba(34,197,94,0.12)",
+     color: "rgba(187,247,208,0.95)",
+     padding: "10px 12px",
+     fontSize: 13,
+   },
++  warningBox: {
++    borderRadius: 12,
++    border: "1px solid rgba(251,191,36,0.35)",
++    background: "rgba(251,191,36,0.1)",
++    color: "rgba(253,224,71,0.95)",
++    padding: "10px 12px",
++    fontSize: 13,
++  },
+ 
+   primaryButton: {
+     display: "inline-flex",
+     alignItems: "center",
+     justifyContent: "center",
+     padding: "10px 12px",
+     borderRadius: ttrRadii.button,
+     fontSize: 13,
+     fontWeight: 900,
+     border: "none",
+     background: "linear-gradient(120deg, #fbbf24, #f97316)",
+     color: "#0f172a",
+     boxShadow: ttrShadows.button,
+     transition: "transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease",
+     userSelect: "none",
+     whiteSpace: "nowrap",
+   },
+   secondaryButton: {
+     display: "inline-flex",
+     alignItems: "center",
+     justifyContent: "center",
+     padding: "10px 12px",
+     borderRadius: ttrRadii.button,
+     fontSize: 13,
+     fontWeight: 800,
+@@ -221,26 +229,25 @@ export const ttrComponents: Record<string, CSSProperties> = {
+     boxShadow: "0 12px 22px rgba(0,0,0,0.25)",
+     transition: "transform 160ms ease, box-shadow 160ms ease",
+     userSelect: "none",
+     whiteSpace: "nowrap",
+   },
+ 
+   quietButton: {
+     display: "inline-flex",
+     alignItems: "center",
+     justifyContent: "center",
+     padding: "10px 12px",
+     borderRadius: ttrRadii.button,
+     fontSize: 13,
+     fontWeight: 800,
+     textDecoration: "none",
+     border: "1px solid rgba(255,255,255,0.12)",
+     background: "rgba(255,255,255,0.05)",
+     color: "rgba(241,245,249,0.92)",
+     boxShadow: "0 12px 22px rgba(0,0,0,0.25)",
+     transition: "transform 160ms ease, box-shadow 160ms ease",
+     userSelect: "none",
+     whiteSpace: "nowrap",
+   },
+ };
+ 
+-

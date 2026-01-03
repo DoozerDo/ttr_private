@@ -189,6 +189,14 @@ export const ttrComponents: Record<string, CSSProperties> = {
     padding: "10px 12px",
     fontSize: 13,
   },
+  warningBox: {
+    borderRadius: 12,
+    border: "1px solid rgba(251,191,36,0.35)",
+    background: "rgba(251,191,36,0.1)",
+    color: "rgba(253,224,71,0.95)",
+    padding: "10px 12px",
+    fontSize: 13,
+  },
 
   primaryButton: {
     display: "inline-flex",
@@ -242,5 +250,4 @@ export const ttrComponents: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
   },
 };
-
 

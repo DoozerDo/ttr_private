@@ -161,6 +161,20 @@ export default function ResultsPage() {
 
         <div className="border rounded p-4">
           <h2 className="font-medium mb-2">Latest analysis</h2>
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              className="text-sm text-blue-600 underline disabled:text-gray-400"
+              disabled={!latest?.jobId}
+              onClick={() => {
+                if (latest?.jobId) {
+                  window.location.href = `/fit-review?jobId=${encodeURIComponent(latest.jobId)}`;
+                }
+              }}
+            >
+              Open Fit Review
+            </button>
+            <span className="text-xs text-gray-500">Job: {latest?.jobId ?? "n/a"}</span>
+          </div>
           <pre className="text-sm whitespace-pre-wrap">
             {latest ? JSON.stringify(latest, null, 2) : ""}
           </pre>

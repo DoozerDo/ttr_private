@@ -28,8 +28,15 @@ describe('InterviewsService', () => {
     remove: jest.fn((data: InterviewSession) => Promise.resolve(data)),
   });
 
-  const createService = (repository = createMockRepository()) =>
-    new InterviewsService(repository as never);
+  const createMockResponseRepository = () => ({
+    create: jest.fn(),
+    save: jest.fn(),
+  });
+
+  const createService = (
+    repository = createMockRepository(),
+    responseRepository = createMockResponseRepository(),
+  ) => new InterviewsService(repository as never, responseRepository as never);
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -88,6 +95,53 @@ describe('InterviewsService', () => {
         order: { createdAt: 'DESC' },
       });
       expect(result).toEqual([mockInterview]);
+    });
+  });
+
+  describe('startInterviewFromFitReview', () => {
+    it('requires jobId and baselineId', async () => {
+      const service = createService();
+
+      await expect(service.startInterviewFromFitReview('user-1', { jobId: '', baselineId: 'b-1' })).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: '' })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('returns existing session for same job', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(mockInterview);
+      const service = createService(repository);
+
+      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
+
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: { userId: 'user-1', jobId: 'job-1' },
+        order: { createdAt: 'DESC' },
+      });
+      expect(result).toEqual(mockInterview);
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('creates new session when none exists', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(null);
+      const service = createService(repository);
+
+      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
+
+      expect(repository.create).toHaveBeenCalledWith({
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+        status: 'active',
+      });
+      expect(repository.save).toHaveBeenCalled();
+      expect(result.jobId).toBe('job-1');
+      expect(result.baselineId).toBe('baseline-1');
+      expect(result.status).toBe('active');
     });
   });
 

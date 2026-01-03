@@ -59,6 +59,23 @@ export class InterviewsController {
     return this.interviewsService.getInterviewForUser(id, userId);
   }
 
+  @Post('start')
+  async startInterviewFromFitReview(
+    @Body() body: { jobId?: string; baselineId?: string },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewsService.startInterviewFromFitReview(userId, {
+      jobId: body.jobId,
+      baselineId: body.baselineId,
+    });
+  }
+
   @Patch(':id')
   async updateInterview(
     @Param('id') id: string,

@@ -43,6 +43,12 @@ export class InterviewsService {
     }
   }
 
+  private validateJobId(jobId?: string | null) {
+    if (!jobId?.trim()) {
+      throw new BadRequestException('Job ID is required.');
+    }
+  }
+
   async createInterview(userId: string, dto: CreateInterviewDto) {
     this.validateDate(dto.date ?? null);
     this.validateType(dto.type ?? null);
@@ -67,6 +73,35 @@ export class InterviewsService {
       where: { userId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async startInterviewFromFitReview(
+    userId: string,
+    dto: { jobId?: string | null; baselineId?: string | null },
+  ) {
+    this.validateJobId(dto.jobId ?? null);
+    this.validateBaselineId(dto.baselineId ?? null);
+
+    const jobId = dto.jobId!.trim();
+    const baselineId = dto.baselineId!.trim();
+
+    const existing = await this.interviewRepository.findOne({
+      where: { userId, jobId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const session = this.interviewRepository.create({
+      userId,
+      jobId,
+      baselineId,
+      status: 'active',
+    });
+
+    return this.interviewRepository.save(session);
   }
 
   async getInterviewForUser(id: string, userId: string) {

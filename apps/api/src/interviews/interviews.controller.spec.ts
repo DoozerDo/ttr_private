@@ -11,6 +11,7 @@ describe('InterviewsController', () => {
       createInterview: jest.fn().mockResolvedValue({ id: 'interview-1' }),
       listInterviewsForUser: jest.fn().mockResolvedValue([]),
       getInterviewForUser: jest.fn().mockResolvedValue({ id: 'interview-1' }),
+      startInterviewFromFitReview: jest.fn().mockResolvedValue({ id: 'interview-1', jobId: 'job-1' }),
       updateInterview: jest.fn().mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
       deleteInterview: jest.fn().mockResolvedValue({ deleted: true, id: 'interview-1' }),
     }) as unknown as InterviewsService;
@@ -57,6 +58,17 @@ describe('InterviewsController', () => {
     await controller.getInterview('interview-1', request as any);
 
     expect(service.getInterviewForUser).toHaveBeenCalledWith('interview-1', 'user-1');
+  });
+
+  it('starts interview from fit review', async () => {
+    const service = createMockService();
+    const controller = new InterviewsController(service);
+    const request = createMockRequest('user-1');
+    const body = { jobId: 'job-1', baselineId: 'baseline-1' };
+
+    await controller.startInterviewFromFitReview(body, request as any);
+
+    expect(service.startInterviewFromFitReview).toHaveBeenCalledWith('user-1', body);
   });
 
   it('updates interview for user', async () => {

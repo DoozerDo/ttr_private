@@ -179,6 +179,7 @@ export default function AnalyzePage() {
   const hasJobDescription = jobDescription.trim().length > 0;
   const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
   const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
+  const fitReviewHref = result?.jobId ? `/fit-review?jobId=${result.jobId}` : "/fit-review";
 
   useEffect(() => {
     let cancelled = false;
@@ -840,6 +841,12 @@ export default function AnalyzePage() {
                     style={ttrComponents.quietButton}
                   >
                     View in Results
+                  </Link>
+                  <Link
+                    href={fitReviewHref}
+                    style={ttrComponents.quietButton}
+                  >
+                    Open Fit Review
                   </Link>
 
                   <button
