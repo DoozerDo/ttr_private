@@ -48,6 +48,10 @@ describe('TemplateCoverLetterGenerator', () => {
           order: 1,
         },
       ],
+      closingTemplate: {
+        key: 'steady',
+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+      },
       tone: 'neutral',
       maxWords: 350,
     };
@@ -59,8 +63,9 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(typeof output1.content).toBe('string');
     expect(output1.content.length).toBeGreaterThan(0);
 
+    expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
     expect(countParagraphs(output1.content)).toBe(4);
-    expect(countWords(output1.content)).toBeLessThanOrEqual(400);
+    expect(countWords(output1.content)).toBeLessThanOrEqual(350);
   });
 
   it('does not include disallowed baseline content when it is not provided', () => {
@@ -84,6 +89,10 @@ describe('TemplateCoverLetterGenerator', () => {
           order: 0,
         },
       ],
+      closingTemplate: {
+        key: 'steady',
+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+      },
       tone: 'neutral',
       maxWords: 300,
     };
@@ -92,6 +101,6 @@ describe('TemplateCoverLetterGenerator', () => {
 
     expect(output.content).not.toContain(disallowed);
     expect(countParagraphs(output.content)).toBe(4);
-    expect(countWords(output.content)).toBeLessThanOrEqual(400);
+    expect(countWords(output.content)).toBeLessThanOrEqual(350);
   });
 });

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { BaselineDto } from "../../lib/baselines";
 import type { JobDto } from "../../lib/jobs";
+import { coverLetterClosingTemplates, defaultClosingTemplateKey } from "../../lib/coverLetters";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
 
@@ -17,6 +18,7 @@ type CoverLetterDto = {
   createdAt: string;
   generatorType?: string;
   generatorVersion?: string;
+  closingTemplateKey?: string;
 };
 
 type LoadState = "idle" | "loading" | "error";
@@ -62,6 +64,8 @@ export default function CoverLettersPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
+  const [complianceFlags, setComplianceFlags] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +164,8 @@ export default function CoverLettersPage() {
 
         setHistory(data);
         setHistoryState("idle");
+        const latestTemplate = data[0]?.closingTemplateKey;
+        setClosingTemplateKey((current) => current || latestTemplate || defaultClosingTemplateKey);
       } catch (error) {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : "Unable to load history.";
@@ -217,23 +223,52 @@ export default function CoverLettersPage() {
     if (!baselineId || !jobId) {
       setStatusMessage(null);
       setErrorMessage("Select a baseline and job to generate a cover letter.");
+      setComplianceFlags([]);
       return;
     }
 
     setIsGenerating(true);
     setStatusMessage(null);
     setErrorMessage(null);
+    setComplianceFlags([]);
 
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineId, jobId }),
+        body: JSON.stringify({ baselineId, jobId, closingTemplateKey }),
       });
 
       if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "Unable to generate a cover letter right now.");
+        const text = await response.text();
+        let parsed: any = null;
+
+        try {
+          parsed = JSON.parse(text);
+        } catch (error) {
+          // ignore parsing issues and use fallback messaging
+        }
+
+        const message =
+          parsed?.error?.message ||
+          parsed?.message ||
+          (typeof parsed === "string" ? parsed : null) ||
+          text ||
+          "Unable to generate a cover letter right now.";
+
+        const flags =
+          parsed?.error?.details?.compliance_flags ||
+          parsed?.details?.compliance_flags ||
+          parsed?.complianceFlags ||
+          [];
+
+        setComplianceFlags(
+          Array.isArray(flags)
+            ? flags.map((flag: any) => flag?.message || flag?.code || "Compliance validation failed.")
+            : [],
+        );
+
+        throw new Error(message);
       }
 
       const data = (await response.json()) as CoverLetterDto;
@@ -243,6 +278,8 @@ export default function CoverLettersPage() {
       });
       setSelectedLetterId(data.id);
       setStatusMessage("Cover letter generated successfully.");
+      setClosingTemplateKey(data.closingTemplateKey || closingTemplateKey);
+      setComplianceFlags([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to generate.";
       setErrorMessage(message);
@@ -367,6 +404,17 @@ export default function CoverLettersPage() {
               </div>
             ) : null}
 
+            {renderSelect(
+              "Choose a closing template",
+              closingTemplateKey,
+              coverLetterClosingTemplates.map((template) => ({
+                value: template.key,
+                label: `${template.label} – ${template.text}`,
+              })),
+              setClosingTemplateKey,
+              false,
+            )}
+
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <button
                 type="button"
@@ -388,6 +436,18 @@ export default function CoverLettersPage() {
 
             {statusMessage ? <div style={ttrComponents.successBox}>{statusMessage}</div> : null}
             {errorMessage ? <div style={ttrComponents.dangerBox}>{errorMessage}</div> : null}
+            {complianceFlags.length ? (
+              <div style={{ ...ttrComponents.dangerBox, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Compliance flags</div>
+                <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {complianceFlags.map((flag, index) => (
+                    <li key={`${flag}-${index}`} style={{ fontSize: 13, lineHeight: 1.5 }}>
+                      {flag}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </section>
 

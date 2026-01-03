@@ -20,11 +20,17 @@ export type CoverLetterJobContext = {
   requirements: string[];
 };
 
+export type CoverLetterClosingTemplate = {
+  key: string;
+  text: string;
+};
+
 export type CoverLetterGenerationInput = {
   baselineId: string;
   jobId: string;
   allowedBaselineBlocks: AllowedBaselineBlock[];
   job: CoverLetterJobContext;
+  closingTemplate: CoverLetterClosingTemplate;
   maxWords?: number;
   tone?: string;
 };

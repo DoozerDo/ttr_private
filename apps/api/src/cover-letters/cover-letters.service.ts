@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
@@ -14,7 +15,14 @@ import {
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
+import {
+  COVER_LETTER_CLOSING_TEMPLATES,
+  DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY,
+  resolveClosingTemplate,
+} from './closing-templates';
 import { CoverLetter } from './cover-letter.entity';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import {
@@ -32,7 +40,10 @@ export class CoverLettersService {
   private readonly jobRepository: Repository<Job>;
   private readonly generator: CoverLetterGenerator;
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly complianceService: ComplianceService,
+  ) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
     this.baselineVersionRepository =
@@ -85,6 +96,12 @@ export class CoverLettersService {
       policies,
     );
 
+    const closingTemplateKey = await this.resolveClosingTemplateKey(
+      userId,
+      input.closingTemplateKey,
+    );
+    const closingTemplate = resolveClosingTemplate(closingTemplateKey);
+
     const allowedSections = sections.filter(
       (section) =>
         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
@@ -105,6 +122,7 @@ export class CoverLettersService {
       job.id,
       allowedBlocks,
       jobContext,
+      closingTemplateKey,
     );
 
     const generation = this.generator.generate({
@@ -112,9 +130,45 @@ export class CoverLettersService {
       jobId: job.id,
       allowedBaselineBlocks: allowedBlocks,
       job: jobContext,
+      closingTemplate,
       maxWords: input.maxWords,
       tone: input.tone,
     });
+
+    const complianceBaselineSections = this.buildComplianceBaselineSections(
+      allowedBlocks,
+      jobContext,
+    );
+
+    const writingFlags = this.complianceService.enforceResumeWritingRules({
+      baselineSections: complianceBaselineSections,
+      generatedSections: [
+        { title: 'Cover Letter', content: generation.content },
+      ],
+    });
+
+    const { complianceFlags, blocked } =
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: userId,
+        baselineVersion,
+        job,
+        outputHash: createHash('sha256')
+          .update(generation.content)
+          .digest('hex'),
+        extraFlags: writingFlags,
+        scopeInflationDetected: false,
+      });
+
+    if (blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'unprocessable',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: complianceFlags },
+        },
+      });
+    }
 
     const coverLetter = this.coverLetterRepository.create({
       userId,
@@ -122,6 +176,7 @@ export class CoverLettersService {
       jobId: job.id,
       generatorType: 'template',
       generatorVersion: 'v1',
+      closingTemplateKey,
       content: generation.content,
       generationInputsHash,
     });
@@ -233,6 +288,7 @@ export class CoverLettersService {
       responsibilities: string[];
       requirements: string[];
     },
+    closingTemplateKey: string,
   ) {
     const normalizedBaseline = allowedBlocks
       .map((block, index) => ({
@@ -258,8 +314,61 @@ export class CoverLettersService {
       `jobId:${jobId}`,
       `baseline:${JSON.stringify(normalizedBaseline)}`,
       `job:${JSON.stringify(normalizedJob)}`,
+      `closing:${closingTemplateKey}`,
     ].join('|');
 
     return createHash('sha256').update(normalizedString).digest('hex');
+  }
+
+  private async resolveClosingTemplateKey(
+    userId: string,
+    requested?: string | null,
+  ) {
+    const validRequested = this.normalizeClosingTemplateKey(requested);
+    if (validRequested) {
+      return validRequested;
+    }
+
+    const lastCoverLetter = await this.coverLetterRepository.findOne({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const lastKey = this.normalizeClosingTemplateKey(
+      lastCoverLetter?.closingTemplateKey,
+    );
+
+    return lastKey ?? DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY;
+  }
+
+  private normalizeClosingTemplateKey(key?: string | null) {
+    if (!key) return null;
+    return COVER_LETTER_CLOSING_TEMPLATES.some((template) => template.key === key)
+      ? key
+      : null;
+  }
+
+  private buildComplianceBaselineSections(
+    allowedBlocks: AllowedBaselineBlock[],
+    job: {
+      title: string | null;
+      company: string | null;
+    },
+  ) {
+    const baselineSections = allowedBlocks.map((block) => ({
+      title: this.cleanText(block.title),
+      content: this.cleanText(block.content),
+    }));
+
+    const jobContext = [job.title, job.company]
+      .map((value) => this.cleanText(value))
+      .filter(Boolean)
+      .join(' ');
+
+    if (jobContext.length > 0) {
+      baselineSections.push({ title: 'Job Context', content: jobContext });
+    }
+
+    return baselineSections;
   }
 }

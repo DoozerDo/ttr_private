@@ -1,1210 +1,1333 @@
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index 1435cb1a29713f6fae649eb4e6b36058f6f06797..beeac1e3f0e51b275153515aade1e48c1f45f2ac 100644
---- a/apps/api/src/compliance/compliance.service.spec.ts
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -1,30 +1,31 @@
- import { createHash } from 'crypto';
- import { ComplianceService } from './compliance.service';
- import {
-   ComplianceAction,
-   ComplianceFlagCode,
-+  ComplianceFlagSeverity,
- } from './compliance.types';
- 
- const buildAuditRepo = () => {
-   const create = jest.fn((payload) => payload);
-   const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
- 
-   return { create, save };
- };
- 
- describe('ComplianceService', () => {
-   const repoMock = buildAuditRepo();
-   const service = new ComplianceService(
-     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-     // @ts-ignore: manual repository injection
-     repoMock,
-   );
- 
-   beforeEach(() => {
-     jest.clearAllMocks();
-   });
- 
-   it('passes validation when baseline hash and job company are present', async () => {
-     const baselineVersion = { hash: 'baseline-hash' };
-     const job = { company: 'ExampleCo', rawDescription: 'Job description' };
- 
-@@ -68,26 +69,40 @@ describe('ComplianceService', () => {
-       expect.objectContaining({
-         passFail: false,
-       }),
-     );
-   });
- 
-   it('returns multiple flags when more than one condition fails', async () => {
-     const job = { company: '', rawDescription: 'Job description' };
- 
-     const result = await service.validateAndAudit({
-       action: ComplianceAction.RESUME_GENERATION,
-       actorId: 'user-2',
-       baselineVersion: { hash: null },
-       job,
-     });
- 
-     const codes = result.complianceFlags.map((flag) => flag.code);
-     expect(codes).toEqual(
-       expect.arrayContaining([
-         ComplianceFlagCode.MISSING_BASELINE_HASH,
-         ComplianceFlagCode.UNKNOWN_COMPANY,
-       ]),
-     );
-     expect(result.blocked).toBe(true);
-   });
-+
-+  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      baselineSections: [{ content: 'Improved uptime by 10%' }],
-+      generatedSections: [{ content: 'Improved uptime by 25%' }],
-+    });
-+
-+    expect(flags).toEqual([
-+      expect.objectContaining({
-+        code: ComplianceFlagCode.INVENTED_METRIC,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+      }),
-+    ]);
-+  });
- });
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index 2f68ce109ae3211826883690a62b5e44e96b779d..b13dcb9b36ec84d977e664ec361f455ca48e0f2e 100644
---- a/apps/api/src/compliance/compliance.service.ts
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -1,90 +1,157 @@
- import { Injectable } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { Job } from '../jobs/job.entity';
- import { ComplianceAudit } from './compliance-audit.entity';
- import {
-   ComplianceAction,
-   ComplianceFlag,
-   ComplianceFlagCode,
-   ComplianceFlagSeverity,
- } from './compliance.types';
- 
- type ComplianceContext = {
-   actorId: string;
-   action: ComplianceAction;
-   baselineVersion?: BaselineVersion | null;
-   job?: Job | null;
-   outputHash?: string | null;
-   scopeInflationDetected?: boolean;
-+  extraFlags?: ComplianceFlag[];
- };
- 
- @Injectable()
- export class ComplianceService {
-   constructor(
-     @InjectRepository(ComplianceAudit)
-     private readonly auditsRepository: Repository<ComplianceAudit>,
-   ) {}
- 
-   private buildFlags(context: ComplianceContext): ComplianceFlag[] {
-     const flags: ComplianceFlag[] = [];
- 
-     if (!context.baselineVersion?.hash) {
-       flags.push({
-         code: ComplianceFlagCode.MISSING_BASELINE_HASH,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Baseline version hash is required.',
-       });
-     }
- 
-     if (context.job && !context.job.company?.trim()) {
-       flags.push({
-         code: ComplianceFlagCode.UNKNOWN_COMPANY,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Job company must be provided for generation.',
-       });
-     }
- 
-     if (context.scopeInflationDetected) {
-       flags.push({
-         code: ComplianceFlagCode.SCOPE_INFLATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Detected potential scope inflation against baseline.',
-       });
-     }
- 
--    return flags;
-+    return [...flags, ...(context.extraFlags ?? [])];
-   }
- 
-   private buildJobHash(job?: Job | null) {
-     if (!job?.rawDescription) return null;
-     return createHash('sha256').update(job.rawDescription).digest('hex');
-   }
- 
-   async validateAndAudit(context: ComplianceContext) {
-     const complianceFlags = this.buildFlags(context);
-     const blocked = complianceFlags.some(
-       (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-     );
- 
-     const audit = this.auditsRepository.create({
-       actorId: context.actorId,
-       action: context.action,
-       baselineVersionHash: context.baselineVersion?.hash ?? null,
-       jobHash: this.buildJobHash(context.job),
-       outputHash: context.outputHash ?? null,
-       complianceFlags,
-       passFail: !blocked,
-     });
- 
-     const saved = await this.auditsRepository.save(audit);
- 
-     return {
-       complianceFlags,
-       blocked,
-       audit: saved,
-     };
-   }
-+
-+  enforceResumeWritingRules({
-+    baselineSections,
-+    generatedSections,
-+  }: {
-+    baselineSections: Array<{ content: string; title?: string | null }>;
-+    generatedSections: Array<{ content: string; title?: string | null }>;
-+  }): ComplianceFlag[] {
-+    const baselineText = this.mergeText(baselineSections);
-+    const generatedText = this.mergeText(generatedSections);
-+
-+    const baselineNumbers = this.extractNumbers(baselineText);
-+    const generatedNumbers = this.extractNumbers(generatedText);
-+
-+    const baselineEntities = this.extractEntities(baselineText);
-+    const generatedEntities = this.extractEntities(generatedText);
-+
-+    const flags: ComplianceFlag[] = [];
-+
-+    for (const num of generatedNumbers) {
-+      if (!baselineNumbers.has(num)) {
-+        flags.push({
-+          code: ComplianceFlagCode.INVENTED_METRIC,
-+          severity: ComplianceFlagSeverity.BLOCK,
-+          message: `Metric "${num}" not found in baseline.`,
-+        });
-+        break;
-+      }
-+    }
-+
-+    for (const entity of generatedEntities) {
-+      if (!baselineEntities.has(entity)) {
-+        const isRole = /manager|engineer|lead|director|chief|officer|vp|president|analyst|specialist|consultant|architect/i.test(
-+          entity,
-+        );
-+        flags.push({
-+          code: isRole
-+            ? ComplianceFlagCode.INVENTED_ROLE
-+            : ComplianceFlagCode.INVENTED_COMPANY,
-+          severity: ComplianceFlagSeverity.BLOCK,
-+          message: `${isRole ? 'Role' : 'Company'} "${entity}" not found in baseline.`,
-+        });
-+        break;
-+      }
-+    }
-+
-+    return flags;
-+  }
-+
-+  private mergeText(sections: Array<{ content: string; title?: string | null }>) {
-+    return sections
-+      .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
-+      .join('\n')
-+      .replace(/\s+/g, ' ')
-+      .trim();
-+  }
-+
-+  private extractNumbers(text: string) {
-+    const matches = text.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
-+    return new Set(matches.map((match) => match.trim()));
-+  }
-+
-+  private extractEntities(text: string) {
-+    const candidates = text.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
-+    return new Set(candidates.map((candidate) => candidate.trim()));
-+  }
- }
-diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
-index 833d21dd5f557574c16cbe4b00f7c0f8d55e925e..b5e0cbc688ad8fbfc1217b98384935777cfa5328 100644
---- a/apps/api/src/compliance/compliance.types.ts
-+++ b/apps/api/src/compliance/compliance.types.ts
-@@ -1,22 +1,25 @@
- export enum ComplianceAction {
-   FIT_SCORE = 'fit_score',
-   RESUME_GENERATION = 'resume_gen',
-   COVER_LETTER_GENERATION = 'cover_letter_gen',
-   APPLICATION_EXPORT = 'application_export',
- }
- 
- export enum ComplianceFlagCode {
-   SCOPE_INFLATION = 'scope_inflation',
-   MISSING_BASELINE_HASH = 'missing_baseline_hash',
-   UNKNOWN_COMPANY = 'unknown_company',
-+  INVENTED_COMPANY = 'invented_company',
-+  INVENTED_ROLE = 'invented_role',
-+  INVENTED_METRIC = 'invented_metric',
- }
- 
- export enum ComplianceFlagSeverity {
-   BLOCK = 'block',
- }
- 
- export type ComplianceFlag = {
-   code: ComplianceFlagCode;
-   severity: ComplianceFlagSeverity;
-   message: string;
- };
-diff --git a/apps/api/src/resume/resume.controller.spec.ts b/apps/api/src/resume/resume.controller.spec.ts
+diff --git a/apps/api/src/cover-letters/closing-templates.ts b/apps/api/src/cover-letters/closing-templates.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..9bfb7491e1c118e2e1638153340001f9d9ac3e25
+index 0000000000000000000000000000000000000000..a5be802f1daee7de0b8a90480b435677f214de88
 --- /dev/null
-+++ b/apps/api/src/resume/resume.controller.spec.ts
-@@ -0,0 +1,39 @@
-+import { ResumeController } from './resume.controller';
-+import { ResumeService } from './resume.service';
++++ b/apps/api/src/cover-letters/closing-templates.ts
+@@ -0,0 +1,26 @@
++import { CoverLetterClosingTemplate } from './generators/cover-letter-generator.interface';
 +
-+describe('ResumeController', () => {
-+  it('returns DOCX download with headers', async () => {
-+    const send = jest.fn();
-+    const setHeader = jest.fn();
-+    const response = { setHeader, send };
++export const COVER_LETTER_CLOSING_TEMPLATES: CoverLetterClosingTemplate[] = [
++  {
++    key: 'steady',
++    text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
++  },
++  {
++    key: 'impact',
++    text: 'I will stay focused on measurable impact while keeping every claim anchored to verified baseline material.',
++  },
++  {
++    key: 'collaborative',
++    text: 'I look forward to collaborating closely, checking expectations early, and sharing progress in transparent updates.',
++  },
++];
 +
-+    const resumeService = {
-+      exportResume: jest.fn().mockResolvedValue({
-+        buffer: Buffer.from('docx-content'),
-+        contentType:
-+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-+        filename: 'resume.docx',
-+      }),
-+      generateResume: jest.fn(),
-+    } as unknown as ResumeService;
++export const DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY =
++  COVER_LETTER_CLOSING_TEMPLATES[0].key;
 +
-+    const controller = new ResumeController(resumeService);
-+
-+    await controller.exportResume(
-+      { baselineId: 'b', jobId: 'j' },
-+      { user: { id: 'user-1' } } as any,
-+      'docx',
-+      response as any,
-+    );
-+
-+    expect(setHeader).toHaveBeenCalledWith(
-+      'Content-Type',
-+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-+    );
-+    expect(setHeader).toHaveBeenCalledWith(
-+      'Content-Disposition',
-+      expect.stringContaining('resume.docx'),
-+    );
-+    expect(send).toHaveBeenCalledWith(expect.any(Buffer));
-+  });
-+});
-diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
-index ea3782d05d4c8540f7f314e98df2f3b4cd601348..af767df461e48a729c98915f983c2111b7b88225 100644
---- a/apps/api/src/resume/resume.controller.ts
-+++ b/apps/api/src/resume/resume.controller.ts
-@@ -1,61 +1,115 @@
--import { BadRequestException, Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-+import {
-+  BadRequestException,
-+  Body,
-+  Controller,
-+  Param,
-+  Post,
-+  Req,
-+  Res,
-+  UseGuards,
-+} from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Request } from 'express';
- import { ResumeService } from './resume.service';
++export function resolveClosingTemplate(key?: string | null) {
++  return (
++    COVER_LETTER_CLOSING_TEMPLATES.find((template) => template.key === key) ??
++    COVER_LETTER_CLOSING_TEMPLATES[0]
++  );
++}
+diff --git a/apps/api/src/cover-letters/cover-letter.entity.ts b/apps/api/src/cover-letters/cover-letter.entity.ts
+index 7c5e7e05e19d2118e91e9b7ed7a7fe7ebe684785..8d136a519ba210f5302c10a5a0714ce106b4cae9 100644
+--- a/apps/api/src/cover-letters/cover-letter.entity.ts
++++ b/apps/api/src/cover-letters/cover-letter.entity.ts
+@@ -1,38 +1,41 @@
+ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
  
- interface ResumeRequestBody {
-   baselineId?: string;
-   baselineVersionId?: string;
-   jobId?: string;
-+  oneTap?: boolean;
+ @Entity({ name: 'cover_letters' })
+ export class CoverLetter {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Index()
+   @Column({ type: 'uuid' })
+   userId!: string;
+ 
+   @Index()
+   @Column({ type: 'uuid' })
+   jobId!: string;
+ 
+   @Index()
+   @Column({ type: 'uuid' })
+   baselineId!: string;
+ 
+   @Column({ type: 'varchar', default: 'template' })
+   generatorType!: string;
+ 
+   @Column({ type: 'varchar', default: 'v1' })
+   generatorVersion!: string;
+ 
++  @Column({ type: 'varchar', length: 50, default: 'steady' })
++  closingTemplateKey!: string;
++
+   @Column({ type: 'text' })
+   content!: string;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   generationInputsHash!: string | null;
+ 
+   @Index()
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
  }
- 
- @Controller('resume')
- @UseGuards(AuthGuard('jwt'))
- export class ResumeController {
-   constructor(private readonly resumeService: ResumeService) {}
- 
-   @Post('generate')
-   async generateResume(
-     @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     return this.handleResumeRequest(body, request);
-   }
- 
-   @Post()
-   async createResumeRequest(
-     @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     return this.handleResumeRequest(body, request);
-   }
- 
-+  @Post('export/:format')
-+  async exportResume(
-+    @Body() body: ResumeRequestBody,
-+    @Req() request: Request & { user?: { id?: string } },
-+    @Param('format') format: string,
-+    @Res() response: any,
-+  ) {
-+    const userId = request.user?.id;
-+
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    const normalizedFormat = format?.toLowerCase();
-+    if (!['docx', 'pdf'].includes(normalizedFormat)) {
-+      throw new BadRequestException('Unsupported export format');
-+    }
-+
-+    const baselineId = body.baselineId?.trim();
-+    const jobId = body.jobId?.trim();
-+
-+    if (!baselineId) {
-+      throw new BadRequestException('baselineId is required');
-+    }
-+
-+    if (!jobId) {
-+      throw new BadRequestException('jobId is required');
-+    }
-+
-+    const { buffer, contentType, filename } =
-+      await this.resumeService.exportResume(userId, {
-+        baselineId,
-+        baselineVersionId: body.baselineVersionId,
-+        jobId,
-+        oneTap: body.oneTap,
-+      });
-+
-+    response.setHeader('Content-Type', contentType);
-+    response.setHeader('Content-Disposition', `attachment; filename=\"${filename}\"`);
-+    response.send(buffer);
-+  }
-+
-   private async handleResumeRequest(
-     body: ResumeRequestBody,
-     request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     const baselineId = body.baselineId?.trim();
-     const baselineVersionId = body.baselineVersionId?.trim();
-     const jobId = body.jobId?.trim();
-+    const oneTap = body.oneTap ?? false;
- 
-     if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
-     }
- 
-     if (!jobId) {
-       throw new BadRequestException('jobId is required');
-     }
- 
-     return this.resumeService.generateResume(userId, {
-       baselineId,
-       baselineVersionId: baselineVersionId ?? undefined,
-       jobId,
-+      oneTap,
-     });
-   }
- }
-diff --git a/apps/api/src/resume/resume.module.ts b/apps/api/src/resume/resume.module.ts
-index a208aa3a0bdf050ad0f705332ff6ed03428e97fa..45c4e225d01cae72ff5a09c41a34555dd9b9ad75 100644
---- a/apps/api/src/resume/resume.module.ts
-+++ b/apps/api/src/resume/resume.module.ts
-@@ -1,26 +1,28 @@
+diff --git a/apps/api/src/cover-letters/cover-letters.module.ts b/apps/api/src/cover-letters/cover-letters.module.ts
+index dd93bc9bfe827dfbe386a942e36ad0bccf067e13..299d889ca6a7678da256aace87113744e869bdfa 100644
+--- a/apps/api/src/cover-letters/cover-letters.module.ts
++++ b/apps/api/src/cover-letters/cover-letters.module.ts
+@@ -1,12 +1,13 @@
  import { Module } from '@nestjs/common';
  import { TypeOrmModule } from '@nestjs/typeorm';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineSection } from '../baseline/baseline-section.entity';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { ComplianceModule } from '../compliance/compliance.module';
-+import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { Job } from '../jobs/job.entity';
- import { ResumeController } from './resume.controller';
- import { ResumeService } from './resume.service';
++import { ComplianceModule } from '../compliance/compliance.module';
+ import { CoverLetter } from './cover-letter.entity';
+ import { CoverLettersController } from './cover-letters.controller';
+ import { CoverLettersService } from './cover-letters.service';
  
  @Module({
-   imports: [
-     TypeOrmModule.forFeature([
-       Baseline,
-       BaselineSection,
-       BaselineVersion,
-       BaselineBlockPolicy,
-+      FitAssessment,
-       Job,
-     ]),
-     ComplianceModule,
-   ],
-   controllers: [ResumeController],
-   providers: [ResumeService],
+-  imports: [TypeOrmModule.forFeature([CoverLetter])],
++  imports: [TypeOrmModule.forFeature([CoverLetter]), ComplianceModule],
+   controllers: [CoverLettersController],
+   providers: [CoverLettersService],
  })
- export class ResumeModule {}
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+ export class CoverLettersModule {}
+diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..400f5b7f54bd3030ad0b224e4843d62f562da38c
+index 0000000000000000000000000000000000000000..5e0ff43cc7c09567e60e366d51415de2ad043182
 --- /dev/null
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -0,0 +1,127 @@
++++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
+@@ -0,0 +1,137 @@
 +import { UnprocessableEntityException } from '@nestjs/common';
++import { DataSource } from 'typeorm';
 +import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
-+import { ComplianceService } from '../compliance/compliance.service';
-+import { ResumeService } from './resume.service';
++import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
++import { CoverLettersService } from './cover-letters.service';
 +
-+const mockBaseline = {
-+  id: 'baseline-1',
-+  userId: 'user-1',
-+  sections: [
-+    {
-+      id: 'section-1',
-+      sectionType: BaselineSectionType.EXPERIENCE,
-+      title: 'Example Co',
-+      content: 'Delivered results with 10% uptime improvement.',
-+      includePolicy: BaselineIncludePolicy.ALWAYS,
-+      order: 0,
-+    },
-+  ],
++type MockRepository<T extends Record<string, any>> = {
++  findOne: jest.Mock;
++  find: jest.Mock;
++  create: jest.Mock;
++  save: jest.Mock;
++  remove: jest.Mock;
 +};
 +
-+const mockBaselineVersion = {
-+  id: 'baseline-version-1',
-+  baselineId: 'baseline-1',
-+  hash: 'hash-1',
-+};
-+
-+const mockJob = {
-+  id: 'job-1',
-+  userId: 'user-1',
-+  company: 'Example Co',
-+  rawDescription: 'Job description',
-+};
-+
-+const buildRepository = (overrides: Record<string, any> = {}) => ({
-+  findOne: jest.fn().mockResolvedValue(null),
-+  find: jest.fn().mockResolvedValue([]),
-+  ...overrides,
-+});
-+
-+const buildService = (fitScore: number, writingFlags: any[] = []) => {
-+  const baselineRepository = buildRepository({
-+    findOne: jest.fn().mockResolvedValue(mockBaseline),
-+  });
-+  const baselineVersionRepository = buildRepository({
-+    findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
-+  });
-+  const baselineBlockPolicyRepository = buildRepository({
-+    find: jest.fn().mockResolvedValue([]),
-+  });
-+  const jobsRepository = buildRepository({
-+    findOne: jest.fn().mockResolvedValue(mockJob),
-+  });
-+  const fitAssessmentRepository = buildRepository({
-+    findOne: jest.fn().mockResolvedValue({
-+      id: 'fit-1',
-+      overallScore: fitScore,
-+    }),
-+  });
-+  const complianceService = {
-+    enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
-+    validateAndAudit: jest.fn().mockResolvedValue({
-+      complianceFlags: writingFlags,
-+      blocked: writingFlags.length > 0,
-+      audit: { id: 'audit-1' },
-+    }),
-+  } as unknown as ComplianceService;
++function buildRepository<T extends Record<string, any>>(initial?: T): MockRepository<T> {
++  let saved = initial;
 +
 +  return {
-+    service: new ResumeService(
-+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+      // @ts-ignore
-+      baselineRepository,
-+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+      // @ts-ignore
-+      baselineVersionRepository,
-+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+      // @ts-ignore
-+      baselineBlockPolicyRepository,
-+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+      // @ts-ignore
-+      jobsRepository,
-+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-+      // @ts-ignore
-+      fitAssessmentRepository,
-+      complianceService,
-+    ),
-+    complianceService,
++    findOne: jest.fn(async () => saved ?? null),
++    find: jest.fn(async () => []),
++    create: jest.fn((payload: Partial<T>) => ({ ...payload } as T)),
++    save: jest.fn(async (payload: T) => {
++      saved = { ...payload, id: payload['id'] ?? 'saved-id', createdAt: new Date(), updatedAt: new Date() } as T;
++      return saved as T;
++    }),
++    remove: jest.fn(async (payload: T) => payload),
 +  };
-+};
++}
 +
-+describe('ResumeService', () => {
-+  const request = {
++describe('CoverLettersService', () => {
++  const coverLetterRepository = buildRepository<any>();
++  const baselineRepository = buildRepository<any>({
++    id: 'baseline-1',
++    userId: 'user-1',
++    sections: [
++      {
++        id: 'section-1',
++        title: 'Experience',
++        content: 'Delivered 15% efficiency improvement with verified metrics.',
++        includePolicy: BaselineIncludePolicy.ALWAYS,
++        order: 0,
++        sectionType: BaselineSectionType.EXPERIENCE,
++      },
++    ],
++  });
++  const baselineVersionRepository = buildRepository<any>({
++    id: 'baseline-version-1',
 +    baselineId: 'baseline-1',
-+    baselineVersionId: 'baseline-version-1',
-+    jobId: 'job-1',
-+    oneTap: true,
++    hash: 'baseline-hash',
++  });
++  const baselineBlockPolicyRepository = buildRepository<any>();
++  const jobRepository = buildRepository<any>({
++    id: 'job-1',
++    userId: 'user-1',
++    title: 'Program Manager',
++    company: 'Acme Corp',
++    normalizedResponsibilities: ['Improve processes by 10%.'],
++    normalizedRequirements: ['Deliver measurable impact.'],
++  });
++
++  const complianceService = {
++    enforceResumeWritingRules: jest.fn().mockReturnValue([]),
++    validateAndAudit: jest.fn(async (ctx: any) => ({
++      complianceFlags: ctx.extraFlags ?? [],
++      blocked: (ctx.extraFlags ?? []).some(
++        (flag: { severity: ComplianceFlagSeverity }) => flag.severity === ComplianceFlagSeverity.BLOCK,
++      ),
++      audit: { id: 'audit-1' },
++    })),
 +  };
 +
-+  it('rejects one-tap generation when fit score is below 92', async () => {
-+    const { service } = buildService(91);
++  const dataSource = {
++    getRepository: jest.fn((entity) => {
++      switch ((entity as any)?.name) {
++        case 'CoverLetter':
++          return coverLetterRepository;
++        case 'Baseline':
++          return baselineRepository;
++        case 'BaselineVersion':
++          return baselineVersionRepository;
++        case 'BaselineBlockPolicy':
++          return baselineBlockPolicyRepository;
++        case 'Job':
++          return jobRepository;
++        default:
++          throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
++      }
++    }),
++  } as unknown as DataSource;
 +
-+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-+      UnprocessableEntityException,
-+    );
++  beforeEach(() => {
++    jest.clearAllMocks();
 +  });
 +
-+  it('allows one-tap generation when fit score is at least 92', async () => {
-+    const { service } = buildService(92);
++  it('persists a chosen closing template and reuses it for the next generation', async () => {
++    const service = new CoverLettersService(dataSource, complianceService as any);
 +
-+    const result = await service.generateResume('user-1', request);
++    await service.generateCoverLetter('user-1', {
++      baselineId: 'baseline-1',
++      jobId: 'job-1',
++      closingTemplateKey: 'collaborative',
++    });
 +
-+    expect(result.ok).toBe(true);
-+    expect(result.sections).toHaveLength(1);
++    expect(coverLetterRepository.save).toHaveBeenCalledWith(
++      expect.objectContaining({ closingTemplateKey: 'collaborative' }),
++    );
++
++    // Simulate subsequent call without providing a template key.
++    const second = await service.generateCoverLetter('user-1', {
++      baselineId: 'baseline-1',
++      jobId: 'job-1',
++    });
++
++    expect(second.closingTemplateKey).toBe('collaborative');
 +  });
 +
-+  it('exports DOCX content with headers and body', async () => {
-+    const { service } = buildService(95, []);
++  it('blocks invented metrics through compliance checks', async () => {
++    complianceService.enforceResumeWritingRules.mockReturnValueOnce([
++      {
++        code: ComplianceFlagCode.INVENTED_METRIC,
++        severity: ComplianceFlagSeverity.BLOCK,
++        message: 'Metric not found in baseline.',
++      },
++    ]);
 +
-+    const exportResult = await service.exportResume('user-1', request, 'docx');
++    const service = new CoverLettersService(dataSource, complianceService as any);
 +
-+    expect(exportResult.contentType).toBe(
-+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-+    );
-+    expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
-+    expect(exportResult.filename).toBe('resume.docx');
++    await expect(
++      service.generateCoverLetter('user-1', {
++        baselineId: 'baseline-1',
++        jobId: 'job-1',
++      }),
++    ).rejects.toThrow(UnprocessableEntityException);
++
++    expect(complianceService.validateAndAudit).toHaveBeenCalled();
 +  });
 +});
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index 9b95c18240c6032485de65146385e461b0b37ea3..dad84338aa4102ac33a0e0ba52ccf713063e476d 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -1,65 +1,125 @@
+diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
+index 4d8a60edc333b325560404ac19d6f9e71a618a99..c4b23c6f25c6f817e41c4af450f55c6b2162f836 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.ts
+@@ -1,60 +1,71 @@
  import {
    BadRequestException,
    Injectable,
    NotFoundException,
-   UnprocessableEntityException,
++  UnprocessableEntityException,
  } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { Baseline } from '../baseline/baseline.entity';
+ import { InjectDataSource } from '@nestjs/typeorm';
+ import { createHash } from 'node:crypto';
+ import { DataSource, Repository } from 'typeorm';
  import {
    BaselineIncludePolicy,
    BaselineSection,
+   BaselineSectionType,
  } from '../baseline/baseline-section.entity';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
  import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { ComplianceService } from '../compliance/compliance.service';
- import { ComplianceAction } from '../compliance/compliance.types';
++import { ComplianceService } from '../compliance/compliance.service';
++import { ComplianceAction } from '../compliance/compliance.types';
  import { Job } from '../jobs/job.entity';
- 
- export type GenerateResumeRequest = {
-   baselineId: string;
-   baselineVersionId?: string;
-   jobId?: string | null;
-+  oneTap?: boolean;
- };
++import {
++  COVER_LETTER_CLOSING_TEMPLATES,
++  DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY,
++  resolveClosingTemplate,
++} from './closing-templates';
+ import { CoverLetter } from './cover-letter.entity';
+ import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
+ import {
+   AllowedBaselineBlock,
+   CoverLetterGenerator,
+ } from './generators/cover-letter-generator.interface';
+ import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
  
  @Injectable()
- export class ResumeService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineVersion)
-     private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     @InjectRepository(BaselineBlockPolicy)
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-     @InjectRepository(Job)
-     private readonly jobsRepository: Repository<Job>,
-+    @InjectRepository(FitAssessment)
-+    private readonly fitAssessmentRepository: Repository<FitAssessment>,
-     private readonly complianceService: ComplianceService,
-   ) {}
+ export class CoverLettersService {
+   private readonly coverLetterRepository: Repository<CoverLetter>;
+   private readonly baselineRepository: Repository<Baseline>;
+   private readonly baselineVersionRepository: Repository<BaselineVersion>;
+   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
+   private readonly jobRepository: Repository<Job>;
+   private readonly generator: CoverLetterGenerator;
  
-+  private async ensureOneTapAllowed(userId: string, jobId: string) {
-+    const assessment = await this.fitAssessmentRepository.findOne({
-+      where: { userId, jobId },
-+      order: { createdAt: 'DESC' },
-+    });
-+
-+    if (!assessment || assessment.overallScore < 92) {
-+      throw new UnprocessableEntityException({
-+        error: {
-+          code: 'fit_score_too_low',
-+          message: 'One tap resume generation requires fit score >= 92.',
-+          details: { last_score: assessment?.overallScore ?? null },
-+        },
-+      });
-+    }
-+  }
-+
-+  private buildResumeText(sections: Array<{ title: string | null; content: string }>) {
-+    return sections
-+      .map((section) => {
-+        const title = section.title ? `${section.title}\n` : '';
-+        return `${title}${section.content}`.trim();
-+      })
-+      .join('\n\n');
-+  }
-+
-+  private buildPdfBuffer(content: string) {
-+    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-+    const escaped = sanitized.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-+    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
-+    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
-+    const pdfParts = [
-+      '%PDF-1.4',
-+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
-+      `4 0 obj ${contentStream} endobj`,
-+      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-+      'xref',
-+      '0 6',
-+      '0000000000 65535 f ',
-+      'trailer << /Size 6 /Root 1 0 R >>',
-+      'startxref',
-+      '0',
-+      '%%EOF',
-+    ];
-+
-+    return Buffer.from(pdfParts.join('\n'));
-+  }
-+
-+  private buildDocxBuffer(content: string) {
-+    const header = 'PK\u0003\u0004';
-+    const body = `Resume\n\n${content}`;
-+    return Buffer.from(header + body, 'utf-8');
-+  }
-+
-   private applyPoliciesToSections(
-     sections: BaselineSection[],
-     policies: BaselineBlockPolicy[],
-   ) {
-     if (!policies.length) {
-       return [...sections].sort((a, b) => a.order - b.order);
-     }
- 
-     const policyMap = new Map<string, BaselineBlockPolicy>(
-       policies.map((policy) => [policy.baselineSectionId, policy]),
+-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {
++  constructor(
++    @InjectDataSource() private readonly dataSource: DataSource,
++    private readonly complianceService: ComplianceService,
++  ) {
+     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
+     this.baselineRepository = this.dataSource.getRepository(Baseline);
+     this.baselineVersionRepository =
+       this.dataSource.getRepository(BaselineVersion);
+     this.baselineBlockPolicyRepository = this.dataSource.getRepository(
+       BaselineBlockPolicy,
      );
- 
-     return [...sections]
-       .map((section) => {
-         const policy = policyMap.get(section.id);
-         return {
-           ...section,
-           includePolicy: policy?.includePolicy ?? section.includePolicy,
-           order: policy?.order ?? section.order,
-           sectionType: section.sectionType ?? section.type,
-         } as BaselineSection;
-       })
-       .sort((a, b) => a.order - b.order);
+     this.jobRepository = this.dataSource.getRepository(Job);
+     this.generator = new TemplateCoverLetterGenerator();
    }
  
-@@ -114,62 +174,103 @@ export class ResumeService {
-     const sectionsWithPolicies = this.applyPoliciesToSections(
+   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: input.baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+@@ -63,87 +74,131 @@ export class CoverLettersService {
+       where: { id: input.jobId, userId },
+     });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: { baselineId: baseline.id },
+       order: { versionNumber: 'DESC', createdAt: 'DESC' },
+     });
+ 
+     const policies = baselineVersion
+       ? await this.baselineBlockPolicyRepository.find({
+           where: { baselineVersionId: baselineVersion.id },
+           relations: ['baselineSection'],
+           order: { order: 'ASC' },
+         })
+       : [];
+ 
+     const sections = this.applyPoliciesToSections(
        baseline.sections ?? [],
        policies,
      );
  
-     const sections = sectionsWithPolicies.map((section) => ({
-       id: section.id,
-       type: section.sectionType,
-       title: section.title,
-       content: section.content,
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       order: section.order,
-       source: 'baseline',
-     }));
- 
-     const job = jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: jobId, userId },
-         })
-       : null;
- 
-     if (jobId && !job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-+    if (request.oneTap && jobId) {
-+      await this.ensureOneTapAllowed(userId, jobId);
-+    }
++    const closingTemplateKey = await this.resolveClosingTemplateKey(
++      userId,
++      input.closingTemplateKey,
++    );
++    const closingTemplate = resolveClosingTemplate(closingTemplateKey);
 +
-     const outputHash = createHash('sha256')
-       .update(JSON.stringify(sections))
-       .digest('hex');
+     const allowedSections = sections.filter(
+       (section) =>
+         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+         BaselineIncludePolicy.NEVER,
+     );
  
+     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+     const jobContext = {
+       id: job.id,
+       title: this.cleanText(job.title),
+       company: this.cleanText(job.company),
+       responsibilities: this.sanitizeList(job.normalizedResponsibilities),
+       requirements: this.sanitizeList(job.normalizedRequirements),
+     };
+ 
+     const generationInputsHash = this.computeGenerationInputsHash(
+       baseline.id,
+       job.id,
+       allowedBlocks,
+       jobContext,
++      closingTemplateKey,
+     );
+ 
+     const generation = this.generator.generate({
+       baselineId: baseline.id,
+       jobId: job.id,
+       allowedBaselineBlocks: allowedBlocks,
+       job: jobContext,
++      closingTemplate,
+       maxWords: input.maxWords,
+       tone: input.tone,
+     });
+ 
++    const complianceBaselineSections = this.buildComplianceBaselineSections(
++      allowedBlocks,
++      jobContext,
++    );
++
 +    const writingFlags = this.complianceService.enforceResumeWritingRules({
-+      baselineSections: baseline.sections ?? [],
-+      generatedSections: sections,
++      baselineSections: complianceBaselineSections,
++      generatedSections: [
++        { title: 'Cover Letter', content: generation.content },
++      ],
 +    });
 +
-     const { complianceFlags, blocked, audit } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.RESUME_GENERATION,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash,
-         scopeInflationDetected: sections.some(
-           (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
-         ),
++    const { complianceFlags, blocked } =
++      await this.complianceService.validateAndAudit({
++        action: ComplianceAction.COVER_LETTER_GENERATION,
++        actorId: userId,
++        baselineVersion,
++        job,
++        outputHash: createHash('sha256')
++          .update(generation.content)
++          .digest('hex'),
 +        extraFlags: writingFlags,
-       });
++        scopeInflationDetected: false,
++      });
++
++    if (blocked) {
++      throw new UnprocessableEntityException({
++        error: {
++          code: 'unprocessable',
++          message: 'Compliance validation failed.',
++          details: { compliance_flags: complianceFlags },
++        },
++      });
++    }
++
+     const coverLetter = this.coverLetterRepository.create({
+       userId,
+       baselineId: baseline.id,
+       jobId: job.id,
+       generatorType: 'template',
+       generatorVersion: 'v1',
++      closingTemplateKey,
+       content: generation.content,
+       generationInputsHash,
+     });
  
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
+     return this.coverLetterRepository.save(coverLetter);
+   }
+ 
+   async listCoverLetters(userId: string) {
+     return this.coverLetterRepository.find({
+       where: { userId },
+       order: { createdAt: 'DESC' },
+     });
+   }
+ 
+   async getCoverLetter(userId: string, id: string) {
+     const coverLetter = await this.coverLetterRepository.findOne({
+       where: { id, userId },
+     });
+ 
+     if (!coverLetter) {
+       throw new NotFoundException('Cover letter not found');
+     }
+ 
+     return coverLetter;
+   }
+@@ -211,55 +266,109 @@ export class CoverLettersService {
+       .replace(/\r\n/g, '\n')
+       .replace(/\r/g, '\n')
+       .replace(/\t/g, ' ')
+       .replace(/\u00a0/g, ' ')
+       .replace(/\s+/g, ' ')
+       .trim();
+   }
+ 
+   private sanitizeList(values?: string[] | null) {
+     return (values ?? [])
+       .map((value) => this.cleanText(value))
+       .filter((value) => value.length > 0);
+   }
+ 
+   private computeGenerationInputsHash(
+     baselineId: string,
+     jobId: string,
+     allowedBlocks: AllowedBaselineBlock[],
+     job: {
+       id: string;
+       title: string | null;
+       company: string | null;
+       responsibilities: string[];
+       requirements: string[];
+     },
++    closingTemplateKey: string,
+   ) {
+     const normalizedBaseline = allowedBlocks
+       .map((block, index) => ({
+         id: block.id,
+         title: block.title ?? null,
+         order: block.order ?? index,
+         includePolicy: block.includePolicy,
+         sectionType: block.sectionType,
+         content: this.cleanText(block.content),
+       }))
+       .sort((a, b) => a.order - b.order);
+ 
+     const normalizedJob = {
+       id: job.id,
+       title: this.cleanText(job.title),
+       company: this.cleanText(job.company),
+       responsibilities: this.sanitizeList(job.responsibilities),
+       requirements: this.sanitizeList(job.requirements),
+     };
+ 
+     const normalizedString = [
+       `baselineId:${baselineId}`,
+       `jobId:${jobId}`,
+       `baseline:${JSON.stringify(normalizedBaseline)}`,
+       `job:${JSON.stringify(normalizedJob)}`,
++      `closing:${closingTemplateKey}`,
+     ].join('|');
+ 
+     return createHash('sha256').update(normalizedString).digest('hex');
+   }
++
++  private async resolveClosingTemplateKey(
++    userId: string,
++    requested?: string | null,
++  ) {
++    const validRequested = this.normalizeClosingTemplateKey(requested);
++    if (validRequested) {
++      return validRequested;
++    }
++
++    const lastCoverLetter = await this.coverLetterRepository.findOne({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++    });
++
++    const lastKey = this.normalizeClosingTemplateKey(
++      lastCoverLetter?.closingTemplateKey,
++    );
++
++    return lastKey ?? DEFAULT_COVER_LETTER_CLOSING_TEMPLATE_KEY;
++  }
++
++  private normalizeClosingTemplateKey(key?: string | null) {
++    if (!key) return null;
++    return COVER_LETTER_CLOSING_TEMPLATES.some((template) => template.key === key)
++      ? key
++      : null;
++  }
++
++  private buildComplianceBaselineSections(
++    allowedBlocks: AllowedBaselineBlock[],
++    job: {
++      title: string | null;
++      company: string | null;
++    },
++  ) {
++    const baselineSections = allowedBlocks.map((block) => ({
++      title: this.cleanText(block.title),
++      content: this.cleanText(block.content),
++    }));
++
++    const jobContext = [job.title, job.company]
++      .map((value) => this.cleanText(value))
++      .filter(Boolean)
++      .join(' ');
++
++    if (jobContext.length > 0) {
++      baselineSections.push({ title: 'Job Context', content: jobContext });
++    }
++
++    return baselineSections;
++  }
+ }
+diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+index 33b1655c56c546567fc4c765201b959a67987cd5..aa0d315d283f934e2738049eebeafedc2f557e6f 100644
+--- a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
++++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+@@ -1,9 +1,11 @@
+ export class GenerateCoverLetterDto {
+   baselineId!: string;
+ 
+   jobId!: string;
+ 
++  closingTemplateKey?: string;
++
+   maxWords?: number;
+ 
+   tone?: string;
+ }
+diff --git a/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
+index 972c340ca3fb708211ee067cd002cafdff2311fd..967e8c5a131d4510452d460bdf5eff23815255dd 100644
+--- a/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
++++ b/apps/api/src/cover-letters/generators/cover-letter-generator.interface.ts
+@@ -1,39 +1,45 @@
+ import {
+   BaselineIncludePolicy,
+   BaselineSectionType,
+ } from '../../baseline/baseline-section.entity';
+ 
+ export type AllowedBaselineBlock = {
+   id: string;
+   title: string | null;
+   content: string;
+   includePolicy: BaselineIncludePolicy;
+   order: number;
+   sectionType: BaselineSectionType;
+ };
+ 
+ export type CoverLetterJobContext = {
+   id: string;
+   title: string | null;
+   company: string | null;
+   responsibilities: string[];
+   requirements: string[];
+ };
+ 
++export type CoverLetterClosingTemplate = {
++  key: string;
++  text: string;
++};
++
+ export type CoverLetterGenerationInput = {
+   baselineId: string;
+   jobId: string;
+   allowedBaselineBlocks: AllowedBaselineBlock[];
+   job: CoverLetterJobContext;
++  closingTemplate: CoverLetterClosingTemplate;
+   maxWords?: number;
+   tone?: string;
+ };
+ 
+ export type CoverLetterGenerationResult = {
+   content: string;
+   wordCount: number;
+ };
+ 
+ export interface CoverLetterGenerator {
+   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult;
+ }
+diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+index 8b7d398fe43a4ca77b35b725899e1828a719bea6..d47836cced7b237826bc67a50a83b955ccae09d4 100644
+--- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+@@ -26,72 +26,81 @@ describe('TemplateCoverLetterGenerator', () => {
+         title: 'Director, Customer Support Operations',
+         company: 'Acme Corp',
+         responsibilities: [
+           'Build and scale support programs and operating rhythms.',
+           'Partner with Product and Engineering to reduce defects.',
+         ],
+         requirements: [
+           'Experience leading cross functional programs.',
+           'Strong metrics and continuous improvement mindset.',
+         ],
+       },
+       allowedBaselineBlocks: [
+         {
+           title: 'Summary',
+           content:
+             'Customer operations leader with experience building scalable support programs. Led cross functional initiatives to improve customer experience and operational outcomes.',
+           order: 0,
          },
-       });
+         {
+           title: 'Experience',
+           content:
+             'Implemented dashboards and operating cadences to drive visibility and accountability. Focused on measurable outcomes and clear stakeholder communication.',
+           order: 1,
+         },
+       ],
++      closingTemplate: {
++        key: 'steady',
++        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
++      },
+       tone: 'neutral',
+       maxWords: 350,
+     };
+ 
+     const output1 = generator.generate(input as any);
+     const output2 = generator.generate(input as any);
+ 
+     expect(output1).toEqual(output2);
+     expect(typeof output1.content).toBe('string');
+     expect(output1.content.length).toBeGreaterThan(0);
+ 
++    expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
+     expect(countParagraphs(output1.content)).toBe(4);
+-    expect(countWords(output1.content)).toBeLessThanOrEqual(400);
++    expect(countWords(output1.content)).toBeLessThanOrEqual(350);
+   });
+ 
+   it('does not include disallowed baseline content when it is not provided', () => {
+     const generator = new TemplateCoverLetterGenerator();
+ 
+     const disallowed = 'DO_NOT_INCLUDE_THIS';
+ 
+     const input = {
+       job: {
+         title: 'Manager, Support Programs',
+         company: 'Example Inc',
+         responsibilities: ['Own support mechanisms and continuous improvement.'],
+         requirements: ['Program management and stakeholder alignment.'],
+       },
+       // Intentionally do NOT include the sentinel in allowedBaselineBlocks.
+       allowedBaselineBlocks: [
+         {
+           title: 'Allowed',
+           content:
+             'Built support operating rhythms and improved internal handoffs. Documented outcomes in plain language and kept commitments modest and clear.',
+           order: 0,
+         },
+       ],
++      closingTemplate: {
++        key: 'steady',
++        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
++      },
+       tone: 'neutral',
+       maxWords: 300,
+     };
+ 
+     const output = generator.generate(input as any);
+ 
+     expect(output.content).not.toContain(disallowed);
+     expect(countParagraphs(output.content)).toBe(4);
+-    expect(countWords(output.content)).toBeLessThanOrEqual(400);
++    expect(countWords(output.content)).toBeLessThanOrEqual(350);
+   });
+ });
+diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+index 8314e1fc8670adf91e006c8794633bc32323accc..b5984237bf5fe91c1f4287f138596d1a31872560 100644
+--- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+@@ -1,85 +1,99 @@
+ import {
+   AllowedBaselineBlock,
+   CoverLetterGenerationInput,
+   CoverLetterGenerationResult,
+   CoverLetterGenerator,
+   CoverLetterJobContext,
+ } from './cover-letter-generator.interface';
+ 
+ type NormalizedJob = CoverLetterJobContext & {
+   title: string | null;
+   company: string | null;
+   responsibilities: string[];
+   requirements: string[];
+ };
+ 
+ type NormalizedBlock = AllowedBaselineBlock & {
+   content: string;
+   title: string | null;
+ };
+ 
+ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
+-  private readonly hardCap = 400;
++  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
++  private readonly hardCap = 350;
+ 
+   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
+     const targetWords = this.resolveTargetWords(input.maxWords);
+     const job = this.normalizeJob(input.job);
+     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
+     const baselineStatements = this.extractBaselineStatements(baselineBlocks);
+     const focusAreas = this.buildFocusAreas(job);
+     const tone = input.tone?.trim() || null;
+ 
+     const paragraphs = [
+       this.composeIntro(job, tone),
+       this.composeStrengths(baselineStatements, tone),
+       this.composeExecution(job, focusAreas, baselineStatements),
+-      this.composeClosing(job, tone),
++      this.composeClosing(job, tone, input.closingTemplate.text),
+     ].filter((paragraph) => paragraph.length > 0);
+ 
+     let content = paragraphs
+       .map((paragraph) => paragraph.trim())
+       .filter(Boolean)
+       .join('\n\n')
+       .trim();
+ 
++    content = this.ensureGreeting(content);
++
+     let wordCount = this.countWords(content);
+ 
+     if (wordCount > this.hardCap) {
+       content = this.trimToWordLimit(content, this.hardCap);
+       wordCount = this.countWords(content);
+     } else if (wordCount > targetWords) {
+       content = this.trimToWordLimit(content, targetWords);
+       wordCount = this.countWords(content);
      }
  
      return {
-       ok: true,
-       baselineId: baseline.id,
-       baselineVersionId: baselineVersion.id,
-       jobId: jobId ?? null,
-       sections,
-       compliance_flags: complianceFlags,
-       audit_id: audit.id,
+       content,
+       wordCount,
      };
    }
+ 
++  private ensureGreeting(body: string) {
++    const greeting = 'Dear Hiring Team,';
++    const normalized = body.trimStart();
 +
-+  async exportResume(
-+    userId: string,
-+    request: GenerateResumeRequest,
-+    format: 'docx' | 'pdf',
-+  ) {
-+    const generation = await this.generateResume(userId, request);
-+    const text = this.buildResumeText(
-+      generation.sections.map((section) => ({
-+        title: section.title,
-+        content: section.content,
-+      })),
-+    );
++    if (normalized.startsWith(greeting)) {
++      return normalized;
++    }
 +
-+    const buffer =
-+      format === 'pdf'
-+        ? this.buildPdfBuffer(text)
-+        : this.buildDocxBuffer(text);
-+
-+    const contentType =
-+      format === 'pdf'
-+        ? 'application/pdf'
-+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-+    const filename = `resume.${format}`;
-+
-+    return {
-+      buffer,
-+      contentType,
-+      filename,
-+    };
++    return `${greeting} ${normalized}`.trim();
 +  }
- }
-diff --git a/apps/web/app/api/baselines/helpers.ts b/apps/web/app/api/baselines/helpers.ts
-index 4cb393b0bb1b7039d3e70b75e26e024307604fb1..703d50bb1dc7591f964de32ee0d69e1478d5fddc 100644
---- a/apps/web/app/api/baselines/helpers.ts
-+++ b/apps/web/app/api/baselines/helpers.ts
-@@ -1,24 +1,32 @@
- import { NextResponse } from "next/server";
++
+   private resolveTargetWords(maxWords?: number | null) {
+     if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
+       return 320;
+     }
  
- export function getApiBaseUrl(): string | undefined {
-   return process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
- }
- 
- export async function relayApiResponse(response: Response) {
-   const contentType = response.headers.get("content-type") || "";
- 
-   if (contentType.includes("application/json")) {
-     const json = await response.json();
-     return NextResponse.json(json, { status: response.status });
+     const clamped = Math.min(Math.max(Math.floor(maxWords), 250), this.hardCap);
+     return clamped;
    }
  
--  const text = await response.text();
--  return new NextResponse(text, { status: response.status });
-+  const buffer = await response.arrayBuffer();
-+  const headers = new Headers();
-+  response.headers.forEach((value, key) => {
-+    headers.set(key, value);
-+  });
-+
-+  return new NextResponse(buffer, {
-+    status: response.status,
-+    headers,
-+  });
- }
+   private normalizeJob(job: CoverLetterJobContext): NormalizedJob {
+     const sanitizeList = (items?: string[]) =>
+       (items ?? [])
+         .map((item) => this.cleanText(item))
+         .filter((item): item is string => Boolean(item));
  
- export {
-   requireAuthToken,
-   type RequireAuthTokenFailure,
-   type RequireAuthTokenResult,
-   type RequireAuthTokenSuccess,
- } from "../auth/helpers";
-diff --git a/apps/web/app/api/resume/export/route.ts b/apps/web/app/api/resume/export/route.ts
+     return {
+       ...job,
+       title: this.cleanText(job.title),
+       company: this.cleanText(job.company),
+       responsibilities: sanitizeList(job.responsibilities),
+       requirements: sanitizeList(job.requirements),
+     };
+   }
+ 
+   private normalizeBlocks(blocks: AllowedBaselineBlock[]): NormalizedBlock[] {
+@@ -154,58 +168,58 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
+ 
+   private composeExecution(
+     job: NormalizedJob,
+     focusAreas: string[],
+     statements: string[],
+   ) {
+     const priorities =
+       focusAreas.length > 0
+         ? this.formatList(focusAreas)
+         : 'the listed responsibilities and requirements';
+     const references = statements.slice(3, 7);
+     const referenceLine = references.length
+       ? ` When expectations align, I will reference passages such as ${this.formatList(references)} to show direct support.`
+       : ' When expectations align, I will point back to the specific baseline passages that cover the work.';
+ 
+     const neutralGuardrail =
+       ' If any responsibility sits outside the documented baseline text, I will call out the gap immediately, ask for context, and proceed without implying experience I cannot prove.';
+ 
+     const collaborationLine = job.company
+       ? ` At ${job.company}, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.`
+       : ' I will confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.';
+ 
+     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
+   }
+ 
+-  private composeClosing(job: NormalizedJob, tone: string | null) {
++  private composeClosing(job: NormalizedJob, tone: string | null, closingTemplate: string) {
+     const roleDescriptor = this.describeRole(job);
+     const toneLine = tone ? ` I will continue to communicate in the same ${tone} style.` : '';
+     const companyLine = job.company
+       ? ` I appreciate your consideration and am ready to share any additional approved excerpts that help ${job.company} make a confident decision.`
+       : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
+ 
+-    return `Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine} Please let me know a good time to connect, and I will come prepared with the most relevant baseline highlights.`;
++    return `${closingTemplate} Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine}`.trim();
+   }
+ 
+   private describeRole(job: NormalizedJob) {
+     if (job.title && job.company) {
+       return `the ${job.title} role at ${job.company}`;
+     }
+ 
+     if (job.title) {
+       return `the ${job.title} role`;
+     }
+ 
+     if (job.company) {
+       return `an opening at ${job.company}`;
+     }
+ 
+     return 'the role you described';
+   }
+ 
+   private formatList(items: string[]) {
+     const cleaned = items.map((item) => this.cleanText(item)).filter(Boolean);
+ 
+     if (cleaned.length === 0) {
+       return '';
+     }
+ 
+diff --git a/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts b/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..2e502c2b34ad81904e4e74d8d38b6e7648091b15
+index 0000000000000000000000000000000000000000..edd9ba77d718513fb7d4a664782c236b84241b60
 --- /dev/null
-+++ b/apps/web/app/api/resume/export/route.ts
-@@ -0,0 +1,32 @@
-+import { NextRequest, NextResponse } from "next/server";
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
++++ b/apps/api/src/migrations/1810000000001-CoverLetterClosingTemplate.ts
+@@ -0,0 +1,17 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
 +
-+export const runtime = "nodejs";
++export class CoverLetterClosingTemplate1810000000001 implements MigrationInterface {
++  name = 'CoverLetterClosingTemplate1810000000001';
 +
-+export async function POST(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "cover_letters" ADD "closingTemplateKey" character varying(50) NOT NULL DEFAULT 'steady'`,
 +    );
 +  }
 +
-+  if (!auth.token) return auth.error;
-+
-+  const format = req.nextUrl.searchParams.get("format") || "docx";
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/resume/export/${encodeURIComponent(format)}`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${auth.token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "cover_letters" DROP COLUMN "closingTemplateKey"`,
++    );
++  }
 +}
-diff --git a/apps/web/app/results/page.tsx b/apps/web/app/results/page.tsx
-index d852a212dc13ef740220ee2d5df1b064c5ca1fab..aaf98ffdb1ad6654cc2263b24971ef395141d0f1 100644
---- a/apps/web/app/results/page.tsx
-+++ b/apps/web/app/results/page.tsx
-@@ -1,204 +1,285 @@
+diff --git a/apps/web/app/api/cover-letters/route.ts b/apps/web/app/api/cover-letters/route.ts
+index 348ec8f6e08aca61d18c963ad05c1ac33793cfca..df4cf37893de19a43578916728079b24d9e58270 100644
+--- a/apps/web/app/api/cover-letters/route.ts
++++ b/apps/web/app/api/cover-letters/route.ts
+@@ -6,36 +6,36 @@ export const runtime = "nodejs";
+ export async function GET(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const auth = requireAuthToken(req);
+ 
+   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
+   if (!auth.token) return auth.error;
+ 
+   const response = await fetch(`${baseUrl}/cover-letters`, {
+     method: "GET",
+     cache: "no-store",
+     headers: { Authorization: `Bearer ${auth.token}` },
+   });
+ 
+   return relayApiResponse(response);
+ }
+ 
+ export async function POST(req: NextRequest) {
+   const baseUrl = getApiBaseUrl();
+   const auth = requireAuthToken(req);
+ 
+   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
+   if (!auth.token) return auth.error;
+ 
+   const body = await req.json();
+ 
+-  const response = await fetch(`${baseUrl}/cover-letters`, {
++  const response = await fetch(`${baseUrl}/cover-letters/generate`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${auth.token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
+ 
+   return relayApiResponse(response);
+ }
+diff --git a/apps/web/app/cover-letters/page.tsx b/apps/web/app/cover-letters/page.tsx
+index ddc9b8ac8c75a80f435064ba240409f78fbfc13c..fbd201d47a45a30bd30353003d62b2f0c54c0662 100644
+--- a/apps/web/app/cover-letters/page.tsx
++++ b/apps/web/app/cover-letters/page.tsx
+@@ -1,89 +1,93 @@
+ // apps/web/app/cover-letters/page.tsx
  "use client";
  
+ import Link from "next/link";
  import { useEffect, useMemo, useState } from "react";
  
- type LatestAnalysis = {
+ import type { BaselineDto } from "../../lib/baselines";
+ import type { JobDto } from "../../lib/jobs";
++import { coverLetterClosingTemplates, defaultClosingTemplateKey } from "../../lib/coverLetters";
+ import { InstrumentShell } from "../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+ 
+ type CoverLetterDto = {
+   id: string;
    baselineId: string;
    jobId: string;
-+  overallScore?: number;
-   note?: string;
+   content: string;
+   createdAt: string;
+   generatorType?: string;
+   generatorVersion?: string;
++  closingTemplateKey?: string;
  };
  
- export default function ResultsPage() {
-   const [baselineId, setBaselineId] = useState<string>("");
-   const [jobId, setJobId] = useState<string>("");
-   const [latest, setLatest] = useState<LatestAnalysis | null>(null);
-   const [resumeResponse, setResumeResponse] = useState<any>(null);
-   const [error, setError] = useState<string | null>(null);
-   const [loading, setLoading] = useState(false);
-+  const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
+ type LoadState = "idle" | "loading" | "error";
  
-   const latestEndpoint = useMemo(() => {
-     if (!jobId) return null;
-     return `/api/analysis/job/${encodeURIComponent(jobId)}/latest`;
-   }, [jobId]);
+ type SelectOption = { value: string; label: string };
  
-   async function loadLatest() {
-     setError(null);
-     setLatest(null);
+ function formatJob(job: JobDto | undefined) {
+   if (!job) return "Untitled job";
+   if (job.title && job.company) return `${job.title} @ ${job.company}`;
+   if (job.title) return job.title;
+   if (job.company) return job.company;
+   return "Untitled job";
+ }
  
-     if (!jobId) {
-       setError("Job ID is required to load analysis.");
-       return;
-     }
+ function formatDate(value: string) {
+   const date = new Date(value);
+   if (Number.isNaN(date.getTime())) return "Unknown date";
+   return date.toLocaleString(undefined, {
+     month: "short",
+     day: "numeric",
+     hour: "numeric",
+     minute: "2-digit",
+   });
+ }
  
-     try {
-       if (!latestEndpoint) throw new Error("Job ID is required.");
+ export default function CoverLettersPage() {
+   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+   const [baselineId, setBaselineId] = useState("");
+   const [baselineState, setBaselineState] = useState<LoadState>("loading");
+   const [baselineError, setBaselineError] = useState<string | null>(null);
  
-       const res = await fetch(
-         `/api/analysis/job/${encodeURIComponent(jobId)}/latest`,
-         { cache: "no-store" },
-       );
+   const [jobs, setJobs] = useState<JobDto[]>([]);
+   const [jobId, setJobId] = useState("");
+   const [jobState, setJobState] = useState<LoadState>("loading");
+   const [jobError, setJobError] = useState<string | null>(null);
  
-       if (!res.ok) {
-         const text = await res.text();
-         throw new Error(text);
-       }
+   const [history, setHistory] = useState<CoverLetterDto[]>([]);
+   const [historyState, setHistoryState] = useState<LoadState>("loading");
+   const [historyError, setHistoryError] = useState<string | null>(null);
  
-       const data: LatestAnalysis = await res.json();
-       setLatest(data);
+   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
  
-       if (data?.baselineId) {
-         setBaselineId(data.baselineId);
-       }
-     } catch (e: any) {
-       setError(e?.message || "Failed to load analysis");
-     }
-   }
+   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [isGenerating, setIsGenerating] = useState(false);
++  const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
++  const [complianceFlags, setComplianceFlags] = useState<string[]>([]);
  
--  async function generateResume() {
-+  async function generateResume(oneTap = false) {
-     if (!baselineId || !jobId) {
-       setError("Baseline and Job are required to generate a resume.");
-       return;
-     }
- 
-     setLoading(true);
-     setError(null);
-     setResumeResponse(null);
- 
-     try {
-       const res = await fetch("/api/resume", {
-         method: "POST",
-         headers: {
-           "Content-Type": "application/json",
-         },
-         body: JSON.stringify({
-           baselineId,
-           jobId,
-+          oneTap,
-         }),
-       });
- 
-       if (!res.ok) {
-         const text = await res.text();
-         throw new Error(text);
-       }
- 
-       const contentType = res.headers.get("content-type") || "";
- 
-       if (contentType.includes("application/json")) {
-         const json = await res.json();
-         setResumeResponse(json);
-       } else {
-         const blob = await res.blob();
-         const url = window.URL.createObjectURL(blob);
-         const a = document.createElement("a");
-         a.href = url;
-         a.download = "resume";
-         document.body.appendChild(a);
-         a.click();
-         a.remove();
-         window.URL.revokeObjectURL(url);
-       }
-     } catch (e: any) {
-       setError(e?.message || "Resume generation failed");
-     } finally {
-       setLoading(false);
-     }
-   }
- 
-+  async function exportResume(format: "docx" | "pdf") {
-+    if (!baselineId || !jobId) {
-+      setError("Baseline and Job are required to generate a resume.");
-+      return;
-+    }
-+
-+    setExporting(format);
-+    setError(null);
-+
-+    try {
-+      const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
-+        method: "POST",
-+        headers: {
-+          "Content-Type": "application/json",
-+        },
-+        body: JSON.stringify({
-+          baselineId,
-+          jobId,
-+          oneTap: true,
-+        }),
-+      });
-+
-+      if (!res.ok) {
-+        const text = await res.text();
-+        throw new Error(text);
-+      }
-+
-+      const blob = await res.blob();
-+      const url = window.URL.createObjectURL(blob);
-+      const a = document.createElement("a");
-+      a.href = url;
-+      a.download = `resume.${format}`;
-+      document.body.appendChild(a);
-+      a.click();
-+      a.remove();
-+      window.URL.revokeObjectURL(url);
-+    } catch (e: any) {
-+      setError(e?.message || "Resume export failed");
-+    } finally {
-+      setExporting(null);
-+    }
-+  }
-+
    useEffect(() => {
-     const params = new URLSearchParams(window.location.search);
-     const job = params.get("jobId");
-     if (job) {
-       setJobId(job);
-     }
+     let cancelled = false;
+ 
+     const loadBaselines = async () => {
+       setBaselineState("loading");
+       setBaselineError(null);
+ 
+       try {
+         const response = await fetch("/api/baselines", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load baselines.");
+         }
+ 
+         const data = (await response.json()) as BaselineDto[];
+         if (cancelled) return;
+ 
+         setBaselines(data);
+         setBaselineId((current) => {
+           if (current && data.some((baseline) => baseline.id === current)) return current;
+           return data[0]?.id ?? "";
+         });
+         setBaselineState("idle");
+       } catch (error) {
+@@ -138,50 +142,52 @@ export default function CoverLettersPage() {
+     loadJobs();
+     return () => {
+       cancelled = true;
+     };
    }, []);
  
-+  const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
-+
-   return (
-     <div className="p-8 space-y-6">
-       <h1 className="text-2xl font-semibold">Results</h1>
+   useEffect(() => {
+     let cancelled = false;
  
-       {error && (
-         <div className="border border-red-400 bg-red-50 text-red-700 p-3 rounded">
-           {error}
-         </div>
-       )}
+     const loadHistory = async () => {
+       setHistoryState("loading");
+       setHistoryError(null);
  
-       <div className="grid grid-cols-2 gap-6">
-         <div className="border rounded p-4 space-y-3">
-           <h2 className="font-medium">Selection</h2>
+       try {
+         const response = await fetch("/api/cover-letters", { cache: "no-store" });
+         if (!response.ok) {
+           const message = await response.text();
+           throw new Error(message || "Unable to load history.");
+         }
  
-           <div>
-             <label className="block text-sm">Baseline</label>
-             <input
-               className="border rounded w-full p-2"
-               value={baselineId}
-               onChange={(e) => setBaselineId(e.target.value)}
-               placeholder="Baseline ID"
-             />
-           </div>
+         const data = (await response.json()) as CoverLetterDto[];
+         if (cancelled) return;
  
-           <div>
-             <label className="block text-sm">Job</label>
-             <input
-               className="border rounded w-full p-2"
-               value={jobId}
-               onChange={(e) => setJobId(e.target.value)}
-               placeholder="Job ID"
-             />
-           </div>
+         setHistory(data);
+         setHistoryState("idle");
++        const latestTemplate = data[0]?.closingTemplateKey;
++        setClosingTemplateKey((current) => current || latestTemplate || defaultClosingTemplateKey);
+       } catch (error) {
+         if (cancelled) return;
+         const message = error instanceof Error ? error.message : "Unable to load history.";
+         setHistory([]);
+         setHistoryState("error");
+         setHistoryError(message);
+         setStatusMessage(null);
+         setErrorMessage(message);
+       }
+     };
  
-           <button
-             onClick={loadLatest}
-             className="bg-gray-700 text-white px-4 py-2 rounded"
-             disabled={!jobId}
-           >
-             Load latest analysis
-           </button>
+     loadHistory();
+     return () => {
+       cancelled = true;
+     };
+   }, []);
  
-           <div className="text-xs text-gray-500">
-             {latestEndpoint ? `Calling: ${latestEndpoint}` : ""}
-           </div>
-         </div>
- 
--        <div className="border rounded p-4">
--          <h2 className="font-medium mb-2">Latest analysis</h2>
--          <div className="flex items-center gap-3 mb-3">
--            <button
--              className="text-sm text-blue-600 underline disabled:text-gray-400"
-+      <div className="border rounded p-4">
-+        <h2 className="font-medium mb-2">Latest analysis</h2>
-+        <div className="flex items-center gap-3 mb-3">
-+          <button
-+            className="text-sm text-blue-600 underline disabled:text-gray-400"
-               disabled={!latest?.jobId}
-               onClick={() => {
-                 if (latest?.jobId) {
-                   window.location.href = `/fit-review?jobId=${encodeURIComponent(latest.jobId)}`;
-                 }
-               }}
-             >
-               Open Fit Review
-             </button>
-             <span className="text-xs text-gray-500">Job: {latest?.jobId ?? "n/a"}</span>
-+            <span className="text-xs text-gray-500">
-+              Fit Score: {latest?.overallScore ?? "n/a"}
-+            </span>
-           </div>
-           <pre className="text-sm whitespace-pre-wrap">
-             {latest ? JSON.stringify(latest, null, 2) : ""}
-           </pre>
-         </div>
-       </div>
- 
-       <div className="border rounded p-4 space-y-3">
-         <h2 className="font-medium">Generate resume</h2>
- 
-         <button
--          onClick={generateResume}
-+          onClick={() => generateResume(false)}
-           disabled={!baselineId || !jobId || loading}
-           className="bg-gray-800 text-white px-4 py-2 rounded"
-         >
-           {loading ? "Generating..." : "Generate resume"}
-         </button>
- 
-+        <button
-+          onClick={() => generateResume(true)}
-+          disabled={!baselineId || !jobId || !oneTapEligible || loading}
-+          className="bg-emerald-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-+          title={
-+            oneTapEligible
-+              ? "Generate immediately with compliance checks"
-+              : "Requires fit score of at least 92"
-+          }
-+        >
-+          {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
-+        </button>
-+
-+        <div className="flex items-center gap-3">
-+          <button
-+            onClick={() => exportResume("docx")}
-+            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
-+            className="bg-blue-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-+          >
-+            {exporting === "docx" ? "Downloading..." : "Download DOCX"}
-+          </button>
-+          <button
-+            onClick={() => exportResume("pdf")}
-+            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
-+            className="bg-purple-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-+          >
-+            {exporting === "pdf" ? "Downloading..." : "Download PDF"}
-+          </button>
-+        </div>
-+
-         <div>
-           <label className="block text-sm">Resume response</label>
-           <pre className="border rounded p-2 text-sm whitespace-pre-wrap">
-             {resumeResponse ? JSON.stringify(resumeResponse, null, 2) : ""}
-           </pre>
-         </div>
-       </div>
-     </div>
+   const sortedHistory = useMemo(
+     () => [...history].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+     [history],
    );
- }
+ 
+   useEffect(() => {
+     if (sortedHistory.length === 0) {
+       setSelectedLetterId(null);
+@@ -195,76 +201,107 @@ export default function CoverLettersPage() {
+   }, [sortedHistory]);
+ 
+   const selectedLetter = useMemo(
+     () => sortedHistory.find((item) => item.id === selectedLetterId) ?? null,
+     [sortedHistory, selectedLetterId],
+   );
+ 
+   const baselineLabel = useMemo(() => {
+     if (baselineState === "loading") return "Loading baselines...";
+     if (baselineState === "error") return "Baselines unavailable";
+     return baselines.length ? "Choose a baseline" : "No baselines available";
+   }, [baselineState, baselines.length]);
+ 
+   const jobLabel = useMemo(() => {
+     if (jobState === "loading") return "Loading jobs...";
+     if (jobState === "error") return "Jobs unavailable";
+     return jobs.length ? "Choose a job" : "No jobs available";
+   }, [jobState, jobs.length]);
+ 
+   const canGenerate = Boolean(baselineId && jobId && !isGenerating);
+ 
+   const handleGenerate = async () => {
+     if (!baselineId || !jobId) {
+       setStatusMessage(null);
+       setErrorMessage("Select a baseline and job to generate a cover letter.");
++      setComplianceFlags([]);
+       return;
+     }
+ 
+     setIsGenerating(true);
+     setStatusMessage(null);
+     setErrorMessage(null);
++    setComplianceFlags([]);
+ 
+     try {
+       const response = await fetch("/api/cover-letters", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify({ baselineId, jobId }),
++        body: JSON.stringify({ baselineId, jobId, closingTemplateKey }),
+       });
+ 
+       if (!response.ok) {
+-        const message = await response.text();
+-        throw new Error(message || "Unable to generate a cover letter right now.");
++        const text = await response.text();
++        let parsed: any = null;
++
++        try {
++          parsed = JSON.parse(text);
++        } catch (error) {
++          // ignore parsing issues and use fallback messaging
++        }
++
++        const message =
++          parsed?.error?.message ||
++          parsed?.message ||
++          (typeof parsed === "string" ? parsed : null) ||
++          text ||
++          "Unable to generate a cover letter right now.";
++
++        const flags =
++          parsed?.error?.details?.compliance_flags ||
++          parsed?.details?.compliance_flags ||
++          parsed?.complianceFlags ||
++          [];
++
++        setComplianceFlags(
++          Array.isArray(flags)
++            ? flags.map((flag: any) => flag?.message || flag?.code || "Compliance validation failed.")
++            : [],
++        );
++
++        throw new Error(message);
+       }
+ 
+       const data = (await response.json()) as CoverLetterDto;
+       setHistory((current) => {
+         const filtered = current.filter((item) => item.id !== data.id);
+         return [data, ...filtered];
+       });
+       setSelectedLetterId(data.id);
+       setStatusMessage("Cover letter generated successfully.");
++      setClosingTemplateKey(data.closingTemplateKey || closingTemplateKey);
++      setComplianceFlags([]);
+     } catch (error) {
+       const message = error instanceof Error ? error.message : "Unable to generate.";
+       setErrorMessage(message);
+       setStatusMessage(null);
+     } finally {
+       setIsGenerating(false);
+     }
+   };
+ 
+   const renderSelect = (label: string, value: string, options: SelectOption[], onChange: (next: string) => void, disabled: boolean) => (
+     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+       <label style={ttrComponents.fieldLabel}>{label}</label>
+       <select
+         value={value}
+         onChange={(event) => onChange(event.target.value)}
+         style={{
+           ...ttrComponents.input,
+           background: "rgba(0,0,0,0.35)",
+           cursor: disabled ? "not-allowed" : "pointer",
+         }}
+         disabled={disabled}
+       >
+         {options.length === 0 ? <option value="">No options</option> : null}
+         {options.map((option) => (
+           <option key={option.value} value={option.value}>
+@@ -345,71 +382,94 @@ export default function CoverLettersPage() {
+               baselines.map((baseline) => ({ value: baseline.id, label: baseline.originalFilename || "Untitled baseline" })),
+               setBaselineId,
+               baselineState !== "idle",
+             )}
+             {baselineState === "error" && baselineError ? <div style={ttrComponents.dangerBox}>{baselineError}</div> : null}
+             {baselineState === "idle" && baselines.length === 0 ? (
+               <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
+                 No baselines available. Upload a baseline to start generating cover letters.
+               </div>
+             ) : null}
+ 
+             {renderSelect(
+               jobLabel,
+               jobId,
+               jobs.map((job) => ({ value: job.id, label: formatJob(job) })),
+               setJobId,
+               jobState !== "idle",
+             )}
+             {jobState === "error" && jobError ? <div style={ttrComponents.dangerBox}>{jobError}</div> : null}
+             {jobState === "idle" && jobs.length === 0 ? (
+               <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
+                 No jobs found. Add a job to generate a tailored cover letter.
+               </div>
+             ) : null}
+ 
++            {renderSelect(
++              "Choose a closing template",
++              closingTemplateKey,
++              coverLetterClosingTemplates.map((template) => ({
++                value: template.key,
++                label: `${template.label} – ${template.text}`,
++              })),
++              setClosingTemplateKey,
++              false,
++            )}
++
+             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+               <button
+                 type="button"
+                 onClick={handleGenerate}
+                 disabled={!canGenerate}
+                 style={{
+                   ...ttrComponents.primaryButton,
+                   opacity: canGenerate ? 1 : 0.6,
+                   cursor: canGenerate ? "pointer" : "not-allowed",
+                   minWidth: 180,
+                 }}
+               >
+                 {isGenerating ? "Generating..." : "Generate"}
+               </button>
+               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                 Uses your latest baseline version automatically.
+               </span>
+             </div>
+ 
+             {statusMessage ? <div style={ttrComponents.successBox}>{statusMessage}</div> : null}
+             {errorMessage ? <div style={ttrComponents.dangerBox}>{errorMessage}</div> : null}
++            {complianceFlags.length ? (
++              <div style={{ ...ttrComponents.dangerBox, display: "flex", flexDirection: "column", gap: 6 }}>
++                <div style={{ fontWeight: 700 }}>Compliance flags</div>
++                <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2 }}>
++                  {complianceFlags.map((flag, index) => (
++                    <li key={`${flag}-${index}`} style={{ fontSize: 13, lineHeight: 1.5 }}>
++                      {flag}
++                    </li>
++                  ))}
++                </ul>
++              </div>
++            ) : null}
+           </div>
+         </section>
+ 
+         <section style={{ ...ttrComponents.basePanel, flex: "1 1 320px" }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
+             <span style={ttrTypography.subtleLabel}>History</span>
+             <h2 style={ttrTypography.h2}>Recent cover letters</h2>
+             <p style={ttrTypography.paragraph}>
+               Tap an entry to load it into the viewer. Newest items appear first.
+             </p>
+           </div>
+ 
+           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+             {historyState === "loading" ? (
+               <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>Loading history...</div>
+             ) : null}
+             {historyState === "error" ? (
+               <div style={ttrComponents.dangerBox}>{historyError || "Unable to load history right now."}</div>
+             ) : null}
+             {historyState === "idle" && sortedHistory.length === 0 ? (
+               <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>No cover letters yet. Generate one to see it listed here.</div>
+             ) : null}
+ 
+             {sortedHistory.map((item) => renderHistoryItem(item))}
+           </div>
+diff --git a/apps/web/lib/coverLetters.ts b/apps/web/lib/coverLetters.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..edbffe04ec378f25345e86b282ab66abe484ad1e
+--- /dev/null
++++ b/apps/web/lib/coverLetters.ts
+@@ -0,0 +1,25 @@
++export type CoverLetterClosingTemplate = {
++  key: string;
++  label: string;
++  text: string;
++};
++
++export const coverLetterClosingTemplates: CoverLetterClosingTemplate[] = [
++  {
++    key: "steady",
++    label: "Steady delivery",
++    text: "I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.",
++  },
++  {
++    key: "impact",
++    label: "Impact-focused",
++    text: "I will stay focused on measurable impact while keeping every claim anchored to verified baseline material.",
++  },
++  {
++    key: "collaborative",
++    label: "Collaborative",
++    text: "I look forward to collaborating closely, checking expectations early, and sharing progress in transparent updates.",
++  },
++];
++
++export const defaultClosingTemplateKey = coverLetterClosingTemplates[0].key;

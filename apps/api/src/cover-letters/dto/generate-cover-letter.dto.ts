@@ -3,6 +3,8 @@ export class GenerateCoverLetterDto {
 
   jobId!: string;
 
+  closingTemplateKey?: string;
+
   maxWords?: number;
 
   tone?: string;
