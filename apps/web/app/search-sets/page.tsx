@@ -41,6 +41,16 @@ type ParsedUrlPreview = {
   parseWarning: string | null;
 };
 
+type SearchSetRunResult = {
+  jobId: string;
+  title: string | null;
+  company: string | null;
+  applyUrl: string | null;
+  sourceUrl: string | null;
+  fitScore: number | null;
+  verdict: string | null;
+};
+
 function safeString(v: unknown): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'number') return String(v);
@@ -223,7 +233,7 @@ export default function SearchSetsPage() {
   const [parsePreview, setParsePreview] = useState<ParsedUrlPreview | null>(null);
 
   const [detail, setDetail] = useState<SearchSet | null>(null);
-  const [runResult, setRunResult] = useState<unknown>(null);
+  const [runResult, setRunResult] = useState<SearchSetRunResult[] | null>(null);
 
   const filtered = useMemo(() => {
     const q = (search || '').trim().toLowerCase();
@@ -388,11 +398,14 @@ export default function SearchSetsPage() {
     setNotice('');
     setRunResult(null);
     try {
-      const data = await apiFetchJson<unknown>(`/api/search-sets/${id}/run`, {
+      const data = await apiFetchJson<SearchSetRunResult[]>(
+        `/api/search-sets/${id}/run`,
+        {
         method: 'POST',
         body: JSON.stringify({}),
-      });
-      setRunResult(data);
+        },
+      );
+      setRunResult(Array.isArray(data) ? data : []);
       setNotice('Search set run completed');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to run search set');
@@ -554,9 +567,59 @@ export default function SearchSetsPage() {
             )}
 
             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
-            <pre className="mt-2 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
-              {runResult ? JSON.stringify(runResult, null, 2) : '{}'}
-            </pre>
+            <div className="mt-2 rounded border">
+              {runResult === null && (
+                <div className="px-3 py-2 text-xs text-gray-600">No run yet.</div>
+              )}
+
+              {Array.isArray(runResult) && runResult.length === 0 && (
+                <div className="px-3 py-2 text-xs text-gray-700">No matching jobs found.</div>
+              )}
+
+              {Array.isArray(runResult) && runResult.length > 0 && (
+                <div className="overflow-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead className="bg-gray-50 text-left">
+                      <tr>
+                        <th className="whitespace-nowrap px-3 py-2">Company</th>
+                        <th className="whitespace-nowrap px-3 py-2">Title</th>
+                        <th className="whitespace-nowrap px-3 py-2">Fit Score</th>
+                        <th className="whitespace-nowrap px-3 py-2">Verdict</th>
+                        <th className="whitespace-nowrap px-3 py-2">Apply</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runResult.map((item) => {
+                        const link = item.applyUrl || item.sourceUrl;
+                        const hasApply = Boolean(item.applyUrl);
+                        return (
+                          <tr key={item.jobId} className="border-t">
+                            <td className="px-3 py-2">{item.company || 'Unknown'}</td>
+                            <td className="px-3 py-2">{item.title || 'Untitled role'}</td>
+                            <td className="px-3 py-2">{item.fitScore ?? '—'}</td>
+                            <td className="px-3 py-2">{item.verdict ?? '—'}</td>
+                            <td className="px-3 py-2">
+                              {link ? (
+                                <a
+                                  className="text-blue-700 underline"
+                                  href={link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {hasApply ? 'Apply' : 'View source'}
+                                </a>
+                              ) : (
+                                <span className="text-gray-500">No link available</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

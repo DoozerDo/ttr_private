@@ -12,8 +12,16 @@ export async function relayApiResponse(response: Response) {
     return NextResponse.json(json, { status: response.status });
   }
 
-  const text = await response.text();
-  return new NextResponse(text, { status: response.status });
+  const buffer = await response.arrayBuffer();
+  const headers = new Headers();
+  response.headers.forEach((value, key) => {
+    headers.set(key, value);
+  });
+
+  return new NextResponse(buffer, {
+    status: response.status,
+    headers,
+  });
 }
 
 export {

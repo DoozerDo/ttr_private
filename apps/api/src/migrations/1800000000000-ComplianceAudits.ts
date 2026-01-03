@@ -7,7 +7,7 @@ export class ComplianceAudits1800000000000 implements MigrationInterface {
     await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
 
     await queryRunner.query(`
-      CREATE TYPE "compliance_audits_action_enum" AS ENUM('fit_score', 'resume_gen', 'cover_letter_gen', 'application_export')
+      CREATE TYPE "compliance_audits_action_enum" AS ENUM('fit_score', 'resume_gen', 'cover_letter_gen', 'application_export', 'resume_export')
     `);
 
     await queryRunner.query(`

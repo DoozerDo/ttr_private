@@ -19,7 +19,8 @@ type NormalizedBlock = AllowedBaselineBlock & {
 };
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
-  private readonly hardCap = 400;
+  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
+  private readonly hardCap = 350;
 
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
     const targetWords = this.resolveTargetWords(input.maxWords);
@@ -33,7 +34,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       this.composeIntro(job, tone),
       this.composeStrengths(baselineStatements, tone),
       this.composeExecution(job, focusAreas, baselineStatements),
-      this.composeClosing(job, tone),
+      this.composeClosing(job, tone, input.closingTemplate.text),
     ].filter((paragraph) => paragraph.length > 0);
 
     let content = paragraphs
@@ -41,6 +42,8 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .filter(Boolean)
       .join('\n\n')
       .trim();
+
+    content = this.ensureGreeting(content);
 
     let wordCount = this.countWords(content);
 
@@ -56,6 +59,17 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       content,
       wordCount,
     };
+  }
+
+  private ensureGreeting(body: string) {
+    const greeting = 'Dear Hiring Team,';
+    const normalized = body.trimStart();
+
+    if (normalized.startsWith(greeting)) {
+      return normalized;
+    }
+
+    return `${greeting} ${normalized}`.trim();
   }
 
   private resolveTargetWords(maxWords?: number | null) {
@@ -176,14 +190,14 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
   }
 
-  private composeClosing(job: NormalizedJob, tone: string | null) {
+  private composeClosing(job: NormalizedJob, tone: string | null, closingTemplate: string) {
     const roleDescriptor = this.describeRole(job);
     const toneLine = tone ? ` I will continue to communicate in the same ${tone} style.` : '';
     const companyLine = job.company
       ? ` I appreciate your consideration and am ready to share any additional approved excerpts that help ${job.company} make a confident decision.`
       : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
 
-    return `Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine} Please let me know a good time to connect, and I will come prepared with the most relevant baseline highlights.`;
+    return `${closingTemplate} Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine}`.trim();
   }
 
   private describeRole(job: NormalizedJob) {

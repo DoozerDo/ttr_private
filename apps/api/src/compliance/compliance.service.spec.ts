@@ -3,6 +3,7 @@ import { ComplianceService } from './compliance.service';
 import {
   ComplianceAction,
   ComplianceFlagCode,
+  ComplianceFlagSeverity,
 } from './compliance.types';
 
 const buildAuditRepo = () => {
@@ -89,5 +90,33 @@ describe('ComplianceService', () => {
       ]),
     );
     expect(result.blocked).toBe(true);
+  });
+
+  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [{ content: 'Improved uptime by 10%' }],
+      generatedSections: [{ content: 'Improved uptime by 25%' }],
+    });
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+      }),
+    ]);
+  });
+
+  it('blocks stylized punctuation in generated output', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
+      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
+    });
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
+        severity: ComplianceFlagSeverity.BLOCK,
+      }),
+    ]);
   });
 });

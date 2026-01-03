@@ -23,6 +23,9 @@ export class CoverLetter {
   @Column({ type: 'varchar', default: 'v1' })
   generatorVersion!: string;
 
+  @Column({ type: 'varchar', length: 50, default: 'steady' })
+  closingTemplateKey!: string;
+
   @Column({ type: 'text' })
   content!: string;
 

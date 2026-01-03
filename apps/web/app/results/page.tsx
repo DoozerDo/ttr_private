@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 type LatestAnalysis = {
   baselineId: string;
   jobId: string;
+  overallScore?: number;
   note?: string;
 };
 
@@ -15,6 +16,7 @@ export default function ResultsPage() {
   const [resumeResponse, setResumeResponse] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
 
   const latestEndpoint = useMemo(() => {
     if (!jobId) return null;
@@ -54,7 +56,7 @@ export default function ResultsPage() {
     }
   }
 
-  async function generateResume() {
+  async function generateResume(oneTap = false) {
     if (!baselineId || !jobId) {
       setError("Baseline and Job are required to generate a resume.");
       return;
@@ -73,6 +75,7 @@ export default function ResultsPage() {
         body: JSON.stringify({
           baselineId,
           jobId,
+          oneTap,
         }),
       });
 
@@ -104,6 +107,49 @@ export default function ResultsPage() {
     }
   }
 
+  async function exportResume(format: "docx" | "pdf") {
+    if (!baselineId || !jobId) {
+      setError("Baseline and Job are required to generate a resume.");
+      return;
+    }
+
+    setExporting(format);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          baselineId,
+          jobId,
+          oneTap: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resume.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.message || "Resume export failed");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const job = params.get("jobId");
@@ -111,6 +157,8 @@ export default function ResultsPage() {
       setJobId(job);
     }
   }, []);
+
+  const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
 
   return (
     <div className="p-8 space-y-6">
@@ -159,11 +207,11 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        <div className="border rounded p-4">
-          <h2 className="font-medium mb-2">Latest analysis</h2>
-          <div className="flex items-center gap-3 mb-3">
-            <button
-              className="text-sm text-blue-600 underline disabled:text-gray-400"
+      <div className="border rounded p-4">
+        <h2 className="font-medium mb-2">Latest analysis</h2>
+        <div className="flex items-center gap-3 mb-3">
+          <button
+            className="text-sm text-blue-600 underline disabled:text-gray-400"
               disabled={!latest?.jobId}
               onClick={() => {
                 if (latest?.jobId) {
@@ -174,6 +222,9 @@ export default function ResultsPage() {
               Open Fit Review
             </button>
             <span className="text-xs text-gray-500">Job: {latest?.jobId ?? "n/a"}</span>
+            <span className="text-xs text-gray-500">
+              Fit Score: {latest?.overallScore ?? "n/a"}
+            </span>
           </div>
           <pre className="text-sm whitespace-pre-wrap">
             {latest ? JSON.stringify(latest, null, 2) : ""}
@@ -185,12 +236,42 @@ export default function ResultsPage() {
         <h2 className="font-medium">Generate resume</h2>
 
         <button
-          onClick={generateResume}
+          onClick={() => generateResume(false)}
           disabled={!baselineId || !jobId || loading}
           className="bg-gray-800 text-white px-4 py-2 rounded"
         >
           {loading ? "Generating..." : "Generate resume"}
         </button>
+
+        <button
+          onClick={() => generateResume(true)}
+          disabled={!baselineId || !jobId || !oneTapEligible || loading}
+          className="bg-emerald-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
+          title={
+            oneTapEligible
+              ? "Generate immediately with compliance checks"
+              : "Requires fit score of at least 92"
+          }
+        >
+          {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
+        </button>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => exportResume("docx")}
+            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+            className="bg-blue-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
+          >
+            {exporting === "docx" ? "Downloading..." : "Download DOCX"}
+          </button>
+          <button
+            onClick={() => exportResume("pdf")}
+            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+            className="bg-purple-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
+          >
+            {exporting === "pdf" ? "Downloading..." : "Download PDF"}
+          </button>
+        </div>
 
         <div>
           <label className="block text-sm">Resume response</label>

@@ -14,6 +14,7 @@ type SearchSetRunResult = {
   jobId: string;
   title: string | null;
   company: string | null;
+  applyUrl: string | null;
   sourceUrl: string | null;
   fitScore: number | null;
   verdict: FitAssessment['verdict'] | null;
@@ -65,11 +66,28 @@ export class SearchSetsRunnerService {
         jobId: job.id,
         title: job.title,
         company: job.company,
+        applyUrl: this.deriveApplyUrl(job),
         sourceUrl: job.sourceUrl,
         fitScore: assessment?.overallScore ?? null,
         verdict: assessment?.verdict ?? null,
       } satisfies SearchSetRunResult;
     });
+  }
+
+  private deriveApplyUrl(job: Job) {
+    if (!job.sourceUrl) return null;
+
+    try {
+      const parsed = new URL(job.sourceUrl);
+      const protocol = parsed.protocol.toLowerCase();
+      if (protocol === 'http:' || protocol === 'https:') {
+        return parsed.toString();
+      }
+    } catch {
+      // Ignore invalid URLs and fall back to null.
+    }
+
+    return null;
   }
 
   private matchesSearchSet(job: Job, searchSet: SearchSet) {

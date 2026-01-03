@@ -124,7 +124,7 @@ describe('SearchSetsRunnerService', () => {
     });
 
     const { service, fitAssessmentRepository } = createService({
-      jobs: [createJob()],
+      jobs: [createJob({ sourceUrl: 'https://example.com/apply' })],
       assessments: [newerAssessment, olderAssessment],
     });
 
@@ -136,7 +136,8 @@ describe('SearchSetsRunnerService', () => {
         jobId: 'job-1',
         title: 'Senior Engineer',
         company: 'Acme Corp',
-        sourceUrl: null,
+        applyUrl: 'https://example.com/apply',
+        sourceUrl: 'https://example.com/apply',
         fitScore: 95,
         verdict: FitAssessmentVerdict.APPLY,
       },
@@ -182,6 +183,40 @@ describe('SearchSetsRunnerService', () => {
     const results = await service.runSearchSet('set-1', 'user-1', 20);
 
     expect(results).toHaveLength(10);
+  });
+
+  it('caps results at 10 even when limit below 1 or above 10', async () => {
+    const jobs = Array.from({ length: 20 }).map((_, index) =>
+      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
+    );
+
+    const { service } = createService({ jobs, assessments: [] });
+
+    const highLimit = await service.runSearchSet('set-1', 'user-1', 50);
+    const lowLimit = await service.runSearchSet('set-1', 'user-1', 0);
+
+    expect(highLimit).toHaveLength(10);
+    expect(lowLimit).toHaveLength(1);
+  });
+
+  it('derives applyUrl from sourceUrl and falls back to null when invalid', async () => {
+    const { service } = createService({
+      jobs: [
+        createJob({ id: 'job-valid', sourceUrl: 'https://example.com/apply' }),
+        createJob({ id: 'job-invalid', sourceUrl: 'notaurl' }),
+        createJob({ id: 'job-missing', sourceUrl: null }),
+      ],
+      assessments: [],
+    });
+
+    const results = await service.runSearchSet('set-1', 'user-1', 5);
+
+    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
+
+    expect(byId['job-valid'].applyUrl).toBe('https://example.com/apply');
+    expect(byId['job-invalid'].applyUrl).toBeNull();
+    expect(byId['job-missing'].applyUrl).toBeNull();
+    expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
   });
 
   it('returns empty results when search set is inactive', async () => {
