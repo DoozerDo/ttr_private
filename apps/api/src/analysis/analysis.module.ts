@@ -4,6 +4,7 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceModule } from '../compliance/compliance.module';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { FitAssessment } from './fit-assessment.entity';
@@ -24,6 +25,7 @@ import { FitScoringService } from './fit-scoring.service';
       FitAssessment,
       User,
     ]),
+    ComplianceModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
   providers: [AnalysisService, FitScoringService],

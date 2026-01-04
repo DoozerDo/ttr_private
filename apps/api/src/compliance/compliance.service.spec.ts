@@ -119,4 +119,31 @@ describe('ComplianceService', () => {
       }),
     ]);
   });
+
+  it('normalizes stylized punctuation for downstream output', () => {
+    const normalized = service.normalizeSectionsForOutput([
+      { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
+    ]);
+
+    expect(normalized[0]).toEqual(
+      expect.objectContaining({
+        title: 'Impact-Summary',
+        content: 'Led teams... increased revenue by 1,200%',
+      }),
+    );
+  });
+
+  it('blocks invented metrics with formatted numbers', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
+      generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
+    });
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+      }),
+    ]);
+  });
 });

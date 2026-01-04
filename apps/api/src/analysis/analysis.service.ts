@@ -13,6 +13,8 @@ import {
 } from '../baseline/baseline-section.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceAction, ComplianceFlag, ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
@@ -98,6 +100,7 @@ export class AnalysisService {
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     private readonly fitScoringService: FitScoringService,
+    private readonly complianceService: ComplianceService,
   ) {}
 
   // VERIFY: Confirm default calibration values with product stakeholders.
@@ -189,6 +192,15 @@ export class AnalysisService {
   private coerceComplianceFlags(flags: string[] | undefined | null) {
     if (!flags?.length) return undefined;
     return flags.map((flag) => ({ code: flag, message: flag }));
+  }
+
+  private mapComplianceStringsToFlags(flags?: string[] | null): ComplianceFlag[] | undefined {
+    if (!flags?.length) return undefined;
+    return flags.map((flag) => ({
+      code: flag as any,
+      message: flag,
+      severity: ComplianceFlagSeverity.BLOCK,
+    }));
   }
 
   private assertJobInput(job?: FitScoreJobInput) {
@@ -440,6 +452,17 @@ export class AnalysisService {
           };
     }
 
+    const hashableJob = (job ?? {
+      rawDescription: jobPayload.rawDescription,
+      normalizedResponsibilities: jobPayload.normalizedResponsibilities,
+      normalizedRequirements: jobPayload.normalizedRequirements,
+      title: jobPayload.title,
+      company: jobPayload.company,
+      sourceUrl: jobPayload.sourceUrl,
+    }) as Job;
+
+    const inputsHash = this.buildInputsHash(hashableJob, baseline, dimensionWeights);
+
     const scoring = this.fitScoringService.score(
       {
         job: jobPayload,
@@ -465,10 +488,29 @@ export class AnalysisService {
         strengths: scoring.strengths,
         gaps: scoring.gaps,
         complianceFlags: scoring.complianceFlags,
-        inputsHash: null,
+        inputsHash,
       });
 
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
+    }
+
+    const compliance = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.FIT_SCORE,
+      actorId: userId,
+      baselineVersion,
+      job: job ?? null,
+      outputHash: inputsHash,
+      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
+    });
+
+    if (compliance.blocked) {
+      throw new BadRequestException({
+        error: {
+          code: 'compliance_blocked',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: compliance.complianceFlags },
+        },
+      });
     }
 
     const breakdown = {
@@ -640,6 +682,14 @@ export class AnalysisService {
         existing.strengths ?? [],
         existing.gaps ?? [],
       );
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.FIT_SCORE,
+        actorId: userId,
+        baselineVersion: { hash: baseline.hash } as BaselineVersion,
+        job,
+        outputHash: inputsHash,
+        extraFlags: this.mapComplianceStringsToFlags(existing.complianceFlags),
+      });
       return {
         ok: true,
         assessmentId: existing.id,
@@ -678,6 +728,25 @@ export class AnalysisService {
       },
       dimensionWeights,
     );
+
+    const compliance = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.FIT_SCORE,
+      actorId: userId,
+      baselineVersion: { hash: baseline.hash } as BaselineVersion,
+      job,
+      outputHash: inputsHash,
+      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
+    });
+
+    if (compliance.blocked) {
+      throw new BadRequestException({
+        error: {
+          code: 'compliance_blocked',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: compliance.complianceFlags },
+        },
+      });
+    }
 
     const assessment = this.fitAssessmentRepository.create({
       userId,

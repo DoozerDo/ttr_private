@@ -201,13 +201,15 @@ export class ResumeService {
     }
 
     const outputHash = createHash('sha256')
-      .update(JSON.stringify(sections))
+      .update(JSON.stringify(this.complianceService.normalizeSectionsForOutput(sections)))
       .digest('hex');
 
     const writingFlags = this.complianceService.enforceResumeWritingRules({
       baselineSections: baseline.sections ?? [],
       generatedSections: sections,
     });
+
+    const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
 
     const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({
@@ -237,7 +239,7 @@ export class ResumeService {
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
       jobId: jobId ?? null,
-      sections,
+      sections: normalizedSections,
       compliance_flags: complianceFlags,
       audit_id: audit.id,
     };

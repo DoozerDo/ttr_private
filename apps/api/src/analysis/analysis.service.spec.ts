@@ -7,6 +7,8 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { ComplianceAction } from '../compliance/compliance.types';
+import { ComplianceService } from '../compliance/compliance.service';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { AnalysisService } from './analysis.service';
@@ -15,6 +17,7 @@ import { FitScoringService } from './fit-scoring.service';
 
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
+  let complianceService: ComplianceService;
 
   const baselineVersion: Partial<BaselineVersion> = {
     id: 'bv-1',
@@ -67,6 +70,16 @@ describe('AnalysisService - fit scores contract', () => {
       providers: [
         AnalysisService,
         FitScoringService,
+        {
+          provide: ComplianceService,
+          useValue: {
+            validateAndAudit: jest.fn().mockResolvedValue({
+              complianceFlags: [],
+              blocked: false,
+              audit: { id: 'audit-1' },
+            }),
+          },
+        },
         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
         {
           provide: getRepositoryToken(BaselineSection),
@@ -102,6 +115,7 @@ describe('AnalysisService - fit scores contract', () => {
     }).compile();
 
     service = module.get(AnalysisService);
+    complianceService = module.get(ComplianceService);
   });
 
   it('rejects ambiguous JD inputs', async () => {
@@ -144,5 +158,20 @@ describe('AnalysisService - fit scores contract', () => {
       }),
     );
     expect(result.strengths).toBeDefined();
+  });
+
+  it('creates a compliance audit for fit score requests', async () => {
+    await service.scoreCompatibility('user-1', {
+      baseline_version_id: 'bv-1',
+      job: { raw_jd_text: 'Drive impact with measurable leadership results.' },
+    });
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: ComplianceAction.FIT_SCORE,
+        actorId: 'user-1',
+        outputHash: expect.any(String),
+      }),
+    );
   });
 });

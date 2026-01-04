@@ -135,6 +135,10 @@ export class CoverLettersService {
       tone: input.tone,
     });
 
+    const normalizedContent = this.complianceService.normalizeText(
+      generation.content,
+    );
+
     const complianceBaselineSections = this.buildComplianceBaselineSections(
       allowedBlocks,
       jobContext,
@@ -154,7 +158,7 @@ export class CoverLettersService {
         baselineVersion,
         job,
         outputHash: createHash('sha256')
-          .update(generation.content)
+          .update(normalizedContent)
           .digest('hex'),
         extraFlags: writingFlags,
         scopeInflationDetected: false,
@@ -177,7 +181,7 @@ export class CoverLettersService {
       generatorType: 'template',
       generatorVersion: 'v1',
       closingTemplateKey,
-      content: generation.content,
+      content: normalizedContent,
       generationInputsHash,
     });
 

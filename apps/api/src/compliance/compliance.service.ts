@@ -121,8 +121,8 @@ export class ComplianceService {
       });
     }
 
-    for (const num of generatedNumbers) {
-      if (!baselineNumbers.has(num)) {
+    for (const num of generatedNumbers.ordered) {
+      if (!baselineNumbers.normalizedSet.has(num)) {
         flags.push({
           code: ComplianceFlagCode.INVENTED_METRIC,
           severity: ComplianceFlagSeverity.BLOCK,
@@ -132,8 +132,9 @@ export class ComplianceService {
       }
     }
 
-    for (const entity of generatedEntities) {
-      if (!baselineEntities.has(entity)) {
+    for (const entity of generatedEntities.ordered) {
+      const normalizedEntity = entity.toLowerCase();
+      if (!baselineEntities.normalizedSet.has(normalizedEntity)) {
         const isRole = /manager|engineer|lead|director|chief|officer|vp|president|analyst|specialist|consultant|architect/i.test(
           entity,
         );
@@ -151,6 +152,23 @@ export class ComplianceService {
     return flags;
   }
 
+  normalizeSectionsForOutput<T extends { content: string; title?: string | null }>(
+    sections: T[],
+  ): T[] {
+    return sections.map((section) => ({
+      ...section,
+      title:
+        section.title === undefined
+          ? section.title
+          : this.normalizePunctuation(section.title ?? ''),
+      content: this.normalizePunctuation(section.content ?? ''),
+    }));
+  }
+
+  normalizeText(content: string) {
+    return this.normalizePunctuation(content);
+  }
+
   private mergeText(sections: Array<{ content: string; title?: string | null }>) {
     return sections
       .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
@@ -160,27 +178,60 @@ export class ComplianceService {
   }
 
   private extractNumbers(text: string) {
-    const matches = text.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
-    return new Set(matches.map((match) => match.trim()));
+    const matches = text.match(/-?\d[\d,]*(?:\.\d+)?%?/g) ?? [];
+    const normalizedSet = new Set<string>();
+    const ordered: string[] = [];
+
+    for (const match of matches) {
+      const normalized = this.normalizeNumberToken(match);
+      if (normalizedSet.has(normalized)) continue;
+      normalizedSet.add(normalized);
+      ordered.push(normalized);
+    }
+
+    return { normalizedSet, ordered };
   }
 
   private extractEntities(text: string) {
-    const candidates = text.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
-    return new Set(candidates.map((candidate) => candidate.trim()));
+    const normalizedText = this.normalizePunctuation(text);
+    const candidates =
+      normalizedText.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
+
+    const normalizedSet = new Set<string>();
+    const ordered: string[] = [];
+
+    for (const candidate of candidates) {
+      const trimmed = candidate.trim();
+      const key = trimmed.toLowerCase();
+      if (normalizedSet.has(key)) continue;
+      normalizedSet.add(key);
+      ordered.push(trimmed);
+    }
+
+    return { normalizedSet, ordered };
   }
 
   private normalizePunctuation(text: string) {
     return text
       .replace(/[\u2010-\u2015\u2212]/g, '-')
       .replace(/\u2026/g, '...')
-      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '•')
+      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '-')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   private findStylizedPunctuation(text: string) {
     const matches =
-      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219]/g) ?? [];
+      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219\u2018\u2019\u201C\u201D]/g) ?? [];
     return Array.from(new Set(matches));
+  }
+
+  private normalizeNumberToken(value: string) {
+    const cleaned = value.replace(/,/g, '').trim();
+    const hasPercent = cleaned.endsWith('%');
+    const numericPortion = hasPercent ? cleaned.slice(0, -1) : cleaned;
+    return hasPercent ? `${numericPortion}%` : numericPortion;
   }
 }
