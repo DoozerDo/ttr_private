@@ -1,20 +1,26 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { Interview } from "./interview.entity";
-import { CreateInterviewRecordDto } from "./dto/create-interview.dto";
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { GapDetectionService } from './gap-detection.service';
+import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+import { CreateInterviewRecordDto } from './dto/create-interview.dto';
+import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
+import { Interview } from './interview.entity';
+import { InterviewGap, InterviewQuestion } from './interview-types';
 
-function asStringArray(value: unknown): string[] {
+function normalizeStringArray(value?: unknown[]): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function normalizeGapList(value?: unknown[]): InterviewGap[] {
   return Array.isArray(value)
-    ? value.filter((v): v is string => typeof v === "string")
+    ? value.filter((entry): entry is InterviewGap => typeof entry === 'object' && entry !== null)
     : [];
 }
 
-function asObjectArray(value: unknown): Record<string, unknown>[] {
+function normalizeQuestionList(value?: unknown[]): InterviewQuestion[] {
   return Array.isArray(value)
-    ? value.filter(
-        (v): v is Record<string, unknown> => typeof v === "object" && v !== null,
-      )
+    ? value.filter((entry): entry is InterviewQuestion => typeof entry === 'object' && entry !== null)
     : [];
 }
 
@@ -23,106 +29,135 @@ export class InterviewRecordsService {
   constructor(
     @InjectRepository(Interview)
     private readonly interviewsRepo: Repository<Interview>,
+    private readonly gapDetectionService: GapDetectionService,
+    private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
   ) {}
 
-  /**
-   * Controller expects this exact method name.
-   */
-  async createInterviewRecord(
-    userId: string,
-    dto: CreateInterviewRecordDto,
-  ): Promise<Interview> {
-    // Create an empty entity instance first to avoid TS errors from unknown columns
-    const interview = this.interviewsRepo.create() as unknown as Interview;
+  private requireJobId(jobId?: string): string {
+    const normalized = jobId?.trim();
 
-    // userId is a known column per your build errors
-    (interview as any).userId = userId;
-
-    // Copy dto fields without TypeScript enforcing exact Interview shape
-    Object.assign(interview as any, dto as any);
-
-    // Normalize known array-ish fields if present in dto
-    if ("gapList" in (dto as any)) (interview as any).gapList = asObjectArray((dto as any).gapList);
-    if ("questions" in (dto as any)) (interview as any).questions = asObjectArray((dto as any).questions);
-    if ("responses" in (dto as any)) (interview as any).responses = asStringArray((dto as any).responses);
-    if ("recommendedAdditions" in (dto as any)) {
-      (interview as any).recommendedAdditions = asStringArray((dto as any).recommendedAdditions);
+    if (!normalized) {
+      throw new BadRequestException('jobId is required');
     }
+
+    return normalized;
+  }
+
+  private requireBaselineVersionId(baselineVersionId?: string): string {
+    const normalized = baselineVersionId?.trim();
+
+    if (!normalized) {
+      throw new BadRequestException('baselineVersionId is required');
+    }
+
+    return normalized;
+  }
+
+  async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
+    const jobId = this.requireJobId(dto.jobId);
+    const baselineVersionId = this.requireBaselineVersionId(dto.baselineVersionId);
+
+    const detection = await this.gapDetectionService.detectGaps({
+      userId,
+      jobId,
+      baselineVersionId,
+    });
+
+    const gapList = dto.gapList?.length ? normalizeGapList(dto.gapList) : detection.gaps;
+    const questions = dto.questions?.length
+      ? normalizeQuestionList(dto.questions)
+      : this.interviewQuestionGenerator.generateQuestions(gapList);
+
+    const interview = this.interviewsRepo.create({
+      userId,
+      baselineId: detection.baselineId ?? dto.baselineId ?? null,
+      baselineVersionId: detection.baselineVersionId ?? baselineVersionId,
+      jobId: detection.jobId ?? jobId,
+      gapList,
+      questions,
+      responses: normalizeStringArray(dto.responses),
+      validationResults: dto.validationResults ?? {},
+      recommendedAdditions: normalizeStringArray(dto.recommendedAdditions),
+    });
 
     return this.interviewsRepo.save(interview);
   }
 
-  /**
-   * Controller expects this exact method name.
-   */
   async listInterviewRecordsForUser(userId: string): Promise<Interview[]> {
     return this.interviewsRepo.find({
-      where: { userId } as any,
-      order: { createdAt: "DESC" } as any,
+      where: { userId },
+      order: { createdAt: 'DESC' },
     });
   }
 
-  /**
-   * Controller expects this exact method name and parameter order.
-   * Your controller calls: getInterviewRecordForUser(id, userId)
-   */
-  async getInterviewRecordForUser(
-    id: string,
-    userId: string,
-  ): Promise<Interview | null> {
-    return this.interviewsRepo.findOne({
-      where: { id, userId } as any,
-    });
-  }
-
-  /**
-   * Controller expects this exact method name.
-   * Uses a permissive patch approach since entity fields vary across branches.
-   */
-  async updateInterviewRecord(
-    id: string,
-    userId: string,
-    dto: Partial<CreateInterviewRecordDto>,
-  ): Promise<Interview> {
+  async getInterviewRecordForUser(id: string, userId: string): Promise<Interview> {
     const interview = await this.interviewsRepo.findOne({
-      where: { id, userId } as any,
+      where: { id, userId },
     });
 
     if (!interview) {
-      throw new NotFoundException("Interview record not found");
+      throw new NotFoundException('Interview record not found');
     }
 
-    Object.assign(interview as any, dto as any);
+    return interview;
+  }
 
-    if ("gapList" in (dto as any)) (interview as any).gapList = asObjectArray((dto as any).gapList);
-    if ("questions" in (dto as any)) (interview as any).questions = asObjectArray((dto as any).questions);
-    if ("responses" in (dto as any)) (interview as any).responses = asStringArray((dto as any).responses);
-    if ("recommendedAdditions" in (dto as any)) {
-      (interview as any).recommendedAdditions = asStringArray((dto as any).recommendedAdditions);
+  async updateInterviewRecord(
+    id: string,
+    userId: string,
+    dto: UpdateInterviewRecordDto,
+  ): Promise<Interview> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    if (dto.jobId !== undefined) {
+      const jobId = dto.jobId.trim();
+
+      if (!jobId) {
+        throw new BadRequestException('jobId cannot be empty');
+      }
+
+      interview.jobId = jobId;
+    }
+
+    if (dto.baselineId !== undefined) {
+      interview.baselineId = dto.baselineId?.trim() || null;
+    }
+
+    if (dto.baselineVersionId !== undefined) {
+      interview.baselineVersionId = dto.baselineVersionId?.trim() || null;
+    }
+
+    if (dto.gapList !== undefined) {
+      interview.gapList = normalizeGapList(dto.gapList);
+    }
+
+    if (dto.questions !== undefined) {
+      interview.questions = normalizeQuestionList(dto.questions);
+    }
+
+    if (dto.responses !== undefined) {
+      interview.responses = normalizeStringArray(dto.responses);
+    }
+
+    if (dto.validationResults !== undefined) {
+      interview.validationResults = dto.validationResults ?? {};
+    }
+
+    if (dto.recommendedAdditions !== undefined) {
+      interview.recommendedAdditions = normalizeStringArray(dto.recommendedAdditions);
     }
 
     return this.interviewsRepo.save(interview);
   }
 
-  /**
-   * Controller expects this exact method name.
-   */
-  async deleteInterviewRecord(
-    id: string,
-    userId: string,
-  ): Promise<{ deleted: true }> {
-    const result = await this.interviewsRepo.delete({ id, userId } as any);
+  async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
 
-    if (!result.affected) {
-      throw new NotFoundException("Interview record not found");
-    }
+    await this.interviewsRepo.remove(interview);
 
-    return { deleted: true };
+    return { deleted: true, id };
   }
 
-  /**
-   * Backward-compatible aliases (in case other code calls the newer names).
-   */
   async createInterview(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
     return this.createInterviewRecord(userId, dto);
   }
@@ -131,7 +166,7 @@ export class InterviewRecordsService {
     return this.listInterviewRecordsForUser(userId);
   }
 
-  async getInterviewById(userId: string, interviewId: string): Promise<Interview | null> {
+  async getInterviewById(userId: string, interviewId: string): Promise<Interview> {
     return this.getInterviewRecordForUser(interviewId, userId);
   }
 }

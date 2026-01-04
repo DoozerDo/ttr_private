@@ -1,820 +1,227 @@
 diff --git a/apps/api/src/interviews/dto/create-interview.dto.ts b/apps/api/src/interviews/dto/create-interview.dto.ts
-index 795e50d01f004d02b491a8a7639910dbba84ac4c..58dc88352f39c1f8dbb312fb2b85c7aedc9a37c6 100644
+index 58dc88352f39c1f8dbb312fb2b85c7aedc9a37c6..f80c1146239d658713e2397334abad1d56a410f0 100644
 --- a/apps/api/src/interviews/dto/create-interview.dto.ts
 +++ b/apps/api/src/interviews/dto/create-interview.dto.ts
-@@ -1,8 +1,10 @@
+@@ -1,10 +1,12 @@
++import { InterviewGap, InterviewQuestion } from '../interview-types';
++
  export class CreateInterviewRecordDto {
    jobId!: string;
--  gapList?: string[];
--  questions?: string[];
--  responses?: string[];
-+  baselineId?: string;
-+  baselineVersionId!: string;
-+  gapList?: unknown[];
-+  questions?: unknown[];
-+  responses?: unknown[];
+   baselineId?: string;
+   baselineVersionId!: string;
+-  gapList?: unknown[];
+-  questions?: unknown[];
+-  responses?: unknown[];
++  gapList?: InterviewGap[];
++  questions?: InterviewQuestion[];
++  responses?: string[];
    validationResults?: Record<string, unknown>;
--  recommendedAdditions?: string[];
-+  recommendedAdditions?: unknown[];
+-  recommendedAdditions?: unknown[];
++  recommendedAdditions?: string[];
  }
 diff --git a/apps/api/src/interviews/dto/update-interview.dto.ts b/apps/api/src/interviews/dto/update-interview.dto.ts
-index 6783b8c4cae081ae5bddb8fdf1b7e33f0591925f..75b6b03a97089791c27d7aac06140b42518a5db9 100644
+index 75b6b03a97089791c27d7aac06140b42518a5db9..8d14031768e1de24fe6cfe91d7bc38ba36d4f6b6 100644
 --- a/apps/api/src/interviews/dto/update-interview.dto.ts
 +++ b/apps/api/src/interviews/dto/update-interview.dto.ts
-@@ -1,8 +1,10 @@
+@@ -1,10 +1,12 @@
++import { InterviewGap, InterviewQuestion } from '../interview-types';
++
  export class UpdateInterviewRecordDto {
    jobId?: string;
--  gapList?: string[];
--  questions?: string[];
--  responses?: string[];
-+  baselineId?: string;
-+  baselineVersionId?: string;
-+  gapList?: unknown[];
-+  questions?: unknown[];
-+  responses?: unknown[];
+   baselineId?: string;
+   baselineVersionId?: string;
+-  gapList?: unknown[];
+-  questions?: unknown[];
+-  responses?: unknown[];
++  gapList?: InterviewGap[];
++  questions?: InterviewQuestion[];
++  responses?: string[];
    validationResults?: Record<string, unknown>;
--  recommendedAdditions?: string[];
-+  recommendedAdditions?: unknown[];
+-  recommendedAdditions?: unknown[];
++  recommendedAdditions?: string[];
  }
-diff --git a/apps/api/src/interviews/gap-detection.service.spec.ts b/apps/api/src/interviews/gap-detection.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..87a976d1a9e7e260a6a5865564d36236c0b2109a
---- /dev/null
-+++ b/apps/api/src/interviews/gap-detection.service.spec.ts
-@@ -0,0 +1,150 @@
-+import { BadRequestException, NotFoundException } from '@nestjs/common';
-+import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { GapDetectionService } from './gap-detection.service';
-+import { Job } from '../jobs/job.entity';
-+import { Baseline } from '../baseline/baseline.entity';
-+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
-+
-+describe('GapDetectionService', () => {
-+  const createMockRepository = () => ({
-+    findOne: jest.fn(),
-+    find: jest.fn(),
-+  });
-+
-+  const createService = (
-+    jobRepository = createMockRepository(),
-+    baselineSectionRepository = createMockRepository(),
-+    baselineVersionRepository = createMockRepository(),
-+    baselineBlockPolicyRepository = createMockRepository(),
-+  ) =>
-+    new GapDetectionService(
-+      jobRepository as never,
-+      baselineSectionRepository as never,
-+      baselineVersionRepository as never,
-+      baselineBlockPolicyRepository as never,
-+    );
-+
-+  afterEach(() => {
-+    jest.restoreAllMocks();
-+  });
-+
-+  it('detects gaps only when baseline coverage is weak', async () => {
-+    const jobRepository = createMockRepository();
-+    const baselineVersionRepository = createMockRepository();
-+    const baselineSectionRepository = createMockRepository();
-+    const baselineBlockPolicyRepository = createMockRepository();
-+
-+    const job: Job = {
-+      id: 'job-1',
-+      userId: 'user-1',
-+      title: null,
-+      company: null,
-+      rawDescription: 'sample',
-+      sourceUrl: null,
-+      normalizedRequirements: ['Hands-on Kubernetes administration', 'Lead cross-functional teams'],
-+      normalizedResponsibilities: [],
-+      jdIngestionMethod: 'PASTE' as never,
-+      jdParsedAt: null,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baseline: Baseline = {
-+      id: 'baseline-1',
-+      userId: 'user-1',
-+      version: 1,
-+      originalFilename: 'file.pdf',
-+      mimeType: 'application/pdf',
-+      storagePath: '/tmp/file.pdf',
-+      hash: null,
-+      sections: [],
-+      versions: [],
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baselineVersion: BaselineVersion = {
-+      id: 'baseline-version-1',
-+      baselineId: baseline.id,
-+      baseline,
-+      blockPolicies: [],
-+      fileHash: null,
-+      storagePath: '/tmp/file.pdf',
-+      versionNumber: 1,
-+      createdAt: new Date(),
-+      hash: null,
-+    };
-+
-+    jobRepository.findOne.mockResolvedValue(job);
-+    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
-+    baselineSectionRepository.find.mockResolvedValue([
-+      {
-+        id: 'section-1',
-+        baselineId: baseline.id,
-+        baseline,
-+        sectionType: 'EXPERIENCE' as never,
-+        title: 'Experience',
-+        content: 'Implemented Kubernetes clusters and automation',
-+        includePolicy: BaselineIncludePolicy.ALWAYS,
-+        order: 1,
-+        createdAt: new Date(),
-+        updatedAt: new Date(),
-+        type: 'EXPERIENCE' as never,
-+        orderIndex: 1,
-+      } as unknown as BaselineSection,
-+    ]);
-+    baselineBlockPolicyRepository.find.mockResolvedValue([]);
-+
-+    const service = createService(jobRepository, baselineSectionRepository, baselineVersionRepository, baselineBlockPolicyRepository);
-+
-+    const result = await service.detectGaps({
-+      userId: 'user-1',
-+      jobId: job.id,
-+      baselineVersionId: baselineVersion.id,
-+    });
-+
-+    expect(result.gaps).toHaveLength(1);
-+    expect(result.gaps[0].domain).toBe('leadership');
-+    expect(result.gaps[0].baselineExcerpt).toBeNull();
-+    expect(result.gaps[0].jdExcerpt).toBe('Lead cross-functional teams');
-+  });
-+
-+  it('throws when required identifiers are missing', async () => {
-+    const service = createService();
-+
-+    await expect(
-+      service.detectGaps({ userId: 'user-1', jobId: '', baselineVersionId: '' }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
-+
-+  it('validates job and baseline ownership', async () => {
-+    const jobRepository = createMockRepository();
-+    const baselineVersionRepository = createMockRepository();
-+    const service = createService(jobRepository, createMockRepository(), baselineVersionRepository);
-+
-+    jobRepository.findOne.mockResolvedValue(null);
-+
-+    await expect(
-+      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
-+    ).rejects.toBeInstanceOf(NotFoundException);
-+
-+    jobRepository.findOne.mockResolvedValue({
-+      id: 'job-1',
-+      userId: 'user-1',
-+      rawDescription: '',
-+      normalizedRequirements: [],
-+      normalizedResponsibilities: [],
-+    } as Job);
-+
-+    baselineVersionRepository.findOne.mockResolvedValue({
-+      id: 'bv-1',
-+      baselineId: 'b-1',
-+      baseline: { userId: 'other-user' } as Baseline,
-+    } as BaselineVersion);
-+
-+    await expect(
-+      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
-+    ).rejects.toBeInstanceOf(NotFoundException);
-+  });
-+});
-diff --git a/apps/api/src/interviews/gap-detection.service.ts b/apps/api/src/interviews/gap-detection.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..b1c68a16d26cf576eef3d25e54154dfc71b03f8e
---- /dev/null
-+++ b/apps/api/src/interviews/gap-detection.service.ts
-@@ -0,0 +1,236 @@
-+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { randomUUID } from 'node:crypto';
-+import { Repository } from 'typeorm';
-+import {
-+  BaselineIncludePolicy,
-+  BaselineSection,
-+} from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
-+import { Job } from '../jobs/job.entity';
-+import {
-+  GapConfidence,
-+  GapDetectionResult,
-+  GapDomain,
-+  InterviewGap,
-+} from './interview-types';
-+
-+type DetectionInputs = {
-+  userId: string;
-+  jobId: string;
-+  baselineVersionId: string;
-+};
-+
-+type SectionTokens = {
-+  section: BaselineSection;
-+  tokens: Set<string>;
-+};
-+
-+@Injectable()
-+export class GapDetectionService {
-+  constructor(
-+    @InjectRepository(Job)
-+    private readonly jobRepository: Repository<Job>,
-+    @InjectRepository(BaselineSection)
-+    private readonly baselineSectionRepository: Repository<BaselineSection>,
-+    @InjectRepository(BaselineVersion)
-+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
-+    @InjectRepository(BaselineBlockPolicy)
-+    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-+  ) {}
-+
-+  async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
-+    const jobId = inputs.jobId?.trim();
-+    const baselineVersionId = inputs.baselineVersionId?.trim();
-+
-+    if (!jobId || !baselineVersionId) {
-+      throw new BadRequestException('jobId and baselineVersionId are required');
-+    }
-+
-+    const job = await this.jobRepository.findOne({
-+      where: { id: jobId, userId: inputs.userId },
-+    });
-+
-+    if (!job) {
-+      throw new NotFoundException('Job not found');
-+    }
-+
-+    const baselineVersion = await this.baselineVersionRepository.findOne({
-+      where: { id: baselineVersionId },
-+      relations: ['baseline'],
-+    });
-+
-+    if (!baselineVersion || !baselineVersion.baseline || baselineVersion.baseline.userId !== inputs.userId) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    const [sections, blockPolicies] = await Promise.all([
-+      this.baselineSectionRepository.find({
-+        where: { baselineId: baselineVersion.baselineId },
-+        order: { order: 'ASC' },
-+      }),
-+      this.baselineBlockPolicyRepository.find({
-+        where: { baselineVersionId },
-+      }),
-+    ]);
-+
-+    const normalizedSections = this.applyPoliciesToSections(sections, blockPolicies).filter(
-+      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-+    );
-+
-+    const sectionTokens = this.buildSectionTokens(normalizedSections);
-+
-+    const jdItems = [
-+      ...(job.normalizedRequirements ?? []),
-+      ...(job.normalizedResponsibilities ?? []),
-+    ]
-+      .map((item) => item.trim())
-+      .filter(Boolean);
-+
-+    const gaps: InterviewGap[] = [];
-+
-+    for (const item of jdItems) {
-+      const jdTokens = this.tokenize(item);
-+      if (!jdTokens.size) {
-+        continue;
-+      }
-+
-+      const match = this.findBestSectionMatch(jdTokens, sectionTokens);
-+      const coverage = match?.overlap ?? 0;
-+      const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
-+
-+      if (coverageRatio >= 0.5) {
-+        continue;
-+      }
-+
-+      const confidence = this.resolveConfidence(coverageRatio);
-+
-+      gaps.push({
-+        gapId: randomUUID(),
-+        domain: this.inferDomain(item),
-+        jdExcerpt: item,
-+        baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
-+        confidence,
-+      });
-+    }
-+
-+    return {
-+      baselineId: baselineVersion.baselineId,
-+      baselineVersionId,
-+      jobId,
-+      gaps,
-+    };
-+  }
-+
-+  private applyPoliciesToSections(
-+    sections: BaselineSection[],
-+    policies: BaselineBlockPolicy[],
-+  ): BaselineSection[] {
-+    if (!policies.length) {
-+      return [...sections].sort((a, b) => a.order - b.order);
-+    }
-+
-+    const policyMap = new Map<string, BaselineBlockPolicy>(
-+      policies.map((policy) => [policy.baselineSectionId, policy]),
-+    );
-+
-+    return [...sections]
-+      .map((section) => {
-+        const policy = policyMap.get(section.id);
-+        return {
-+          ...section,
-+          includePolicy: policy?.includePolicy ?? section.includePolicy,
-+          order: policy?.order ?? section.order,
-+          sectionType: section.sectionType ?? section.type,
-+        } as BaselineSection;
-+      })
-+      .sort((a, b) => a.order - b.order);
-+  }
-+
-+  private tokenize(text: string): Set<string> {
-+    return new Set(
-+      text
-+        .toLowerCase()
-+        .split(/[^a-z0-9+]+/i)
-+        .map((token) => token.trim())
-+        .filter((token) => token.length >= 3),
-+    );
-+  }
-+
-+  private buildSectionTokens(sections: BaselineSection[]): SectionTokens[] {
-+    return sections.map((section) => ({
-+      section,
-+      tokens: this.tokenize(section.content ?? ''),
-+    }));
-+  }
-+
-+  private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
-+    let bestMatch:
-+      | {
-+          section: BaselineSection;
-+          overlap: number;
-+        }
-+      | null = null;
-+
-+    for (const candidate of sections) {
-+      const overlap = [...jdTokens].filter((token) => candidate.tokens.has(token)).length;
-+
-+      if (!bestMatch || overlap > bestMatch.overlap) {
-+        bestMatch = { section: candidate.section, overlap };
-+      }
-+    }
-+
-+    return bestMatch;
-+  }
-+
-+  private resolveConfidence(coverageRatio: number): GapConfidence {
-+    if (coverageRatio === 0) {
-+      return 'high';
-+    }
-+    if (coverageRatio < 0.25) {
-+      return 'medium';
-+    }
-+    return 'low';
-+  }
-+
-+  private buildBaselineExcerpt(content: string | null): string | null {
-+    if (!content) {
-+      return null;
-+    }
-+
-+    const trimmed = content.trim();
-+
-+    if (trimmed.length <= 300) {
-+      return trimmed;
-+    }
-+
-+    return `${trimmed.slice(0, 297)}...`;
-+  }
-+
-+  private inferDomain(text: string): GapDomain {
-+    const value = text.toLowerCase();
-+
-+    const leadershipKeywords = ['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'];
-+    if (leadershipKeywords.some((keyword) => value.includes(keyword))) {
-+      return 'leadership';
-+    }
-+
-+    const toolingKeywords = ['sql', 'python', 'javascript', 'aws', 'gcp', 'azure', 'tool', 'framework', 'platform'];
-+    if (toolingKeywords.some((keyword) => value.includes(keyword))) {
-+      return 'tooling';
-+    }
-+
-+    const scopeKeywords = ['scale', 'scalable', 'enterprise', 'multiple teams', 'cross-functional', 'global'];
-+    if (scopeKeywords.some((keyword) => value.includes(keyword))) {
-+      return 'scope';
-+    }
-+
-+    const industryKeywords = ['healthcare', 'finance', 'fintech', 'ecommerce', 'retail', 'government'];
-+    if (industryKeywords.some((keyword) => value.includes(keyword))) {
-+      return 'industry';
-+    }
-+
-+    return 'experience';
-+  }
-+}
-diff --git a/apps/api/src/interviews/interview-question-generator.service.spec.ts b/apps/api/src/interviews/interview-question-generator.service.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..464842eaa50a432275e0f97a4c1e9c2b60d195ba
---- /dev/null
-+++ b/apps/api/src/interviews/interview-question-generator.service.spec.ts
-@@ -0,0 +1,30 @@
-+import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
-+import { InterviewGap } from './interview-types';
-+
-+describe('InterviewQuestionGeneratorService', () => {
-+  it('creates neutral, JD-referenced questions for each gap', () => {
-+    const service = new InterviewQuestionGeneratorService();
-+    const gap: InterviewGap = {
-+      gapId: 'gap-1',
-+      domain: 'experience',
-+      jdExcerpt: 'Cloud security controls',
-+      baselineExcerpt: null,
-+      confidence: 'high',
-+    };
-+
-+    const questions = service.generateQuestions([gap]);
-+
-+    expect(questions).toHaveLength(5);
-+    questions.forEach((question) => {
-+      expect(question.jdReference).toBe(gap.jdExcerpt);
-+      expect(question.prompt).toContain(gap.jdExcerpt);
-+      expect(question.prompt).not.toMatch(/%|increase by|doubled/i);
-+      expect(question.prompt.toLowerCase()).toContain('if');
-+    });
-+
-+    const categories = questions.map((q) => q.category);
-+    expect(categories).toEqual(
-+      expect.arrayContaining(['Direct Experience', 'Context', 'Scope', 'Tooling', 'Impact']),
-+    );
-+  });
-+});
-diff --git a/apps/api/src/interviews/interview-question-generator.service.ts b/apps/api/src/interviews/interview-question-generator.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..279088516aae5adb4d79a32b66d7b08308a3e1ac
---- /dev/null
-+++ b/apps/api/src/interviews/interview-question-generator.service.ts
-@@ -0,0 +1,49 @@
-+import { Injectable } from '@nestjs/common';
-+import { InterviewGap, InterviewQuestion } from './interview-types';
-+
-+const QUESTION_TEMPLATES: Record<
-+  InterviewQuestion['category'],
-+  (gap: InterviewGap) => InterviewQuestion
-+> = {
-+  'Direct Experience': (gap) => ({
-+    gapId: gap.gapId,
-+    category: 'Direct Experience',
-+    prompt: `The JD highlights "${gap.jdExcerpt}". Can you share any direct experience you have related to this?`,
-+    jdReference: gap.jdExcerpt,
-+  }),
-+  Context: (gap) => ({
-+    gapId: gap.gapId,
-+    category: 'Context',
-+    prompt: `What context surrounded any work you have done related to "${gap.jdExcerpt}", if applicable?`,
-+    jdReference: gap.jdExcerpt,
-+  }),
-+  Scope: (gap) => ({
-+    gapId: gap.gapId,
-+    category: 'Scope',
-+    prompt: `If you've engaged with "${gap.jdExcerpt}", what was the scope of your involvement?`,
-+    jdReference: gap.jdExcerpt,
-+  }),
-+  Tooling: (gap) => ({
-+    gapId: gap.gapId,
-+    category: 'Tooling',
-+    prompt: `What tools or platforms have you used, if any, when addressing "${gap.jdExcerpt}"?`,
-+    jdReference: gap.jdExcerpt,
-+  }),
-+  Impact: (gap) => ({
-+    gapId: gap.gapId,
-+    category: 'Impact',
-+    prompt: `What outcomes resulted from efforts related to "${gap.jdExcerpt}", or what impact would you aim for in similar work?`,
-+    jdReference: gap.jdExcerpt,
-+  }),
-+};
-+
-+@Injectable()
-+export class InterviewQuestionGeneratorService {
-+  generateQuestions(gaps: InterviewGap[]): InterviewQuestion[] {
-+    return gaps.flatMap((gap) => this.buildQuestionsForGap(gap));
-+  }
-+
-+  private buildQuestionsForGap(gap: InterviewGap): InterviewQuestion[] {
-+    return Object.values(QUESTION_TEMPLATES).map((template) => template(gap));
-+  }
-+}
-diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
-index 60570bf032d9201ec94b7a79ff3cfb8f89ca6d12..1c65f6b206eaae1603ba9882739efd22bf39a9c5 100644
---- a/apps/api/src/interviews/interview-records.service.spec.ts
-+++ b/apps/api/src/interviews/interview-records.service.spec.ts
-@@ -1,133 +1,175 @@
- import { BadRequestException, NotFoundException } from '@nestjs/common';
- import { Interview } from './interview.entity';
- import { InterviewRecordsService } from './interview-records.service';
-+import { GapDetectionService } from './gap-detection.service';
-+import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
-+import { InterviewGap, InterviewQuestion } from './interview-types';
- 
- describe('InterviewRecordsService', () => {
-   const mockInterview: Interview = {
-     id: 'interview-1',
-     userId: 'user-1',
-+    baselineId: 'baseline-1',
-+    baselineVersionId: 'baseline-version-1',
-     jobId: 'job-1',
--    gapList: ['gap'],
--    questions: ['q1'],
-+    gapList: [],
-+    questions: [],
-     responses: ['r1'],
-     validationResults: { ok: true },
-     recommendedAdditions: ['add'],
-     createdAt: new Date('2024-01-01T00:00:00Z'),
-     updatedAt: new Date('2024-01-01T00:00:00Z'),
-   };
- 
-   const createMockRepository = () => ({
-     create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
-     save: jest.fn(async (data: Interview) => data),
-     find: jest.fn(),
-     findOne: jest.fn(),
-     remove: jest.fn(async (data: Interview) => data),
-   });
- 
--  const createService = (repository = createMockRepository()) =>
--    new InterviewRecordsService(repository as never);
-+  const createService = (
-+    repository = createMockRepository(),
-+    gapDetectionService: Partial<GapDetectionService> = {},
-+    interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
-+  ) =>
-+    new InterviewRecordsService(
-+      repository as never,
-+      gapDetectionService as GapDetectionService,
-+      interviewQuestionGenerator as InterviewQuestionGeneratorService,
-+    );
- 
-   afterEach(() => {
-     jest.restoreAllMocks();
-   });
- 
-   it('creates an interview record with required jobId and sanitization', async () => {
-     const repository = createMockRepository();
--    const service = createService(repository);
-+    const gapList: InterviewGap[] = [
-+      {
-+        gapId: 'gap-1',
-+        domain: 'experience',
-+        jdExcerpt: 'JD item',
-+        baselineExcerpt: null,
-+        confidence: 'high',
-+      },
-+    ];
-+    const questions: InterviewQuestion[] = [
-+      {
-+        gapId: 'gap-1',
-+        category: 'Direct Experience',
-+        prompt: 'Question',
-+        jdReference: 'JD item',
-+      },
-+    ];
-+    const service = createService(
-+      repository,
-+      {
-+        detectGaps: jest.fn().mockResolvedValue({
-+          baselineId: 'baseline-1',
-+          baselineVersionId: 'baseline-version-1',
-+          jobId: 'job-2',
-+          gaps: gapList,
-+        }),
-+      },
-+      { generateQuestions: jest.fn().mockReturnValue(questions) },
-+    );
- 
-     const result = await service.createInterviewRecord('user-1', {
-       jobId: ' job-2 ',
--      gapList: [' gap1 ', ''],
--      questions: [' q '],
-+      baselineVersionId: 'baseline-version-1',
-       responses: [' a '],
-       recommendedAdditions: [' add '],
-     });
- 
-     expect(repository.create).toHaveBeenCalledWith(
-       expect.objectContaining({
-         userId: 'user-1',
-+        baselineId: 'baseline-1',
-+        baselineVersionId: 'baseline-version-1',
-         jobId: 'job-2',
--        gapList: ['gap1'],
--        questions: ['q'],
--        responses: ['a'],
--        recommendedAdditions: ['add'],
-+        gapList,
-+        questions,
-+        responses: [' a '],
-+        recommendedAdditions: [' add '],
-       }),
-     );
-     expect(result.jobId).toBe('job-2');
-   });
- 
-   it('lists interview records for a user', async () => {
-     const repository = createMockRepository();
-     repository.find.mockResolvedValue([mockInterview]);
-     const service = createService(repository);
- 
-     const records = await service.listInterviewRecordsForUser('user-1');
- 
-     expect(repository.find).toHaveBeenCalledWith({
-       where: { userId: 'user-1' },
-       order: { createdAt: 'DESC' },
-     });
-     expect(records).toEqual([mockInterview]);
-   });
- 
-   it('retrieves an interview record for a user', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(mockInterview);
-     const service = createService(repository);
- 
-     const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
- 
-     expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
-     expect(record).toEqual(mockInterview);
-   });
- 
-   it('throws when interview record not found', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(null);
-     const service = createService(repository);
- 
-     await expect(
-       service.getInterviewRecordForUser('missing', 'user-1'),
-     ).rejects.toBeInstanceOf(NotFoundException);
-   });
- 
-   it('updates an interview record with validation', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue({ ...mockInterview });
-     const service = createService(repository);
- 
-     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-       jobId: ' job-3 ',
--      gapList: [' gap2 '],
-+      gapList: [{ gapId: 'gap-2' }],
-       validationResults: { ok: false },
-       recommendedAdditions: [' new '],
-     });
- 
-     expect(repository.save).toHaveBeenCalled();
-     expect(result.jobId).toBe('job-3');
--    expect(result.gapList).toEqual(['gap2']);
-+    expect(result.gapList).toEqual([{ gapId: 'gap-2' }]);
-     expect(result.validationResults).toEqual({ ok: false });
--    expect(result.recommendedAdditions).toEqual(['new']);
-+    expect(result.recommendedAdditions).toEqual([' new ']);
-   });
- 
-   it('throws when updating with empty jobId', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue({ ...mockInterview });
-     const service = createService(repository);
- 
-     await expect(
-       service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
-     ).rejects.toBeInstanceOf(BadRequestException);
-   });
- 
-   it('deletes an interview record', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(mockInterview);
-     const service = createService(repository);
- 
-     const result = await service.deleteInterviewRecord('interview-1', 'user-1');
- 
-     expect(repository.remove).toHaveBeenCalledWith(mockInterview);
-     expect(result).toEqual({ deleted: true, id: 'interview-1' });
-   });
- });
 diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
-index 2366f25be51516336212c4dc409a6d67eeb01540..29a9fe9170dba8981f2e34e6f029d67013dd5070 100644
+index 8474aa93da65a0027dbf80f7add5035a833e272e..6e9928e73dadfc427d89439ca4c79e7f89c40085 100644
 --- a/apps/api/src/interviews/interview-records.service.ts
 +++ b/apps/api/src/interviews/interview-records.service.ts
-@@ -1,98 +1,117 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import { CreateInterviewRecordDto } from './dto/create-interview.dto';
- import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
- import { Interview } from './interview.entity';
+@@ -1,137 +1,172 @@
+-import { Injectable, NotFoundException } from "@nestjs/common";
+-import { InjectRepository } from "@nestjs/typeorm";
+-import { Repository } from "typeorm";
+-import { Interview } from "./interview.entity";
+-import { CreateInterviewRecordDto } from "./dto/create-interview.dto";
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
 +import { GapDetectionService } from './gap-detection.service';
 +import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import { CreateInterviewRecordDto } from './dto/create-interview.dto';
++import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
++import { Interview } from './interview.entity';
 +import { InterviewGap, InterviewQuestion } from './interview-types';
++
++function normalizeStringArray(value?: unknown[]): string[] {
++  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
++}
+ 
+-function asStringArray(value: unknown): string[] {
++function normalizeGapList(value?: unknown[]): InterviewGap[] {
+   return Array.isArray(value)
+-    ? value.filter((v): v is string => typeof v === "string")
++    ? value.filter((entry): entry is InterviewGap => typeof entry === 'object' && entry !== null)
+     : [];
+ }
+ 
+-function asObjectArray(value: unknown): Record<string, unknown>[] {
++function normalizeQuestionList(value?: unknown[]): InterviewQuestion[] {
+   return Array.isArray(value)
+-    ? value.filter(
+-        (v): v is Record<string, unknown> => typeof v === "object" && v !== null,
+-      )
++    ? value.filter((entry): entry is InterviewQuestion => typeof entry === 'object' && entry !== null)
+     : [];
+ }
  
  @Injectable()
  export class InterviewRecordsService {
    constructor(
      @InjectRepository(Interview)
-     private readonly interviewRepository: Repository<Interview>,
+     private readonly interviewsRepo: Repository<Interview>,
 +    private readonly gapDetectionService: GapDetectionService,
 +    private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
    ) {}
  
--  private sanitizeStringArray(values?: string[]) {
--    return (values ?? []).map((value) => value.trim()).filter(Boolean);
--  }
--
-   async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto) {
--    if (!dto.jobId?.trim()) {
--      throw new BadRequestException('Job ID is required.');
-+    if (!dto.jobId?.trim() || !dto.baselineVersionId?.trim()) {
-+      throw new BadRequestException('Job ID and baselineVersionId are required.');
+-  /**
+-   * Controller expects this exact method name.
+-   */
+-  async createInterviewRecord(
+-    userId: string,
+-    dto: CreateInterviewRecordDto,
+-  ): Promise<Interview> {
+-    // Create an empty entity instance first to avoid TS errors from unknown columns
+-    const interview = this.interviewsRepo.create() as unknown as Interview;
++  private requireJobId(jobId?: string): string {
++    const normalized = jobId?.trim();
++
++    if (!normalized) {
++      throw new BadRequestException('jobId is required');
++    }
+ 
+-    // userId is a known column per your build errors
+-    (interview as any).userId = userId;
++    return normalized;
++  }
+ 
+-    // Copy dto fields without TypeScript enforcing exact Interview shape
+-    Object.assign(interview as any, dto as any);
++  private requireBaselineVersionId(baselineVersionId?: string): string {
++    const normalized = baselineVersionId?.trim();
+ 
+-    // Normalize known array-ish fields if present in dto
+-    if ("gapList" in (dto as any)) (interview as any).gapList = asObjectArray((dto as any).gapList);
+-    if ("questions" in (dto as any)) (interview as any).questions = asObjectArray((dto as any).questions);
+-    if ("responses" in (dto as any)) (interview as any).responses = asStringArray((dto as any).responses);
+-    if ("recommendedAdditions" in (dto as any)) {
+-      (interview as any).recommendedAdditions = asStringArray((dto as any).recommendedAdditions);
++    if (!normalized) {
++      throw new BadRequestException('baselineVersionId is required');
      }
  
-+    const gapResult = await this.gapDetectionService.detectGaps({
++    return normalized;
++  }
++
++  async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
++    const jobId = this.requireJobId(dto.jobId);
++    const baselineVersionId = this.requireBaselineVersionId(dto.baselineVersionId);
++
++    const detection = await this.gapDetectionService.detectGaps({
 +      userId,
-+      jobId: dto.jobId.trim(),
-+      baselineVersionId: dto.baselineVersionId.trim(),
++      jobId,
++      baselineVersionId,
 +    });
 +
-+    const gapList: InterviewGap[] = gapResult.gaps;
-+    const questions: InterviewQuestion[] =
-+      this.interviewQuestionGenerator.generateQuestions(gapList);
++    const gapList = dto.gapList?.length ? normalizeGapList(dto.gapList) : detection.gaps;
++    const questions = dto.questions?.length
++      ? normalizeQuestionList(dto.questions)
++      : this.interviewQuestionGenerator.generateQuestions(gapList);
 +
-     const interview = this.interviewRepository.create({
-       userId,
-+      baselineId: gapResult.baselineId,
-+      baselineVersionId: gapResult.baselineVersionId,
-       jobId: dto.jobId.trim(),
--      gapList: this.sanitizeStringArray(dto.gapList),
--      questions: this.sanitizeStringArray(dto.questions),
--      responses: this.sanitizeStringArray(dto.responses),
++    const interview = this.interviewsRepo.create({
++      userId,
++      baselineId: detection.baselineId ?? dto.baselineId ?? null,
++      baselineVersionId: detection.baselineVersionId ?? baselineVersionId,
++      jobId: detection.jobId ?? jobId,
 +      gapList,
 +      questions,
-+      responses: dto.responses ?? [],
-       validationResults: dto.validationResults ?? {},
--      recommendedAdditions: this.sanitizeStringArray(dto.recommendedAdditions),
-+      recommendedAdditions: dto.recommendedAdditions ?? [],
++      responses: normalizeStringArray(dto.responses),
++      validationResults: dto.validationResults ?? {},
++      recommendedAdditions: normalizeStringArray(dto.recommendedAdditions),
++    });
++
+     return this.interviewsRepo.save(interview);
+   }
+ 
+-  /**
+-   * Controller expects this exact method name.
+-   */
+   async listInterviewRecordsForUser(userId: string): Promise<Interview[]> {
+     return this.interviewsRepo.find({
+-      where: { userId } as any,
+-      order: { createdAt: "DESC" } as any,
++      where: { userId },
++      order: { createdAt: 'DESC' },
      });
- 
-     return this.interviewRepository.save(interview);
    }
  
-   async listInterviewRecordsForUser(userId: string) {
-     return this.interviewRepository.find({
-       where: { userId },
-       order: { createdAt: 'DESC' },
-     });
-   }
- 
-   async getInterviewRecordForUser(id: string, userId: string) {
-     const interview = await this.interviewRepository.findOne({ where: { id, userId } });
- 
-     if (!interview) {
-       throw new NotFoundException('Interview not found');
-     }
- 
-     return interview;
-   }
- 
--  async updateInterviewRecord(
+-  /**
+-   * Controller expects this exact method name and parameter order.
+-   * Your controller calls: getInterviewRecordForUser(id, userId)
+-   */
+-  async getInterviewRecordForUser(
 -    id: string,
 -    userId: string,
--    dto: UpdateInterviewRecordDto,
--  ) {
-+  async updateInterviewRecord(id: string, userId: string, dto: UpdateInterviewRecordDto) {
-     const interview = await this.getInterviewRecordForUser(id, userId);
+-  ): Promise<Interview | null> {
+-    return this.interviewsRepo.findOne({
+-      where: { id, userId } as any,
++  async getInterviewRecordForUser(id: string, userId: string): Promise<Interview> {
++    const interview = await this.interviewsRepo.findOne({
++      where: { id, userId },
+     });
++
++    if (!interview) {
++      throw new NotFoundException('Interview record not found');
++    }
++
++    return interview;
+   }
  
-     if (dto.jobId !== undefined) {
-       if (!dto.jobId?.trim()) {
-         throw new BadRequestException('Job ID is required.');
-       }
-       interview.jobId = dto.jobId.trim();
+-  /**
+-   * Controller expects this exact method name.
+-   * Uses a permissive patch approach since entity fields vary across branches.
+-   */
+   async updateInterviewRecord(
+     id: string,
+     userId: string,
+-    dto: Partial<CreateInterviewRecordDto>,
++    dto: UpdateInterviewRecordDto,
+   ): Promise<Interview> {
+-    const interview = await this.interviewsRepo.findOne({
+-      where: { id, userId } as any,
+-    });
++    const interview = await this.getInterviewRecordForUser(id, userId);
+ 
+-    if (!interview) {
+-      throw new NotFoundException("Interview record not found");
++    if (dto.jobId !== undefined) {
++      const jobId = dto.jobId.trim();
++
++      if (!jobId) {
++        throw new BadRequestException('jobId cannot be empty');
++      }
++
++      interview.jobId = jobId;
      }
  
+-    Object.assign(interview as any, dto as any);
 +    if (dto.baselineId !== undefined) {
 +      interview.baselineId = dto.baselineId?.trim() || null;
 +    }
@@ -823,209 +230,67 @@ index 2366f25be51516336212c4dc409a6d67eeb01540..29a9fe9170dba8981f2e34e6f029d670
 +      interview.baselineVersionId = dto.baselineVersionId?.trim() || null;
 +    }
 +
-     if (dto.gapList !== undefined) {
--      interview.gapList = this.sanitizeStringArray(dto.gapList);
-+      interview.gapList = Array.isArray(dto.gapList) ? dto.gapList : [];
++    if (dto.gapList !== undefined) {
++      interview.gapList = normalizeGapList(dto.gapList);
++    }
+ 
+-    if ("gapList" in (dto as any)) (interview as any).gapList = asObjectArray((dto as any).gapList);
+-    if ("questions" in (dto as any)) (interview as any).questions = asObjectArray((dto as any).questions);
+-    if ("responses" in (dto as any)) (interview as any).responses = asStringArray((dto as any).responses);
+-    if ("recommendedAdditions" in (dto as any)) {
+-      (interview as any).recommendedAdditions = asStringArray((dto as any).recommendedAdditions);
++    if (dto.questions !== undefined) {
++      interview.questions = normalizeQuestionList(dto.questions);
++    }
++
++    if (dto.responses !== undefined) {
++      interview.responses = normalizeStringArray(dto.responses);
++    }
++
++    if (dto.validationResults !== undefined) {
++      interview.validationResults = dto.validationResults ?? {};
++    }
++
++    if (dto.recommendedAdditions !== undefined) {
++      interview.recommendedAdditions = normalizeStringArray(dto.recommendedAdditions);
      }
  
-     if (dto.questions !== undefined) {
--      interview.questions = this.sanitizeStringArray(dto.questions);
-+      interview.questions = Array.isArray(dto.questions) ? dto.questions : [];
-     }
- 
-     if (dto.responses !== undefined) {
--      interview.responses = this.sanitizeStringArray(dto.responses);
-+      interview.responses = Array.isArray(dto.responses) ? dto.responses : [];
-     }
- 
-     if (dto.validationResults !== undefined) {
-       interview.validationResults = dto.validationResults ?? {};
-     }
- 
-     if (dto.recommendedAdditions !== undefined) {
--      interview.recommendedAdditions = this.sanitizeStringArray(dto.recommendedAdditions);
-+      interview.recommendedAdditions = Array.isArray(dto.recommendedAdditions)
-+        ? dto.recommendedAdditions
-+        : [];
-     }
- 
-     return this.interviewRepository.save(interview);
+     return this.interviewsRepo.save(interview);
    }
  
-   async deleteInterviewRecord(id: string, userId: string) {
-     const interview = await this.getInterviewRecordForUser(id, userId);
+-  /**
+-   * Controller expects this exact method name.
+-   */
+-  async deleteInterviewRecord(
+-    id: string,
+-    userId: string,
+-  ): Promise<{ deleted: true }> {
+-    const result = await this.interviewsRepo.delete({ id, userId } as any);
++  async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
++    const interview = await this.getInterviewRecordForUser(id, userId);
  
-     await this.interviewRepository.remove(interview);
+-    if (!result.affected) {
+-      throw new NotFoundException("Interview record not found");
+-    }
++    await this.interviewsRepo.remove(interview);
  
-     return { deleted: true, id };
+-    return { deleted: true };
++    return { deleted: true, id };
+   }
+ 
+-  /**
+-   * Backward-compatible aliases (in case other code calls the newer names).
+-   */
+   async createInterview(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
+     return this.createInterviewRecord(userId, dto);
+   }
+ 
+   async getInterviewsForUser(userId: string): Promise<Interview[]> {
+     return this.listInterviewRecordsForUser(userId);
+   }
+ 
+-  async getInterviewById(userId: string, interviewId: string): Promise<Interview | null> {
++  async getInterviewById(userId: string, interviewId: string): Promise<Interview> {
+     return this.getInterviewRecordForUser(interviewId, userId);
    }
  }
-diff --git a/apps/api/src/interviews/interview-types.ts b/apps/api/src/interviews/interview-types.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c6797dc16c70e5df4f977eb8951e9bbeba80a5d5
---- /dev/null
-+++ b/apps/api/src/interviews/interview-types.ts
-@@ -0,0 +1,37 @@
-+export type GapDomain =
-+  | 'experience'
-+  | 'tooling'
-+  | 'scope'
-+  | 'leadership'
-+  | 'industry';
-+
-+export type GapConfidence = 'low' | 'medium' | 'high';
-+
-+export type InterviewGap = {
-+  gapId: string;
-+  domain: GapDomain;
-+  jdExcerpt: string;
-+  baselineExcerpt: string | null;
-+  confidence: GapConfidence;
-+};
-+
-+export type InterviewQuestionCategory =
-+  | 'Direct Experience'
-+  | 'Context'
-+  | 'Scope'
-+  | 'Tooling'
-+  | 'Impact';
-+
-+export type InterviewQuestion = {
-+  gapId: string;
-+  category: InterviewQuestionCategory;
-+  prompt: string;
-+  jdReference: string;
-+};
-+
-+export type GapDetectionResult = {
-+  baselineId: string;
-+  baselineVersionId: string;
-+  jobId: string;
-+  gaps: InterviewGap[];
-+};
-diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
-index 0b43e9cf5a12539015002b5a2d0152bebd6915ec..76e6d1830d822f21f38eee553dc5849c355c38de 100644
---- a/apps/api/src/interviews/interview.entity.ts
-+++ b/apps/api/src/interviews/interview.entity.ts
-@@ -1,40 +1,47 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
-+import { InterviewGap, InterviewQuestion } from './interview-types';
- 
- @Entity({ name: 'interviews' })
- export class Interview {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Column()
-   userId!: string;
- 
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  baselineId!: string | null;
-+
-+  @Column({ type: 'varchar', length: 255, nullable: true })
-+  baselineVersionId!: string | null;
-+
-   @Column({ type: 'varchar', length: 255 })
-   jobId!: string;
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
--  gapList!: string[];
-+  gapList!: InterviewGap[];
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
--  questions!: string[];
-+  questions!: InterviewQuestion[];
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   responses!: string[];
- 
-   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-   validationResults!: Record<string, unknown>;
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   recommendedAdditions!: string[];
- 
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
-index 388b8eb6e92402fcb7b6489c64d11640f6619284..33de0a15664087d7ac33d3deede2582b09de4c20 100644
---- a/apps/api/src/interviews/interviews.module.ts
-+++ b/apps/api/src/interviews/interviews.module.ts
-@@ -1,17 +1,40 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
-+import { Baseline } from '../baseline/baseline.entity';
-+import { BaselineSection } from '../baseline/baseline-section.entity';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
-+import { Job } from '../jobs/job.entity';
- import { Interview } from './interview.entity';
- import { InterviewRecordsController } from './interview-records.controller';
- import { InterviewRecordsService } from './interview-records.service';
- import { InterviewResponse } from './interview-response.entity';
- import { InterviewSession } from './interview-session.entity';
-+import { GapDetectionService } from './gap-detection.service';
-+import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import { InterviewsController } from './interviews.controller';
- import { InterviewsService } from './interviews.service';
- 
- @Module({
--  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse, Interview])],
-+  imports: [
-+    TypeOrmModule.forFeature([
-+      InterviewSession,
-+      InterviewResponse,
-+      Interview,
-+      Job,
-+      Baseline,
-+      BaselineSection,
-+      BaselineVersion,
-+      BaselineBlockPolicy,
-+    ]),
-+  ],
-   controllers: [InterviewsController, InterviewRecordsController],
--  providers: [InterviewsService, InterviewRecordsService],
-+  providers: [
-+    InterviewsService,
-+    InterviewRecordsService,
-+    GapDetectionService,
-+    InterviewQuestionGeneratorService,
-+  ],
-   exports: [InterviewsService, InterviewRecordsService],
- })
- export class InterviewsModule {}
-diff --git a/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts b/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..cbeec44bec64b49cfe37bbd195bddfe8c3bd0c96
---- /dev/null
-+++ b/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts
-@@ -0,0 +1,19 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class InterviewBaselineReferences1830000000000 implements MigrationInterface {
-+  name = 'InterviewBaselineReferences1830000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "interviews" ADD COLUMN IF NOT EXISTS "baselineId" character varying(255)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "interviews" ADD COLUMN IF NOT EXISTS "baselineVersionId" character varying(255)`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineVersionId"`);
-+    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineId"`);
-+  }
-+}

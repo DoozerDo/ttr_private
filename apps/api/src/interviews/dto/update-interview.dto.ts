@@ -1,10 +1,12 @@
+import { InterviewGap, InterviewQuestion } from '../interview-types';
+
 export class UpdateInterviewRecordDto {
   jobId?: string;
   baselineId?: string;
   baselineVersionId?: string;
-  gapList?: unknown[];
-  questions?: unknown[];
-  responses?: unknown[];
+  gapList?: InterviewGap[];
+  questions?: InterviewQuestion[];
+  responses?: string[];
   validationResults?: Record<string, unknown>;
-  recommendedAdditions?: unknown[];
+  recommendedAdditions?: string[];
 }
