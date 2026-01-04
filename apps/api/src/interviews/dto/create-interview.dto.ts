@@ -1,8 +1,10 @@
 export class CreateInterviewRecordDto {
   jobId!: string;
-  gapList?: string[];
-  questions?: string[];
-  responses?: string[];
+  baselineId?: string;
+  baselineVersionId!: string;
+  gapList?: unknown[];
+  questions?: unknown[];
+  responses?: unknown[];
   validationResults?: Record<string, unknown>;
-  recommendedAdditions?: string[];
+  recommendedAdditions?: unknown[];
 }

@@ -1,1020 +1,1031 @@
-diff --git a/apps/api/src/analysis/analysis.module.ts b/apps/api/src/analysis/analysis.module.ts
-index 8ca6fafc54f853897ba965f873103835490ab965..b93b7d027e0216a04b0ef72ca1568cffd0322e2e 100644
---- a/apps/api/src/analysis/analysis.module.ts
-+++ b/apps/api/src/analysis/analysis.module.ts
-@@ -1,31 +1,33 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineSection } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceModule } from '../compliance/compliance.module';
- import { Job } from '../jobs/job.entity';
- import { User } from '../users/user.entity';
- import { FitAssessment } from './fit-assessment.entity';
- import { AnalysisController } from './analysis.controller';
- import { CalibrationController } from './calibration.controller';
- import { FitScoresController } from './fit-scores.controller';
- import { AnalysisService } from './analysis.service';
- import { FitScoringService } from './fit-scoring.service';
- 
- @Module({
-   imports: [
-     TypeOrmModule.forFeature([
-       Baseline,
-       BaselineSection,
-       BaselineVersion,
-       BaselineBlockPolicy,
-       Job,
-       FitAssessment,
-       User,
-     ]),
-+    ComplianceModule,
-   ],
-   controllers: [AnalysisController, CalibrationController, FitScoresController],
-   providers: [AnalysisService, FitScoringService],
- })
- export class AnalysisModule {}
-diff --git a/apps/api/src/analysis/analysis.service.spec.ts b/apps/api/src/analysis/analysis.service.spec.ts
-index 190b6173c30675ee8b190159bb09f105cd5bd676..bf126bcb40fd59d052f6a7c5c4042315ba7bd008 100644
---- a/apps/api/src/analysis/analysis.service.spec.ts
-+++ b/apps/api/src/analysis/analysis.service.spec.ts
-@@ -1,42 +1,45 @@
- import { Test } from '@nestjs/testing';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceAction } from '../compliance/compliance.types';
-+import { ComplianceService } from '../compliance/compliance.service';
- import { Job } from '../jobs/job.entity';
- import { User } from '../users/user.entity';
- import { AnalysisService } from './analysis.service';
- import { FitAssessment } from './fit-assessment.entity';
- import { FitScoringService } from './fit-scoring.service';
- 
- describe('AnalysisService - fit scores contract', () => {
-   let service: AnalysisService;
-+  let complianceService: ComplianceService;
- 
-   const baselineVersion: Partial<BaselineVersion> = {
-     id: 'bv-1',
-     baselineId: 'b-1',
-     versionNumber: 2,
-     baseline: { id: 'b-1', userId: 'user-1' } as Baseline,
-   };
- 
-   const baselineSections: BaselineSection[] = [
-     {
-       id: 's-1',
-       baselineId: 'b-1',
-       sectionType: 'EXPERIENCE' as any,
-       title: null,
-       content: 'Implemented distributed systems and led platform teams.',
-       includePolicy: BaselineIncludePolicy.OPTIONAL,
-       order: 0,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     } as BaselineSection,
-     {
-       id: 's-2',
-       baselineId: 'b-1',
-       sectionType: 'SKILLS' as any,
-       title: null,
-@@ -45,104 +48,130 @@ describe('AnalysisService - fit scores contract', () => {
-       order: 1,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     } as BaselineSection,
-   ];
- 
-   const baseline: Baseline = {
-     id: 'b-1',
-     userId: 'user-1',
-     version: 2,
-     originalFilename: 'resume.pdf',
-     mimeType: 'application/pdf',
-     storagePath: '/tmp/resume.pdf',
-     hash: 'hash',
-     sections: baselineSections,
-     versions: [],
-     createdAt: new Date(),
-     updatedAt: new Date(),
-   };
- 
-   beforeEach(async () => {
-     const module = await Test.createTestingModule({
-       providers: [
-         AnalysisService,
-         FitScoringService,
-+        {
-+          provide: ComplianceService,
-+          useValue: {
-+            validateAndAudit: jest.fn().mockResolvedValue({
-+              complianceFlags: [],
-+              blocked: false,
-+              audit: { id: 'audit-1' },
-+            }),
-+          },
-+        },
-         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
-         {
-           provide: getRepositoryToken(BaselineSection),
-           useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
-         },
-         {
-           provide: getRepositoryToken(BaselineBlockPolicy),
-           useValue: { find: jest.fn().mockResolvedValue([]) },
-         },
-         {
-           provide: getRepositoryToken(BaselineVersion),
-           useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
-         },
-         { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
-         {
-           provide: getRepositoryToken(FitAssessment),
-           useValue: {
-             create: jest.fn((payload) => payload),
-             save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
-           },
-         },
-         {
-           provide: getRepositoryToken(User),
-           useValue: {
-             findOne: jest.fn().mockResolvedValue({
-               id: 'user-1',
-               calibrationProfileName: null,
-               calibrationWeights: null,
-             }),
-           },
-         },
-       ],
-     }).compile();
- 
-     service = module.get(AnalysisService);
-+    complianceService = module.get(ComplianceService);
-   });
- 
-   it('rejects ambiguous JD inputs', async () => {
-     await expect(
-       service.scoreCompatibility('user-1', {
-         baseline_version_id: 'bv-1',
-         job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
-       }),
-     ).rejects.toThrowError(expect.objectContaining({ response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }) }) }));
-   });
- 
-   it('rejects missing JD inputs', async () => {
-     await expect(
-       service.scoreCompatibility('user-1', { baseline_version_id: 'bv-1', job: {} }),
-     ).rejects.toThrowError(
-       expect.objectContaining({
-         response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }) }),
-       }),
-     );
-   });
- 
-   it('returns a contract-compliant success response', async () => {
-     const result = await service.scoreCompatibility('user-1', {
-       baseline_version_id: 'bv-1',
-       job: { raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.' },
-     });
- 
-     expect(result).toEqual(
-       expect.objectContaining({
-         fit_score: expect.any(Number),
-         overall_score: expect.any(Number),
-         verdict: expect.any(String),
-         breakdown: expect.objectContaining({
-           experience_alignment: expect.any(Number),
-           leadership_level: expect.any(Number),
-           technical_platform_fit: expect.any(Number),
-           industry_context: expect.any(Number),
-           strategic_vs_tactical: expect.any(Number),
-         }),
-       }),
-     );
-     expect(result.strengths).toBeDefined();
-   });
-+
-+  it('creates a compliance audit for fit score requests', async () => {
-+    await service.scoreCompatibility('user-1', {
-+      baseline_version_id: 'bv-1',
-+      job: { raw_jd_text: 'Drive impact with measurable leadership results.' },
-+    });
-+
-+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
-+      expect.objectContaining({
-+        action: ComplianceAction.FIT_SCORE,
-+        actorId: 'user-1',
-+        outputHash: expect.any(String),
-+      }),
-+    );
-+  });
- });
-diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-index 6a6ab6dbe24a28519301ed2cd00cfc47fb44d940..8bdcffd43eb7b8968eecdcabca2643787d8771fd 100644
---- a/apps/api/src/analysis/analysis.service.ts
-+++ b/apps/api/src/analysis/analysis.service.ts
-@@ -1,40 +1,42 @@
- import {
-   BadRequestException,
-   Injectable,
-   NotFoundException,
- } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { ComplianceService } from '../compliance/compliance.service';
-+import { ComplianceAction, ComplianceFlag, ComplianceFlagSeverity } from '../compliance/compliance.types';
- import { Job } from '../jobs/job.entity';
- import { CalibrationWeights, User } from '../users/user.entity';
- import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
- import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
- import {
-   DimensionWeightOverrides,
-   FitScoringService,
- } from './fit-scoring.service';
- 
- export type AnalysisRequest = {
-   baselineId: string;
+diff --git a/apps/api/src/interviews/dto/create-interview.dto.ts b/apps/api/src/interviews/dto/create-interview.dto.ts
+index 795e50d01f004d02b491a8a7639910dbba84ac4c..58dc88352f39c1f8dbb312fb2b85c7aedc9a37c6 100644
+--- a/apps/api/src/interviews/dto/create-interview.dto.ts
++++ b/apps/api/src/interviews/dto/create-interview.dto.ts
+@@ -1,8 +1,10 @@
+ export class CreateInterviewRecordDto {
+   jobId!: string;
+-  gapList?: string[];
+-  questions?: string[];
+-  responses?: string[];
++  baselineId?: string;
++  baselineVersionId!: string;
++  gapList?: unknown[];
++  questions?: unknown[];
++  responses?: unknown[];
+   validationResults?: Record<string, unknown>;
+-  recommendedAdditions?: string[];
++  recommendedAdditions?: unknown[];
+ }
+diff --git a/apps/api/src/interviews/dto/update-interview.dto.ts b/apps/api/src/interviews/dto/update-interview.dto.ts
+index 6783b8c4cae081ae5bddb8fdf1b7e33f0591925f..75b6b03a97089791c27d7aac06140b42518a5db9 100644
+--- a/apps/api/src/interviews/dto/update-interview.dto.ts
++++ b/apps/api/src/interviews/dto/update-interview.dto.ts
+@@ -1,8 +1,10 @@
+ export class UpdateInterviewRecordDto {
    jobId?: string;
-   jobDescription?: string;
- };
- 
- export type AnalysisResult = {
-   ok: boolean;
-   baselineId: string;
-   score: number;
-   strengths: string[];
-   gaps: string[];
-   summary: string;
- };
- 
- type FitScoreJobInput = {
-@@ -76,50 +78,51 @@ type FitScoreResponse = {
-   score?: number;
-   overallScore?: number;
-   dimensionScores?: FitAssessment['dimensionScores'];
-   complianceFlags?: FitAssessment['complianceFlags'];
-   summary?: string;
- };
- 
- @Injectable()
- export class AnalysisService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineSection)
-     private readonly baselineSectionRepository: Repository<BaselineSection>,
-     @InjectRepository(BaselineBlockPolicy)
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-     @InjectRepository(BaselineVersion)
-     private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-     @InjectRepository(FitAssessment)
-     private readonly fitAssessmentRepository: Repository<FitAssessment>,
-     @InjectRepository(User)
-     private readonly usersRepository: Repository<User>,
-     private readonly fitScoringService: FitScoringService,
-+    private readonly complianceService: ComplianceService,
-   ) {}
- 
-   // VERIFY: Confirm default calibration values with product stakeholders.
-   private readonly defaultCalibration: {
-     profileName: string;
-     weights: CalibrationWeights;
-   } = {
-     profileName: 'default',
-     weights: {
-       dimensionA: 1,
-       dimensionB: 1,
-       dimensionC: 1,
-       dimensionD: 1,
-       dimensionE: 1,
-     },
-   };
- 
-   private normalizeKeywords(text: string) {
-     const tokens = text
-       .toLowerCase()
-       .match(/[a-z0-9]+/g)
-       ?.filter((token) => token.length >= 3) ?? [];
- 
-     const frequencies = new Map<string, number>();
-     for (const token of tokens) {
-@@ -169,50 +172,59 @@ export class AnalysisService {
-       job: {
-         rawDescription: job.rawDescription,
-         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-         normalizedRequirements: job.normalizedRequirements ?? [],
-         title: job.title ?? null,
-         company: job.company ?? null,
-       },
-       baseline: {
-         id: baseline.id,
-         version: baseline.version ?? null,
-         sections: sectionPayload,
-       },
-       calibration: dimensionWeights,
-     };
- 
-     return createHash('sha256')
-       .update(JSON.stringify(payload))
-       .digest('hex');
-   }
- 
-   private coerceComplianceFlags(flags: string[] | undefined | null) {
-     if (!flags?.length) return undefined;
-     return flags.map((flag) => ({ code: flag, message: flag }));
-   }
- 
-+  private mapComplianceStringsToFlags(flags?: string[] | null): ComplianceFlag[] | undefined {
-+    if (!flags?.length) return undefined;
-+    return flags.map((flag) => ({
-+      code: flag as any,
-+      message: flag,
-+      severity: ComplianceFlagSeverity.BLOCK,
-+    }));
-+  }
+-  gapList?: string[];
+-  questions?: string[];
+-  responses?: string[];
++  baselineId?: string;
++  baselineVersionId?: string;
++  gapList?: unknown[];
++  questions?: unknown[];
++  responses?: unknown[];
+   validationResults?: Record<string, unknown>;
+-  recommendedAdditions?: string[];
++  recommendedAdditions?: unknown[];
+ }
+diff --git a/apps/api/src/interviews/gap-detection.service.spec.ts b/apps/api/src/interviews/gap-detection.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..87a976d1a9e7e260a6a5865564d36236c0b2109a
+--- /dev/null
++++ b/apps/api/src/interviews/gap-detection.service.spec.ts
+@@ -0,0 +1,150 @@
++import { BadRequestException, NotFoundException } from '@nestjs/common';
++import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { GapDetectionService } from './gap-detection.service';
++import { Job } from '../jobs/job.entity';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 +
-   private assertJobInput(job?: FitScoreJobInput) {
-     const rawText = job?.raw_jd_text ?? job?.raw_jd;
-     const hasRaw = Boolean(rawText?.trim());
-     const parsed = job?.parsed_jd;
-     const hasParsed = Boolean(
-       parsed &&
-         ((parsed.responsibilities && parsed.responsibilities.length > 0) ||
-           (parsed.requirements && parsed.requirements.length > 0)),
-     );
-     const hasId = Boolean(job?.id?.trim());
-     const providedCount = Number(hasRaw) + Number(hasParsed);
- 
-     if (hasId && providedCount > 0) {
-       throw new BadRequestException({
-         error: { code: 'JD_INPUT_AMBIGUOUS', message: 'Provide either job.id or JD content, not both.' },
-       });
-     }
- 
-     if (!hasId && providedCount === 0) {
-       throw new BadRequestException({
-         error: {
-           code: 'JD_INPUT_MISSING',
-           message: 'Provide exactly one of raw_jd_text (or raw_jd) or parsed_jd.',
-         },
-       });
-@@ -418,81 +430,111 @@ export class AnalysisService {
-       }
- 
-       jobPayload = {
-         title: job.title ?? null,
-         company: job.company ?? null,
-         rawDescription: job.rawDescription,
-         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-         normalizedRequirements: job.normalizedRequirements ?? [],
-         sourceUrl: job.sourceUrl ?? null,
-       };
-     } else {
-       const rawText = jobInput.raw_jd_text ?? jobInput.raw_jd;
-       const hasParsed = jobInput.parsed_jd !== undefined;
-       jobPayload = hasParsed
-         ? this.buildJobPayloadFromParsed(jobInput)
-         : {
-             title: null,
-             company: null,
-             rawDescription: rawText ?? '',
-             normalizedResponsibilities: [],
-             normalizedRequirements: [],
-             sourceUrl: null,
-           };
-     }
- 
-+    const hashableJob = (job ?? {
-+      rawDescription: jobPayload.rawDescription,
-+      normalizedResponsibilities: jobPayload.normalizedResponsibilities,
-+      normalizedRequirements: jobPayload.normalizedRequirements,
-+      title: jobPayload.title,
-+      company: jobPayload.company,
-+      sourceUrl: jobPayload.sourceUrl,
-+    }) as Job;
++describe('GapDetectionService', () => {
++  const createMockRepository = () => ({
++    findOne: jest.fn(),
++    find: jest.fn(),
++  });
 +
-+    const inputsHash = this.buildInputsHash(hashableJob, baseline, dimensionWeights);
++  const createService = (
++    jobRepository = createMockRepository(),
++    baselineSectionRepository = createMockRepository(),
++    baselineVersionRepository = createMockRepository(),
++    baselineBlockPolicyRepository = createMockRepository(),
++  ) =>
++    new GapDetectionService(
++      jobRepository as never,
++      baselineSectionRepository as never,
++      baselineVersionRepository as never,
++      baselineBlockPolicyRepository as never,
++    );
 +
-     const scoring = this.fitScoringService.score(
-       {
-         job: jobPayload,
-         baseline: {
-           version: baselineVersion.versionNumber ?? baseline.version ?? null,
-           sections: includedSections,
-         },
-       },
-       dimensionWeights,
-     );
- 
-     let savedAssessment: FitAssessment | null = null;
- 
-     if (job) {
-       const assessment = this.fitAssessmentRepository.create({
-         userId,
-         jobId: job.id,
-         baselineId: baseline.id,
-         baselineVersion: baselineVersion.versionNumber ?? baseline.version ?? null,
-         overallScore: scoring.overallScore,
-         verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
-         dimensionScores: scoring.dimensionScores,
-         strengths: scoring.strengths,
-         gaps: scoring.gaps,
-         complianceFlags: scoring.complianceFlags,
--        inputsHash: null,
-+        inputsHash,
-       });
- 
-       savedAssessment = await this.fitAssessmentRepository.save(assessment);
-     }
- 
-+    const compliance = await this.complianceService.validateAndAudit({
-+      action: ComplianceAction.FIT_SCORE,
-+      actorId: userId,
-+      baselineVersion,
-+      job: job ?? null,
-+      outputHash: inputsHash,
-+      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
++  afterEach(() => {
++    jest.restoreAllMocks();
++  });
++
++  it('detects gaps only when baseline coverage is weak', async () => {
++    const jobRepository = createMockRepository();
++    const baselineVersionRepository = createMockRepository();
++    const baselineSectionRepository = createMockRepository();
++    const baselineBlockPolicyRepository = createMockRepository();
++
++    const job: Job = {
++      id: 'job-1',
++      userId: 'user-1',
++      title: null,
++      company: null,
++      rawDescription: 'sample',
++      sourceUrl: null,
++      normalizedRequirements: ['Hands-on Kubernetes administration', 'Lead cross-functional teams'],
++      normalizedResponsibilities: [],
++      jdIngestionMethod: 'PASTE' as never,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const baseline: Baseline = {
++      id: 'baseline-1',
++      userId: 'user-1',
++      version: 1,
++      originalFilename: 'file.pdf',
++      mimeType: 'application/pdf',
++      storagePath: '/tmp/file.pdf',
++      hash: null,
++      sections: [],
++      versions: [],
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const baselineVersion: BaselineVersion = {
++      id: 'baseline-version-1',
++      baselineId: baseline.id,
++      baseline,
++      blockPolicies: [],
++      fileHash: null,
++      storagePath: '/tmp/file.pdf',
++      versionNumber: 1,
++      createdAt: new Date(),
++      hash: null,
++    };
++
++    jobRepository.findOne.mockResolvedValue(job);
++    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
++    baselineSectionRepository.find.mockResolvedValue([
++      {
++        id: 'section-1',
++        baselineId: baseline.id,
++        baseline,
++        sectionType: 'EXPERIENCE' as never,
++        title: 'Experience',
++        content: 'Implemented Kubernetes clusters and automation',
++        includePolicy: BaselineIncludePolicy.ALWAYS,
++        order: 1,
++        createdAt: new Date(),
++        updatedAt: new Date(),
++        type: 'EXPERIENCE' as never,
++        orderIndex: 1,
++      } as unknown as BaselineSection,
++    ]);
++    baselineBlockPolicyRepository.find.mockResolvedValue([]);
++
++    const service = createService(jobRepository, baselineSectionRepository, baselineVersionRepository, baselineBlockPolicyRepository);
++
++    const result = await service.detectGaps({
++      userId: 'user-1',
++      jobId: job.id,
++      baselineVersionId: baselineVersion.id,
 +    });
 +
-+    if (compliance.blocked) {
-+      throw new BadRequestException({
-+        error: {
-+          code: 'compliance_blocked',
-+          message: 'Compliance validation failed.',
-+          details: { compliance_flags: compliance.complianceFlags },
-+        },
++    expect(result.gaps).toHaveLength(1);
++    expect(result.gaps[0].domain).toBe('leadership');
++    expect(result.gaps[0].baselineExcerpt).toBeNull();
++    expect(result.gaps[0].jdExcerpt).toBe('Lead cross-functional teams');
++  });
++
++  it('throws when required identifiers are missing', async () => {
++    const service = createService();
++
++    await expect(
++      service.detectGaps({ userId: 'user-1', jobId: '', baselineVersionId: '' }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
++
++  it('validates job and baseline ownership', async () => {
++    const jobRepository = createMockRepository();
++    const baselineVersionRepository = createMockRepository();
++    const service = createService(jobRepository, createMockRepository(), baselineVersionRepository);
++
++    jobRepository.findOne.mockResolvedValue(null);
++
++    await expect(
++      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
++    ).rejects.toBeInstanceOf(NotFoundException);
++
++    jobRepository.findOne.mockResolvedValue({
++      id: 'job-1',
++      userId: 'user-1',
++      rawDescription: '',
++      normalizedRequirements: [],
++      normalizedResponsibilities: [],
++    } as Job);
++
++    baselineVersionRepository.findOne.mockResolvedValue({
++      id: 'bv-1',
++      baselineId: 'b-1',
++      baseline: { userId: 'other-user' } as Baseline,
++    } as BaselineVersion);
++
++    await expect(
++      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
++    ).rejects.toBeInstanceOf(NotFoundException);
++  });
++});
+diff --git a/apps/api/src/interviews/gap-detection.service.ts b/apps/api/src/interviews/gap-detection.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1c68a16d26cf576eef3d25e54154dfc71b03f8e
+--- /dev/null
++++ b/apps/api/src/interviews/gap-detection.service.ts
+@@ -0,0 +1,236 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { randomUUID } from 'node:crypto';
++import { Repository } from 'typeorm';
++import {
++  BaselineIncludePolicy,
++  BaselineSection,
++} from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
++import { Job } from '../jobs/job.entity';
++import {
++  GapConfidence,
++  GapDetectionResult,
++  GapDomain,
++  InterviewGap,
++} from './interview-types';
++
++type DetectionInputs = {
++  userId: string;
++  jobId: string;
++  baselineVersionId: string;
++};
++
++type SectionTokens = {
++  section: BaselineSection;
++  tokens: Set<string>;
++};
++
++@Injectable()
++export class GapDetectionService {
++  constructor(
++    @InjectRepository(Job)
++    private readonly jobRepository: Repository<Job>,
++    @InjectRepository(BaselineSection)
++    private readonly baselineSectionRepository: Repository<BaselineSection>,
++    @InjectRepository(BaselineVersion)
++    private readonly baselineVersionRepository: Repository<BaselineVersion>,
++    @InjectRepository(BaselineBlockPolicy)
++    private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
++  ) {}
++
++  async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
++    const jobId = inputs.jobId?.trim();
++    const baselineVersionId = inputs.baselineVersionId?.trim();
++
++    if (!jobId || !baselineVersionId) {
++      throw new BadRequestException('jobId and baselineVersionId are required');
++    }
++
++    const job = await this.jobRepository.findOne({
++      where: { id: jobId, userId: inputs.userId },
++    });
++
++    if (!job) {
++      throw new NotFoundException('Job not found');
++    }
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: baselineVersionId },
++      relations: ['baseline'],
++    });
++
++    if (!baselineVersion || !baselineVersion.baseline || baselineVersion.baseline.userId !== inputs.userId) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    const [sections, blockPolicies] = await Promise.all([
++      this.baselineSectionRepository.find({
++        where: { baselineId: baselineVersion.baselineId },
++        order: { order: 'ASC' },
++      }),
++      this.baselineBlockPolicyRepository.find({
++        where: { baselineVersionId },
++      }),
++    ]);
++
++    const normalizedSections = this.applyPoliciesToSections(sections, blockPolicies).filter(
++      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
++    );
++
++    const sectionTokens = this.buildSectionTokens(normalizedSections);
++
++    const jdItems = [
++      ...(job.normalizedRequirements ?? []),
++      ...(job.normalizedResponsibilities ?? []),
++    ]
++      .map((item) => item.trim())
++      .filter(Boolean);
++
++    const gaps: InterviewGap[] = [];
++
++    for (const item of jdItems) {
++      const jdTokens = this.tokenize(item);
++      if (!jdTokens.size) {
++        continue;
++      }
++
++      const match = this.findBestSectionMatch(jdTokens, sectionTokens);
++      const coverage = match?.overlap ?? 0;
++      const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
++
++      if (coverageRatio >= 0.5) {
++        continue;
++      }
++
++      const confidence = this.resolveConfidence(coverageRatio);
++
++      gaps.push({
++        gapId: randomUUID(),
++        domain: this.inferDomain(item),
++        jdExcerpt: item,
++        baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
++        confidence,
 +      });
 +    }
 +
-     const breakdown = {
-       experience_alignment: scoring.dimensionScores.experienceAlignment,
-       leadership_level: scoring.dimensionScores.leadershipLevel,
-       technical_platform_fit: scoring.dimensionScores.technicalPlatformFit,
-       industry_context: scoring.dimensionScores.industryContext,
-       strategic_vs_tactical: scoring.dimensionScores.strategicTacticalFit,
-     };
++    return {
++      baselineId: baselineVersion.baselineId,
++      baselineVersionId,
++      jobId,
++      gaps,
++    };
++  }
++
++  private applyPoliciesToSections(
++    sections: BaselineSection[],
++    policies: BaselineBlockPolicy[],
++  ): BaselineSection[] {
++    if (!policies.length) {
++      return [...sections].sort((a, b) => a.order - b.order);
++    }
++
++    const policyMap = new Map<string, BaselineBlockPolicy>(
++      policies.map((policy) => [policy.baselineSectionId, policy]),
++    );
++
++    return [...sections]
++      .map((section) => {
++        const policy = policyMap.get(section.id);
++        return {
++          ...section,
++          includePolicy: policy?.includePolicy ?? section.includePolicy,
++          order: policy?.order ?? section.order,
++          sectionType: section.sectionType ?? section.type,
++        } as BaselineSection;
++      })
++      .sort((a, b) => a.order - b.order);
++  }
++
++  private tokenize(text: string): Set<string> {
++    return new Set(
++      text
++        .toLowerCase()
++        .split(/[^a-z0-9+]+/i)
++        .map((token) => token.trim())
++        .filter((token) => token.length >= 3),
++    );
++  }
++
++  private buildSectionTokens(sections: BaselineSection[]): SectionTokens[] {
++    return sections.map((section) => ({
++      section,
++      tokens: this.tokenize(section.content ?? ''),
++    }));
++  }
++
++  private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
++    let bestMatch:
++      | {
++          section: BaselineSection;
++          overlap: number;
++        }
++      | null = null;
++
++    for (const candidate of sections) {
++      const overlap = [...jdTokens].filter((token) => candidate.tokens.has(token)).length;
++
++      if (!bestMatch || overlap > bestMatch.overlap) {
++        bestMatch = { section: candidate.section, overlap };
++      }
++    }
++
++    return bestMatch;
++  }
++
++  private resolveConfidence(coverageRatio: number): GapConfidence {
++    if (coverageRatio === 0) {
++      return 'high';
++    }
++    if (coverageRatio < 0.25) {
++      return 'medium';
++    }
++    return 'low';
++  }
++
++  private buildBaselineExcerpt(content: string | null): string | null {
++    if (!content) {
++      return null;
++    }
++
++    const trimmed = content.trim();
++
++    if (trimmed.length <= 300) {
++      return trimmed;
++    }
++
++    return `${trimmed.slice(0, 297)}...`;
++  }
++
++  private inferDomain(text: string): GapDomain {
++    const value = text.toLowerCase();
++
++    const leadershipKeywords = ['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'];
++    if (leadershipKeywords.some((keyword) => value.includes(keyword))) {
++      return 'leadership';
++    }
++
++    const toolingKeywords = ['sql', 'python', 'javascript', 'aws', 'gcp', 'azure', 'tool', 'framework', 'platform'];
++    if (toolingKeywords.some((keyword) => value.includes(keyword))) {
++      return 'tooling';
++    }
++
++    const scopeKeywords = ['scale', 'scalable', 'enterprise', 'multiple teams', 'cross-functional', 'global'];
++    if (scopeKeywords.some((keyword) => value.includes(keyword))) {
++      return 'scope';
++    }
++
++    const industryKeywords = ['healthcare', 'finance', 'fintech', 'ecommerce', 'retail', 'government'];
++    if (industryKeywords.some((keyword) => value.includes(keyword))) {
++      return 'industry';
++    }
++
++    return 'experience';
++  }
++}
+diff --git a/apps/api/src/interviews/interview-question-generator.service.spec.ts b/apps/api/src/interviews/interview-question-generator.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..464842eaa50a432275e0f97a4c1e9c2b60d195ba
+--- /dev/null
++++ b/apps/api/src/interviews/interview-question-generator.service.spec.ts
+@@ -0,0 +1,30 @@
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import { InterviewGap } from './interview-types';
++
++describe('InterviewQuestionGeneratorService', () => {
++  it('creates neutral, JD-referenced questions for each gap', () => {
++    const service = new InterviewQuestionGeneratorService();
++    const gap: InterviewGap = {
++      gapId: 'gap-1',
++      domain: 'experience',
++      jdExcerpt: 'Cloud security controls',
++      baselineExcerpt: null,
++      confidence: 'high',
++    };
++
++    const questions = service.generateQuestions([gap]);
++
++    expect(questions).toHaveLength(5);
++    questions.forEach((question) => {
++      expect(question.jdReference).toBe(gap.jdExcerpt);
++      expect(question.prompt).toContain(gap.jdExcerpt);
++      expect(question.prompt).not.toMatch(/%|increase by|doubled/i);
++      expect(question.prompt.toLowerCase()).toContain('if');
++    });
++
++    const categories = questions.map((q) => q.category);
++    expect(categories).toEqual(
++      expect.arrayContaining(['Direct Experience', 'Context', 'Scope', 'Tooling', 'Impact']),
++    );
++  });
++});
+diff --git a/apps/api/src/interviews/interview-question-generator.service.ts b/apps/api/src/interviews/interview-question-generator.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..279088516aae5adb4d79a32b66d7b08308a3e1ac
+--- /dev/null
++++ b/apps/api/src/interviews/interview-question-generator.service.ts
+@@ -0,0 +1,49 @@
++import { Injectable } from '@nestjs/common';
++import { InterviewGap, InterviewQuestion } from './interview-types';
++
++const QUESTION_TEMPLATES: Record<
++  InterviewQuestion['category'],
++  (gap: InterviewGap) => InterviewQuestion
++> = {
++  'Direct Experience': (gap) => ({
++    gapId: gap.gapId,
++    category: 'Direct Experience',
++    prompt: `The JD highlights "${gap.jdExcerpt}". Can you share any direct experience you have related to this?`,
++    jdReference: gap.jdExcerpt,
++  }),
++  Context: (gap) => ({
++    gapId: gap.gapId,
++    category: 'Context',
++    prompt: `What context surrounded any work you have done related to "${gap.jdExcerpt}", if applicable?`,
++    jdReference: gap.jdExcerpt,
++  }),
++  Scope: (gap) => ({
++    gapId: gap.gapId,
++    category: 'Scope',
++    prompt: `If you've engaged with "${gap.jdExcerpt}", what was the scope of your involvement?`,
++    jdReference: gap.jdExcerpt,
++  }),
++  Tooling: (gap) => ({
++    gapId: gap.gapId,
++    category: 'Tooling',
++    prompt: `What tools or platforms have you used, if any, when addressing "${gap.jdExcerpt}"?`,
++    jdReference: gap.jdExcerpt,
++  }),
++  Impact: (gap) => ({
++    gapId: gap.gapId,
++    category: 'Impact',
++    prompt: `What outcomes resulted from efforts related to "${gap.jdExcerpt}", or what impact would you aim for in similar work?`,
++    jdReference: gap.jdExcerpt,
++  }),
++};
++
++@Injectable()
++export class InterviewQuestionGeneratorService {
++  generateQuestions(gaps: InterviewGap[]): InterviewQuestion[] {
++    return gaps.flatMap((gap) => this.buildQuestionsForGap(gap));
++  }
++
++  private buildQuestionsForGap(gap: InterviewGap): InterviewQuestion[] {
++    return Object.values(QUESTION_TEMPLATES).map((template) => template(gap));
++  }
++}
+diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
+index 60570bf032d9201ec94b7a79ff3cfb8f89ca6d12..1c65f6b206eaae1603ba9882739efd22bf39a9c5 100644
+--- a/apps/api/src/interviews/interview-records.service.spec.ts
++++ b/apps/api/src/interviews/interview-records.service.spec.ts
+@@ -1,133 +1,175 @@
+ import { BadRequestException, NotFoundException } from '@nestjs/common';
+ import { Interview } from './interview.entity';
+ import { InterviewRecordsService } from './interview-records.service';
++import { GapDetectionService } from './gap-detection.service';
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import { InterviewGap, InterviewQuestion } from './interview-types';
  
-     return {
-       fit_score: scoring.overallScore,
-       overall_score: scoring.overallScore,
-       verdict: (scoring.verdict ?? FitAssessmentVerdict.CONSIDER).toLowerCase() as
-         | 'apply'
-         | 'consider'
-         | 'skip',
-       breakdown,
-       strengths: scoring.strengths,
-       gaps: scoring.gaps,
-       compliance_flags: this.coerceComplianceFlags(scoring.complianceFlags),
-       audit_id: savedAssessment?.id ?? null,
-       assessmentId: savedAssessment?.id,
-       jobId: savedAssessment?.jobId,
-       baselineId: savedAssessment?.baselineId,
-       baselineVersion: savedAssessment?.baselineVersion,
-       createdAt: savedAssessment?.createdAt,
-@@ -618,89 +660,116 @@ export class AnalysisService {
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
+ describe('InterviewRecordsService', () => {
+   const mockInterview: Interview = {
+     id: 'interview-1',
+     userId: 'user-1',
++    baselineId: 'baseline-1',
++    baselineVersionId: 'baseline-version-1',
+     jobId: 'job-1',
+-    gapList: ['gap'],
+-    questions: ['q1'],
++    gapList: [],
++    questions: [],
+     responses: ['r1'],
+     validationResults: { ok: true },
+     recommendedAdditions: ['add'],
+     createdAt: new Date('2024-01-01T00:00:00Z'),
+     updatedAt: new Date('2024-01-01T00:00:00Z'),
+   };
  
-     const includedSections =
-       baseline.sections?.filter(
-         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-       ) ?? [];
+   const createMockRepository = () => ({
+     create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
+     save: jest.fn(async (data: Interview) => data),
+     find: jest.fn(),
+     findOne: jest.fn(),
+     remove: jest.fn(async (data: Interview) => data),
+   });
  
-     const calibration = await this.getCalibration(userId);
+-  const createService = (repository = createMockRepository()) =>
+-    new InterviewRecordsService(repository as never);
++  const createService = (
++    repository = createMockRepository(),
++    gapDetectionService: Partial<GapDetectionService> = {},
++    interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
++  ) =>
++    new InterviewRecordsService(
++      repository as never,
++      gapDetectionService as GapDetectionService,
++      interviewQuestionGenerator as InterviewQuestionGeneratorService,
++    );
  
-     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
  
-     const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
+   it('creates an interview record with required jobId and sanitization', async () => {
+     const repository = createMockRepository();
+-    const service = createService(repository);
++    const gapList: InterviewGap[] = [
++      {
++        gapId: 'gap-1',
++        domain: 'experience',
++        jdExcerpt: 'JD item',
++        baselineExcerpt: null,
++        confidence: 'high',
++      },
++    ];
++    const questions: InterviewQuestion[] = [
++      {
++        gapId: 'gap-1',
++        category: 'Direct Experience',
++        prompt: 'Question',
++        jdReference: 'JD item',
++      },
++    ];
++    const service = createService(
++      repository,
++      {
++        detectGaps: jest.fn().mockResolvedValue({
++          baselineId: 'baseline-1',
++          baselineVersionId: 'baseline-version-1',
++          jobId: 'job-2',
++          gaps: gapList,
++        }),
++      },
++      { generateQuestions: jest.fn().mockReturnValue(questions) },
++    );
  
-     const existing = await this.fitAssessmentRepository.findOne({
-       where: { userId, jobId, baselineId, inputsHash },
+     const result = await service.createInterviewRecord('user-1', {
+       jobId: ' job-2 ',
+-      gapList: [' gap1 ', ''],
+-      questions: [' q '],
++      baselineVersionId: 'baseline-version-1',
+       responses: [' a '],
+       recommendedAdditions: [' add '],
+     });
+ 
+     expect(repository.create).toHaveBeenCalledWith(
+       expect.objectContaining({
+         userId: 'user-1',
++        baselineId: 'baseline-1',
++        baselineVersionId: 'baseline-version-1',
+         jobId: 'job-2',
+-        gapList: ['gap1'],
+-        questions: ['q'],
+-        responses: ['a'],
+-        recommendedAdditions: ['add'],
++        gapList,
++        questions,
++        responses: [' a '],
++        recommendedAdditions: [' add '],
+       }),
+     );
+     expect(result.jobId).toBe('job-2');
+   });
+ 
+   it('lists interview records for a user', async () => {
+     const repository = createMockRepository();
+     repository.find.mockResolvedValue([mockInterview]);
+     const service = createService(repository);
+ 
+     const records = await service.listInterviewRecordsForUser('user-1');
+ 
+     expect(repository.find).toHaveBeenCalledWith({
+       where: { userId: 'user-1' },
        order: { createdAt: 'DESC' },
      });
- 
-     if (existing) {
-       const summary = this.buildSummaryFromTerms(
-         existing.strengths ?? [],
-         existing.gaps ?? [],
-       );
-+      await this.complianceService.validateAndAudit({
-+        action: ComplianceAction.FIT_SCORE,
-+        actorId: userId,
-+        baselineVersion: { hash: baseline.hash } as BaselineVersion,
-+        job,
-+        outputHash: inputsHash,
-+        extraFlags: this.mapComplianceStringsToFlags(existing.complianceFlags),
-+      });
-       return {
-         ok: true,
-         assessmentId: existing.id,
-         jobId: existing.jobId,
-         baselineId: existing.baselineId,
-         baselineVersion: existing.baselineVersion,
-         overallScore: existing.overallScore,
-         score: existing.overallScore,
-         verdict: existing.verdict,
-         dimensionScores: existing.dimensionScores,
-         strengths: existing.strengths,
-         gaps: existing.gaps,
-         complianceFlags: existing.complianceFlags,
-         summary,
-         createdAt: existing.createdAt,
-       };
-     }
- 
-     const scoring = this.fitScoringService.score(
-       {
-         job: {
-           rawDescription: job.rawDescription,
-           normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-           normalizedRequirements: job.normalizedRequirements ?? [],
-           title: job.title ?? null,
-           company: job.company ?? null,
-           sourceUrl: job.sourceUrl ?? null,
-         },
-         baseline: {
-           version: baseline.version ?? null,
-           sections: includedSections.map((section) => ({
-             type: section.sectionType ?? section.type,
-             content: section.content,
-           })),
-         },
-       },
-       dimensionWeights,
-     );
- 
-+    const compliance = await this.complianceService.validateAndAudit({
-+      action: ComplianceAction.FIT_SCORE,
-+      actorId: userId,
-+      baselineVersion: { hash: baseline.hash } as BaselineVersion,
-+      job,
-+      outputHash: inputsHash,
-+      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
-+    });
-+
-+    if (compliance.blocked) {
-+      throw new BadRequestException({
-+        error: {
-+          code: 'compliance_blocked',
-+          message: 'Compliance validation failed.',
-+          details: { compliance_flags: compliance.complianceFlags },
-+        },
-+      });
-+    }
-+
-     const assessment = this.fitAssessmentRepository.create({
-       userId,
-       jobId,
-       baselineId: baseline.id,
-       baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
-       overallScore: scoring.overallScore,
-       verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
-       dimensionScores: scoring.dimensionScores,
-       strengths: scoring.strengths,
-       gaps: scoring.gaps,
-       complianceFlags: scoring.complianceFlags,
-       inputsHash,
-     });
- 
-     const saved = await this.fitAssessmentRepository.save(assessment);
- 
-     return {
-       ok: true,
-       assessmentId: saved.id,
-       jobId: saved.jobId,
-       baselineId: saved.baselineId,
-       baselineVersion: saved.baselineVersion,
-       overallScore: saved.overallScore,
-       score: saved.overallScore,
-       verdict: saved.verdict,
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index bf80d8e859fccfc978b1e2bc43a3c874c5e61b6c..33133a60d07751c7e1179a03a0303bed50582c17 100644
---- a/apps/api/src/compliance/compliance.service.spec.ts
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -97,26 +97,53 @@ describe('ComplianceService', () => {
-       baselineSections: [{ content: 'Improved uptime by 10%' }],
-       generatedSections: [{ content: 'Improved uptime by 25%' }],
-     });
- 
-     expect(flags).toEqual([
-       expect.objectContaining({
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-       }),
-     ]);
+     expect(records).toEqual([mockInterview]);
    });
  
-   it('blocks stylized punctuation in generated output', () => {
-     const flags = service.enforceResumeWritingRules({
-       baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
-       generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
+   it('retrieves an interview record for a user', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue(mockInterview);
+     const service = createService(repository);
+ 
+     const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
+ 
+     expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
+     expect(record).toEqual(mockInterview);
+   });
+ 
+   it('throws when interview record not found', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue(null);
+     const service = createService(repository);
+ 
+     await expect(
+       service.getInterviewRecordForUser('missing', 'user-1'),
+     ).rejects.toBeInstanceOf(NotFoundException);
+   });
+ 
+   it('updates an interview record with validation', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue({ ...mockInterview });
+     const service = createService(repository);
+ 
+     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
+       jobId: ' job-3 ',
+-      gapList: [' gap2 '],
++      gapList: [{ gapId: 'gap-2' }],
+       validationResults: { ok: false },
+       recommendedAdditions: [' new '],
      });
  
-     expect(flags).toEqual([
-       expect.objectContaining({
-         code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-       }),
-     ]);
+     expect(repository.save).toHaveBeenCalled();
+     expect(result.jobId).toBe('job-3');
+-    expect(result.gapList).toEqual(['gap2']);
++    expect(result.gapList).toEqual([{ gapId: 'gap-2' }]);
+     expect(result.validationResults).toEqual({ ok: false });
+-    expect(result.recommendedAdditions).toEqual(['new']);
++    expect(result.recommendedAdditions).toEqual([' new ']);
    });
-+
-+  it('normalizes stylized punctuation for downstream output', () => {
-+    const normalized = service.normalizeSectionsForOutput([
-+      { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
-+    ]);
-+
-+    expect(normalized[0]).toEqual(
-+      expect.objectContaining({
-+        title: 'Impact-Summary',
-+        content: 'Led teams... increased revenue by 1,200%',
-+      }),
-+    );
-+  });
-+
-+  it('blocks invented metrics with formatted numbers', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
-+      generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
-+    });
-+
-+    expect(flags).toEqual([
-+      expect.objectContaining({
-+        code: ComplianceFlagCode.INVENTED_METRIC,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+      }),
-+    ]);
-+  });
+ 
+   it('throws when updating with empty jobId', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue({ ...mockInterview });
+     const service = createService(repository);
+ 
+     await expect(
+       service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
+     ).rejects.toBeInstanceOf(BadRequestException);
+   });
+ 
+   it('deletes an interview record', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue(mockInterview);
+     const service = createService(repository);
+ 
+     const result = await service.deleteInterviewRecord('interview-1', 'user-1');
+ 
+     expect(repository.remove).toHaveBeenCalledWith(mockInterview);
+     expect(result).toEqual({ deleted: true, id: 'interview-1' });
+   });
  });
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index ed273497dc1632ef5bea9e44da143ad4579b89ba..27349cf83231ea04516794fcfd71c83bb5848535 100644
---- a/apps/api/src/compliance/compliance.service.ts
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -99,88 +99,139 @@ export class ComplianceService {
-     const baselineText = this.mergeText(baselineSections);
-     const generatedText = this.mergeText(generatedSections);
+diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
+index 2366f25be51516336212c4dc409a6d67eeb01540..29a9fe9170dba8981f2e34e6f029d67013dd5070 100644
+--- a/apps/api/src/interviews/interview-records.service.ts
++++ b/apps/api/src/interviews/interview-records.service.ts
+@@ -1,98 +1,117 @@
+ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { CreateInterviewRecordDto } from './dto/create-interview.dto';
+ import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
+ import { Interview } from './interview.entity';
++import { GapDetectionService } from './gap-detection.service';
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import { InterviewGap, InterviewQuestion } from './interview-types';
  
-     const stylizedCharacters = this.findStylizedPunctuation(generatedText);
-     const normalizedBaselineText = this.normalizePunctuation(baselineText);
-     const normalizedGeneratedText = this.normalizePunctuation(generatedText);
+ @Injectable()
+ export class InterviewRecordsService {
+   constructor(
+     @InjectRepository(Interview)
+     private readonly interviewRepository: Repository<Interview>,
++    private readonly gapDetectionService: GapDetectionService,
++    private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
+   ) {}
  
-     const baselineNumbers = this.extractNumbers(normalizedBaselineText);
-     const generatedNumbers = this.extractNumbers(normalizedGeneratedText);
- 
-     const baselineEntities = this.extractEntities(normalizedBaselineText);
-     const generatedEntities = this.extractEntities(normalizedGeneratedText);
- 
-     const flags: ComplianceFlag[] = [];
- 
-     if (stylizedCharacters.length > 0) {
-       flags.push({
-         code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: `Stylized punctuation (${stylizedCharacters.join(
-           '',
-         )}) detected; use plain punctuation only.`,
-       });
+-  private sanitizeStringArray(values?: string[]) {
+-    return (values ?? []).map((value) => value.trim()).filter(Boolean);
+-  }
+-
+   async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto) {
+-    if (!dto.jobId?.trim()) {
+-      throw new BadRequestException('Job ID is required.');
++    if (!dto.jobId?.trim() || !dto.baselineVersionId?.trim()) {
++      throw new BadRequestException('Job ID and baselineVersionId are required.');
      }
  
--    for (const num of generatedNumbers) {
--      if (!baselineNumbers.has(num)) {
-+    for (const num of generatedNumbers.ordered) {
-+      if (!baselineNumbers.normalizedSet.has(num)) {
-         flags.push({
-           code: ComplianceFlagCode.INVENTED_METRIC,
-           severity: ComplianceFlagSeverity.BLOCK,
-           message: `Metric "${num}" not found in baseline.`,
-         });
-         break;
-       }
-     }
- 
--    for (const entity of generatedEntities) {
--      if (!baselineEntities.has(entity)) {
-+    for (const entity of generatedEntities.ordered) {
-+      const normalizedEntity = entity.toLowerCase();
-+      if (!baselineEntities.normalizedSet.has(normalizedEntity)) {
-         const isRole = /manager|engineer|lead|director|chief|officer|vp|president|analyst|specialist|consultant|architect/i.test(
-           entity,
-         );
-         flags.push({
-           code: isRole
-             ? ComplianceFlagCode.INVENTED_ROLE
-             : ComplianceFlagCode.INVENTED_COMPANY,
-           severity: ComplianceFlagSeverity.BLOCK,
-           message: `${isRole ? 'Role' : 'Company'} "${entity}" not found in baseline.`,
-         });
-         break;
-       }
-     }
- 
-     return flags;
-   }
- 
-+  normalizeSectionsForOutput<T extends { content: string; title?: string | null }>(
-+    sections: T[],
-+  ): T[] {
-+    return sections.map((section) => ({
-+      ...section,
-+      title:
-+        section.title === undefined
-+          ? section.title
-+          : this.normalizePunctuation(section.title ?? ''),
-+      content: this.normalizePunctuation(section.content ?? ''),
-+    }));
-+  }
++    const gapResult = await this.gapDetectionService.detectGaps({
++      userId,
++      jobId: dto.jobId.trim(),
++      baselineVersionId: dto.baselineVersionId.trim(),
++    });
 +
-+  normalizeText(content: string) {
-+    return this.normalizePunctuation(content);
-+  }
++    const gapList: InterviewGap[] = gapResult.gaps;
++    const questions: InterviewQuestion[] =
++      this.interviewQuestionGenerator.generateQuestions(gapList);
 +
-   private mergeText(sections: Array<{ content: string; title?: string | null }>) {
-     return sections
-       .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
-       .join('\n')
-       .replace(/\s+/g, ' ')
-       .trim();
-   }
- 
-   private extractNumbers(text: string) {
--    const matches = text.match(/\b\d+(?:\.\d+)?\b/g) ?? [];
--    return new Set(matches.map((match) => match.trim()));
-+    const matches = text.match(/-?\d[\d,]*(?:\.\d+)?%?/g) ?? [];
-+    const normalizedSet = new Set<string>();
-+    const ordered: string[] = [];
-+
-+    for (const match of matches) {
-+      const normalized = this.normalizeNumberToken(match);
-+      if (normalizedSet.has(normalized)) continue;
-+      normalizedSet.add(normalized);
-+      ordered.push(normalized);
-+    }
-+
-+    return { normalizedSet, ordered };
-   }
- 
-   private extractEntities(text: string) {
--    const candidates = text.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
--    return new Set(candidates.map((candidate) => candidate.trim()));
-+    const normalizedText = this.normalizePunctuation(text);
-+    const candidates =
-+      normalizedText.match(/\b[A-Z][a-zA-Z0-9&.-]{2,}(?:\s+[A-Z][a-zA-Z0-9&.-]{1,})*/g) ?? [];
-+
-+    const normalizedSet = new Set<string>();
-+    const ordered: string[] = [];
-+
-+    for (const candidate of candidates) {
-+      const trimmed = candidate.trim();
-+      const key = trimmed.toLowerCase();
-+      if (normalizedSet.has(key)) continue;
-+      normalizedSet.add(key);
-+      ordered.push(trimmed);
-+    }
-+
-+    return { normalizedSet, ordered };
-   }
- 
-   private normalizePunctuation(text: string) {
-     return text
-       .replace(/[\u2010-\u2015\u2212]/g, '-')
-       .replace(/\u2026/g, '...')
--      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '•')
-+      .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '-')
-+      .replace(/[\u2018\u2019]/g, "'")
-+      .replace(/[\u201C\u201D]/g, '"')
-       .replace(/\s+/g, ' ')
-       .trim();
-   }
- 
-   private findStylizedPunctuation(text: string) {
-     const matches =
--      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219]/g) ?? [];
-+      text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219\u2018\u2019\u201C\u201D]/g) ?? [];
-     return Array.from(new Set(matches));
-   }
-+
-+  private normalizeNumberToken(value: string) {
-+    const cleaned = value.replace(/,/g, '').trim();
-+    const hasPercent = cleaned.endsWith('%');
-+    const numericPortion = hasPercent ? cleaned.slice(0, -1) : cleaned;
-+    return hasPercent ? `${numericPortion}%` : numericPortion;
-+  }
- }
-diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
-index c4b23c6f25c6f817e41c4af450f55c6b2162f836..073716caeb2abb7d9d8b2dcf87a6a95859be247b 100644
---- a/apps/api/src/cover-letters/cover-letters.service.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.ts
-@@ -113,93 +113,97 @@ export class CoverLettersService {
-       id: job.id,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: this.sanitizeList(job.normalizedResponsibilities),
-       requirements: this.sanitizeList(job.normalizedRequirements),
-     };
- 
-     const generationInputsHash = this.computeGenerationInputsHash(
-       baseline.id,
-       job.id,
-       allowedBlocks,
-       jobContext,
-       closingTemplateKey,
-     );
- 
-     const generation = this.generator.generate({
-       baselineId: baseline.id,
-       jobId: job.id,
-       allowedBaselineBlocks: allowedBlocks,
-       job: jobContext,
-       closingTemplate,
-       maxWords: input.maxWords,
-       tone: input.tone,
-     });
- 
-+    const normalizedContent = this.complianceService.normalizeText(
-+      generation.content,
-+    );
-+
-     const complianceBaselineSections = this.buildComplianceBaselineSections(
-       allowedBlocks,
-       jobContext,
-     );
- 
-     const writingFlags = this.complianceService.enforceResumeWritingRules({
-       baselineSections: complianceBaselineSections,
-       generatedSections: [
-         { title: 'Cover Letter', content: generation.content },
-       ],
-     });
- 
-     const { complianceFlags, blocked } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.COVER_LETTER_GENERATION,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash: createHash('sha256')
--          .update(generation.content)
-+          .update(normalizedContent)
-           .digest('hex'),
-         extraFlags: writingFlags,
-         scopeInflationDetected: false,
-       });
- 
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
-         },
-       });
-     }
- 
-     const coverLetter = this.coverLetterRepository.create({
+     const interview = this.interviewRepository.create({
        userId,
-       baselineId: baseline.id,
-       jobId: job.id,
-       generatorType: 'template',
-       generatorVersion: 'v1',
-       closingTemplateKey,
--      content: generation.content,
-+      content: normalizedContent,
-       generationInputsHash,
++      baselineId: gapResult.baselineId,
++      baselineVersionId: gapResult.baselineVersionId,
+       jobId: dto.jobId.trim(),
+-      gapList: this.sanitizeStringArray(dto.gapList),
+-      questions: this.sanitizeStringArray(dto.questions),
+-      responses: this.sanitizeStringArray(dto.responses),
++      gapList,
++      questions,
++      responses: dto.responses ?? [],
+       validationResults: dto.validationResults ?? {},
+-      recommendedAdditions: this.sanitizeStringArray(dto.recommendedAdditions),
++      recommendedAdditions: dto.recommendedAdditions ?? [],
      });
  
-     return this.coverLetterRepository.save(coverLetter);
+     return this.interviewRepository.save(interview);
    }
  
-   async listCoverLetters(userId: string) {
-     return this.coverLetterRepository.find({
+   async listInterviewRecordsForUser(userId: string) {
+     return this.interviewRepository.find({
        where: { userId },
        order: { createdAt: 'DESC' },
      });
    }
  
-   async getCoverLetter(userId: string, id: string) {
-     const coverLetter = await this.coverLetterRepository.findOne({
-       where: { id, userId },
-     });
+   async getInterviewRecordForUser(id: string, userId: string) {
+     const interview = await this.interviewRepository.findOne({ where: { id, userId } });
  
-     if (!coverLetter) {
-       throw new NotFoundException('Cover letter not found');
+     if (!interview) {
+       throw new NotFoundException('Interview not found');
      }
  
-     return coverLetter;
+     return interview;
    }
  
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index 0a60743a1eddccd833e5153beea73280bf94e74b..d84a49563edea68042a8c9c2de22f5ca064baef9 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -179,87 +179,89 @@ export class ResumeService {
-     const sections = sectionsWithPolicies.map((section) => ({
-       id: section.id,
-       type: section.sectionType,
-       title: section.title,
-       content: section.content,
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       order: section.order,
-       source: 'baseline',
-     }));
+-  async updateInterviewRecord(
+-    id: string,
+-    userId: string,
+-    dto: UpdateInterviewRecordDto,
+-  ) {
++  async updateInterviewRecord(id: string, userId: string, dto: UpdateInterviewRecordDto) {
+     const interview = await this.getInterviewRecordForUser(id, userId);
  
-     const job = jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: jobId, userId },
-         })
-       : null;
- 
-     if (jobId && !job) {
-       throw new NotFoundException('Job not found');
+     if (dto.jobId !== undefined) {
+       if (!dto.jobId?.trim()) {
+         throw new BadRequestException('Job ID is required.');
+       }
+       interview.jobId = dto.jobId.trim();
      }
  
-     if (request.oneTap && jobId) {
-       await this.ensureOneTapAllowed(userId, jobId);
-     }
- 
-     const outputHash = createHash('sha256')
--      .update(JSON.stringify(sections))
-+      .update(JSON.stringify(this.complianceService.normalizeSectionsForOutput(sections)))
-       .digest('hex');
- 
-     const writingFlags = this.complianceService.enforceResumeWritingRules({
-       baselineSections: baseline.sections ?? [],
-       generatedSections: sections,
-     });
- 
-+    const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
++    if (dto.baselineId !== undefined) {
++      interview.baselineId = dto.baselineId?.trim() || null;
++    }
 +
-     const { complianceFlags, blocked, audit } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.RESUME_GENERATION,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash,
-         scopeInflationDetected: sections.some(
-           (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
-         ),
-         extraFlags: writingFlags,
-       });
- 
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
-         },
-       });
++    if (dto.baselineVersionId !== undefined) {
++      interview.baselineVersionId = dto.baselineVersionId?.trim() || null;
++    }
++
+     if (dto.gapList !== undefined) {
+-      interview.gapList = this.sanitizeStringArray(dto.gapList);
++      interview.gapList = Array.isArray(dto.gapList) ? dto.gapList : [];
      }
  
-     return {
-       ok: true,
-       baselineId: baseline.id,
-       baselineVersionId: baselineVersion.id,
-       jobId: jobId ?? null,
--      sections,
-+      sections: normalizedSections,
-       compliance_flags: complianceFlags,
-       audit_id: audit.id,
-     };
+     if (dto.questions !== undefined) {
+-      interview.questions = this.sanitizeStringArray(dto.questions);
++      interview.questions = Array.isArray(dto.questions) ? dto.questions : [];
+     }
+ 
+     if (dto.responses !== undefined) {
+-      interview.responses = this.sanitizeStringArray(dto.responses);
++      interview.responses = Array.isArray(dto.responses) ? dto.responses : [];
+     }
+ 
+     if (dto.validationResults !== undefined) {
+       interview.validationResults = dto.validationResults ?? {};
+     }
+ 
+     if (dto.recommendedAdditions !== undefined) {
+-      interview.recommendedAdditions = this.sanitizeStringArray(dto.recommendedAdditions);
++      interview.recommendedAdditions = Array.isArray(dto.recommendedAdditions)
++        ? dto.recommendedAdditions
++        : [];
+     }
+ 
+     return this.interviewRepository.save(interview);
    }
  
-   async exportResume(
-     userId: string,
-     request: GenerateResumeRequest,
-     format: 'docx' | 'pdf',
-   ) {
-     const generation = await this.generateResume(userId, request);
-     const text = this.buildResumeText(
-       generation.sections.map((section) => ({
-         title: section.title,
-         content: section.content,
-       })),
-     );
+   async deleteInterviewRecord(id: string, userId: string) {
+     const interview = await this.getInterviewRecordForUser(id, userId);
  
-     const buffer =
-       format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
+     await this.interviewRepository.remove(interview);
  
-     const contentType =
-       format === 'pdf'
-         ? 'application/pdf'
-         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+     return { deleted: true, id };
+   }
+ }
+diff --git a/apps/api/src/interviews/interview-types.ts b/apps/api/src/interviews/interview-types.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6797dc16c70e5df4f977eb8951e9bbeba80a5d5
+--- /dev/null
++++ b/apps/api/src/interviews/interview-types.ts
+@@ -0,0 +1,37 @@
++export type GapDomain =
++  | 'experience'
++  | 'tooling'
++  | 'scope'
++  | 'leadership'
++  | 'industry';
++
++export type GapConfidence = 'low' | 'medium' | 'high';
++
++export type InterviewGap = {
++  gapId: string;
++  domain: GapDomain;
++  jdExcerpt: string;
++  baselineExcerpt: string | null;
++  confidence: GapConfidence;
++};
++
++export type InterviewQuestionCategory =
++  | 'Direct Experience'
++  | 'Context'
++  | 'Scope'
++  | 'Tooling'
++  | 'Impact';
++
++export type InterviewQuestion = {
++  gapId: string;
++  category: InterviewQuestionCategory;
++  prompt: string;
++  jdReference: string;
++};
++
++export type GapDetectionResult = {
++  baselineId: string;
++  baselineVersionId: string;
++  jobId: string;
++  gaps: InterviewGap[];
++};
+diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
+index 0b43e9cf5a12539015002b5a2d0152bebd6915ec..76e6d1830d822f21f38eee553dc5849c355c38de 100644
+--- a/apps/api/src/interviews/interview.entity.ts
++++ b/apps/api/src/interviews/interview.entity.ts
+@@ -1,40 +1,47 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   PrimaryGeneratedColumn,
+   UpdateDateColumn,
+ } from 'typeorm';
++import { InterviewGap, InterviewQuestion } from './interview-types';
+ 
+ @Entity({ name: 'interviews' })
+ export class Interview {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Column()
+   userId!: string;
+ 
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  baselineId!: string | null;
++
++  @Column({ type: 'varchar', length: 255, nullable: true })
++  baselineVersionId!: string | null;
++
+   @Column({ type: 'varchar', length: 255 })
+   jobId!: string;
+ 
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+-  gapList!: string[];
++  gapList!: InterviewGap[];
+ 
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+-  questions!: string[];
++  questions!: InterviewQuestion[];
+ 
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+   responses!: string[];
+ 
+   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+   validationResults!: Record<string, unknown>;
+ 
+   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+   recommendedAdditions!: string[];
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
+ }
+diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
+index 388b8eb6e92402fcb7b6489c64d11640f6619284..33de0a15664087d7ac33d3deede2582b09de4c20 100644
+--- a/apps/api/src/interviews/interviews.module.ts
++++ b/apps/api/src/interviews/interviews.module.ts
+@@ -1,17 +1,40 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
++import { Baseline } from '../baseline/baseline.entity';
++import { BaselineSection } from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
++import { Job } from '../jobs/job.entity';
+ import { Interview } from './interview.entity';
+ import { InterviewRecordsController } from './interview-records.controller';
+ import { InterviewRecordsService } from './interview-records.service';
+ import { InterviewResponse } from './interview-response.entity';
+ import { InterviewSession } from './interview-session.entity';
++import { GapDetectionService } from './gap-detection.service';
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+ import { InterviewsController } from './interviews.controller';
+ import { InterviewsService } from './interviews.service';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([InterviewSession, InterviewResponse, Interview])],
++  imports: [
++    TypeOrmModule.forFeature([
++      InterviewSession,
++      InterviewResponse,
++      Interview,
++      Job,
++      Baseline,
++      BaselineSection,
++      BaselineVersion,
++      BaselineBlockPolicy,
++    ]),
++  ],
+   controllers: [InterviewsController, InterviewRecordsController],
+-  providers: [InterviewsService, InterviewRecordsService],
++  providers: [
++    InterviewsService,
++    InterviewRecordsService,
++    GapDetectionService,
++    InterviewQuestionGeneratorService,
++  ],
+   exports: [InterviewsService, InterviewRecordsService],
+ })
+ export class InterviewsModule {}
+diff --git a/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts b/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cbeec44bec64b49cfe37bbd195bddfe8c3bd0c96
+--- /dev/null
++++ b/apps/api/src/migrations/1830000000000-InterviewBaselineReferences.ts
+@@ -0,0 +1,19 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class InterviewBaselineReferences1830000000000 implements MigrationInterface {
++  name = 'InterviewBaselineReferences1830000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "interviews" ADD COLUMN IF NOT EXISTS "baselineId" character varying(255)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "interviews" ADD COLUMN IF NOT EXISTS "baselineVersionId" character varying(255)`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineVersionId"`);
++    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineId"`);
++  }
++}

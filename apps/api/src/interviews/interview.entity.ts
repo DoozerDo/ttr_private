@@ -5,6 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { InterviewGap, InterviewQuestion } from './interview-types';
 
 @Entity({ name: 'interviews' })
 export class Interview {
@@ -14,14 +15,20 @@ export class Interview {
   @Column()
   userId!: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  baselineId!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  baselineVersionId!: string | null;
+
   @Column({ type: 'varchar', length: 255 })
   jobId!: string;
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-  gapList!: string[];
+  gapList!: InterviewGap[];
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-  questions!: string[];
+  questions!: InterviewQuestion[];
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   responses!: string[];

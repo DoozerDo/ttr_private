@@ -1,14 +1,19 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Interview } from './interview.entity';
 import { InterviewRecordsService } from './interview-records.service';
+import { GapDetectionService } from './gap-detection.service';
+import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+import { InterviewGap, InterviewQuestion } from './interview-types';
 
 describe('InterviewRecordsService', () => {
   const mockInterview: Interview = {
     id: 'interview-1',
     userId: 'user-1',
+    baselineId: 'baseline-1',
+    baselineVersionId: 'baseline-version-1',
     jobId: 'job-1',
-    gapList: ['gap'],
-    questions: ['q1'],
+    gapList: [],
+    questions: [],
     responses: ['r1'],
     validationResults: { ok: true },
     recommendedAdditions: ['add'],
@@ -24,8 +29,16 @@ describe('InterviewRecordsService', () => {
     remove: jest.fn(async (data: Interview) => data),
   });
 
-  const createService = (repository = createMockRepository()) =>
-    new InterviewRecordsService(repository as never);
+  const createService = (
+    repository = createMockRepository(),
+    gapDetectionService: Partial<GapDetectionService> = {},
+    interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
+  ) =>
+    new InterviewRecordsService(
+      repository as never,
+      gapDetectionService as GapDetectionService,
+      interviewQuestionGenerator as InterviewQuestionGeneratorService,
+    );
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -33,12 +46,39 @@ describe('InterviewRecordsService', () => {
 
   it('creates an interview record with required jobId and sanitization', async () => {
     const repository = createMockRepository();
-    const service = createService(repository);
+    const gapList: InterviewGap[] = [
+      {
+        gapId: 'gap-1',
+        domain: 'experience',
+        jdExcerpt: 'JD item',
+        baselineExcerpt: null,
+        confidence: 'high',
+      },
+    ];
+    const questions: InterviewQuestion[] = [
+      {
+        gapId: 'gap-1',
+        category: 'Direct Experience',
+        prompt: 'Question',
+        jdReference: 'JD item',
+      },
+    ];
+    const service = createService(
+      repository,
+      {
+        detectGaps: jest.fn().mockResolvedValue({
+          baselineId: 'baseline-1',
+          baselineVersionId: 'baseline-version-1',
+          jobId: 'job-2',
+          gaps: gapList,
+        }),
+      },
+      { generateQuestions: jest.fn().mockReturnValue(questions) },
+    );
 
     const result = await service.createInterviewRecord('user-1', {
       jobId: ' job-2 ',
-      gapList: [' gap1 ', ''],
-      questions: [' q '],
+      baselineVersionId: 'baseline-version-1',
       responses: [' a '],
       recommendedAdditions: [' add '],
     });
@@ -46,11 +86,13 @@ describe('InterviewRecordsService', () => {
     expect(repository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
         jobId: 'job-2',
-        gapList: ['gap1'],
-        questions: ['q'],
-        responses: ['a'],
-        recommendedAdditions: ['add'],
+        gapList,
+        questions,
+        responses: [' a '],
+        recommendedAdditions: [' add '],
       }),
     );
     expect(result.jobId).toBe('job-2');
@@ -98,16 +140,16 @@ describe('InterviewRecordsService', () => {
 
     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
       jobId: ' job-3 ',
-      gapList: [' gap2 '],
+      gapList: [{ gapId: 'gap-2' }],
       validationResults: { ok: false },
       recommendedAdditions: [' new '],
     });
 
     expect(repository.save).toHaveBeenCalled();
     expect(result.jobId).toBe('job-3');
-    expect(result.gapList).toEqual(['gap2']);
+    expect(result.gapList).toEqual([{ gapId: 'gap-2' }]);
     expect(result.validationResults).toEqual({ ok: false });
-    expect(result.recommendedAdditions).toEqual(['new']);
+    expect(result.recommendedAdditions).toEqual([' new ']);
   });
 
   it('throws when updating with empty jobId', async () => {
