@@ -1,193 +1,372 @@
-diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-index d47836cced7b237826bc67a50a83b955ccae09d4..eaeb7a2e843c72d2db117532a8ff5ade5117a196 100644
---- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-+++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
-@@ -46,50 +46,82 @@ describe('TemplateCoverLetterGenerator', () => {
-           content:
-             'Implemented dashboards and operating cadences to drive visibility and accountability. Focused on measurable outcomes and clear stakeholder communication.',
-           order: 1,
-         },
-       ],
-       closingTemplate: {
-         key: 'steady',
-         text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.spec.ts b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+index c11464bab6a600fe8cb52e53d1d3fd97ac279eaa..e10c3c7cc5d7a1d765d3d14e50467b68066db229 100644
+--- a/apps/api/src/search-sets/search-sets-runner.service.spec.ts
++++ b/apps/api/src/search-sets/search-sets-runner.service.spec.ts
+@@ -2,64 +2,65 @@ import { FitAssessment, FitAssessmentVerdict } from '../analysis/fit-assessment.
+ import { Job, JobIngestionMethod } from '../jobs/job.entity';
+ import {
+   SearchSet,
+   SearchSetSeniority,
+   SearchSetWorkMode,
+ } from './search-set.entity';
+ import { SearchSetsRunnerService } from './search-sets-runner.service';
+ import { SearchSetsService } from './search-sets.service';
+ 
+ describe('SearchSetsRunnerService', () => {
+   const baseSearchSet: SearchSet = {
+     id: 'set-1',
+     userId: 'user-1',
+     titlePatterns: ['Engineer'],
+     seniority: SearchSetSeniority.ANY,
+     industry: [],
+     workMode: SearchSetWorkMode.ANY,
+     sourceUrl: null,
+     urlBacked: false,
+     parseWarning: null,
+     isActive: true,
+     createdAt: new Date(),
+     updatedAt: new Date(),
+   };
+ 
+-  const createJob = (overrides: Partial<Job> = {}): Job =>
++  const createJob = (overrides: Partial<Job> & Record<string, unknown> = {}): Job =>
+     ({
+       id: overrides.id ?? 'job-1',
+       userId: overrides.userId ?? 'user-1',
+       title: overrides.title ?? 'Senior Engineer',
+       company: overrides.company ?? 'Acme Corp',
+       rawDescription: overrides.rawDescription ?? 'Remote friendly role',
+       sourceUrl: overrides.sourceUrl ?? null,
+       normalizedResponsibilities: overrides.normalizedResponsibilities ?? [],
+       normalizedRequirements: overrides.normalizedRequirements ?? [],
+       jdIngestionMethod: overrides.jdIngestionMethod ?? JobIngestionMethod.PASTE,
+       jdParsedAt: overrides.jdParsedAt ?? new Date(),
+       createdAt: overrides.createdAt ?? new Date(),
+       updatedAt: overrides.updatedAt ?? new Date(),
++      ...overrides,
+     } as Job);
+ 
+   const createFitAssessment = (overrides: Partial<FitAssessment>): FitAssessment =>
+     ({
+       id: overrides.id ?? 'assessment-1',
+       userId: overrides.userId ?? 'user-1',
+       jobId: overrides.jobId ?? 'job-1',
+       baselineId: overrides.baselineId ?? 'baseline-1',
+       baselineVersion: overrides.baselineVersion ?? 1,
+       overallScore: overrides.overallScore ?? 80,
+       verdict: overrides.verdict ?? FitAssessmentVerdict.CONSIDER,
+       dimensionScores:
+         overrides.dimensionScores ??
+         ({
+           experienceAlignment: 1,
+           leadershipLevel: 1,
+           technicalPlatformFit: 1,
+           industryContext: 1,
+           strategicTacticalFit: 1,
+         } as FitAssessment['dimensionScores']),
+       strengths: overrides.strengths ?? [],
+       gaps: overrides.gaps ?? [],
+       complianceFlags: overrides.complianceFlags ?? [],
+       inputsHash: overrides.inputsHash ?? null,
+       createdAt: overrides.createdAt ?? new Date(),
+@@ -127,51 +128,51 @@ describe('SearchSetsRunnerService', () => {
+       jobs: [createJob({ sourceUrl: 'https://example.com/apply' })],
+       assessments: [newerAssessment, olderAssessment],
+     });
+ 
+     const results = await service.runSearchSet('set-1', 'user-1', 5);
+ 
+     expect(fitAssessmentRepository.createQueryBuilder).toHaveBeenCalled();
+     expect(results).toEqual([
+       {
+         jobId: 'job-1',
+         title: 'Senior Engineer',
+         company: 'Acme Corp',
+         applyUrl: 'https://example.com/apply',
+         sourceUrl: 'https://example.com/apply',
+         fitScore: 95,
+         verdict: FitAssessmentVerdict.APPLY,
        },
-       tone: 'neutral',
-       maxWords: 350,
-     };
- 
-     const output1 = generator.generate(input as any);
-     const output2 = generator.generate(input as any);
- 
-     expect(output1).toEqual(output2);
-     expect(typeof output1.content).toBe('string');
-     expect(output1.content.length).toBeGreaterThan(0);
- 
-     expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
-     expect(countParagraphs(output1.content)).toBe(4);
-     expect(countWords(output1.content)).toBeLessThanOrEqual(350);
+     ]);
    });
  
-+  it('locks the greeting to the approved salutation even when another greeting is present', () => {
-+    const generator = new TemplateCoverLetterGenerator();
+   it('applies work mode and seniority filters', async () => {
+     const { service } = createService({
+       jobs: [
+         createJob({
+           id: 'job-remote',
+-          title: 'Senior SRE',
++          title: 'Senior Engineer',
+           rawDescription: 'Fully remote position',
+         }),
+         createJob({
+           id: 'job-onsite',
+           title: 'Junior Engineer',
+           rawDescription: 'Onsite role',
+         }),
+       ],
+       searchSet: {
+         ...baseSearchSet,
+         titlePatterns: ['Engineer'],
+         workMode: SearchSetWorkMode.REMOTE,
+         seniority: SearchSetSeniority.SENIOR,
+       },
+       assessments: [],
+     });
+ 
+     const results = await service.runSearchSet('set-1', 'user-1', 10);
+ 
+     expect(results).toHaveLength(1);
+     expect(results[0].jobId).toBe('job-remote');
+   });
+ 
+   it('limits results to 10', async () => {
+     const jobs = Array.from({ length: 12 }).map((_, index) =>
+@@ -197,35 +198,84 @@ describe('SearchSetsRunnerService', () => {
+ 
+     expect(highLimit).toHaveLength(10);
+     expect(lowLimit).toHaveLength(1);
+   });
+ 
+   it('derives applyUrl from sourceUrl and falls back to null when invalid', async () => {
+     const { service } = createService({
+       jobs: [
+         createJob({ id: 'job-valid', sourceUrl: 'https://example.com/apply' }),
+         createJob({ id: 'job-invalid', sourceUrl: 'notaurl' }),
+         createJob({ id: 'job-missing', sourceUrl: null }),
+       ],
+       assessments: [],
+     });
+ 
+     const results = await service.runSearchSet('set-1', 'user-1', 5);
+ 
+     const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
+ 
+     expect(byId['job-valid'].applyUrl).toBe('https://example.com/apply');
+     expect(byId['job-invalid'].applyUrl).toBeNull();
+     expect(byId['job-missing'].applyUrl).toBeNull();
+     expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
+   });
+ 
++  it('prefers explicit apply/posting/job URLs and normalizes them', async () => {
++    const jobs = [
++      createJob({
++        id: 'job-apply',
++        // @ts-expect-error testing loose fields from persisted data
++        applyUrl: ' https://jobs.example.com/submit ',
++      }),
++      createJob({
++        id: 'job-posting',
++        // @ts-expect-error testing loose fields from persisted data
++        postingUrl: 'https://jobs.example.com/posting/123',
++      }),
++      createJob({
++        id: 'job-joburl',
++        // @ts-expect-error testing loose fields from persisted data
++        jobUrl: 'http://jobs.example.com/job/999',
++      }),
++    ];
 +
-+    const input = {
-+      job: {
-+        title: 'Product Manager',
-+        company: 'Fabrikam',
-+        responsibilities: ['Lead product roadmaps.', 'Partner with engineering.'],
-+        requirements: ['Drive impact.', 'Collaborate across teams.'],
-+      },
-+      allowedBaselineBlocks: [
-+        {
-+          title: 'Summary',
-+          content:
-+            'Delivered 25% lift in engagement by coordinating cross-functional releases. Communicated clearly with stakeholders.',
-+          order: 0,
-+        },
-+      ],
-+      closingTemplate: {
-+        key: 'steady',
-+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
-+      },
-+      tone: 'direct',
-+      maxWords: 260,
-+    };
++    const { service } = createService({ jobs, assessments: [] });
 +
-+    const output = generator.generate(input as any);
++    const results = await service.runSearchSet('set-1', 'user-1', 5);
 +
-+    expect(output.content.startsWith('Dear Hiring Team,')).toBe(true);
-+    expect(output.content.toLowerCase()).not.toContain('dear hiring manager');
++    expect(results.find((r) => r.jobId === 'job-apply')?.applyUrl).toBe(
++      'https://jobs.example.com/submit',
++    );
++    expect(results.find((r) => r.jobId === 'job-posting')?.applyUrl).toBe(
++      'https://jobs.example.com/posting/123',
++    );
++    expect(results.find((r) => r.jobId === 'job-joburl')?.applyUrl).toBe(
++      'http://jobs.example.com/job/999',
++    );
 +  });
 +
-   it('does not include disallowed baseline content when it is not provided', () => {
-     const generator = new TemplateCoverLetterGenerator();
- 
-     const disallowed = 'DO_NOT_INCLUDE_THIS';
- 
-     const input = {
-       job: {
-         title: 'Manager, Support Programs',
-         company: 'Example Inc',
-         responsibilities: ['Own support mechanisms and continuous improvement.'],
-         requirements: ['Program management and stakeholder alignment.'],
-       },
-       // Intentionally do NOT include the sentinel in allowedBaselineBlocks.
-       allowedBaselineBlocks: [
-         {
-           title: 'Allowed',
-           content:
-             'Built support operating rhythms and improved internal handoffs. Documented outcomes in plain language and kept commitments modest and clear.',
-           order: 0,
-         },
-       ],
-       closingTemplate: {
-         key: 'steady',
-         text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
-       },
-diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-index b5984237bf5fe91c1f4287f138596d1a31872560..c76d14da86c9e908e0b7c81a59ed45809fe1645e 100644
---- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-+++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
-@@ -1,97 +1,99 @@
- import {
-   AllowedBaselineBlock,
-   CoverLetterGenerationInput,
-   CoverLetterGenerationResult,
-   CoverLetterGenerator,
-   CoverLetterJobContext,
- } from './cover-letter-generator.interface';
- 
- type NormalizedJob = CoverLetterJobContext & {
-   title: string | null;
-   company: string | null;
-   responsibilities: string[];
-   requirements: string[];
- };
- 
- type NormalizedBlock = AllowedBaselineBlock & {
-   content: string;
-   title: string | null;
- };
- 
- export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
--  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
-+  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page (R7 one-page limit).
-   private readonly hardCap = 350;
- 
-   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
-     const targetWords = this.resolveTargetWords(input.maxWords);
-     const job = this.normalizeJob(input.job);
-     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
-     const baselineStatements = this.extractBaselineStatements(baselineBlocks);
-     const focusAreas = this.buildFocusAreas(job);
-     const tone = input.tone?.trim() || null;
- 
-     const paragraphs = [
-       this.composeIntro(job, tone),
-       this.composeStrengths(baselineStatements, tone),
-       this.composeExecution(job, focusAreas, baselineStatements),
-       this.composeClosing(job, tone, input.closingTemplate.text),
-     ].filter((paragraph) => paragraph.length > 0);
- 
-     let content = paragraphs
-       .map((paragraph) => paragraph.trim())
-       .filter(Boolean)
-       .join('\n\n')
-       .trim();
- 
-     content = this.ensureGreeting(content);
- 
-     let wordCount = this.countWords(content);
- 
-     if (wordCount > this.hardCap) {
-       content = this.trimToWordLimit(content, this.hardCap);
-       wordCount = this.countWords(content);
-     } else if (wordCount > targetWords) {
-       content = this.trimToWordLimit(content, targetWords);
-       wordCount = this.countWords(content);
-     }
- 
-     return {
-       content,
-       wordCount,
-     };
-   }
- 
-   private ensureGreeting(body: string) {
-     const greeting = 'Dear Hiring Team,';
-     const normalized = body.trimStart();
- 
-     if (normalized.startsWith(greeting)) {
-       return normalized;
-     }
- 
--    return `${greeting} ${normalized}`.trim();
-+    const stripped = normalized.replace(/^dear\s+hiring\s+team,?\s*/i, '').trimStart();
++  it('always includes applyUrl field even when null', async () => {
++    const jobs = [
++      createJob({ id: 'job-with', sourceUrl: 'https://example.com/has' }),
++      createJob({ id: 'job-without', sourceUrl: null }),
++    ];
 +
-+    return `${greeting} ${stripped}`.trim();
-   }
++    const { service } = createService({ jobs, assessments: [] });
++
++    const results = await service.runSearchSet('set-1', 'user-1', 5);
++
++    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
++    expect(byId['job-with']).toHaveProperty('applyUrl', 'https://example.com/has');
++    expect(byId['job-without']).toHaveProperty('applyUrl', null);
++  });
++
+   it('returns empty results when search set is inactive', async () => {
+     const { service } = createService({
+       searchSet: { ...baseSearchSet, isActive: false },
+     });
  
-   private resolveTargetWords(maxWords?: number | null) {
-     if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
-       return 320;
+     const results = await service.runSearchSet('set-1', 'user-1');
+ 
+     expect(results).toEqual([]);
+   });
+ });
+diff --git a/apps/api/src/search-sets/search-sets-runner.service.ts b/apps/api/src/search-sets/search-sets-runner.service.ts
+index 7c4af6b632b8bdead2510eade4e9af79d6c06768..2ae16cda9afbd919a36a082bb90c579eaebace92 100644
+--- a/apps/api/src/search-sets/search-sets-runner.service.ts
++++ b/apps/api/src/search-sets/search-sets-runner.service.ts
+@@ -53,54 +53,78 @@ export class SearchSetsRunnerService {
+ 
+     if (selectedJobs.length === 0) {
+       return [];
      }
  
-     const clamped = Math.min(Math.max(Math.floor(maxWords), 250), this.hardCap);
-     return clamped;
+     const latestAssessments = await this.loadLatestAssessments(
+       selectedJobs.map((job) => job.id),
+       userId,
+     );
+ 
+     return selectedJobs.map((job) => {
+       const assessment = latestAssessments.get(job.id);
+       return {
+         jobId: job.id,
+         title: job.title,
+         company: job.company,
+         applyUrl: this.deriveApplyUrl(job),
+         sourceUrl: job.sourceUrl,
+         fitScore: assessment?.overallScore ?? null,
+         verdict: assessment?.verdict ?? null,
+       } satisfies SearchSetRunResult;
+     });
    }
  
-   private normalizeJob(job: CoverLetterJobContext): NormalizedJob {
-     const sanitizeList = (items?: string[]) =>
-       (items ?? [])
-         .map((item) => this.cleanText(item))
-         .filter((item): item is string => Boolean(item));
+   private deriveApplyUrl(job: Job) {
+-    if (!job.sourceUrl) return null;
++    const candidateUrls = [
++      (job as any).applyUrl,
++      (job as any).apply_url,
++      (job as any).postingUrl,
++      (job as any).posting_url,
++      (job as any).jobUrl,
++      (job as any).job_url,
++      job.sourceUrl,
++    ];
++
++    for (const candidate of candidateUrls) {
++      const normalized = this.normalizeUrl(candidate);
++      if (normalized) {
++        return normalized;
++      }
++    }
++
++    return null;
++  }
++
++  private normalizeUrl(raw: unknown) {
++    if (typeof raw !== 'string') return null;
++
++    const trimmed = raw.trim();
++    if (!trimmed) return null;
  
-     return {
-       ...job,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: sanitizeList(job.responsibilities),
-       requirements: sanitizeList(job.requirements),
-     };
+     try {
+-      const parsed = new URL(job.sourceUrl);
++      const parsed = new URL(trimmed);
+       const protocol = parsed.protocol.toLowerCase();
+       if (protocol === 'http:' || protocol === 'https:') {
+         return parsed.toString();
+       }
+     } catch {
+       // Ignore invalid URLs and fall back to null.
+     }
+ 
+     return null;
    }
+ 
+   private matchesSearchSet(job: Job, searchSet: SearchSet) {
+     if (!this.matchesTitlePatterns(job.title, searchSet.titlePatterns)) {
+       return false;
+     }
+ 
+     if (!this.matchesSeniority(job, searchSet.seniority)) {
+       return false;
+     }
+ 
+     if (!this.matchesWorkMode(job, searchSet.workMode)) {
+       return false;
+     }
+ 
+     if (!this.matchesIndustry(job, searchSet.industry)) {
+diff --git a/apps/web/app/search-sets/page.tsx b/apps/web/app/search-sets/page.tsx
+index 036591976f8aec1a3b3c0f3b3685f92ef7754fe3..1504dd21bd6791a8700a2160d392f018faebf8a1 100644
+--- a/apps/web/app/search-sets/page.tsx
++++ b/apps/web/app/search-sets/page.tsx
+@@ -568,70 +568,69 @@ export default function SearchSetsPage() {
+ 
+             <h3 className="mt-4 text-sm font-semibold">Run result</h3>
+             <div className="mt-2 rounded border">
+               {runResult === null && (
+                 <div className="px-3 py-2 text-xs text-gray-600">No run yet.</div>
+               )}
+ 
+               {Array.isArray(runResult) && runResult.length === 0 && (
+                 <div className="px-3 py-2 text-xs text-gray-700">No matching jobs found.</div>
+               )}
+ 
+               {Array.isArray(runResult) && runResult.length > 0 && (
+                 <div className="overflow-auto">
+                   <table className="w-full border-collapse text-xs">
+                     <thead className="bg-gray-50 text-left">
+                       <tr>
+                         <th className="whitespace-nowrap px-3 py-2">Company</th>
+                         <th className="whitespace-nowrap px-3 py-2">Title</th>
+                         <th className="whitespace-nowrap px-3 py-2">Fit Score</th>
+                         <th className="whitespace-nowrap px-3 py-2">Verdict</th>
+                         <th className="whitespace-nowrap px-3 py-2">Apply</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {runResult.map((item) => {
+-                        const link = item.applyUrl || item.sourceUrl;
+-                        const hasApply = Boolean(item.applyUrl);
++                        const link = item.applyUrl;
+                         return (
+                           <tr key={item.jobId} className="border-t">
+                             <td className="px-3 py-2">{item.company || 'Unknown'}</td>
+                             <td className="px-3 py-2">{item.title || 'Untitled role'}</td>
+                             <td className="px-3 py-2">{item.fitScore ?? '—'}</td>
+                             <td className="px-3 py-2">{item.verdict ?? '—'}</td>
+                             <td className="px-3 py-2">
+                               {link ? (
+                                 <a
+                                   className="text-blue-700 underline"
+                                   href={link}
+                                   target="_blank"
+                                   rel="noopener noreferrer"
+                                 >
+-                                  {hasApply ? 'Apply' : 'View source'}
++                                  Apply
+                                 </a>
+                               ) : (
+-                                <span className="text-gray-500">No link available</span>
++                                <span className="text-gray-500">No apply link available</span>
+                               )}
+                             </td>
+                           </tr>
+                         );
+                       })}
+                     </tbody>
+                   </table>
+                 </div>
+               )}
+             </div>
+           </div>
+         </div>
+ 
+         <div className="lg:col-span-2">
+           <div className="rounded border p-4">
+             <h2 className="text-lg font-semibold">{formModeLabel}</h2>
+ 
+             <div className="mt-4 space-y-3">
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Title patterns</label>
+                 <textarea
+                   className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                   value={titlePatternsInput}
+                   onChange={(e) => setTitlePatternsInput(e.target.value)}
+                   placeholder="Engineer\nProduct Manager"

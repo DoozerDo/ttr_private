@@ -590,8 +590,7 @@ export default function SearchSetsPage() {
                     </thead>
                     <tbody>
                       {runResult.map((item) => {
-                        const link = item.applyUrl || item.sourceUrl;
-                        const hasApply = Boolean(item.applyUrl);
+                        const link = item.applyUrl;
                         return (
                           <tr key={item.jobId} className="border-t">
                             <td className="px-3 py-2">{item.company || 'Unknown'}</td>
@@ -606,10 +605,10 @@ export default function SearchSetsPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  {hasApply ? 'Apply' : 'View source'}
+                                  Apply
                                 </a>
                               ) : (
-                                <span className="text-gray-500">No link available</span>
+                                <span className="text-gray-500">No apply link available</span>
                               )}
                             </td>
                           </tr>

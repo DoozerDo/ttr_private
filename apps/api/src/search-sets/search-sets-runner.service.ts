@@ -75,10 +75,34 @@ export class SearchSetsRunnerService {
   }
 
   private deriveApplyUrl(job: Job) {
-    if (!job.sourceUrl) return null;
+    const candidateUrls = [
+      (job as any).applyUrl,
+      (job as any).apply_url,
+      (job as any).postingUrl,
+      (job as any).posting_url,
+      (job as any).jobUrl,
+      (job as any).job_url,
+      job.sourceUrl,
+    ];
+
+    for (const candidate of candidateUrls) {
+      const normalized = this.normalizeUrl(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeUrl(raw: unknown) {
+    if (typeof raw !== 'string') return null;
+
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
 
     try {
-      const parsed = new URL(job.sourceUrl);
+      const parsed = new URL(trimmed);
       const protocol = parsed.protocol.toLowerCase();
       if (protocol === 'http:' || protocol === 'https:') {
         return parsed.toString();

@@ -24,7 +24,7 @@ describe('SearchSetsRunnerService', () => {
     updatedAt: new Date(),
   };
 
-  const createJob = (overrides: Partial<Job> = {}): Job =>
+  const createJob = (overrides: Partial<Job> & Record<string, unknown> = {}): Job =>
     ({
       id: overrides.id ?? 'job-1',
       userId: overrides.userId ?? 'user-1',
@@ -38,6 +38,7 @@ describe('SearchSetsRunnerService', () => {
       jdParsedAt: overrides.jdParsedAt ?? new Date(),
       createdAt: overrides.createdAt ?? new Date(),
       updatedAt: overrides.updatedAt ?? new Date(),
+      ...overrides,
     } as Job);
 
   const createFitAssessment = (overrides: Partial<FitAssessment>): FitAssessment =>
@@ -149,7 +150,7 @@ describe('SearchSetsRunnerService', () => {
       jobs: [
         createJob({
           id: 'job-remote',
-          title: 'Senior SRE',
+          title: 'Senior Engineer',
           rawDescription: 'Fully remote position',
         }),
         createJob({
@@ -217,6 +218,55 @@ describe('SearchSetsRunnerService', () => {
     expect(byId['job-invalid'].applyUrl).toBeNull();
     expect(byId['job-missing'].applyUrl).toBeNull();
     expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
+  });
+
+  it('prefers explicit apply/posting/job URLs and normalizes them', async () => {
+    const jobs = [
+      createJob({
+        id: 'job-apply',
+        // @ts-expect-error testing loose fields from persisted data
+        applyUrl: ' https://jobs.example.com/submit ',
+      }),
+      createJob({
+        id: 'job-posting',
+        // @ts-expect-error testing loose fields from persisted data
+        postingUrl: 'https://jobs.example.com/posting/123',
+      }),
+      createJob({
+        id: 'job-joburl',
+        // @ts-expect-error testing loose fields from persisted data
+        jobUrl: 'http://jobs.example.com/job/999',
+      }),
+    ];
+
+    const { service } = createService({ jobs, assessments: [] });
+
+    const results = await service.runSearchSet('set-1', 'user-1', 5);
+
+    expect(results.find((r) => r.jobId === 'job-apply')?.applyUrl).toBe(
+      'https://jobs.example.com/submit',
+    );
+    expect(results.find((r) => r.jobId === 'job-posting')?.applyUrl).toBe(
+      'https://jobs.example.com/posting/123',
+    );
+    expect(results.find((r) => r.jobId === 'job-joburl')?.applyUrl).toBe(
+      'http://jobs.example.com/job/999',
+    );
+  });
+
+  it('always includes applyUrl field even when null', async () => {
+    const jobs = [
+      createJob({ id: 'job-with', sourceUrl: 'https://example.com/has' }),
+      createJob({ id: 'job-without', sourceUrl: null }),
+    ];
+
+    const { service } = createService({ jobs, assessments: [] });
+
+    const results = await service.runSearchSet('set-1', 'user-1', 5);
+
+    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
+    expect(byId['job-with']).toHaveProperty('applyUrl', 'https://example.com/has');
+    expect(byId['job-without']).toHaveProperty('applyUrl', null);
   });
 
   it('returns empty results when search set is inactive', async () => {
