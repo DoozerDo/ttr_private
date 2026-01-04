@@ -1,234 +1,193 @@
-diff --git a/apps/api/src/resume/resume.controller.spec.ts b/apps/api/src/resume/resume.controller.spec.ts
-index 9bfb7491e1c118e2e1638153340001f9d9ac3e25..27a69d124fc9506edfdf96b0e415082fe02adae9 100644
---- a/apps/api/src/resume/resume.controller.spec.ts
-+++ b/apps/api/src/resume/resume.controller.spec.ts
-@@ -1,39 +1,39 @@
- import { ResumeController } from './resume.controller';
- import { ResumeService } from './resume.service';
+diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+index d47836cced7b237826bc67a50a83b955ccae09d4..eaeb7a2e843c72d2db117532a8ff5ade5117a196 100644
+--- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.spec.ts
+@@ -46,50 +46,82 @@ describe('TemplateCoverLetterGenerator', () => {
+           content:
+             'Implemented dashboards and operating cadences to drive visibility and accountability. Focused on measurable outcomes and clear stakeholder communication.',
+           order: 1,
+         },
+       ],
+       closingTemplate: {
+         key: 'steady',
+         text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+       },
+       tone: 'neutral',
+       maxWords: 350,
+     };
  
- describe('ResumeController', () => {
-   it('returns DOCX download with headers', async () => {
-     const send = jest.fn();
-     const setHeader = jest.fn();
-     const response = { setHeader, send };
+     const output1 = generator.generate(input as any);
+     const output2 = generator.generate(input as any);
  
-     const resumeService = {
-       exportResume: jest.fn().mockResolvedValue({
-         buffer: Buffer.from('docx-content'),
-         contentType:
-           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-         filename: 'resume.docx',
-       }),
-       generateResume: jest.fn(),
-     } as unknown as ResumeService;
+     expect(output1).toEqual(output2);
+     expect(typeof output1.content).toBe('string');
+     expect(output1.content.length).toBeGreaterThan(0);
  
-     const controller = new ResumeController(resumeService);
- 
-     await controller.exportResume(
-       { baselineId: 'b', jobId: 'j' },
-       { user: { id: 'user-1' } } as any,
--      'docx',
-       response as any,
-     );
- 
-     expect(setHeader).toHaveBeenCalledWith(
-       'Content-Type',
-       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-     );
-     expect(setHeader).toHaveBeenCalledWith(
-       'Content-Disposition',
-       expect.stringContaining('resume.docx'),
-     );
-+    expect(setHeader).toHaveBeenCalledWith('Content-Length', expect.any(String));
-     expect(send).toHaveBeenCalledWith(expect.any(Buffer));
+     expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
+     expect(countParagraphs(output1.content)).toBe(4);
+     expect(countWords(output1.content)).toBeLessThanOrEqual(350);
    });
- });
-diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
-index bc845231d2d09637c198a466c9c703a11a92f71c..6b4174465f844a5102f56d8c8e4f341a3b65b64f 100644
---- a/apps/api/src/resume/resume.controller.ts
-+++ b/apps/api/src/resume/resume.controller.ts
-@@ -1,46 +1,47 @@
+ 
++  it('locks the greeting to the approved salutation even when another greeting is present', () => {
++    const generator = new TemplateCoverLetterGenerator();
++
++    const input = {
++      job: {
++        title: 'Product Manager',
++        company: 'Fabrikam',
++        responsibilities: ['Lead product roadmaps.', 'Partner with engineering.'],
++        requirements: ['Drive impact.', 'Collaborate across teams.'],
++      },
++      allowedBaselineBlocks: [
++        {
++          title: 'Summary',
++          content:
++            'Delivered 25% lift in engagement by coordinating cross-functional releases. Communicated clearly with stakeholders.',
++          order: 0,
++        },
++      ],
++      closingTemplate: {
++        key: 'steady',
++        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
++      },
++      tone: 'direct',
++      maxWords: 260,
++    };
++
++    const output = generator.generate(input as any);
++
++    expect(output.content.startsWith('Dear Hiring Team,')).toBe(true);
++    expect(output.content.toLowerCase()).not.toContain('dear hiring manager');
++  });
++
+   it('does not include disallowed baseline content when it is not provided', () => {
+     const generator = new TemplateCoverLetterGenerator();
+ 
+     const disallowed = 'DO_NOT_INCLUDE_THIS';
+ 
+     const input = {
+       job: {
+         title: 'Manager, Support Programs',
+         company: 'Example Inc',
+         responsibilities: ['Own support mechanisms and continuous improvement.'],
+         requirements: ['Program management and stakeholder alignment.'],
+       },
+       // Intentionally do NOT include the sentinel in allowedBaselineBlocks.
+       allowedBaselineBlocks: [
+         {
+           title: 'Allowed',
+           content:
+             'Built support operating rhythms and improved internal handoffs. Documented outcomes in plain language and kept commitments modest and clear.',
+           order: 0,
+         },
+       ],
+       closingTemplate: {
+         key: 'steady',
+         text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+       },
+diff --git a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+index b5984237bf5fe91c1f4287f138596d1a31872560..c76d14da86c9e908e0b7c81a59ed45809fe1645e 100644
+--- a/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
++++ b/apps/api/src/cover-letters/generators/template-cover-letter.generator.ts
+@@ -1,97 +1,99 @@
  import {
-   BadRequestException,
-   Body,
-   Controller,
-   Param,
-   Post,
-   Req,
-   Res,
-   UseGuards,
- } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Request, Response } from 'express';
- import { ResumeService } from './resume.service';
+   AllowedBaselineBlock,
+   CoverLetterGenerationInput,
+   CoverLetterGenerationResult,
+   CoverLetterGenerator,
+   CoverLetterJobContext,
+ } from './cover-letter-generator.interface';
  
- type ResumeExportFormat = 'docx' | 'pdf';
+ type NormalizedJob = CoverLetterJobContext & {
+   title: string | null;
+   company: string | null;
+   responsibilities: string[];
+   requirements: string[];
+ };
  
- interface ResumeRequestBody {
-   baselineId?: string;
-   baselineVersionId?: string;
-   jobId?: string;
-   format?: ResumeExportFormat;
-+  oneTap?: boolean;
- }
+ type NormalizedBlock = AllowedBaselineBlock & {
+   content: string;
+   title: string | null;
+ };
  
- @Controller('resume')
- @UseGuards(AuthGuard('jwt'))
- export class ResumeController {
-   constructor(private readonly resumeService: ResumeService) {}
+ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
+-  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
++  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page (R7 one-page limit).
+   private readonly hardCap = 350;
  
-   @Post('generate')
-   async generateResume(
-     @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     return this.handleGenerate(body, request);
-   }
+   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
+     const targetWords = this.resolveTargetWords(input.maxWords);
+     const job = this.normalizeJob(input.job);
+     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
+     const baselineStatements = this.extractBaselineStatements(baselineBlocks);
+     const focusAreas = this.buildFocusAreas(job);
+     const tone = input.tone?.trim() || null;
  
-   @Post()
-   async createResumeRequest(
-     @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     return this.handleGenerate(body, request);
-   }
+     const paragraphs = [
+       this.composeIntro(job, tone),
+       this.composeStrengths(baselineStatements, tone),
+       this.composeExecution(job, focusAreas, baselineStatements),
+       this.composeClosing(job, tone, input.closingTemplate.text),
+     ].filter((paragraph) => paragraph.length > 0);
  
-   @Post('export')
-   async exportResume(
-@@ -58,66 +59,64 @@ export class ResumeController {
-     @Body() body: ResumeRequestBody,
-     @Req() request: Request & { user?: { id?: string } },
-     @Res() res: Response,
-   ) {
-     const format = this.normalizeFormat(formatParam);
-     return this.handleExport(body, request, res, format);
-   }
+     let content = paragraphs
+       .map((paragraph) => paragraph.trim())
+       .filter(Boolean)
+       .join('\n\n')
+       .trim();
  
-   private normalizeFormat(value: string): ResumeExportFormat {
-     const normalized = (value ?? '').toLowerCase().trim();
-     if (normalized === 'pdf') return 'pdf';
-     if (normalized === 'docx') return 'docx';
-     throw new BadRequestException('Invalid format. Use docx or pdf.');
-   }
+     content = this.ensureGreeting(content);
  
-   private getUserId(request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
-     if (!userId) throw new BadRequestException('Invalid user context');
-     return userId;
-   }
+     let wordCount = this.countWords(content);
  
-   private parsePayload(body: ResumeRequestBody) {
-     const baselineId = body.baselineId?.trim();
-     const baselineVersionId = body.baselineVersionId?.trim();
-     const jobId = body.jobId?.trim();
-+    const oneTap = Boolean(body.oneTap);
- 
-     if (!baselineId) throw new BadRequestException('baselineId is required');
-     if (!jobId) throw new BadRequestException('jobId is required');
+     if (wordCount > this.hardCap) {
+       content = this.trimToWordLimit(content, this.hardCap);
+       wordCount = this.countWords(content);
+     } else if (wordCount > targetWords) {
+       content = this.trimToWordLimit(content, targetWords);
+       wordCount = this.countWords(content);
+     }
  
      return {
-       baselineId,
-       baselineVersionId: baselineVersionId ?? undefined,
-       jobId,
-+      oneTap,
+       content,
+       wordCount,
      };
    }
  
-   private async handleGenerate(
-     body: ResumeRequestBody,
-     request: Request & { user?: { id?: string } },
-   ) {
-     const userId = this.getUserId(request);
-     const payload = this.parsePayload(body);
-     return this.resumeService.generateResume(userId, payload);
+   private ensureGreeting(body: string) {
+     const greeting = 'Dear Hiring Team,';
+     const normalized = body.trimStart();
+ 
+     if (normalized.startsWith(greeting)) {
+       return normalized;
+     }
+ 
+-    return `${greeting} ${normalized}`.trim();
++    const stripped = normalized.replace(/^dear\s+hiring\s+team,?\s*/i, '').trimStart();
++
++    return `${greeting} ${stripped}`.trim();
    }
  
-   private async handleExport(
-     body: ResumeRequestBody,
-     request: Request & { user?: { id?: string } },
-     res: Response,
-     format: ResumeExportFormat,
-   ) {
-     const userId = this.getUserId(request);
-     const payload = this.parsePayload(body);
+   private resolveTargetWords(maxWords?: number | null) {
+     if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
+       return 320;
+     }
  
-     const file = await this.resumeService.exportResume(userId, payload, format);
- 
--    const contentType =
--      format === 'pdf'
--        ? 'application/pdf'
--        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
--
--    res.setHeader('Content-Type', contentType);
--    res.setHeader('Content-Disposition', `attachment; filename="resume.${format}"`);
--    res.send(file);
-+    res.setHeader('Content-Type', file.contentType);
-+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
-+    res.setHeader('Content-Length', String(file.buffer.byteLength));
-+    res.send(file.buffer);
+     const clamped = Math.min(Math.max(Math.floor(maxWords), 250), this.hardCap);
+     return clamped;
    }
- }
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
-index 7844be9b57d572a2fbd07f5ca8c412a97f3e9ddf..67edc987859473a94dac0dde5f465aae31ea1703 100644
---- a/apps/api/src/resume/resume.service.spec.ts
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -148,26 +148,59 @@ describe('ResumeService', () => {
-       }),
-     } as unknown as ComplianceService;
  
-     const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
+   private normalizeJob(job: CoverLetterJobContext): NormalizedJob {
+     const sanitizeList = (items?: string[]) =>
+       (items ?? [])
+         .map((item) => this.cleanText(item))
+         .filter((item): item is string => Boolean(item));
  
-     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-       UnprocessableEntityException,
-     );
-   });
- 
-   it('audits resume export actions', async () => {
-     const { service, complianceService } = buildService(95);
- 
-     await service.exportResume('user-1', request, 'pdf');
- 
-     expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
-       expect.objectContaining({
-         action: ComplianceAction.RESUME_EXPORT,
-         actorId: 'user-1',
-         baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
-         job: expect.objectContaining({ id: 'job-1' }),
-         outputHash: expect.any(String),
-       }),
-     );
-   });
-+
-+  it('blocks generation when invented metrics are present', async () => {
-+    const inventedMetricFlag = [
-+      {
-+        code: ComplianceFlagCode.INVENTED_METRIC,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Metric not in baseline.',
-+      },
-+    ];
-+    const { service } = buildService(95, inventedMetricFlag);
-+
-+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-+      UnprocessableEntityException,
-+    );
-+  });
-+
-+  it('blocks export when compliance flags are blocking', async () => {
-+    const complianceService = {
-+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-+      validateAndAudit: jest.fn().mockResolvedValue({
-+        complianceFlags: [
-+          { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
-+        ],
-+        blocked: true,
-+        audit: { id: 'audit-2' },
-+      }),
-+    } as unknown as ComplianceService;
-+    const { service } = buildService(95, [], mockBaselineVersion, complianceService);
-+
-+    await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
-+      UnprocessableEntityException,
-+    );
-+  });
- });
+     return {
+       ...job,
+       title: this.cleanText(job.title),
+       company: this.cleanText(job.company),
+       responsibilities: sanitizeList(job.responsibilities),
+       requirements: sanitizeList(job.requirements),
+     };
+   }

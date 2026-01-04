@@ -19,7 +19,7 @@ type NormalizedBlock = AllowedBaselineBlock & {
 };
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
-  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
+  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page (R7 one-page limit).
   private readonly hardCap = 350;
 
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
@@ -69,7 +69,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       return normalized;
     }
 
-    return `${greeting} ${normalized}`.trim();
+    const stripped = normalized.replace(/^dear\s+hiring\s+team,?\s*/i, '').trimStart();
+
+    return `${greeting} ${stripped}`.trim();
   }
 
   private resolveTargetWords(maxWords?: number | null) {

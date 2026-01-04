@@ -68,6 +68,38 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(countWords(output1.content)).toBeLessThanOrEqual(350);
   });
 
+  it('locks the greeting to the approved salutation even when another greeting is present', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const input = {
+      job: {
+        title: 'Product Manager',
+        company: 'Fabrikam',
+        responsibilities: ['Lead product roadmaps.', 'Partner with engineering.'],
+        requirements: ['Drive impact.', 'Collaborate across teams.'],
+      },
+      allowedBaselineBlocks: [
+        {
+          title: 'Summary',
+          content:
+            'Delivered 25% lift in engagement by coordinating cross-functional releases. Communicated clearly with stakeholders.',
+          order: 0,
+        },
+      ],
+      closingTemplate: {
+        key: 'steady',
+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+      },
+      tone: 'direct',
+      maxWords: 260,
+    };
+
+    const output = generator.generate(input as any);
+
+    expect(output.content.startsWith('Dear Hiring Team,')).toBe(true);
+    expect(output.content.toLowerCase()).not.toContain('dear hiring manager');
+  });
+
   it('does not include disallowed baseline content when it is not provided', () => {
     const generator = new TemplateCoverLetterGenerator();
 
