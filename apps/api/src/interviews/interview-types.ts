@@ -29,7 +29,7 @@ export type InterviewQuestion = {
   jdReference: string;
 };
 
-export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected';
+export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected' | 'deferred';
 
 export type RecommendedAdditionSource = {
   gapId?: string;
@@ -42,6 +42,13 @@ export type RecommendedAddition = {
   text: string;
   sources: RecommendedAdditionSource[];
   status: RecommendedAdditionStatus;
+};
+
+export type RecommendedAdditionDecision = 'accept' | 'reject' | 'defer';
+
+export type AdditionDecision = {
+  additionId: string;
+  decision: RecommendedAdditionDecision;
 };
 
 export type GapDetectionResult = {

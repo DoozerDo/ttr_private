@@ -50,10 +50,10 @@ function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] 
       const questionIndex = typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
       const questionPrompt = typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
 
-      // If nothing meaningful exists, drop the entry.
-      if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) return null;
+      if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) {
+        return null;
+      }
 
-      // IMPORTANT: omit undefined fields to satisfy exactOptionalPropertyTypes.
       const source: RecommendedAdditionSource = {
         ...(gapId !== undefined ? { gapId } : {}),
         ...(questionIndex !== undefined ? { questionIndex } : {}),
@@ -77,6 +77,7 @@ function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[]
       if (typeof entry === 'string') {
         const text = entry.trim();
         if (!text) return null;
+
         return {
           id: buildAdditionId(text, []),
           text,
@@ -116,21 +117,13 @@ export class InterviewRecordsService {
 
   private requireJobId(jobId?: string): string {
     const normalized = jobId?.trim();
-
-    if (!normalized) {
-      throw new BadRequestException('jobId is required');
-    }
-
+    if (!normalized) throw new BadRequestException('jobId is required');
     return normalized;
   }
 
   private requireBaselineVersionId(baselineVersionId?: string): string {
     const normalized = baselineVersionId?.trim();
-
-    if (!normalized) {
-      throw new BadRequestException('baselineVersionId is required');
-    }
-
+    if (!normalized) throw new BadRequestException('baselineVersionId is required');
     return normalized;
   }
 
@@ -157,6 +150,7 @@ export class InterviewRecordsService {
     });
 
     const gapList = dto.gapList?.length ? normalizeGapList(dto.gapList) : detection.gaps;
+
     const questions = dto.questions?.length
       ? normalizeQuestionList(dto.questions)
       : this.interviewQuestionGenerator.generateQuestions(gapList);
@@ -195,20 +189,12 @@ export class InterviewRecordsService {
     return interview;
   }
 
-  async updateInterviewRecord(
-    id: string,
-    userId: string,
-    dto: UpdateInterviewRecordDto,
-  ): Promise<Interview> {
+  async updateInterviewRecord(id: string, userId: string, dto: UpdateInterviewRecordDto): Promise<Interview> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
     if (dto.jobId !== undefined) {
       const jobId = dto.jobId.trim();
-
-      if (!jobId) {
-        throw new BadRequestException('jobId cannot be empty');
-      }
-
+      if (!jobId) throw new BadRequestException('jobId cannot be empty');
       interview.jobId = jobId;
     }
 
@@ -249,11 +235,48 @@ export class InterviewRecordsService {
     return this.interviewsRepo.save(interview);
   }
 
-  async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
+  async applyAdditionDecisions(id: string, userId: string, body: unknown): Promise<Interview> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
-    await this.interviewsRepo.remove(interview);
+    const existing = Array.isArray(interview.recommendedAdditions) ? interview.recommendedAdditions : [];
 
+    const payload = (body ?? {}) as {
+      decisions?: Array<{ id?: string; status?: RecommendedAdditionStatus }>;
+      additions?: Array<{ id?: string; status?: RecommendedAdditionStatus }>;
+      acceptedIds?: string[];
+      rejectedIds?: string[];
+    };
+
+    const decisionsList = Array.isArray(payload.decisions)
+      ? payload.decisions
+      : Array.isArray(payload.additions)
+        ? payload.additions
+        : [];
+
+    const acceptedSet = new Set(Array.isArray(payload.acceptedIds) ? payload.acceptedIds : []);
+    const rejectedSet = new Set(Array.isArray(payload.rejectedIds) ? payload.rejectedIds : []);
+
+    const statusById = new Map<string, RecommendedAdditionStatus>();
+    for (const decision of decisionsList) {
+      const idValue = typeof decision?.id === 'string' ? decision.id : '';
+      const statusValue = decision?.status === 'accepted' || decision?.status === 'rejected' ? decision.status : null;
+      if (idValue && statusValue) statusById.set(idValue, statusValue);
+    }
+
+    interview.recommendedAdditions = existing.map((addition) => {
+      const nextStatus =
+        statusById.get(addition.id) ??
+        (acceptedSet.has(addition.id) ? 'accepted' : rejectedSet.has(addition.id) ? 'rejected' : undefined);
+
+      return nextStatus ? { ...addition, status: nextStatus } : addition;
+    });
+
+    return this.interviewsRepo.save(interview);
+  }
+
+  async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+    await this.interviewsRepo.remove(interview);
     return { deleted: true, id };
   }
 

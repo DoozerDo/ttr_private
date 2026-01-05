@@ -1,258 +1,129 @@
-diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-index 3aed836ce4bdb1c33e6334dbaa6866e7f1783a7c..84363705d9b5a1ce275fcd6385bc3f2d2bcda6d7 100644
---- a/apps/api/src/analysis/analysis.service.ts
-+++ b/apps/api/src/analysis/analysis.service.ts
-@@ -1,48 +1,49 @@
+diff --git a/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts b/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1762e3a06dd18ee966f6150301030b96b00fea2f
+--- /dev/null
++++ b/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts
+@@ -0,0 +1,5 @@
++import { AdditionDecision } from '../interview-types';
++
++export class ApplyAdditionDecisionsDto {
++  decisions!: AdditionDecision[];
++}
+diff --git a/apps/api/src/interviews/interview-records.controller.ts b/apps/api/src/interviews/interview-records.controller.ts
+index 036ddbcdf20ffd1cfa99c4d7e39e468985c48c90..51342dba53551cbf65389a1534ee1513d2fdd1d1 100644
+--- a/apps/api/src/interviews/interview-records.controller.ts
++++ b/apps/api/src/interviews/interview-records.controller.ts
+@@ -1,40 +1,41 @@
  import {
    BadRequestException,
-   Injectable,
-   NotFoundException,
+   Body,
+   Controller,
+   Delete,
+   Get,
+   Param,
+   Patch,
+   Post,
+   Req,
+   UseGuards,
  } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
-   BaselineSectionType,
- } from '../baseline/baseline-section.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { ComplianceService } from '../compliance/compliance.service';
- import {
-   ComplianceAction,
-   ComplianceFlag,
-   ComplianceFlagSeverity,
- } from '../compliance/compliance.types';
- import { Interview } from '../interviews/interview.entity';
-+import { RecommendedAddition } from '../interviews/interview-types';
- import { Job } from '../jobs/job.entity';
- import { CalibrationWeights, User } from '../users/user.entity';
- import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
- import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
- import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
- import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
- import {
-   DimensionWeightOverrides,
-   FitScoringService,
- } from './fit-scoring.service';
+ import { AuthGuard } from '@nestjs/passport';
+ import type { Request } from 'express';
+ import { CreateInterviewRecordDto } from './dto/create-interview.dto';
++import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
+ import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
+ import { InterviewRecordsService } from './interview-records.service';
  
- export type AnalysisRequest = {
-   baselineId: string;
-   jobId?: string;
-   jobDescription?: string;
- };
+ @Controller('interview-records')
+ @UseGuards(AuthGuard('jwt'))
+ export class InterviewRecordsController {
+   constructor(private readonly interviewRecordsService: InterviewRecordsService) {}
  
- export type AnalysisResult = {
-   ok: boolean;
-   baselineId: string;
-   score: number;
-   strengths: string[];
-   gaps: string[];
-   summary: string;
- };
-@@ -194,54 +195,54 @@ export class AnalysisService {
-         version: baseline.version ?? null,
-         sections: sectionPayload,
-       },
-       calibration: dimensionWeights,
-     };
- 
-     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-   }
- 
-   private coerceComplianceFlags(flags: string[] | undefined | null) {
-     if (!flags?.length) return undefined;
-     return flags.map((flag) => ({ code: flag, message: flag }));
-   }
- 
-   private mapComplianceStringsToFlags(
-     flags?: string[] | null,
-   ): ComplianceFlag[] | undefined {
-     if (!flags?.length) return undefined;
-     return flags.map((flag) => ({
-       code: flag as any,
-       message: flag,
-       severity: ComplianceFlagSeverity.BLOCK,
-     }));
-   }
- 
--  private normalizeAdditions(additions?: string[] | null) {
-+  private normalizeAdditions(additions?: (string | RecommendedAddition)[] | null) {
-     if (!additions?.length) return [];
-     return additions
--      .map((entry) => entry?.trim())
-+      .map((entry) => (typeof entry === 'string' ? entry : entry?.text)?.trim())
-       .filter((entry): entry is string => Boolean(entry));
-   }
- 
-   private assertJobInput(job?: FitScoreJobInput) {
-     const rawText = job?.raw_jd_text ?? job?.raw_jd;
-     const hasRaw = Boolean(rawText?.trim());
-     const parsed = job?.parsed_jd;
-     const hasParsed = Boolean(
-       parsed &&
-         ((parsed.responsibilities && parsed.responsibilities.length > 0) ||
-           (parsed.requirements && parsed.requirements.length > 0)),
-     );
-     const hasId = Boolean(job?.id?.trim());
-     const providedCount = Number(hasRaw) + Number(hasParsed);
- 
-     if (hasId && providedCount > 0) {
-       throw new BadRequestException({
-         error: {
-           code: 'JD_INPUT_AMBIGUOUS',
-           message: 'Provide either job.id or JD content, not both.',
-         },
-       });
-     }
- 
-     if (!hasId && providedCount === 0) {
-diff --git a/apps/api/src/baseline/baseline-version.service.ts b/apps/api/src/baseline/baseline-version.service.ts
-index b8f4ffc75cdc5ea8e9b51ef3959a9a0aa0d1cb99..77fba2c0c20f0ddc5ffe842722f53bb6c0727e4e 100644
---- a/apps/api/src/baseline/baseline-version.service.ts
-+++ b/apps/api/src/baseline/baseline-version.service.ts
-@@ -1,30 +1,31 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'node:crypto';
- import { Repository } from 'typeorm';
- import { Interview } from '../interviews/interview.entity';
-+import { RecommendedAddition } from '../interviews/interview-types';
- import { ComplianceFlagSeverity } from '../compliance/compliance.types';
- import { ComplianceService } from '../compliance/compliance.service';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from './baseline-section.entity';
- import { Baseline } from './baseline.entity';
- import { BaselineBlockPolicy } from './baseline-block-policy.entity';
- import { BaselineVersion } from './baseline-version.entity';
- 
- type PolicyState = {
-   baselineSectionId: string;
-   includePolicy: BaselineIncludePolicy;
-   order: number;
- };
- 
- type ApproveAdditionsPayload = {
-   baselineId: string;
-   interviewId?: string;
-   additions?: string[];
- };
- 
- @Injectable()
- export class BaselineVersionService {
-   constructor(
-@@ -51,54 +52,54 @@ export class BaselineVersionService {
- 
-   private buildVersionHash(
-     baselineHash: string | null,
-     policies: PolicyState[],
-     additions: string[],
+   @Post()
+   async createInterviewRecord(
+     @Body() body: CreateInterviewRecordDto,
+     @Req() request: Request & { user?: { id?: string } },
    ) {
-     const normalizedPolicies = [...policies]
-       .map((policy) => ({
-         id: policy.baselineSectionId,
-         includePolicy: policy.includePolicy,
-         order: policy.order,
-       }))
-       .sort((a, b) => {
-         const delta = a.id.localeCompare(b.id);
-         if (delta !== 0) return delta;
-         return a.order - b.order;
-       });
+     const userId = request.user?.id;
  
-     const normalizedAdditions = [...additions].sort((a, b) => a.localeCompare(b));
- 
-     return createHash('sha256')
-       .update(JSON.stringify({ baselineHash: baselineHash ?? null, policies: normalizedPolicies, additions: normalizedAdditions }))
-       .digest('hex');
-   }
- 
--  private normalizeAdditions(additions?: string[] | null) {
-+  private normalizeAdditions(additions?: (string | RecommendedAddition)[] | null) {
-     if (!additions?.length) return [];
-     return additions
--      .map((entry) => entry?.trim())
-+      .map((entry) => (typeof entry === 'string' ? entry : entry?.text)?.trim())
-       .filter((entry): entry is string => Boolean(entry));
-   }
- 
-   async approveVerifiedAdditions(userId: string, payload: ApproveAdditionsPayload) {
-     const baselineId = payload.baselineId?.trim();
- 
-     if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
      }
  
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-     });
+     return this.interviewRecordsService.createInterviewRecord(userId, body);
+   }
  
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
+   @Get()
+   async listInterviewRecords(
+     @Req() request: Request & { user?: { id?: string } },
+@@ -55,39 +56,54 @@ export class InterviewRecordsController {
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
      }
  
-     const additionsFromPayload = this.normalizeAdditions(payload.additions);
+     return this.interviewRecordsService.getInterviewRecordForUser(id, userId);
+   }
  
-     const interviewId = payload.interviewId?.trim();
-     const interview = interviewId
-       ? await this.interviewRepository.findOne({
-           where: { id: interviewId, userId },
-         })
-diff --git a/apps/api/src/interviews/dto/create-interview.dto.ts b/apps/api/src/interviews/dto/create-interview.dto.ts
-index f80c1146239d658713e2397334abad1d56a410f0..d703d52f25c14f96aca548909f8bdda79709e641 100644
---- a/apps/api/src/interviews/dto/create-interview.dto.ts
-+++ b/apps/api/src/interviews/dto/create-interview.dto.ts
-@@ -1,12 +1,12 @@
--import { InterviewGap, InterviewQuestion } from '../interview-types';
-+import { InterviewGap, InterviewQuestion, RecommendedAddition } from '../interview-types';
+   @Patch(':id')
+   async updateInterviewRecord(
+     @Param('id') id: string,
+     @Body() body: UpdateInterviewRecordDto,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
  
- export class CreateInterviewRecordDto {
-   jobId!: string;
-   baselineId?: string;
-   baselineVersionId!: string;
-   gapList?: InterviewGap[];
-   questions?: InterviewQuestion[];
-   responses?: string[];
-   validationResults?: Record<string, unknown>;
--  recommendedAdditions?: string[];
-+  recommendedAdditions?: RecommendedAddition[];
- }
-diff --git a/apps/api/src/interviews/dto/update-interview.dto.ts b/apps/api/src/interviews/dto/update-interview.dto.ts
-index 8d14031768e1de24fe6cfe91d7bc38ba36d4f6b6..c467e14290883934e222f442abc6a5c84968f3a1 100644
---- a/apps/api/src/interviews/dto/update-interview.dto.ts
-+++ b/apps/api/src/interviews/dto/update-interview.dto.ts
-@@ -1,12 +1,12 @@
--import { InterviewGap, InterviewQuestion } from '../interview-types';
-+import { InterviewGap, InterviewQuestion, RecommendedAddition } from '../interview-types';
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
  
- export class UpdateInterviewRecordDto {
-   jobId?: string;
-   baselineId?: string;
-   baselineVersionId?: string;
-   gapList?: InterviewGap[];
-   questions?: InterviewQuestion[];
-   responses?: string[];
-   validationResults?: Record<string, unknown>;
--  recommendedAdditions?: string[];
-+  recommendedAdditions?: RecommendedAddition[];
+     return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
+   }
+ 
++  @Post(':id/decisions')
++  async applyAdditionDecisions(
++    @Param('id') id: string,
++    @Body() body: ApplyAdditionDecisionsDto,
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    return this.interviewRecordsService.applyAdditionDecisions(id, userId, body);
++  }
++
+   @Delete(':id')
+   async deleteInterviewRecord(
+     @Param('id') id: string,
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return this.interviewRecordsService.deleteInterviewRecord(id, userId);
+   }
  }
 diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
-index 1c65f6b206eaae1603ba9882739efd22bf39a9c5..8f1654c873de1d39cda0a61e9dce9323e39bec7f 100644
+index 8f1654c873de1d39cda0a61e9dce9323e39bec7f..95edc33fd1da3e36b04f4f3dc12b7318f49491f6 100644
 --- a/apps/api/src/interviews/interview-records.service.spec.ts
 +++ b/apps/api/src/interviews/interview-records.service.spec.ts
-@@ -1,65 +1,79 @@
+@@ -1,79 +1,88 @@
  import { BadRequestException, NotFoundException } from '@nestjs/common';
-+import { createHash } from 'crypto';
+ import { createHash } from 'crypto';
  import { Interview } from './interview.entity';
  import { InterviewRecordsService } from './interview-records.service';
  import { GapDetectionService } from './gap-detection.service';
  import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
--import { InterviewGap, InterviewQuestion } from './interview-types';
-+import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
+ import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
++import { BaselineVersionService } from '../baseline/baseline-version.service';
++import { AnalysisService } from '../analysis/analysis.service';
  
  describe('InterviewRecordsService', () => {
    const mockInterview: Interview = {
@@ -265,17 +136,17 @@ index 1c65f6b206eaae1603ba9882739efd22bf39a9c5..8f1654c873de1d39cda0a61e9dce9323
      questions: [],
      responses: ['r1'],
      validationResults: { ok: true },
--    recommendedAdditions: ['add'],
-+    recommendedAdditions: [
-+      {
-+        id: createHash('sha256')
-+          .update(JSON.stringify({ text: 'add', sources: [] }))
-+          .digest('hex'),
-+        text: 'add',
-+        sources: [],
-+        status: 'proposed',
-+      },
-+    ],
+     recommendedAdditions: [
+       {
+         id: createHash('sha256')
+           .update(JSON.stringify({ text: 'add', sources: [] }))
+           .digest('hex'),
+         text: 'add',
+         sources: [],
+         status: 'proposed',
+       },
+     ],
++    expandedFitAssessment: null,
      createdAt: new Date('2024-01-01T00:00:00Z'),
      updatedAt: new Date('2024-01-01T00:00:00Z'),
    };
@@ -292,15 +163,21 @@ index 1c65f6b206eaae1603ba9882739efd22bf39a9c5..8f1654c873de1d39cda0a61e9dce9323
      repository = createMockRepository(),
      gapDetectionService: Partial<GapDetectionService> = {},
      interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
-+    recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
-+      generateFromResponses: jest.fn().mockReturnValue([]),
+     recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
+       generateFromResponses: jest.fn().mockReturnValue([]),
+     },
++    baselineVersionService: Partial<BaselineVersionService> = {
++      approveVerifiedAdditions: jest.fn(),
 +    },
++    analysisService?: Partial<AnalysisService>,
    ) =>
      new InterviewRecordsService(
        repository as never,
        gapDetectionService as GapDetectionService,
        interviewQuestionGenerator as InterviewQuestionGeneratorService,
-+      recommendedAdditionsService as any,
+       recommendedAdditionsService as any,
++      baselineVersionService as BaselineVersionService,
++      analysisService as AnalysisService,
      );
  
    afterEach(() => {
@@ -326,161 +203,154 @@ index 1c65f6b206eaae1603ba9882739efd22bf39a9c5..8f1654c873de1d39cda0a61e9dce9323
          jdReference: 'JD item',
        },
      ];
-@@ -70,106 +84,163 @@ describe('InterviewRecordsService', () => {
-           baselineId: 'baseline-1',
-           baselineVersionId: 'baseline-version-1',
-           jobId: 'job-2',
-           gaps: gapList,
-         }),
+@@ -211,36 +220,160 @@ describe('InterviewRecordsService', () => {
+     expect(result.recommendedAdditions).toEqual(additions);
+   });
+ 
+   it('skips recommendations when compliance blocks', async () => {
+     const repository = createMockRepository();
+     repository.findOne.mockResolvedValue({
+       ...mockInterview,
+       validationResults: {
+         blocked: false,
+         complianceFlags: [{ severity: 'block' }],
        },
-       { generateQuestions: jest.fn().mockReturnValue(questions) },
-     );
- 
-     const result = await service.createInterviewRecord('user-1', {
-       jobId: ' job-2 ',
-       baselineVersionId: 'baseline-version-1',
-       responses: [' a '],
-       recommendedAdditions: [' add '],
      });
- 
-     expect(repository.create).toHaveBeenCalledWith(
-       expect.objectContaining({
-         userId: 'user-1',
-         baselineId: 'baseline-1',
-         baselineVersionId: 'baseline-version-1',
-         jobId: 'job-2',
-         gapList,
-         questions,
-         responses: [' a '],
--        recommendedAdditions: [' add '],
-+        recommendedAdditions: [
-+          {
-+            id: expect.any(String),
-+            sources: [],
-+            status: 'proposed',
-+            text: 'add',
-+          },
-+        ],
-       }),
-     );
-     expect(result.jobId).toBe('job-2');
-   });
- 
-   it('lists interview records for a user', async () => {
-     const repository = createMockRepository();
-     repository.find.mockResolvedValue([mockInterview]);
-     const service = createService(repository);
- 
-     const records = await service.listInterviewRecordsForUser('user-1');
- 
-     expect(repository.find).toHaveBeenCalledWith({
-       where: { userId: 'user-1' },
-       order: { createdAt: 'DESC' },
-     });
-     expect(records).toEqual([mockInterview]);
-   });
- 
-   it('retrieves an interview record for a user', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(mockInterview);
-     const service = createService(repository);
- 
-     const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
- 
-     expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
-     expect(record).toEqual(mockInterview);
-   });
- 
-   it('throws when interview record not found', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(null);
-     const service = createService(repository);
- 
-     await expect(
-       service.getInterviewRecordForUser('missing', 'user-1'),
-     ).rejects.toBeInstanceOf(NotFoundException);
-   });
- 
-   it('updates an interview record with validation', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue({ ...mockInterview });
--    const service = createService(repository);
-+    const recommendedAdditions = [
-+      { id: 'abc', text: 'addition', sources: [], status: 'proposed' as const },
-+    ];
-+    const service = createService(repository, {}, {}, {
-+      generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
-+    });
+     const recommendedAdditionsService = {
+       generateFromResponses: jest.fn(),
+     };
+     const service = createService(repository, {}, {}, recommendedAdditionsService);
  
      const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-       jobId: ' job-3 ',
-       gapList: [{ gapId: 'gap-2' }],
-       validationResults: { ok: false },
--      recommendedAdditions: [' new '],
-+      responses: [' a '],
+       responses: [' Response '],
      });
  
-     expect(repository.save).toHaveBeenCalled();
-     expect(result.jobId).toBe('job-3');
-     expect(result.gapList).toEqual([{ gapId: 'gap-2' }]);
-     expect(result.validationResults).toEqual({ ok: false });
--    expect(result.recommendedAdditions).toEqual([' new ']);
-+    expect(result.recommendedAdditions).toEqual(recommendedAdditions);
+     expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
+     expect(result.recommendedAdditions).toEqual([]);
    });
  
-   it('throws when updating with empty jobId', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue({ ...mockInterview });
-     const service = createService(repository);
- 
-     await expect(
-       service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
-     ).rejects.toBeInstanceOf(BadRequestException);
-   });
- 
-+  it('generates recommended additions when compliance allows', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({ ...mockInterview, recommendedAdditions: [] });
-+    const additions = [
-+      { id: 'a', text: 'Addition 1', sources: [], status: 'proposed' as const },
-+    ];
-+    const recommendedAdditionsService = {
-+      generateFromResponses: jest.fn().mockReturnValue(additions),
-+    };
-+    const service = createService(repository, {}, {}, recommendedAdditionsService);
-+
-+    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-+      responses: [' Response '],
-+    });
-+
-+    expect(recommendedAdditionsService.generateFromResponses).toHaveBeenCalledWith({
-+      responses: [' Response '],
-+      questions: [],
-+      gaps: [],
-+    });
-+    expect(result.recommendedAdditions).toEqual(additions);
-+  });
-+
-+  it('skips recommendations when compliance blocks', async () => {
++  it('applies decisions to recommended additions', async () => {
 +    const repository = createMockRepository();
 +    repository.findOne.mockResolvedValue({
 +      ...mockInterview,
-+      validationResults: {
-+        blocked: false,
-+        complianceFlags: [{ severity: 'block' }],
-+      },
++      recommendedAdditions: [
++        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
++        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
++      ],
 +    });
-+    const recommendedAdditionsService = {
-+      generateFromResponses: jest.fn(),
++    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
++    const service = createService(repository, {}, {}, undefined, baselineVersionService);
++
++    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
++      decisions: [
++        { additionId: 'a1', decision: 'reject' },
++        { additionId: 'a2', decision: 'defer' },
++      ],
++    });
++
++    expect(repository.save).toHaveBeenCalledTimes(1);
++    expect(result.recommendedAdditions).toEqual([
++      { id: 'a1', text: 'Addition A', sources: [], status: 'rejected' },
++      { id: 'a2', text: 'Addition B', sources: [], status: 'deferred' },
++    ]);
++    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
++  });
++
++  it('approves accepted additions and stores baseline version reference', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({
++      ...mockInterview,
++      recommendedAdditions: [
++        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
++        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
++      ],
++    });
++    const baselineVersionService = {
++      approveVerifiedAdditions: jest.fn().mockResolvedValue({
++        baseline_version_id: 'new-version',
++        version_number: 3,
++        hash: 'hash',
++        diff: {},
++      }),
 +    };
-+    const service = createService(repository, {}, {}, recommendedAdditionsService);
++    const service = createService(repository, {}, {}, undefined, baselineVersionService);
 +
-+    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-+      responses: [' Response '],
++    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
++      decisions: [
++        { additionId: 'a1', decision: 'accept' },
++        { additionId: 'a2', decision: 'reject' },
++      ],
 +    });
 +
-+    expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
-+    expect(result.recommendedAdditions).toEqual([]);
++    expect(baselineVersionService.approveVerifiedAdditions).toHaveBeenCalledWith('user-1', {
++      baselineId: 'baseline-1',
++      interviewId: 'interview-1',
++      additions: [
++        { id: 'a1', text: 'Addition A', sources: [], status: 'accepted' },
++      ],
++    });
++    expect(repository.save).toHaveBeenCalledTimes(2);
++    expect(result.baselineVersionId).toBe('new-version');
++    expect(result.recommendedAdditions[0].status).toBe('accepted');
++  });
++
++  it('does not approve baseline when no additions are accepted', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({
++      ...mockInterview,
++      recommendedAdditions: [
++        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
++      ],
++    });
++    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
++    const service = createService(repository, {}, {}, undefined, baselineVersionService);
++
++    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
++      decisions: [{ additionId: 'a1', decision: 'reject' }],
++    });
++
++    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
++    expect(repository.save).toHaveBeenCalledTimes(1);
++    expect(result.recommendedAdditions[0].status).toBe('rejected');
++  });
++
++  it('runs expanded fit assessment when available', async () => {
++    const repository = createMockRepository();
++    repository.findOne.mockResolvedValue({
++      ...mockInterview,
++      recommendedAdditions: [
++        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
++      ],
++    });
++    const baselineVersionService = {
++      approveVerifiedAdditions: jest.fn().mockResolvedValue({
++        baseline_version_id: 'new-version',
++        version_number: 4,
++        hash: 'hash',
++        diff: {},
++      }),
++    };
++    const analysisService = {
++      runExpandedFitAssessment: jest.fn().mockResolvedValue({
++        ok: true,
++        expandedScore: 98,
++      }),
++    };
++    const service = createService(repository, {}, {}, undefined, baselineVersionService, analysisService);
++
++    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
++      decisions: [{ additionId: 'a1', decision: 'accept' }],
++    });
++
++    expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith('user-1', {
++      jobId: 'job-1',
++      baselineId: 'baseline-1',
++      baselineVersion: 4,
++      interviewId: 'interview-1',
++      verifiedAdditions: ['Addition A'],
++    });
++    expect(result.expandedFitAssessment).toEqual({ ok: true, expandedScore: 98 });
++    expect(result.baselineVersionId).toBe('new-version');
 +  });
 +
    it('deletes an interview record', async () => {
@@ -495,29 +365,34 @@ index 1c65f6b206eaae1603ba9882739efd22bf39a9c5..8f1654c873de1d39cda0a61e9dce9323
    });
  });
 diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
-index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a70dab9364 100644
+index ae19e0081d59f3b45b25cc7d57ebbc8fadc87903..4d0302ceab5c400b42bd0f94fb4469cc33d952d1 100644
 --- a/apps/api/src/interviews/interview-records.service.ts
 +++ b/apps/api/src/interviews/interview-records.service.ts
-@@ -1,105 +1,195 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+@@ -1,62 +1,67 @@
+-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
  import { InjectRepository } from '@nestjs/typeorm';
-+import { createHash } from 'node:crypto';
+ import { createHash } from 'node:crypto';
  import { Repository } from 'typeorm';
-+import { ComplianceFlagSeverity } from '../compliance/compliance.types';
++import { AnalysisService } from '../analysis/analysis.service';
++import { BaselineVersionService } from '../baseline/baseline-version.service';
+ import { ComplianceFlagSeverity } from '../compliance/compliance.types';
++import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
  import { GapDetectionService } from './gap-detection.service';
  import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
  import { CreateInterviewRecordDto } from './dto/create-interview.dto';
  import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
  import { Interview } from './interview.entity';
--import { InterviewGap, InterviewQuestion } from './interview-types';
-+import {
-+  InterviewGap,
-+  InterviewQuestion,
-+  RecommendedAddition,
-+  RecommendedAdditionSource,
-+  RecommendedAdditionStatus,
-+} from './interview-types';
-+import { RecommendedAdditionsService } from './recommended-additions.service';
+ import {
++  AdditionDecision,
+   InterviewGap,
+   InterviewQuestion,
+   RecommendedAddition,
++  RecommendedAdditionDecision,
+   RecommendedAdditionSource,
+   RecommendedAdditionStatus,
+ } from './interview-types';
+ import { RecommendedAdditionsService } from './recommended-additions.service';
  
  function normalizeStringArray(value?: unknown[]): string[] {
    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -535,72 +410,83 @@ index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a7
      : [];
  }
  
-+function normalizeAdditionStatus(value?: unknown): RecommendedAdditionStatus {
-+  return value === 'accepted' || value === 'rejected' ? value : 'proposed';
-+}
+ function normalizeAdditionStatus(value?: unknown): RecommendedAdditionStatus {
+-  return value === 'accepted' || value === 'rejected' ? value : 'proposed';
++  return value === 'accepted' || value === 'rejected' || value === 'deferred' ? value : 'proposed';
+ }
+ 
+ function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] {
+   if (!Array.isArray(value)) return [];
+ 
+   return value
+     .map((entry): RecommendedAdditionSource | null => {
+       if (!entry || typeof entry !== 'object') return null;
+ 
+       const raw = entry as Partial<RecommendedAdditionSource>;
+ 
+       const gapId = typeof raw.gapId === 'string' ? raw.gapId : undefined;
+       const questionIndex = typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
+       const questionPrompt = typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
+ 
+       // If nothing meaningful exists, drop the entry.
+       if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) return null;
+ 
+       // IMPORTANT: omit undefined fields to satisfy exactOptionalPropertyTypes.
+       const source: RecommendedAdditionSource = {
+         ...(gapId !== undefined ? { gapId } : {}),
+         ...(questionIndex !== undefined ? { questionIndex } : {}),
+         ...(questionPrompt !== undefined ? { questionPrompt } : {}),
+       };
+ 
+@@ -82,58 +87,85 @@ function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[]
+           text,
+           sources: [],
+           status: 'proposed' as const,
+         };
+       }
+ 
+       if (!entry || typeof entry !== 'object') return null;
+ 
+       const addition = entry as RecommendedAddition;
+       const text = typeof addition.text === 'string' ? addition.text.trim() : '';
+       if (!text) return null;
+ 
+       const sources = normalizeAdditionSources(addition.sources);
+       const status = normalizeAdditionStatus(addition.status);
+ 
+       return {
+         id: typeof addition.id === 'string' && addition.id ? addition.id : buildAdditionId(text, sources),
+         text,
+         sources,
+         status,
+       };
+     })
+     .filter((entry): entry is RecommendedAddition => Boolean(entry));
+ }
+ 
++type NormalizedDecision = {
++  additionId: string;
++  decision: RecommendedAdditionDecision;
++};
 +
-+function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] {
++function normalizeDecisions(value?: AdditionDecision[]): NormalizedDecision[] {
 +  if (!Array.isArray(value)) return [];
 +
 +  return value
 +    .map((entry) => {
 +      if (!entry || typeof entry !== 'object') return null;
-+      const source = entry as RecommendedAdditionSource;
 +
-+      if (
-+        source.gapId === undefined &&
-+        source.questionIndex === undefined &&
-+        (!source.questionPrompt || typeof source.questionPrompt !== 'string')
-+      ) {
-+        return null;
++      const additionId = typeof entry.additionId === 'string' ? entry.additionId.trim() : '';
++      const decision = typeof entry.decision === 'string' ? entry.decision.trim() : '';
++
++      if (!additionId || !decision) return null;
++      if (decision !== 'accept' && decision !== 'reject' && decision !== 'defer') {
++        throw new BadRequestException('decision must be accept, reject, or defer');
 +      }
 +
-+      return {
-+        gapId: source.gapId,
-+        questionIndex: source.questionIndex,
-+        questionPrompt: source.questionPrompt,
-+      };
++      return { additionId, decision };
 +    })
-+    .filter((entry): entry is RecommendedAdditionSource => Boolean(entry));
-+}
-+
-+function buildAdditionId(text: string, sources: RecommendedAdditionSource[]): string {
-+  return createHash('sha256').update(JSON.stringify({ text, sources })).digest('hex');
-+}
-+
-+function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[] {
-+  if (!Array.isArray(value)) return [];
-+
-+  return value
-+    .map((entry) => {
-+      if (typeof entry === 'string') {
-+        const text = entry.trim();
-+        if (!text) return null;
-+        return {
-+          id: buildAdditionId(text, []),
-+          text,
-+          sources: [],
-+          status: 'proposed' as const,
-+        };
-+      }
-+
-+      if (!entry || typeof entry !== 'object') return null;
-+
-+      const addition = entry as RecommendedAddition;
-+      const text = typeof addition.text === 'string' ? addition.text.trim() : '';
-+      if (!text) return null;
-+
-+      const sources = normalizeAdditionSources(addition.sources);
-+      const status = normalizeAdditionStatus(addition.status);
-+
-+      return {
-+        id: typeof addition.id === 'string' && addition.id ? addition.id : buildAdditionId(text, sources),
-+        text,
-+        sources,
-+        status,
-+      };
-+    })
-+    .filter((entry): entry is RecommendedAddition => Boolean(entry));
++    .filter((entry): entry is NormalizedDecision => Boolean(entry));
 +}
 +
  @Injectable()
@@ -610,7 +496,9 @@ index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a7
      private readonly interviewsRepo: Repository<Interview>,
      private readonly gapDetectionService: GapDetectionService,
      private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
-+    private readonly recommendedAdditionsService: RecommendedAdditionsService,
+     private readonly recommendedAdditionsService: RecommendedAdditionsService,
++    private readonly baselineVersionService: BaselineVersionService,
++    @Optional() private readonly analysisService?: AnalysisService,
    ) {}
  
    private requireJobId(jobId?: string): string {
@@ -633,83 +521,10 @@ index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a7
      return normalized;
    }
  
-+  private hasBlockingCompliance(validationResults: Record<string, unknown> | undefined | null): boolean {
-+    if (!validationResults) return false;
-+
-+    const blocked = Boolean((validationResults as { blocked?: boolean }).blocked);
-+    if (blocked) return true;
-+
-+    const flags = (validationResults as { complianceFlags?: Array<{ severity?: string }> }).complianceFlags;
-+    if (!Array.isArray(flags)) return false;
-+
-+    return flags.some((flag) => flag?.severity === ComplianceFlagSeverity.BLOCK);
-+  }
-+
-   async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
-     const jobId = this.requireJobId(dto.jobId);
-     const baselineVersionId = this.requireBaselineVersionId(dto.baselineVersionId);
+   private hasBlockingCompliance(validationResults: Record<string, unknown> | undefined | null): boolean {
+     if (!validationResults) return false;
  
-     const detection = await this.gapDetectionService.detectGaps({
-       userId,
-       jobId,
-       baselineVersionId,
-     });
- 
-     const gapList = dto.gapList?.length ? normalizeGapList(dto.gapList) : detection.gaps;
-     const questions = dto.questions?.length
-       ? normalizeQuestionList(dto.questions)
-       : this.interviewQuestionGenerator.generateQuestions(gapList);
- 
-     const interview = this.interviewsRepo.create({
-       userId,
-       baselineId: detection.baselineId ?? dto.baselineId ?? null,
-       baselineVersionId: detection.baselineVersionId ?? baselineVersionId,
-       jobId: detection.jobId ?? jobId,
-       gapList,
-       questions,
-       responses: normalizeStringArray(dto.responses),
-       validationResults: dto.validationResults ?? {},
--      recommendedAdditions: normalizeStringArray(dto.recommendedAdditions),
-+      recommendedAdditions: normalizeRecommendedAdditions(dto.recommendedAdditions),
-     });
- 
-     return this.interviewsRepo.save(interview);
-   }
- 
-   async listInterviewRecordsForUser(userId: string): Promise<Interview[]> {
-     return this.interviewsRepo.find({
-       where: { userId },
-       order: { createdAt: 'DESC' },
-     });
-   }
- 
-   async getInterviewRecordForUser(id: string, userId: string): Promise<Interview> {
-     const interview = await this.interviewsRepo.findOne({
-       where: { id, userId },
-     });
- 
-     if (!interview) {
-       throw new NotFoundException('Interview record not found');
-     }
- 
-     return interview;
-   }
- 
-   async updateInterviewRecord(
-@@ -121,52 +211,58 @@ export class InterviewRecordsService {
- 
-     if (dto.baselineId !== undefined) {
-       interview.baselineId = dto.baselineId?.trim() || null;
-     }
- 
-     if (dto.baselineVersionId !== undefined) {
-       interview.baselineVersionId = dto.baselineVersionId?.trim() || null;
-     }
- 
-     if (dto.gapList !== undefined) {
-       interview.gapList = normalizeGapList(dto.gapList);
-     }
- 
+@@ -227,45 +259,129 @@ export class InterviewRecordsService {
      if (dto.questions !== undefined) {
        interview.questions = normalizeQuestionList(dto.questions);
      }
@@ -722,21 +537,103 @@ index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a7
        interview.validationResults = dto.validationResults ?? {};
      }
  
--    if (dto.recommendedAdditions !== undefined) {
--      interview.recommendedAdditions = normalizeStringArray(dto.recommendedAdditions);
-+    if (this.hasBlockingCompliance(interview.validationResults)) {
-+      interview.recommendedAdditions = [];
-+    } else {
-+      interview.recommendedAdditions = this.recommendedAdditionsService.generateFromResponses({
-+        responses: interview.responses,
-+        questions: interview.questions,
-+        gaps: interview.gapList,
-+      });
+     if (this.hasBlockingCompliance(interview.validationResults)) {
+       interview.recommendedAdditions = [];
+     } else {
+       interview.recommendedAdditions = this.recommendedAdditionsService.generateFromResponses({
+         responses: interview.responses,
+         questions: interview.questions,
+         gaps: interview.gapList,
+       });
      }
  
      return this.interviewsRepo.save(interview);
    }
  
++  async applyAdditionDecisions(
++    id: string,
++    userId: string,
++    dto: ApplyAdditionDecisionsDto,
++  ): Promise<Interview> {
++    const interview = await this.getInterviewRecordForUser(id, userId);
++    const decisions = normalizeDecisions(dto?.decisions);
++
++    if (!decisions.length) {
++      throw new BadRequestException('decisions are required');
++    }
++
++    if (!interview.recommendedAdditions?.length) {
++      throw new NotFoundException('No recommended additions found for this interview');
++    }
++
++    const additionIds = new Set(interview.recommendedAdditions.map((addition) => addition.id));
++
++    decisions.forEach((decision) => {
++      if (!additionIds.has(decision.additionId)) {
++        throw new NotFoundException(`Recommended addition ${decision.additionId} not found`);
++      }
++    });
++
++    const decisionMap = new Map<string, RecommendedAdditionDecision>(
++      decisions.map((entry) => [entry.additionId, entry.decision]),
++    );
++
++    const acceptedAdditions: RecommendedAddition[] = [];
++
++    interview.recommendedAdditions = interview.recommendedAdditions.map((addition) => {
++      const decision = decisionMap.get(addition.id);
++      if (!decision) return addition;
++
++      const status: RecommendedAdditionStatus =
++        decision === 'accept'
++          ? 'accepted'
++          : decision === 'reject'
++            ? 'rejected'
++            : 'deferred';
++      const updated = { ...addition, status };
++
++      if (status === 'accepted') {
++        acceptedAdditions.push(updated);
++      }
++
++      return updated;
++    });
++
++    let savedInterview = await this.interviewsRepo.save(interview);
++
++    if (!acceptedAdditions.length) {
++      return savedInterview;
++    }
++
++    if (!savedInterview.baselineId?.trim()) {
++      throw new BadRequestException('baselineId is required to approve additions');
++    }
++
++    const promotion = await this.baselineVersionService.approveVerifiedAdditions(userId, {
++      baselineId: savedInterview.baselineId,
++      interviewId: savedInterview.id,
++      additions: acceptedAdditions,
++    });
++
++    savedInterview.baselineVersionId = promotion?.baseline_version_id ?? savedInterview.baselineVersionId ?? null;
++
++    if (this.analysisService && savedInterview.jobId?.trim()) {
++      const expanded = await this.analysisService.runExpandedFitAssessment(userId, {
++        jobId: savedInterview.jobId,
++        baselineId: savedInterview.baselineId,
++        baselineVersion: promotion?.version_number,
++        interviewId: savedInterview.id,
++        verifiedAdditions: acceptedAdditions.map((addition) => addition.text),
++      });
++
++      savedInterview.expandedFitAssessment = expanded;
++    }
++
++    savedInterview = await this.interviewsRepo.save(savedInterview);
++
++    return savedInterview;
++  }
++
    async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
      const interview = await this.getInterviewRecordForUser(id, userId);
  
@@ -758,10 +655,10 @@ index 6e9928e73dadfc427d89439ca4c79e7f89c40085..4976a92744940d69c02c24a35fd2a6a7
    }
  }
 diff --git a/apps/api/src/interviews/interview-types.ts b/apps/api/src/interviews/interview-types.ts
-index c6797dc16c70e5df4f977eb8951e9bbeba80a5d5..37465fd1d1f349d265b5a0f7f4a3f05596c5c1b1 100644
+index 37465fd1d1f349d265b5a0f7f4a3f05596c5c1b1..d01b93eea7195c6bc32e3f42844c6df52cb466fa 100644
 --- a/apps/api/src/interviews/interview-types.ts
 +++ b/apps/api/src/interviews/interview-types.ts
-@@ -7,31 +7,46 @@ export type GapDomain =
+@@ -7,46 +7,53 @@ export type GapDomain =
  
  export type GapConfidence = 'low' | 'medium' | 'high';
  
@@ -787,19 +684,27 @@ index c6797dc16c70e5df4f977eb8951e9bbeba80a5d5..37465fd1d1f349d265b5a0f7f4a3f055
    jdReference: string;
  };
  
-+export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected';
+-export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected';
++export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected' | 'deferred';
+ 
+ export type RecommendedAdditionSource = {
+   gapId?: string;
+   questionIndex?: number;
+   questionPrompt?: string;
+ };
+ 
+ export type RecommendedAddition = {
+   id: string;
+   text: string;
+   sources: RecommendedAdditionSource[];
+   status: RecommendedAdditionStatus;
+ };
+ 
++export type RecommendedAdditionDecision = 'accept' | 'reject' | 'defer';
 +
-+export type RecommendedAdditionSource = {
-+  gapId?: string;
-+  questionIndex?: number;
-+  questionPrompt?: string;
-+};
-+
-+export type RecommendedAddition = {
-+  id: string;
-+  text: string;
-+  sources: RecommendedAdditionSource[];
-+  status: RecommendedAdditionStatus;
++export type AdditionDecision = {
++  additionId: string;
++  decision: RecommendedAdditionDecision;
 +};
 +
  export type GapDetectionResult = {
@@ -809,31 +714,10 @@ index c6797dc16c70e5df4f977eb8951e9bbeba80a5d5..37465fd1d1f349d265b5a0f7f4a3f055
    gaps: InterviewGap[];
  };
 diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
-index 76e6d1830d822f21f38eee553dc5849c355c38de..d60e393f98bd22551b7c29774b553287cc43c38f 100644
+index d60e393f98bd22551b7c29774b553287cc43c38f..3f9bd7aca8c7f6deb62f636a4423a1c94117af69 100644
 --- a/apps/api/src/interviews/interview.entity.ts
 +++ b/apps/api/src/interviews/interview.entity.ts
-@@ -1,47 +1,51 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   PrimaryGeneratedColumn,
-   UpdateDateColumn,
- } from 'typeorm';
--import { InterviewGap, InterviewQuestion } from './interview-types';
-+import {
-+  InterviewGap,
-+  InterviewQuestion,
-+  RecommendedAddition,
-+} from './interview-types';
- 
- @Entity({ name: 'interviews' })
- export class Interview {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Column()
-   userId!: string;
+@@ -21,31 +21,34 @@ export class Interview {
  
    @Column({ type: 'varchar', length: 255, nullable: true })
    baselineId!: string | null;
@@ -857,9 +741,11 @@ index 76e6d1830d822f21f38eee553dc5849c355c38de..d60e393f98bd22551b7c29774b553287
    validationResults!: Record<string, unknown>;
  
    @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
--  recommendedAdditions!: string[];
-+  recommendedAdditions!: RecommendedAddition[];
+   recommendedAdditions!: RecommendedAddition[];
  
++  @Column({ type: 'jsonb', nullable: true })
++  expandedFitAssessment?: Record<string, unknown> | null;
++
    @CreateDateColumn({ type: 'timestamptz' })
    createdAt!: Date;
  
@@ -867,10 +753,10 @@ index 76e6d1830d822f21f38eee553dc5849c355c38de..d60e393f98bd22551b7c29774b553287
    updatedAt!: Date;
  }
 diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
-index 539ef29419913fcffdba4099ef1bc9dd4ac86933..17407a926e13234903c679e0dc10816b8441bcd7 100644
+index 17407a926e13234903c679e0dc10816b8441bcd7..b20aa81cea8c787810cc497e49fc8232bd7d8392 100644
 --- a/apps/api/src/interviews/interviews.module.ts
 +++ b/apps/api/src/interviews/interviews.module.ts
-@@ -1,49 +1,51 @@
+@@ -1,51 +1,61 @@
  import { Module } from '@nestjs/common';
  import { TypeOrmModule } from '@nestjs/typeorm';
  import { Baseline } from '../baseline/baseline.entity';
@@ -878,14 +764,18 @@ index 539ef29419913fcffdba4099ef1bc9dd4ac86933..17407a926e13234903c679e0dc10816b
  import { BaselineVersion } from '../baseline/baseline-version.entity';
  import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
  import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
++import { AnalysisService } from '../analysis/analysis.service';
++import { FitScoringService } from '../analysis/fit-scoring.service';
  import { ComplianceModule } from '../compliance/compliance.module';
  import { Job } from '../jobs/job.entity';
++import { User } from '../users/user.entity';
  import { Interview } from './interview.entity';
  import { InterviewToolkitController } from './interview-toolkit.controller';
  import { InterviewToolkitService } from './interview-toolkit.service';
  import { InterviewRecordsController } from './interview-records.controller';
  import { InterviewRecordsService } from './interview-records.service';
-+import { RecommendedAdditionsService } from './recommended-additions.service';
+ import { RecommendedAdditionsService } from './recommended-additions.service';
  import { InterviewResponse } from './interview-response.entity';
  import { InterviewSession } from './interview-session.entity';
  import { GapDetectionService } from './gap-detection.service';
@@ -893,6 +783,7 @@ index 539ef29419913fcffdba4099ef1bc9dd4ac86933..17407a926e13234903c679e0dc10816b
  import { InterviewsController } from './interviews.controller';
  import { InterviewsService } from './interviews.service';
  import { StarStory } from '../star-stories/star-story.entity';
++import { BaselineVersionService } from '../baseline/baseline-version.service';
  
  @Module({
    imports: [
@@ -906,6 +797,8 @@ index 539ef29419913fcffdba4099ef1bc9dd4ac86933..17407a926e13234903c679e0dc10816b
        BaselineSection,
        BaselineVersion,
        BaselineBlockPolicy,
++      ExpandedFitAssessment,
++      User,
        StarStory,
      ]),
      ComplianceModule,
@@ -917,75 +810,11 @@ index 539ef29419913fcffdba4099ef1bc9dd4ac86933..17407a926e13234903c679e0dc10816b
      GapDetectionService,
      InterviewQuestionGeneratorService,
      InterviewToolkitService,
-+    RecommendedAdditionsService,
+     RecommendedAdditionsService,
++    BaselineVersionService,
++    AnalysisService,
++    FitScoringService,
    ],
    exports: [InterviewsService, InterviewRecordsService],
  })
  export class InterviewsModule {}
-diff --git a/apps/api/src/interviews/recommended-additions.service.ts b/apps/api/src/interviews/recommended-additions.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..4d5f18abac9ea963dc05b37374ef94c09a40782c
---- /dev/null
-+++ b/apps/api/src/interviews/recommended-additions.service.ts
-@@ -0,0 +1,61 @@
-+import { Injectable } from '@nestjs/common';
-+import { createHash } from 'node:crypto';
-+import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
-+
-+type RecommendationInput = {
-+  responses: string[];
-+  questions?: InterviewQuestion[];
-+  gaps?: InterviewGap[];
-+};
-+
-+@Injectable()
-+export class RecommendedAdditionsService {
-+  generateFromResponses(input: RecommendationInput): RecommendedAddition[] {
-+    const normalizedResponses = (input.responses ?? [])
-+      .map((entry) => entry?.trim())
-+      .filter((entry): entry is string => Boolean(entry));
-+
-+    if (!normalizedResponses.length) {
-+      return [];
-+    }
-+
-+    const suggestions: RecommendedAddition[] = [];
-+
-+    for (let index = 0; index < normalizedResponses.length && suggestions.length < 8; index += 1) {
-+      const snippet = this.buildSnippet(normalizedResponses[index]);
-+      const question = input.questions?.[index];
-+      const gap = input.gaps?.find((entry) => entry.gapId === question?.gapId);
-+
-+      const text = `Documented experience: ${snippet}`;
-+      const sources = [
-+        {
-+          gapId: gap?.gapId,
-+          questionIndex: question ? index : undefined,
-+          questionPrompt: question?.prompt,
-+        },
-+      ].filter((source) => Boolean(source.gapId || source.questionPrompt)) as RecommendedAddition['sources'];
-+
-+      const id = this.buildId(text, sources);
-+
-+      suggestions.push({
-+        id,
-+        text,
-+        sources,
-+        status: 'proposed',
-+      });
-+    }
-+
-+    return suggestions.slice(0, Math.max(3, suggestions.length));
-+  }
-+
-+  private buildSnippet(response: string): string {
-+    const condensed = response.replace(/\s+/g, ' ').trim();
-+    const [firstSentence] = condensed.split(/(?<=[.!?])\s+/);
-+    const snippet = firstSentence || condensed;
-+    return snippet.length > 180 ? `${snippet.slice(0, 177)}...` : snippet;
-+  }
-+
-+  private buildId(text: string, sources: RecommendedAddition['sources']): string {
-+    return createHash('sha256').update(JSON.stringify({ text, sources })).digest('hex');
-+  }
-+}

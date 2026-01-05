@@ -5,8 +5,12 @@ import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
+import { AnalysisService } from '../analysis/analysis.service';
+import { FitScoringService } from '../analysis/fit-scoring.service';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { Job } from '../jobs/job.entity';
+import { User } from '../users/user.entity';
 import { Interview } from './interview.entity';
 import { InterviewToolkitController } from './interview-toolkit.controller';
 import { InterviewToolkitService } from './interview-toolkit.service';
@@ -20,6 +24,7 @@ import { InterviewQuestionGeneratorService } from './interview-question-generato
 import { InterviewsController } from './interviews.controller';
 import { InterviewsService } from './interviews.service';
 import { StarStory } from '../star-stories/star-story.entity';
+import { BaselineVersionService } from '../baseline/baseline-version.service';
 
 @Module({
   imports: [
@@ -33,6 +38,8 @@ import { StarStory } from '../star-stories/star-story.entity';
       BaselineSection,
       BaselineVersion,
       BaselineBlockPolicy,
+      ExpandedFitAssessment,
+      User,
       StarStory,
     ]),
     ComplianceModule,
@@ -45,6 +52,9 @@ import { StarStory } from '../star-stories/star-story.entity';
     InterviewQuestionGeneratorService,
     InterviewToolkitService,
     RecommendedAdditionsService,
+    BaselineVersionService,
+    AnalysisService,
+    FitScoringService,
   ],
   exports: [InterviewsService, InterviewRecordsService],
 })

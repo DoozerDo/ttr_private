@@ -13,6 +13,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { CreateInterviewRecordDto } from './dto/create-interview.dto';
+import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
 import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
 import { InterviewRecordsService } from './interview-records.service';
 
@@ -75,6 +76,21 @@ export class InterviewRecordsController {
     }
 
     return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
+  }
+
+  @Post(':id/decisions')
+  async applyAdditionDecisions(
+    @Param('id') id: string,
+    @Body() body: ApplyAdditionDecisionsDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.applyAdditionDecisions(id, userId, body);
   }
 
   @Delete(':id')

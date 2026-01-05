@@ -5,6 +5,8 @@ import { InterviewRecordsService } from './interview-records.service';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
+import { BaselineVersionService } from '../baseline/baseline-version.service';
+import { AnalysisService } from '../analysis/analysis.service';
 
 describe('InterviewRecordsService', () => {
   const mockInterview: Interview = {
@@ -27,6 +29,7 @@ describe('InterviewRecordsService', () => {
         status: 'proposed',
       },
     ],
+    expandedFitAssessment: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
   };
@@ -46,12 +49,18 @@ describe('InterviewRecordsService', () => {
     recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
       generateFromResponses: jest.fn().mockReturnValue([]),
     },
+    baselineVersionService: Partial<BaselineVersionService> = {
+      approveVerifiedAdditions: jest.fn(),
+    },
+    analysisService?: Partial<AnalysisService>,
   ) =>
     new InterviewRecordsService(
       repository as never,
       gapDetectionService as GapDetectionService,
       interviewQuestionGenerator as InterviewQuestionGeneratorService,
       recommendedAdditionsService as any,
+      baselineVersionService as BaselineVersionService,
+      analysisService as AnalysisService,
     );
 
   afterEach(() => {
@@ -231,6 +240,130 @@ describe('InterviewRecordsService', () => {
 
     expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
     expect(result.recommendedAdditions).toEqual([]);
+  });
+
+  it('applies decisions to recommended additions', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [
+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
+      ],
+    });
+    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
+
+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
+      decisions: [
+        { additionId: 'a1', decision: 'reject' },
+        { additionId: 'a2', decision: 'defer' },
+      ],
+    });
+
+    expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(result.recommendedAdditions).toEqual([
+      { id: 'a1', text: 'Addition A', sources: [], status: 'rejected' },
+      { id: 'a2', text: 'Addition B', sources: [], status: 'deferred' },
+    ]);
+    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
+  });
+
+  it('approves accepted additions and stores baseline version reference', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [
+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
+      ],
+    });
+    const baselineVersionService = {
+      approveVerifiedAdditions: jest.fn().mockResolvedValue({
+        baseline_version_id: 'new-version',
+        version_number: 3,
+        hash: 'hash',
+        diff: {},
+      }),
+    };
+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
+
+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
+      decisions: [
+        { additionId: 'a1', decision: 'accept' },
+        { additionId: 'a2', decision: 'reject' },
+      ],
+    });
+
+    expect(baselineVersionService.approveVerifiedAdditions).toHaveBeenCalledWith('user-1', {
+      baselineId: 'baseline-1',
+      interviewId: 'interview-1',
+      additions: [
+        { id: 'a1', text: 'Addition A', sources: [], status: 'accepted' },
+      ],
+    });
+    expect(repository.save).toHaveBeenCalledTimes(2);
+    expect(result.baselineVersionId).toBe('new-version');
+    expect(result.recommendedAdditions[0].status).toBe('accepted');
+  });
+
+  it('does not approve baseline when no additions are accepted', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [
+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+      ],
+    });
+    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
+
+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
+      decisions: [{ additionId: 'a1', decision: 'reject' }],
+    });
+
+    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
+    expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(result.recommendedAdditions[0].status).toBe('rejected');
+  });
+
+  it('runs expanded fit assessment when available', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [
+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+      ],
+    });
+    const baselineVersionService = {
+      approveVerifiedAdditions: jest.fn().mockResolvedValue({
+        baseline_version_id: 'new-version',
+        version_number: 4,
+        hash: 'hash',
+        diff: {},
+      }),
+    };
+    const analysisService = {
+      runExpandedFitAssessment: jest.fn().mockResolvedValue({
+        ok: true,
+        expandedScore: 98,
+      }),
+    };
+    const service = createService(repository, {}, {}, undefined, baselineVersionService, analysisService);
+
+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
+      decisions: [{ additionId: 'a1', decision: 'accept' }],
+    });
+
+    expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith('user-1', {
+      jobId: 'job-1',
+      baselineId: 'baseline-1',
+      baselineVersion: 4,
+      interviewId: 'interview-1',
+      verifiedAdditions: ['Addition A'],
+    });
+    expect(result.expandedFitAssessment).toEqual({ ok: true, expandedScore: 98 });
+    expect(result.baselineVersionId).toBe('new-version');
   });
 
   it('deletes an interview record', async () => {
