@@ -60,6 +60,7 @@ describe('CoverLettersService', () => {
 
   const complianceService = {
     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+    detectScopeInflation: jest.fn().mockReturnValue([]),
     validateAndAudit: jest.fn(async (ctx: any) => ({
       complianceFlags: ctx.extraFlags ?? [],
       blocked: (ctx.extraFlags ?? []).some(
@@ -120,6 +121,27 @@ describe('CoverLettersService', () => {
         code: ComplianceFlagCode.INVENTED_METRIC,
         severity: ComplianceFlagSeverity.BLOCK,
         message: 'Metric not found in baseline.',
+      },
+    ]);
+
+    const service = new CoverLettersService(dataSource, complianceService as any);
+
+    await expect(
+      service.generateCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        jobId: 'job-1',
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalled();
+  });
+
+  it('blocks cover letter generation when scope inflation is detected', async () => {
+    complianceService.detectScopeInflation.mockReturnValueOnce([
+      {
+        code: ComplianceFlagCode.SCOPE_INFLATION,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Scope exceeds baseline.',
       },
     ]);
 

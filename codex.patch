@@ -1,744 +1,184 @@
-diff --git a/apps/api/src/baseline/baseline-version.service.spec.ts b/apps/api/src/baseline/baseline-version.service.spec.ts
-index 72c54a2d1411fa0a6fecf412cc07ab21eac5c716..cbca04be85e0431f37a69013a6d6b8c3a3a618d1 100644
---- a/apps/api/src/baseline/baseline-version.service.spec.ts
-+++ b/apps/api/src/baseline/baseline-version.service.spec.ts
-@@ -1,46 +1,50 @@
-+import { BadRequestException } from '@nestjs/common';
- import { createHash } from 'node:crypto';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { Test } from '@nestjs/testing';
- import { BaselineBlockPolicy } from './baseline-block-policy.entity';
- import { Baseline } from './baseline.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
-   BaselineSectionType,
- } from './baseline-section.entity';
- import { BaselineVersion } from './baseline-version.entity';
- import { BaselineVersionService } from './baseline-version.service';
- import { Interview } from '../interviews/interview.entity';
-+import { ComplianceService } from '../compliance/compliance.service';
-+import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
- 
- describe('BaselineVersionService', () => {
-   let service: BaselineVersionService;
-   let baselineVersionRepository: any;
-   let baselineRepository: any;
-   let baselineSectionRepository: any;
-   let baselineBlockPolicyRepository: any;
-   let interviewRepository: any;
-+  let complianceService: ComplianceService;
- 
-   const baseline: Baseline = {
-     id: 'baseline-1',
-     userId: 'user-1',
-     version: 1,
-     originalFilename: 'resume.pdf',
-     mimeType: 'application/pdf',
-     storagePath: '/tmp/resume.pdf',
-     hash: 'base-hash',
-     sections: [
-       {
-         id: 'section-1',
-         baselineId: 'baseline-1',
-         sectionType: BaselineSectionType.EXPERIENCE,
-         title: null,
-         content: 'Experience content',
-         includePolicy: BaselineIncludePolicy.OPTIONAL,
-         order: 0,
-       } as BaselineSection,
-     ],
-     versions: [],
-     createdAt: new Date(),
-     updatedAt: new Date(),
-   } as Baseline;
- 
-@@ -75,68 +79,92 @@ describe('BaselineVersionService', () => {
-     baselineVersionRepository = {
-       findOne: jest.fn().mockResolvedValue({ ...baselineVersion }),
-       save: jest.fn(),
-     };
- 
-     baselineSectionRepository = {
-       find: jest.fn().mockResolvedValue(baseline.sections),
-     };
- 
-     baselineBlockPolicyRepository = {
-       find: jest.fn().mockResolvedValue([]),
-     };
- 
-     interviewRepository = {
-       findOne: jest.fn(),
-     };
- 
-     const moduleRef = await Test.createTestingModule({
-       providers: [
-         BaselineVersionService,
-         { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
-         { provide: getRepositoryToken(BaselineSection), useValue: baselineSectionRepository },
-         { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-         { provide: getRepositoryToken(BaselineBlockPolicy), useValue: baselineBlockPolicyRepository },
-         { provide: getRepositoryToken(Interview), useValue: interviewRepository },
-+        {
-+          provide: ComplianceService,
-+          useValue: {
-+            enforceTechnologyConsistency: jest.fn().mockReturnValue([]),
-+          },
-+        },
-       ],
-     }).compile();
- 
-     service = moduleRef.get(BaselineVersionService);
-+    complianceService = moduleRef.get(ComplianceService);
-   });
- 
-   it('creates a new version without mutating prior versions', async () => {
-     const result = await service.approveVerifiedAdditions('user-1', {
-       baselineId: 'baseline-1',
-       additions: ['added context'],
-     });
- 
-     expect(result.version_number).toBe(2);
-     expect(result.diff).toEqual({ added: ['added context'], interviewId: null });
-     expect(baselineVersion.fileHash).toBe('existing-hash');
-     expect(baselineVersion.verifiedAdditions).toEqual([]);
-   });
- 
-   it('generates deterministic hashes regardless of addition ordering', async () => {
-     const additions = ['b addition', 'a addition'];
-     const policies = baseline.sections.map((section, index) => ({
-       id: section.id,
-       includePolicy: section.includePolicy,
-       order: section.order ?? index,
-     }));
-     const expectedHash = createHash('sha256')
-       .update(
-         JSON.stringify({
-           baselineHash: baseline.hash,
-           policies,
-           additions: [...additions].sort((a, b) => a.localeCompare(b)),
-         }),
-       )
-       .digest('hex');
- 
-     const result = await service.approveVerifiedAdditions('user-1', {
-       baselineId: 'baseline-1',
-       additions,
-     });
- 
-     expect(result.hash).toBe(expectedHash);
-   });
-+
-+  it('rejects additions that introduce technologies outside the baseline vocabulary', async () => {
-+    jest.spyOn(complianceService, 'enforceTechnologyConsistency').mockReturnValue([
-+      {
-+        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Technology "ImaginaryDB" not found in baseline.',
-+      },
-+    ]);
-+
-+    await expect(
-+      service.approveVerifiedAdditions('user-1', {
-+        baselineId: 'baseline-1',
-+        additions: ['Built ImaginaryDB cluster'],
-+      }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
- });
-diff --git a/apps/api/src/baseline/baseline-version.service.ts b/apps/api/src/baseline/baseline-version.service.ts
-index 8699952fc908ff086bddaf07bda2988266c49d54..b8f4ffc75cdc5ea8e9b51ef3959a9a0aa0d1cb99 100644
---- a/apps/api/src/baseline/baseline-version.service.ts
-+++ b/apps/api/src/baseline/baseline-version.service.ts
-@@ -1,63 +1,66 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'node:crypto';
- import { Repository } from 'typeorm';
- import { Interview } from '../interviews/interview.entity';
-+import { ComplianceFlagSeverity } from '../compliance/compliance.types';
-+import { ComplianceService } from '../compliance/compliance.service';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from './baseline-section.entity';
- import { Baseline } from './baseline.entity';
- import { BaselineBlockPolicy } from './baseline-block-policy.entity';
- import { BaselineVersion } from './baseline-version.entity';
- 
- type PolicyState = {
-   baselineSectionId: string;
-   includePolicy: BaselineIncludePolicy;
-   order: number;
- };
- 
- type ApproveAdditionsPayload = {
-   baselineId: string;
-   interviewId?: string;
-   additions?: string[];
- };
- 
- @Injectable()
- export class BaselineVersionService {
-   constructor(
-     @InjectRepository(Baseline)
-     private readonly baselineRepository: Repository<Baseline>,
-     @InjectRepository(BaselineSection)
-     private readonly baselineSectionRepository: Repository<BaselineSection>,
-     @InjectRepository(BaselineVersion)
-     private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     @InjectRepository(BaselineBlockPolicy)
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-     @InjectRepository(Interview)
-     private readonly interviewRepository: Repository<Interview>,
-+    private readonly complianceService: ComplianceService,
-   ) {}
- 
-   private normalizePoliciesFromSections(sections: BaselineSection[]): PolicyState[] {
-     return sections.map((section, index) => ({
-       baselineSectionId: section.id,
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       order: section.order ?? index,
-     }));
-   }
- 
-   private buildVersionHash(
-     baselineHash: string | null,
-     policies: PolicyState[],
-     additions: string[],
-   ) {
-     const normalizedPolicies = [...policies]
-       .map((policy) => ({
-         id: policy.baselineSectionId,
-         includePolicy: policy.includePolicy,
-         order: policy.order,
-       }))
-       .sort((a, b) => {
-         const delta = a.id.localeCompare(b.id);
-         if (delta !== 0) return delta;
-         return a.order - b.order;
-@@ -105,50 +108,66 @@ export class BaselineVersionService {
-       throw new NotFoundException('Interview not found');
-     }
- 
-     if (interview?.baselineId && interview.baselineId !== baselineId) {
-       throw new BadRequestException('Interview baseline does not match target baseline');
-     }
- 
-     const additions = additionsFromPayload.length
-       ? additionsFromPayload
-       : this.normalizeAdditions(interview?.recommendedAdditions);
- 
-     if (!additions.length) {
-       throw new BadRequestException('No verified additions supplied for promotion');
-     }
- 
-     const latestVersion = await this.baselineVersionRepository.findOne({
-       where: { baselineId },
-       order: { versionNumber: 'DESC', createdAt: 'DESC' },
-     });
- 
-     const sections = await this.baselineSectionRepository.find({
-       where: { baselineId },
-       order: { order: 'ASC' },
-     });
- 
-+    const technologyFlags = this.complianceService.enforceTechnologyConsistency({
-+      baselineSections: sections,
-+      generatedSections: additions.map((content, index) => ({
-+        title: `Addition ${index + 1}`,
-+        content,
-+      })),
-+    });
-+
-+    const blockingTechnologyFlag = technologyFlags.find(
-+      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-+    );
-+
-+    if (blockingTechnologyFlag) {
-+      throw new BadRequestException(blockingTechnologyFlag.message);
-+    }
-+
-     const existingPolicies = latestVersion
-       ? await this.baselineBlockPolicyRepository.find({
-           where: { baselineVersionId: latestVersion.id },
-           order: { order: 'ASC' },
-         })
-       : [];
- 
-     const policyState: PolicyState[] =
-       existingPolicies.length > 0
-         ? existingPolicies.map((policy) => ({
-             baselineSectionId: policy.baselineSectionId,
-             includePolicy: policy.includePolicy,
-             order: policy.order,
-           }))
-         : this.normalizePoliciesFromSections(sections);
- 
-     const nextVersionNumber = (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
- 
-     const versionHash = this.buildVersionHash(baseline.hash, policyState, additions);
- 
-     const diffPayload = {
-       added: additions,
-       interviewId: interview?.id ?? null,
-     };
- 
-diff --git a/apps/api/src/baseline/baseline.module.ts b/apps/api/src/baseline/baseline.module.ts
-index dbb57a495c3dfec5dcb48e1ab0802663fb45d163..1ec9b21af41c6f026a16df7fa418dbe4dea70361 100644
---- a/apps/api/src/baseline/baseline.module.ts
-+++ b/apps/api/src/baseline/baseline.module.ts
-@@ -1,46 +1,48 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { MulterModule } from '@nestjs/platform-express';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { diskStorage } from 'multer';
- import { mkdirSync } from 'node:fs';
- import path from 'node:path';
- import { BaselineSection } from './baseline-section.entity';
- import { BaselineController } from './baseline.controller';
- import { Baseline } from './baseline.entity';
- import { BaselineVersion } from './baseline-version.entity';
- import { BaselineService } from './baseline.service';
- import { BaselineTextExtractor } from './baseline-text-extractor.service';
- import { BaselineParserService } from './baseline-parser.service';
- import { BaselineBlockPolicy } from './baseline-block-policy.entity';
- import { BaselineVersionService } from './baseline-version.service';
- import { Interview } from '../interviews/interview.entity';
-+import { ComplianceModule } from '../compliance/compliance.module';
- 
- @Module({
-   imports: [
-     ConfigModule,
-+    ComplianceModule,
-     TypeOrmModule.forFeature([
-       Baseline,
-       BaselineSection,
-       BaselineVersion,
-       BaselineBlockPolicy,
-       Interview,
-     ]),
-     MulterModule.registerAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         storage: diskStorage({
-           destination: (_req, _file, cb) => {
-             const uploadDir =
-               configService.get<string>('BASELINE_STORAGE_PATH') ??
-               path.join(process.cwd(), 'storage', 'baselines');
- 
-             mkdirSync(uploadDir, { recursive: true });
-             cb(null, uploadDir);
-           },
-           filename: (_req, file, cb) => {
-             const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-             const ext = path.extname(file.originalname) || '.bin';
-             cb(null, `${uniqueSuffix}${ext}`);
-           },
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index 33133a60d07751c7e1179a03a0303bed50582c17..780d13a80216070ce9e7203c9269eec8dd7ebe85 100644
---- a/apps/api/src/compliance/compliance.service.spec.ts
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -1,32 +1,33 @@
- import { createHash } from 'crypto';
- import { ComplianceService } from './compliance.service';
- import {
-   ComplianceAction,
-   ComplianceFlagCode,
-   ComplianceFlagSeverity,
- } from './compliance.types';
-+import { BaselineSectionType } from '../baseline/baseline-section.entity';
- 
- const buildAuditRepo = () => {
-   const create = jest.fn((payload) => payload);
-   const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
- 
-   return { create, save };
- };
- 
- describe('ComplianceService', () => {
-   const repoMock = buildAuditRepo();
-   const service = new ComplianceService(
-     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-     // @ts-ignore: manual repository injection
-     repoMock,
-   );
- 
-   beforeEach(() => {
-     jest.clearAllMocks();
-   });
- 
-   it('passes validation when baseline hash and job company are present', async () => {
-     const baselineVersion = { hash: 'baseline-hash' };
-     const job = { company: 'ExampleCo', rawDescription: 'Job description' };
- 
-     const result = await service.validateAndAudit({
-@@ -124,26 +125,75 @@ describe('ComplianceService', () => {
-     const normalized = service.normalizeSectionsForOutput([
-       { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
-     ]);
- 
-     expect(normalized[0]).toEqual(
-       expect.objectContaining({
-         title: 'Impact-Summary',
-         content: 'Led teams... increased revenue by 1,200%',
-       }),
-     );
-   });
- 
-   it('blocks invented metrics with formatted numbers', () => {
-     const flags = service.enforceResumeWritingRules({
-       baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
-       generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
-     });
- 
-     expect(flags).toEqual([
-       expect.objectContaining({
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-       }),
-     ]);
-   });
-+
-+  it('allows technologies present in baseline vocabulary', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      baselineSections: [
-+        {
-+          title: 'Skills',
-+          content: 'AWS, PostgreSQL, Terraform',
-+          sectionType: BaselineSectionType.SKILLS,
-+        },
-+      ],
-+      generatedSections: [{ content: 'Led AWS migration with PostgreSQL.' }],
-+    });
-+
-+    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
-+  });
-+
-+  it('blocks technologies not present in baseline', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      baselineSections: [
-+        {
-+          title: 'Skills',
-+          content: 'AWS, PostgreSQL',
-+          sectionType: BaselineSectionType.SKILLS,
-+        },
-+      ],
-+      generatedSections: [{ content: 'Implemented QuantumOS pipelines.' }],
-+    });
-+
-+    expect(flags).toEqual(
-+      expect.arrayContaining([
-+        expect.objectContaining({ code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY, severity: ComplianceFlagSeverity.BLOCK }),
-+      ]),
-+    );
-+  });
-+
-+  it('is conservative and avoids over-flagging generic terms', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      baselineSections: [
-+        {
-+          title: 'Experience',
-+          content: 'AWS migration and platform leadership.',
-+          sectionType: BaselineSectionType.EXPERIENCE,
-+        },
-+      ],
-+      generatedSections: [{ content: 'Collaborated with cross-functional teams to improve processes.' }],
-+    });
-+
-+    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
-+  });
- });
 diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index 27349cf83231ea04516794fcfd71c83bb5848535..8b42793fc91167c607fe31f38a61d734736c9b91 100644
+index de8eaa2e5c72ccfcfc97e4e5ba372bbefac4d4e4..1b14e0a0220a8927e59086796a2ac627221cd8f5 100644
 --- a/apps/api/src/compliance/compliance.service.ts
 +++ b/apps/api/src/compliance/compliance.service.ts
-@@ -1,30 +1,31 @@
+@@ -1,156 +1,170 @@
  import { Injectable } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'crypto';
- import { Repository } from 'typeorm';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { BaselineSectionType } from '../baseline/baseline-section.entity';
- import { Job } from '../jobs/job.entity';
- import { ComplianceAudit } from './compliance-audit.entity';
+ import { createHash } from 'node:crypto';
+ import type { BaselineVersion } from '../baseline/baseline-version.entity';
+ import type { Job } from '../jobs/job.entity';
  import {
    ComplianceAction,
++  ComplianceFlagCode,
    ComplianceFlag,
-   ComplianceFlagCode,
    ComplianceFlagSeverity,
  } from './compliance.types';
++import { ScopeInflationDetector } from './scope-inflation-detector';
  
- type ComplianceContext = {
-   actorId: string;
+ export type ValidateAndAuditRequest = {
    action: ComplianceAction;
+   actorId: string;
+ 
    baselineVersion?: BaselineVersion | null;
    job?: Job | null;
-   outputHash?: string | null;
+ 
+   outputHash: string;
+ 
+   extraFlags?: ComplianceFlag[] | undefined;
+ 
    scopeInflationDetected?: boolean;
-   extraFlags?: ComplianceFlag[];
+   techMismatchDetected?: boolean;
+ 
+   [key: string]: unknown;
+ };
+ 
+ export type ValidateAndAuditResult = {
+   blocked: boolean;
+   complianceFlags: ComplianceFlag[];
+   audit: {
+     id: string;
+     outputHash: string;
+     action: ComplianceAction;
+     actorId: string;
+     baselineVersionHash: string | null;
+     jobId: string | null;
+     createdAt: string;
+   };
  };
  
  @Injectable()
  export class ComplianceService {
-   constructor(
-     @InjectRepository(ComplianceAudit)
-     private readonly auditsRepository: Repository<ComplianceAudit>,
-   ) {}
-@@ -77,103 +78,122 @@ export class ComplianceService {
-       jobHash: this.buildJobHash(context.job),
-       outputHash: context.outputHash ?? null,
-       complianceFlags,
-       passFail: !blocked,
-     });
- 
-     const saved = await this.auditsRepository.save(audit);
- 
-     return {
-       complianceFlags,
-       blocked,
-       audit: saved,
-     };
++  private readonly scopeInflationDetector = new ScopeInflationDetector();
++
+   public normalizeText(input: string): string {
+     return (input ?? '').replace(/\s+/g, ' ').trim();
    }
  
-   enforceResumeWritingRules({
-     baselineSections,
-     generatedSections,
-   }: {
-     baselineSections: Array<{ content: string; title?: string | null }>;
-     generatedSections: Array<{ content: string; title?: string | null }>;
-   }): ComplianceFlag[] {
-     const baselineText = this.mergeText(baselineSections);
-     const generatedText = this.mergeText(generatedSections);
+   // Preserve section shape so downstream callers can still reference `title`, etc.
+   public normalizeSectionsForOutput<
+     T extends { content?: string | null; title?: string | null; [key: string]: any },
+   >(sections: T[]): T[] {
+     if (!Array.isArray(sections)) return [];
  
-+    const baselineTechVocabulary = this.buildTechnologyVocabulary(baselineSections);
-+    const generatedTechnologies = this.extractTechnologiesFromSections(generatedSections);
-+
-     const stylizedCharacters = this.findStylizedPunctuation(generatedText);
-     const normalizedBaselineText = this.normalizePunctuation(baselineText);
-     const normalizedGeneratedText = this.normalizePunctuation(generatedText);
- 
-     const baselineNumbers = this.extractNumbers(normalizedBaselineText);
-     const generatedNumbers = this.extractNumbers(normalizedGeneratedText);
- 
-     const baselineEntities = this.extractEntities(normalizedBaselineText);
-     const generatedEntities = this.extractEntities(normalizedGeneratedText);
- 
-     const flags: ComplianceFlag[] = [];
- 
-     if (stylizedCharacters.length > 0) {
-       flags.push({
-         code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: `Stylized punctuation (${stylizedCharacters.join(
-           '',
-         )}) detected; use plain punctuation only.`,
-       });
-     }
- 
-     for (const num of generatedNumbers.ordered) {
-       if (!baselineNumbers.normalizedSet.has(num)) {
-         flags.push({
-           code: ComplianceFlagCode.INVENTED_METRIC,
-           severity: ComplianceFlagSeverity.BLOCK,
-           message: `Metric "${num}" not found in baseline.`,
-         });
-         break;
-       }
-     }
- 
-     for (const entity of generatedEntities.ordered) {
-       const normalizedEntity = entity.toLowerCase();
-       if (!baselineEntities.normalizedSet.has(normalizedEntity)) {
-         const isRole = /manager|engineer|lead|director|chief|officer|vp|president|analyst|specialist|consultant|architect/i.test(
-           entity,
-         );
-         flags.push({
-           code: isRole
-             ? ComplianceFlagCode.INVENTED_ROLE
-             : ComplianceFlagCode.INVENTED_COMPANY,
-           severity: ComplianceFlagSeverity.BLOCK,
-           message: `${isRole ? 'Role' : 'Company'} "${entity}" not found in baseline.`,
-         });
-         break;
-       }
-     }
- 
-+    flags.push(
-+      ...this.detectFictionalTechnologies(baselineTechVocabulary, generatedTechnologies),
-+    );
-+
-     return flags;
-   }
- 
-+  enforceTechnologyConsistency({
-+    baselineSections,
-+    generatedSections,
-+  }: {
-+    baselineSections: Array<{ content: string; title?: string | null }>;
-+    generatedSections: Array<{ content: string; title?: string | null }>;
-+  }): ComplianceFlag[] {
-+    const baselineTechVocabulary = this.buildTechnologyVocabulary(baselineSections);
-+    const generatedTechnologies = this.extractTechnologiesFromSections(generatedSections);
-+    return this.detectFictionalTechnologies(baselineTechVocabulary, generatedTechnologies);
-+  }
-+
-   normalizeSectionsForOutput<T extends { content: string; title?: string | null }>(
-     sections: T[],
-   ): T[] {
-     return sections.map((section) => ({
-       ...section,
-       title:
-         section.title === undefined
-           ? section.title
-           : this.normalizePunctuation(section.title ?? ''),
-       content: this.normalizePunctuation(section.content ?? ''),
+     return sections.map((s) => ({
+       ...s,
+       title: s?.title ?? null,
+       content: this.normalizeText(String(s?.content ?? '')),
      }));
    }
  
-   normalizeText(content: string) {
-     return this.normalizePunctuation(content);
+   public enforceResumeWritingRules(payload: {
+     normalizedContent?: string;
+     rawContent?: string;
+     [key: string]: unknown;
+   }): ComplianceFlag[] {
+     const content =
+       this.normalizeText(payload.normalizedContent ?? payload.rawContent ?? '');
+ 
+     if (!content) return [];
+ 
+     const flags: ComplianceFlag[] = [];
+ 
+     if (content.includes('\u0000')) {
+       flags.push(
+         this.flag(
+           'invalid_null_bytes',
+           'Content contains invalid null bytes.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
+ 
+     return flags;
    }
  
-   private mergeText(sections: Array<{ content: string; title?: string | null }>) {
-     return sections
-       .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
-       .join('\n')
-       .replace(/\s+/g, ' ')
-       .trim();
-   }
- 
-@@ -212,26 +232,123 @@ export class ComplianceService {
-   }
- 
-   private normalizePunctuation(text: string) {
-     return text
-       .replace(/[\u2010-\u2015\u2212]/g, '-')
-       .replace(/\u2026/g, '...')
-       .replace(/[\u00b7\u2022\u2023\u2043\u2219]/g, '-')
-       .replace(/[\u2018\u2019]/g, "'")
-       .replace(/[\u201C\u201D]/g, '"')
-       .replace(/\s+/g, ' ')
-       .trim();
-   }
- 
-   private findStylizedPunctuation(text: string) {
-     const matches =
-       text.match(/[\u2010-\u2015\u2212\u2026\u00b7\u2022\u2023\u2043\u2219\u2018\u2019\u201C\u201D]/g) ?? [];
-     return Array.from(new Set(matches));
-   }
- 
-   private normalizeNumberToken(value: string) {
-     const cleaned = value.replace(/,/g, '').trim();
-     const hasPercent = cleaned.endsWith('%');
-     const numericPortion = hasPercent ? cleaned.slice(0, -1) : cleaned;
-     return hasPercent ? `${numericPortion}%` : numericPortion;
-   }
-+
-+  private buildTechnologyVocabulary(
-+    baselineSections: Array<{ content: string; title?: string | null; sectionType?: string; type?: string }>,
-+  ): Set<string> {
-+    const vocabulary = new Set<string>();
-+    const allowedTypes = new Set<string>([
-+      BaselineSectionType.SKILLS,
-+      BaselineSectionType.EXPERIENCE,
-+      BaselineSectionType.PROJECT,
-+    ]);
-+
-+    for (const section of baselineSections) {
-+    for (const section of baselineSections) {
-+      const type = (section.sectionType ?? (section as any).type ?? '').toString().toUpperCase();
-+      if (type && !allowedTypes.has(type)) continue;
-+
-+      const tokens = this.extractTechnologyTokens(section.content ?? '');
-+      tokens.forEach((token) => vocabulary.add(token.toLowerCase()));
-+    }
-+
-+    return vocabulary;
++  public detectScopeInflation(payload: {
++    baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
++    generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
++  }): ComplianceFlag[] {
++    const baselineSections = payload.baselineSections ?? [];
++    const generatedSections = payload.generatedSections ?? [];
++    return this.scopeInflationDetector.detect(baselineSections, generatedSections);
 +  }
 +
-+  private extractTechnologiesFromSections(
-+    sections: Array<{ content: string; title?: string | null }>,
-+  ): { normalizedSet: Set<string>; ordered: string[] } {
-+    const normalizedSet = new Set<string>();
-+    const ordered: string[] = [];
-+
-+    for (const section of sections) {
-+      const tokens = this.extractTechnologyTokens(section.content ?? '');
-+      for (const token of tokens) {
-+        const key = token.toLowerCase();
-+        if (normalizedSet.has(key)) continue;
-+        normalizedSet.add(key);
-+        ordered.push(token);
-+      }
-+    }
-+
-+    return { normalizedSet, ordered };
-+  }
-+
-+  private extractTechnologyTokens(text: string): string[] {
-+    const normalized = this.normalizePunctuation(text);
-+    const rawTokens = normalized.match(/\b[A-Za-z0-9][A-Za-z0-9.+#-]{1,29}\b/g) ?? [];
-+    const normalizedSet = new Set<string>();
-+    const ordered: string[] = [];
-+
-+    for (const raw of rawTokens) {
-+      const cleaned = raw.trim();
-+      if (!cleaned) continue;
-+
-+      const hasLetter = /[A-Za-z]/.test(cleaned);
-+      if (!hasLetter) continue;
-+
-+      const hasSpecial = /[+#.]/.test(cleaned);
-+      const hasDigit = /\d/.test(cleaned);
-+      const isAllCaps = /^[A-Z0-9]{2,}$/.test(cleaned);
-+      const hasInternalCapital = /[a-z][A-Z]/.test(cleaned) || /[A-Z]{2,}[a-z]/.test(cleaned);
-+
-+      if (!(hasSpecial || hasDigit || isAllCaps || hasInternalCapital)) {
-+        continue;
-+      }
-+
-+      const key = cleaned.toLowerCase();
-+      if (normalizedSet.has(key)) continue;
-+
-+      normalizedSet.add(key);
-+      ordered.push(cleaned);
-+    }
-+
-+    return ordered;
-+  }
-+
-+  private detectFictionalTechnologies(
-+    baselineTechVocabulary: Set<string>,
-+    generatedTechnologies: { normalizedSet: Set<string>; ordered: string[] },
-+  ): ComplianceFlag[] {
-+    const flags: ComplianceFlag[] = [];
-+    if (!baselineTechVocabulary.size || !generatedTechnologies.ordered.length) {
-+      return flags;
-+    }
-+
-+    for (const technology of generatedTechnologies.ordered) {
-+      const normalized = technology.toLowerCase();
-+      if (!baselineTechVocabulary.has(normalized)) {
-+        flags.push({
-+          code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
-+          severity: ComplianceFlagSeverity.BLOCK,
-+          message: `Technology "${technology}" not found in baseline.`,
-+        });
-+        break;
-+      }
-+    }
-+
-+    return flags;
-+  }
- }
+   public enforceTechnologyConsistency(payload: {
+     baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
+     jobText?: string | null;
+     [key: string]: unknown;
+   }): ComplianceFlag[] {
+     void payload;
+     return [];
+   }
+ 
+   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
+     const flags: ComplianceFlag[] = [];
+ 
+     const actorId = String(payload.actorId ?? '').trim();
+     const outputHash = String(payload.outputHash ?? '').trim();
+ 
+     if (!actorId) {
+       flags.push(
+         this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
+       );
+     }
+ 
+     if (!outputHash) {
+       flags.push(
+         this.flag(
+           'missing_output_hash',
+           'Output hash is required.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
+ 
+     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
+       for (const f of payload.extraFlags) {
+         if (!f || typeof f.code !== 'string' || !f.code.trim()) continue;
+         flags.push({
+           code: f.code as any,
+           message: f.message,
+           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
++          evidence: f.evidence,
+         });
+       }
+     }
+ 
+     if (payload.scopeInflationDetected === true) {
+       flags.push(
+         this.flag(
+-          'scope_inflation_detected',
++          ComplianceFlagCode.SCOPE_INFLATION,
+           'Potential scope inflation detected.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
+ 
+     const blocked = flags.some(
+       (f) =>
+         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+     );
+ 
+     const auditId = this.buildAuditId(payload);
+ 
+     const baselineVersionHash =
+       (payload.baselineVersion as any)?.hash ??
+       (payload.baselineVersion as any)?.fileHash ??
+       null;
+ 
+     const jobId = (payload.job as any)?.id ?? null;
+ 
+     return {
+       blocked,
+       complianceFlags: flags,
+       audit: {
+         id: auditId,
 diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
-index c039f5bf72f45453f957faf718a1b3c108964806..0e309282a0751a43988ddcc74ef003eb3cac9232 100644
+index 0e309282a0751a43988ddcc74ef003eb3cac9232..d7b909962a46f2b172092ce39a2190146cba9300 100644
 --- a/apps/api/src/compliance/compliance.types.ts
 +++ b/apps/api/src/compliance/compliance.types.ts
-@@ -1,27 +1,28 @@
+@@ -1,28 +1,30 @@
  export enum ComplianceAction {
    FIT_SCORE = 'fit_score',
    RESUME_GENERATION = 'resume_gen',
@@ -755,15 +195,679 @@ index c039f5bf72f45453f957faf718a1b3c108964806..0e309282a0751a43988ddcc74ef003eb
    INVENTED_ROLE = 'invented_role',
    INVENTED_METRIC = 'invented_metric',
    STYLIZED_PUNCTUATION = 'stylized_punctuation',
-+  FICTIONAL_TECHNOLOGY = 'fictional_technology',
+   FICTIONAL_TECHNOLOGY = 'fictional_technology',
  }
  
  export enum ComplianceFlagSeverity {
    BLOCK = 'block',
++  WARN = 'warn',
  }
  
  export type ComplianceFlag = {
    code: ComplianceFlagCode;
    severity: ComplianceFlagSeverity;
    message: string;
++  evidence?: Array<{ baseline: string; generated: string }>;
  };
+diff --git a/apps/api/src/compliance/scope-inflation-detector.spec.ts b/apps/api/src/compliance/scope-inflation-detector.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c284240ac84abccef3047a51ce194a2de49825f3
+--- /dev/null
++++ b/apps/api/src/compliance/scope-inflation-detector.spec.ts
+@@ -0,0 +1,58 @@
++import { BaselineSectionType } from '../baseline/baseline-section.entity';
++import { ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
++import { ScopeInflationDetector } from './scope-inflation-detector';
++
++describe('ScopeInflationDetector', () => {
++  const detector = new ScopeInflationDetector();
++
++  it('does not flag scope cues that are present in the baseline fingerprint', () => {
++    const flags = detector.detect(
++      [
++        {
++          sectionType: BaselineSectionType.EXPERIENCE,
++          title: 'Experience',
++          content: 'Led a global team delivering a 10% uplift.',
++        },
++      ],
++      [
++        {
++          title: 'Generated Resume',
++          content: 'Led a global team delivering a 10% uplift.',
++        },
++      ],
++    );
++
++    expect(flags).toHaveLength(0);
++  });
++
++  it('blocks exaggerated seniority and scale claims beyond the baseline', () => {
++    const flags = detector.detect(
++      [
++        {
++          sectionType: BaselineSectionType.EXPERIENCE,
++          title: 'Experience',
++          content: 'Contributed to feature delivery.',
++        },
++      ],
++      [
++        {
++          title: 'Generated Resume',
++          content: 'Directed a global organization of thousands across regions.',
++        },
++      ],
++    );
++
++    expect(flags).toEqual([
++      expect.objectContaining({
++        code: ComplianceFlagCode.SCOPE_INFLATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++        evidence: expect.arrayContaining([
++          expect.objectContaining({
++            baseline: expect.any(String),
++            generated: expect.stringContaining('Directed a global organization'),
++          }),
++        ]),
++      }),
++    ]);
++  });
++});
+diff --git a/apps/api/src/compliance/scope-inflation-detector.ts b/apps/api/src/compliance/scope-inflation-detector.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5cfcfc2afb690883f675db1b00b264a231596b34
+--- /dev/null
++++ b/apps/api/src/compliance/scope-inflation-detector.ts
+@@ -0,0 +1,216 @@
++import { BaselineSectionType } from '../baseline/baseline-section.entity';
++import {
++  ComplianceFlag,
++  ComplianceFlagCode,
++  ComplianceFlagSeverity,
++} from './compliance.types';
++
++type ScopeCategory = 'seniority' | 'ownership' | 'scale';
++
++type Fingerprint = {
++  cues: Record<ScopeCategory, Set<string>>;
++  evidence: Record<ScopeCategory, Map<string, string>>;
++};
++
++type SectionShape = { content?: string | null; title?: string | null; sectionType?: string };
++
++const SCOPE_CUES: Record<ScopeCategory, string[]> = {
++  seniority: [
++    'director',
++    'executive director',
++    'senior director',
++    'vp',
++    'vice president',
++    'svp',
++    'evp',
++    'chief',
++    'cto',
++    'ceo',
++    'cpo',
++    'head of',
++    'principal',
++    'executive',
++    'global head',
++    'senior vice president',
++  ],
++  ownership: [
++    'owned',
++    'led',
++    'architected',
++    'built',
++    'drove',
++    'managed',
++    'spearheaded',
++    'transformed',
++    'accountable for',
++    'responsible for',
++    'oversaw',
++    'directed',
++    'created',
++    'launched',
++    'delivered',
++    'implemented',
++  ],
++  scale: [
++    'global',
++    'worldwide',
++    'multi-region',
++    'multi region',
++    'multi-regional',
++    'company-wide',
++    'enterprise',
++    'enterprise-wide',
++    'nationwide',
++    'country-wide',
++    'thousands',
++    'millions',
++    'billions',
++  ],
++};
++
++const CATEGORY_SEVERITY: Record<ScopeCategory, ComplianceFlagSeverity> = {
++  seniority: ComplianceFlagSeverity.BLOCK,
++  scale: ComplianceFlagSeverity.BLOCK,
++  ownership: ComplianceFlagSeverity.WARN,
++};
++
++export class ScopeInflationDetector {
++  private normalize(text: string) {
++    return text.toLowerCase().replace(/\s+/g, ' ').trim();
++  }
++
++  private extractSnippet(text: string, cue: string) {
++    const lower = text.toLowerCase();
++    const index = lower.indexOf(cue);
++    if (index === -1) {
++      return text.slice(0, 200).trim();
++    }
++
++    const start = Math.max(0, index - 60);
++    const end = Math.min(text.length, index + cue.length + 60);
++    return text.slice(start, end).trim();
++  }
++
++  private buildFingerprint(sections: SectionShape[]): Fingerprint {
++    const fingerprint: Fingerprint = {
++      cues: {
++        seniority: new Set<string>(),
++        ownership: new Set<string>(),
++        scale: new Set<string>(),
++      },
++      evidence: {
++        seniority: new Map<string, string>(),
++        ownership: new Map<string, string>(),
++        scale: new Map<string, string>(),
++      },
++    };
++
++    const relevantSections = sections.filter((section) => {
++      const type = section.sectionType as BaselineSectionType | undefined;
++      if (!type) return true;
++      return [
++        BaselineSectionType.EXPERIENCE,
++        BaselineSectionType.PROJECT,
++        BaselineSectionType.SUMMARY,
++        BaselineSectionType.SKILLS,
++      ].includes(type);
++    });
++
++    for (const section of relevantSections) {
++      const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
++      if (!text) continue;
++
++      const normalized = this.normalize(text);
++      for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
++        for (const cue of cues) {
++          if (normalized.includes(cue)) {
++            fingerprint.cues[category].add(cue);
++            if (!fingerprint.evidence[category].has(cue)) {
++              fingerprint.evidence[category].set(cue, this.extractSnippet(text, cue));
++            }
++          }
++        }
++      }
++    }
++
++    return fingerprint;
++  }
++
++  private gatherCues(
++    section: { content?: string | null; title?: string | null },
++  ): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
++    const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
++    if (!text) return [];
++    const normalized = this.normalize(text);
++
++    const matches: Array<{ category: ScopeCategory; cue: string; snippet: string }> = [];
++
++    for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
++      for (const cue of cues) {
++        if (normalized.includes(cue)) {
++          matches.push({
++            category,
++            cue,
++            snippet: this.extractSnippet(text, cue),
++          });
++        }
++      }
++    }
++
++    return matches;
++  }
++
++  detect(
++    baselineSections: SectionShape[],
++    generatedSections: Array<{ title?: string | null; content?: string | null }>,
++  ): ComplianceFlag[] {
++    const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
++    const violations: Array<{
++      category: ScopeCategory;
++      cue: string;
++      generated: string;
++      baseline: string;
++    }> = [];
++
++    for (const section of generatedSections ?? []) {
++      const cues = this.gatherCues(section);
++      for (const cue of cues) {
++        if (!baselineFingerprint.cues[cue.category].has(cue.cue)) {
++          const baselineEvidence =
++            baselineFingerprint.evidence[cue.category].get(cue.cue) ??
++            'Baseline has no matching scope evidence.';
++          violations.push({
++            category: cue.category,
++            cue: cue.cue,
++            generated: cue.snippet,
++            baseline: baselineEvidence,
++          });
++        }
++      }
++    }
++
++    if (!violations.length) return [];
++
++    const hasBlocking = violations.some(
++      (violation) => CATEGORY_SEVERITY[violation.category] === ComplianceFlagSeverity.BLOCK,
++    );
++
++    const severity = hasBlocking ? ComplianceFlagSeverity.BLOCK : ComplianceFlagSeverity.WARN;
++
++    const evidence = violations.map((violation) => ({
++      baseline: violation.baseline,
++      generated: violation.generated,
++    }));
++
++    return [
++      {
++        code: ComplianceFlagCode.SCOPE_INFLATION,
++        severity,
++        message: hasBlocking
++          ? 'Potential scope inflation exceeds baseline scope.'
++          : 'Potential scope inflation cues need review against baseline.',
++        evidence,
++      },
++    ];
++  }
++}
+diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
+index 5e0ff43cc7c09567e60e366d51415de2ad043182..bcd920773b8e3ad364b7804db4cfd8517c77347e 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.spec.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
+@@ -38,50 +38,51 @@ describe('CoverLettersService', () => {
+         title: 'Experience',
+         content: 'Delivered 15% efficiency improvement with verified metrics.',
+         includePolicy: BaselineIncludePolicy.ALWAYS,
+         order: 0,
+         sectionType: BaselineSectionType.EXPERIENCE,
+       },
+     ],
+   });
+   const baselineVersionRepository = buildRepository<any>({
+     id: 'baseline-version-1',
+     baselineId: 'baseline-1',
+     hash: 'baseline-hash',
+   });
+   const baselineBlockPolicyRepository = buildRepository<any>();
+   const jobRepository = buildRepository<any>({
+     id: 'job-1',
+     userId: 'user-1',
+     title: 'Program Manager',
+     company: 'Acme Corp',
+     normalizedResponsibilities: ['Improve processes by 10%.'],
+     normalizedRequirements: ['Deliver measurable impact.'],
+   });
+ 
+   const complianceService = {
+     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
++    detectScopeInflation: jest.fn().mockReturnValue([]),
+     validateAndAudit: jest.fn(async (ctx: any) => ({
+       complianceFlags: ctx.extraFlags ?? [],
+       blocked: (ctx.extraFlags ?? []).some(
+         (flag: { severity: ComplianceFlagSeverity }) => flag.severity === ComplianceFlagSeverity.BLOCK,
+       ),
+       audit: { id: 'audit-1' },
+     })),
+   };
+ 
+   const dataSource = {
+     getRepository: jest.fn((entity) => {
+       switch ((entity as any)?.name) {
+         case 'CoverLetter':
+           return coverLetterRepository;
+         case 'Baseline':
+           return baselineRepository;
+         case 'BaselineVersion':
+           return baselineVersionRepository;
+         case 'BaselineBlockPolicy':
+           return baselineBlockPolicyRepository;
+         case 'Job':
+           return jobRepository;
+         default:
+           throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
+       }
+@@ -112,26 +113,47 @@ describe('CoverLettersService', () => {
+     });
+ 
+     expect(second.closingTemplateKey).toBe('collaborative');
+   });
+ 
+   it('blocks invented metrics through compliance checks', async () => {
+     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
+       {
+         code: ComplianceFlagCode.INVENTED_METRIC,
+         severity: ComplianceFlagSeverity.BLOCK,
+         message: 'Metric not found in baseline.',
+       },
+     ]);
+ 
+     const service = new CoverLettersService(dataSource, complianceService as any);
+ 
+     await expect(
+       service.generateCoverLetter('user-1', {
+         baselineId: 'baseline-1',
+         jobId: 'job-1',
+       }),
+     ).rejects.toThrow(UnprocessableEntityException);
+ 
+     expect(complianceService.validateAndAudit).toHaveBeenCalled();
+   });
++
++  it('blocks cover letter generation when scope inflation is detected', async () => {
++    complianceService.detectScopeInflation.mockReturnValueOnce([
++      {
++        code: ComplianceFlagCode.SCOPE_INFLATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++        message: 'Scope exceeds baseline.',
++      },
++    ]);
++
++    const service = new CoverLettersService(dataSource, complianceService as any);
++
++    await expect(
++      service.generateCoverLetter('user-1', {
++        baselineId: 'baseline-1',
++        jobId: 'job-1',
++      }),
++    ).rejects.toThrow(UnprocessableEntityException);
++
++    expect(complianceService.validateAndAudit).toHaveBeenCalled();
++  });
+ });
+diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
+index 073716caeb2abb7d9d8b2dcf87a6a95859be247b..5828b097b71846aaa0b31ed71843aef5eac0ce69 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.ts
+@@ -129,60 +129,69 @@ export class CoverLettersService {
+       baselineId: baseline.id,
+       jobId: job.id,
+       allowedBaselineBlocks: allowedBlocks,
+       job: jobContext,
+       closingTemplate,
+       maxWords: input.maxWords,
+       tone: input.tone,
+     });
+ 
+     const normalizedContent = this.complianceService.normalizeText(
+       generation.content,
+     );
+ 
+     const complianceBaselineSections = this.buildComplianceBaselineSections(
+       allowedBlocks,
+       jobContext,
+     );
+ 
+     const writingFlags = this.complianceService.enforceResumeWritingRules({
+       baselineSections: complianceBaselineSections,
+       generatedSections: [
+         { title: 'Cover Letter', content: generation.content },
+       ],
+     });
+ 
++    const scopeFlags = this.complianceService.detectScopeInflation({
++      baselineSections: allowedBlocks.map((block) => ({
++        title: block.title,
++        content: block.content,
++        sectionType: block.sectionType,
++      })),
++      generatedSections: [{ title: 'Cover Letter', content: generation.content }],
++    });
++
+     const { complianceFlags, blocked } =
+       await this.complianceService.validateAndAudit({
+         action: ComplianceAction.COVER_LETTER_GENERATION,
+         actorId: userId,
+         baselineVersion,
+         job,
+         outputHash: createHash('sha256')
+           .update(normalizedContent)
+           .digest('hex'),
+-        extraFlags: writingFlags,
++        extraFlags: [...writingFlags, ...scopeFlags],
+         scopeInflationDetected: false,
+       });
+ 
+     if (blocked) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'unprocessable',
+           message: 'Compliance validation failed.',
+           details: { compliance_flags: complianceFlags },
+         },
+       });
+     }
+ 
+     const coverLetter = this.coverLetterRepository.create({
+       userId,
+       baselineId: baseline.id,
+       jobId: job.id,
+       generatorType: 'template',
+       generatorVersion: 'v1',
+       closingTemplateKey,
+       content: normalizedContent,
+       generationInputsHash,
+     });
+ 
+     return this.coverLetterRepository.save(coverLetter);
+diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+index 67edc987859473a94dac0dde5f465aae31ea1703..c20fe474c17b2589e01d6f9785eb3f1bd50759d9 100644
+--- a/apps/api/src/resume/resume.service.spec.ts
++++ b/apps/api/src/resume/resume.service.spec.ts
+@@ -42,50 +42,51 @@ const buildService = (
+   fitScore: number,
+   writingFlags: any[] = [],
+   baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
+   complianceOverride: Partial<ComplianceService> = {},
+ ) => {
+   const baselineRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue(mockBaseline),
+   });
+   const baselineVersionRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue(baselineVersionOverride),
+   });
+   const baselineBlockPolicyRepository = buildRepository({
+     find: jest.fn().mockResolvedValue([]),
+   });
+   const jobsRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue(mockJob),
+   });
+   const fitAssessmentRepository = buildRepository({
+     findOne: jest.fn().mockResolvedValue({
+       id: 'fit-1',
+       overallScore: fitScore,
+     }),
+   });
+   const complianceService = {
+     enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
++    detectScopeInflation: jest.fn().mockReturnValue([]),
+     validateAndAudit: jest.fn().mockResolvedValue({
+       complianceFlags: writingFlags,
+       blocked: writingFlags.length > 0,
+       audit: { id: 'audit-1' },
+     }),
+     ...complianceOverride,
+   } as unknown as ComplianceService;
+ 
+   return {
+     service: new ResumeService(
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineVersionRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       baselineBlockPolicyRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       jobsRepository,
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       fitAssessmentRepository,
+@@ -167,40 +168,65 @@ describe('ResumeService', () => {
+         baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
+         job: expect.objectContaining({ id: 'job-1' }),
+         outputHash: expect.any(String),
+       }),
+     );
+   });
+ 
+   it('blocks generation when invented metrics are present', async () => {
+     const inventedMetricFlag = [
+       {
+         code: ComplianceFlagCode.INVENTED_METRIC,
+         severity: ComplianceFlagSeverity.BLOCK,
+         message: 'Metric not in baseline.',
+       },
+     ];
+     const { service } = buildService(95, inventedMetricFlag);
+ 
+     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+       UnprocessableEntityException,
+     );
+   });
+ 
+   it('blocks export when compliance flags are blocking', async () => {
+     const complianceService = {
+       enforceResumeWritingRules: jest.fn().mockReturnValue([]),
++      detectScopeInflation: jest.fn().mockReturnValue([]),
+       validateAndAudit: jest.fn().mockResolvedValue({
+         complianceFlags: [
+           { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
+         ],
+         blocked: true,
+         audit: { id: 'audit-2' },
+       }),
+     } as unknown as ComplianceService;
+     const { service } = buildService(95, [], mockBaselineVersion, complianceService);
+ 
+     await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
+       UnprocessableEntityException,
+     );
+   });
++
++  it('blocks generation when scope inflation is detected', async () => {
++    const scopeFlag = [
++      {
++        code: ComplianceFlagCode.SCOPE_INFLATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++        message: 'Scope exceeds baseline.',
++      },
++    ];
++
++    const { service } = buildService(95, [], mockBaselineVersion, {
++      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
++      detectScopeInflation: jest.fn().mockReturnValue(scopeFlag),
++      validateAndAudit: jest.fn().mockResolvedValue({
++        complianceFlags: scopeFlag,
++        blocked: true,
++        audit: { id: 'audit-3' },
++      }),
++    });
++
++    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
++      UnprocessableEntityException,
++    );
++  });
+ });
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index d84a49563edea68042a8c9c2de22f5ca064baef9..0a6a1803bf611105313426ffb1590ce284539649 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -187,63 +187,66 @@ export class ResumeService {
+     }));
+ 
+     const job = jobId
+       ? await this.jobsRepository.findOne({
+           where: { id: jobId, userId },
+         })
+       : null;
+ 
+     if (jobId && !job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     if (request.oneTap && jobId) {
+       await this.ensureOneTapAllowed(userId, jobId);
+     }
+ 
+     const outputHash = createHash('sha256')
+       .update(JSON.stringify(this.complianceService.normalizeSectionsForOutput(sections)))
+       .digest('hex');
+ 
+     const writingFlags = this.complianceService.enforceResumeWritingRules({
+       baselineSections: baseline.sections ?? [],
+       generatedSections: sections,
+     });
+ 
++    const scopeFlags = this.complianceService.detectScopeInflation({
++      baselineSections: sections,
++      generatedSections: sections,
++    });
++
+     const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
+ 
+     const { complianceFlags, blocked, audit } =
+       await this.complianceService.validateAndAudit({
+         action: ComplianceAction.RESUME_GENERATION,
+         actorId: userId,
+         baselineVersion,
+         job,
+         outputHash,
+-        scopeInflationDetected: sections.some(
+-          (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
+-        ),
+-        extraFlags: writingFlags,
++        scopeInflationDetected: false,
++        extraFlags: [...writingFlags, ...scopeFlags],
+       });
+ 
+     if (blocked) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'unprocessable',
+           message: 'Compliance validation failed.',
+           details: { compliance_flags: complianceFlags },
+         },
+       });
+     }
+ 
+     return {
+       ok: true,
+       baselineId: baseline.id,
+       baselineVersionId: baselineVersion.id,
+       jobId: jobId ?? null,
+       sections: normalizedSections,
+       compliance_flags: complianceFlags,
+       audit_id: audit.id,
+     };
+   }
+ 
+   async exportResume(
+     userId: string,

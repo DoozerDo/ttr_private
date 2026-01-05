@@ -19,10 +19,12 @@ export enum ComplianceFlagCode {
 
 export enum ComplianceFlagSeverity {
   BLOCK = 'block',
+  WARN = 'warn',
 }
 
 export type ComplianceFlag = {
   code: ComplianceFlagCode;
   severity: ComplianceFlagSeverity;
   message: string;
+  evidence?: Array<{ baseline: string; generated: string }>;
 };

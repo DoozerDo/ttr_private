@@ -64,6 +64,7 @@ const buildService = (
   });
   const complianceService = {
     enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
+    detectScopeInflation: jest.fn().mockReturnValue([]),
     validateAndAudit: jest.fn().mockResolvedValue({
       complianceFlags: writingFlags,
       blocked: writingFlags.length > 0,
@@ -189,6 +190,7 @@ describe('ResumeService', () => {
   it('blocks export when compliance flags are blocking', async () => {
     const complianceService = {
       enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      detectScopeInflation: jest.fn().mockReturnValue([]),
       validateAndAudit: jest.fn().mockResolvedValue({
         complianceFlags: [
           { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
@@ -200,6 +202,30 @@ describe('ResumeService', () => {
     const { service } = buildService(95, [], mockBaselineVersion, complianceService);
 
     await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+  });
+
+  it('blocks generation when scope inflation is detected', async () => {
+    const scopeFlag = [
+      {
+        code: ComplianceFlagCode.SCOPE_INFLATION,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Scope exceeds baseline.',
+      },
+    ];
+
+    const { service } = buildService(95, [], mockBaselineVersion, {
+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      detectScopeInflation: jest.fn().mockReturnValue(scopeFlag),
+      validateAndAudit: jest.fn().mockResolvedValue({
+        complianceFlags: scopeFlag,
+        blocked: true,
+        audit: { id: 'audit-3' },
+      }),
+    });
+
+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
       UnprocessableEntityException,
     );
   });

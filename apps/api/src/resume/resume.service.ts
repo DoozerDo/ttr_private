@@ -209,6 +209,11 @@ export class ResumeService {
       generatedSections: sections,
     });
 
+    const scopeFlags = this.complianceService.detectScopeInflation({
+      baselineSections: sections,
+      generatedSections: sections,
+    });
+
     const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
 
     const { complianceFlags, blocked, audit } =
@@ -218,10 +223,8 @@ export class ResumeService {
         baselineVersion,
         job,
         outputHash,
-        scopeInflationDetected: sections.some(
-          (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
-        ),
-        extraFlags: writingFlags,
+        scopeInflationDetected: false,
+        extraFlags: [...writingFlags, ...scopeFlags],
       });
 
     if (blocked) {

@@ -4,9 +4,11 @@ import type { BaselineVersion } from '../baseline/baseline-version.entity';
 import type { Job } from '../jobs/job.entity';
 import {
   ComplianceAction,
+  ComplianceFlagCode,
   ComplianceFlag,
   ComplianceFlagSeverity,
 } from './compliance.types';
+import { ScopeInflationDetector } from './scope-inflation-detector';
 
 export type ValidateAndAuditRequest = {
   action: ComplianceAction;
@@ -41,6 +43,8 @@ export type ValidateAndAuditResult = {
 
 @Injectable()
 export class ComplianceService {
+  private readonly scopeInflationDetector = new ScopeInflationDetector();
+
   public normalizeText(input: string): string {
     return (input ?? '').replace(/\s+/g, ' ').trim();
   }
@@ -83,6 +87,15 @@ export class ComplianceService {
     return flags;
   }
 
+  public detectScopeInflation(payload: {
+    baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
+    generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
+  }): ComplianceFlag[] {
+    const baselineSections = payload.baselineSections ?? [];
+    const generatedSections = payload.generatedSections ?? [];
+    return this.scopeInflationDetector.detect(baselineSections, generatedSections);
+  }
+
   public enforceTechnologyConsistency(payload: {
     baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
     jobText?: string | null;
@@ -121,6 +134,7 @@ export class ComplianceService {
           code: f.code as any,
           message: f.message,
           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
+          evidence: f.evidence,
         });
       }
     }
@@ -128,7 +142,7 @@ export class ComplianceService {
     if (payload.scopeInflationDetected === true) {
       flags.push(
         this.flag(
-          'scope_inflation_detected',
+          ComplianceFlagCode.SCOPE_INFLATION,
           'Potential scope inflation detected.',
           ComplianceFlagSeverity.BLOCK,
         ),

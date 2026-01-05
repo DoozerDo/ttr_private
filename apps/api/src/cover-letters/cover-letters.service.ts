@@ -151,6 +151,15 @@ export class CoverLettersService {
       ],
     });
 
+    const scopeFlags = this.complianceService.detectScopeInflation({
+      baselineSections: allowedBlocks.map((block) => ({
+        title: block.title,
+        content: block.content,
+        sectionType: block.sectionType,
+      })),
+      generatedSections: [{ title: 'Cover Letter', content: generation.content }],
+    });
+
     const { complianceFlags, blocked } =
       await this.complianceService.validateAndAudit({
         action: ComplianceAction.COVER_LETTER_GENERATION,
@@ -160,7 +169,7 @@ export class CoverLettersService {
         outputHash: createHash('sha256')
           .update(normalizedContent)
           .digest('hex'),
-        extraFlags: writingFlags,
+        extraFlags: [...writingFlags, ...scopeFlags],
         scopeInflationDetected: false,
       });
 
