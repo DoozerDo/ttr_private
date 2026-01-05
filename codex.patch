@@ -1,99 +1,46 @@
 diff --git a/apps/api/src/interviews/gap-detection.service.spec.ts b/apps/api/src/interviews/gap-detection.service.spec.ts
-index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008da8d369c4 100644
+index 3a20f99c3ba357e4403e71b6d706008da8d369c4..8fcafc75d18b4ec436c819184c65701c4042bfaa 100644
 --- a/apps/api/src/interviews/gap-detection.service.spec.ts
 +++ b/apps/api/src/interviews/gap-detection.service.spec.ts
-@@ -1,50 +1,52 @@
- import { BadRequestException, NotFoundException } from '@nestjs/common';
- import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
--import { GapDetectionService } from './gap-detection.service';
-+import { GapDetectionService, GapEmbeddingProvider } from './gap-detection.service';
- import { Job } from '../jobs/job.entity';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+@@ -242,26 +242,226 @@ describe('GapDetectionService', () => {
+       } as unknown as BaselineSection,
+     ]);
+     baselineBlockPolicyRepository.find.mockResolvedValue([]);
  
- describe('GapDetectionService', () => {
-   const createMockRepository = () => ({
-     findOne: jest.fn(),
-     find: jest.fn(),
-   });
- 
-   const createService = (
-     jobRepository = createMockRepository(),
-     baselineSectionRepository = createMockRepository(),
-     baselineVersionRepository = createMockRepository(),
-     baselineBlockPolicyRepository = createMockRepository(),
-+    embeddingProvider?: GapEmbeddingProvider,
-   ) =>
-     new GapDetectionService(
-       jobRepository as never,
-       baselineSectionRepository as never,
-       baselineVersionRepository as never,
-       baselineBlockPolicyRepository as never,
-+      embeddingProvider as never,
+     const service = createService(
+       jobRepository,
+       baselineSectionRepository,
+       baselineVersionRepository,
+       baselineBlockPolicyRepository,
+       embeddingProvider,
      );
  
-   afterEach(() => {
-     jest.restoreAllMocks();
-   });
+     const result = await service.detectGaps({
+       userId: 'user-2',
+       jobId: job.id,
+       baselineVersionId: baselineVersion.id,
+     });
  
-   it('detects gaps only when baseline coverage is weak', async () => {
-     const jobRepository = createMockRepository();
-     const baselineVersionRepository = createMockRepository();
-     const baselineSectionRepository = createMockRepository();
-     const baselineBlockPolicyRepository = createMockRepository();
- 
-     const job: Job = {
-       id: 'job-1',
-       userId: 'user-1',
-       title: null,
-       company: null,
-       rawDescription: 'sample',
-       sourceUrl: null,
-       normalizedRequirements: ['Hands-on Kubernetes administration', 'Lead cross-functional teams'],
-       normalizedResponsibilities: [],
-       jdIngestionMethod: 'PASTE' as never,
-       jdParsedAt: null,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-@@ -125,26 +127,141 @@ describe('GapDetectionService', () => {
- 
-     jobRepository.findOne.mockResolvedValue(null);
- 
-     await expect(
-       service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
-     ).rejects.toBeInstanceOf(NotFoundException);
- 
-     jobRepository.findOne.mockResolvedValue({
-       id: 'job-1',
-       userId: 'user-1',
-       rawDescription: '',
-       normalizedRequirements: [],
-       normalizedResponsibilities: [],
-     } as Job);
- 
-     baselineVersionRepository.findOne.mockResolvedValue({
-       id: 'bv-1',
-       baselineId: 'b-1',
-       baseline: { userId: 'other-user' } as Baseline,
-     } as BaselineVersion);
- 
-     await expect(
-       service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
-     ).rejects.toBeInstanceOf(NotFoundException);
+     expect(result.gaps).toHaveLength(1);
+     expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
+     expect(embeddingProvider.embed).toHaveBeenCalledWith('Optimize data pipelines');
+     expect(embeddingProvider.embed).toHaveBeenCalledWith('Customer support leadership');
+     expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
+     expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
    });
 +
-+  it('uses embeddings to avoid false gaps and falls back to token overlap otherwise', async () => {
++  it('clusters semantically similar JD gaps together while preserving deterministic ordering', async () => {
 +    const jobRepository = createMockRepository();
 +    const baselineVersionRepository = createMockRepository();
 +    const baselineSectionRepository = createMockRepository();
 +    const baselineBlockPolicyRepository = createMockRepository();
 +
 +    const embeddingVectors: Record<string, number[]> = {
-+      'Stream processing and pipeline optimization': [1, 0],
-+      'Backend architecture and api design': [0, 1],
-+      'Optimize data pipelines': [0.99, 0.01],
-+      'Customer support leadership': [0.5, 0.5],
++      'Build analytics dashboards': [1, 0],
++      'Develop analytics dashboards and reporting': [0.98, 0.05],
++      'Scale distributed systems': [0, 1],
++      'Operations handbook': [0, 1],
++      'Team leadership': [0, 1],
 +    };
 +
 +    const embeddingProvider: GapEmbeddingProvider = {
@@ -102,13 +49,13 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +    };
 +
 +    const job: Job = {
-+      id: 'job-2',
-+      userId: 'user-2',
++      id: 'job-3',
++      userId: 'user-3',
 +      title: null,
 +      company: null,
 +      rawDescription: 'sample',
 +      sourceUrl: null,
-+      normalizedRequirements: ['Optimize data pipelines', 'Customer support leadership'],
++      normalizedRequirements: ['Build analytics dashboards', 'Scale distributed systems', 'Develop analytics dashboards and reporting'],
 +      normalizedResponsibilities: [],
 +      jdIngestionMethod: 'PASTE' as never,
 +      jdParsedAt: null,
@@ -117,8 +64,8 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +    };
 +
 +    const baseline: Baseline = {
-+      id: 'baseline-2',
-+      userId: 'user-2',
++      id: 'baseline-3',
++      userId: 'user-3',
 +      version: 1,
 +      originalFilename: 'file.pdf',
 +      mimeType: 'application/pdf',
@@ -131,7 +78,7 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +    };
 +
 +    const baselineVersion: BaselineVersion = {
-+      id: 'baseline-version-2',
++      id: 'baseline-version-3',
 +      baselineId: baseline.id,
 +      baseline,
 +      blockPolicies: [],
@@ -146,12 +93,12 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
 +    baselineSectionRepository.find.mockResolvedValue([
 +      {
-+        id: 'section-emb-1',
++        id: 'section-3a',
 +        baselineId: baseline.id,
 +        baseline,
 +        sectionType: 'EXPERIENCE' as never,
-+        title: 'Experience',
-+        content: 'Stream processing and pipeline optimization',
++        title: 'Operations',
++        content: 'Operations handbook',
 +        includePolicy: BaselineIncludePolicy.ALWAYS,
 +        order: 1,
 +        createdAt: new Date(),
@@ -160,12 +107,12 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +        orderIndex: 1,
 +      } as unknown as BaselineSection,
 +      {
-+        id: 'section-emb-2',
++        id: 'section-3b',
 +        baselineId: baseline.id,
 +        baseline,
 +        sectionType: 'EXPERIENCE' as never,
 +        title: 'Leadership',
-+        content: 'Backend architecture and api design',
++        content: 'Team leadership',
 +        includePolicy: BaselineIncludePolicy.ALWAYS,
 +        order: 2,
 +        createdAt: new Date(),
@@ -184,33 +131,117 @@ index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008d
 +      embeddingProvider,
 +    );
 +
-+    const result = await service.detectGaps({
-+      userId: 'user-2',
++    const firstRun = await service.detectGaps({
++      userId: 'user-3',
 +      jobId: job.id,
 +      baselineVersionId: baselineVersion.id,
 +    });
 +
-+    expect(result.gaps).toHaveLength(1);
-+    expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
-+    expect(embeddingProvider.embed).toHaveBeenCalledWith('Optimize data pipelines');
-+    expect(embeddingProvider.embed).toHaveBeenCalledWith('Customer support leadership');
-+    expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
-+    expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
++    const secondRun = await service.detectGaps({
++      userId: 'user-3',
++      jobId: job.id,
++      baselineVersionId: baselineVersion.id,
++    });
++
++    const expectedOrder = [
++      'Build analytics dashboards',
++      'Develop analytics dashboards and reporting',
++      'Scale distributed systems',
++    ];
++
++    expect(firstRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
++    expect(secondRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
++    expect(firstRun.gaps).toHaveLength(3);
++  });
++
++  it('avoids clustering dissimilar JD gaps', async () => {
++    const jobRepository = createMockRepository();
++    const baselineVersionRepository = createMockRepository();
++    const baselineSectionRepository = createMockRepository();
++    const baselineBlockPolicyRepository = createMockRepository();
++
++    const embeddingProvider: GapEmbeddingProvider = {
++      isEnabled: () => false,
++      embed: jest.fn(),
++    };
++
++    const job: Job = {
++      id: 'job-4',
++      userId: 'user-4',
++      title: null,
++      company: null,
++      rawDescription: 'sample',
++      sourceUrl: null,
++      normalizedRequirements: ['Cloud security architecture', 'Frontend component libraries', 'Experimental data science'],
++      normalizedResponsibilities: [],
++      jdIngestionMethod: 'PASTE' as never,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const baseline: Baseline = {
++      id: 'baseline-4',
++      userId: 'user-4',
++      version: 1,
++      originalFilename: 'file.pdf',
++      mimeType: 'application/pdf',
++      storagePath: '/tmp/file.pdf',
++      hash: null,
++      sections: [],
++      versions: [],
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const baselineVersion: BaselineVersion = {
++      id: 'baseline-version-4',
++      baselineId: baseline.id,
++      baseline,
++      blockPolicies: [],
++      fileHash: null,
++      storagePath: '/tmp/file.pdf',
++      versionNumber: 1,
++      createdAt: new Date(),
++      hash: null,
++    };
++
++    jobRepository.findOne.mockResolvedValue(job);
++    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
++    baselineSectionRepository.find.mockResolvedValue([]);
++    baselineBlockPolicyRepository.find.mockResolvedValue([]);
++
++    const service = createService(
++      jobRepository,
++      baselineSectionRepository,
++      baselineVersionRepository,
++      baselineBlockPolicyRepository,
++      embeddingProvider,
++    );
++
++    const result = await service.detectGaps({
++      userId: 'user-4',
++      jobId: job.id,
++      baselineVersionId: baselineVersion.id,
++    });
++
++    expect(result.gaps.map((gap) => gap.jdExcerpt)).toEqual(job.normalizedRequirements);
++    expect(result.gaps).toHaveLength(3);
 +  });
  });
 diff --git a/apps/api/src/interviews/gap-detection.service.ts b/apps/api/src/interviews/gap-detection.service.ts
-index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48659a391a 100644
+index d04739453717b0b28cf92c581ce57f48659a391a..c2432712f7f1a6fd66d6be1fb749e4f06449fb69 100644
 --- a/apps/api/src/interviews/gap-detection.service.ts
 +++ b/apps/api/src/interviews/gap-detection.service.ts
-@@ -1,127 +1,163 @@
--import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import {
-+  BadRequestException,
-+  Inject,
-+  Injectable,
-+  NotFoundException,
-+  Optional,
-+} from '@nestjs/common';
+@@ -1,76 +1,78 @@
+-import {
+-  BadRequestException,
+-  Inject,
+-  Injectable,
+-  NotFoundException,
+-  Optional,
+-} from '@nestjs/common';
++import { BadRequestException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
  import { InjectRepository } from '@nestjs/typeorm';
  import { randomUUID } from 'node:crypto';
  import { Repository } from 'typeorm';
@@ -239,22 +270,32 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
    tokens: Set<string>;
  };
  
-+export interface GapEmbeddingProvider {
-+  isEnabled(): boolean;
-+  embed(text: string): Promise<number[]>;
-+}
+ export interface GapEmbeddingProvider {
+   isEnabled(): boolean;
+   embed(text: string): Promise<number[]>;
+ }
+ 
+ export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
+ 
+ type SectionEmbedding = {
+   section: BaselineSection;
+   embedding: number[];
+ };
+ 
++const GAP_EMBEDDING_MATCH_THRESHOLD = 0.75;
++const GAP_CLUSTER_EMBEDDING_THRESHOLD = 0.82;
++const GAP_CLUSTER_TOKEN_THRESHOLD = 0.6;
 +
-+export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
-+
-+type SectionEmbedding = {
-+  section: BaselineSection;
-+  embedding: number[];
++type GapCandidate = {
++  gap: InterviewGap;
++  tokens: Set<string>;
++  embedding?: number[] | null;
 +};
 +
  @Injectable()
  export class GapDetectionService {
-+  private readonly embeddingMatchThreshold = 0.75;
-+
+-  private readonly embeddingMatchThreshold = 0.75;
+-
    constructor(
      @InjectRepository(Job)
      private readonly jobRepository: Repository<Job>,
@@ -264,9 +305,9 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
      private readonly baselineVersionRepository: Repository<BaselineVersion>,
      @InjectRepository(BaselineBlockPolicy)
      private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-+    @Optional()
-+    @Inject(GAP_EMBEDDING_PROVIDER)
-+    private readonly embeddingProvider?: GapEmbeddingProvider,
+     @Optional()
+     @Inject(GAP_EMBEDDING_PROVIDER)
+     private readonly embeddingProvider?: GapEmbeddingProvider,
    ) {}
  
    async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
@@ -280,19 +321,7 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
      const job = await this.jobRepository.findOne({
        where: { id: jobId, userId: inputs.userId },
      });
- 
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     const baselineVersion = await this.baselineVersionRepository.findOne({
-       where: { id: baselineVersionId },
-       relations: ['baseline'],
-     });
- 
-     if (!baselineVersion || !baselineVersion.baseline || baselineVersion.baseline.userId !== inputs.userId) {
-       throw new NotFoundException('Baseline version not found');
-     }
+@@ -90,94 +92,105 @@ export class GapDetectionService {
  
      const [sections, blockPolicies] = await Promise.all([
        this.baselineSectionRepository.find({
@@ -309,7 +338,7 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
      );
  
      const sectionTokens = this.buildSectionTokens(normalizedSections);
-+    let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
+     let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
  
      const jdItems = [
        ...(job.normalizedRequirements ?? []),
@@ -318,7 +347,8 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
        .map((item) => item.trim())
        .filter(Boolean);
  
-     const gaps: InterviewGap[] = [];
+-    const gaps: InterviewGap[] = [];
++    const clusteringInputs: GapCandidate[] = [];
  
      for (const item of jdItems) {
        const jdTokens = this.tokenize(item);
@@ -329,89 +359,86 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
        const match = this.findBestSectionMatch(jdTokens, sectionTokens);
        const coverage = match?.overlap ?? 0;
        const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
++      let jdEmbedding: number[] | null = null;
  
-+      if (sectionEmbeddings) {
-+        try {
-+          const embeddingMatch = await this.findBestEmbeddingMatch(item, sectionEmbeddings);
-+          const similarity = embeddingMatch?.similarity ?? 0;
-+          if (similarity >= this.embeddingMatchThreshold) {
-+            continue;
-+          }
-+        } catch {
-+          sectionEmbeddings = null;
-+        }
-+      }
-+
+       if (sectionEmbeddings) {
+         try {
+-          const embeddingMatch = await this.findBestEmbeddingMatch(item, sectionEmbeddings);
++          jdEmbedding = await this.embeddingProvider!.embed(item);
++          const embeddingMatch = this.findBestEmbeddingMatch(jdEmbedding ?? [], sectionEmbeddings);
+           const similarity = embeddingMatch?.similarity ?? 0;
+-          if (similarity >= this.embeddingMatchThreshold) {
++          if (similarity >= GAP_EMBEDDING_MATCH_THRESHOLD) {
+             continue;
+           }
+         } catch {
+           sectionEmbeddings = null;
++          jdEmbedding = null;
+         }
+       }
+ 
        if (coverageRatio >= 0.5) {
          continue;
        }
  
        const confidence = this.resolveConfidence(coverageRatio);
  
-       gaps.push({
+-      gaps.push({
++      const gap: InterviewGap = {
          gapId: randomUUID(),
          domain: this.inferDomain(item),
          jdExcerpt: item,
          baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
          confidence,
++      };
++
++      clusteringInputs.push({
++        gap,
++        tokens: jdTokens,
++        embedding: jdEmbedding,
        });
      }
  
++    const orderedGaps = this.clusterAndOrderGaps(clusteringInputs);
++
      return {
        baselineId: baselineVersion.baselineId,
        baselineVersionId,
        jobId,
-       gaps,
+-      gaps,
++      gaps: orderedGaps,
      };
    }
  
    private applyPoliciesToSections(
      sections: BaselineSection[],
-@@ -143,69 +179,126 @@ export class GapDetectionService {
+     policies: BaselineBlockPolicy[],
+   ): BaselineSection[] {
+     if (!policies.length) {
+       return [...sections].sort((a, b) => a.order - b.order);
+     }
+ 
+     const policyMap = new Map<string, BaselineBlockPolicy>(
+       policies.map((policy) => [policy.baselineSectionId, policy]),
+     );
+ 
+     return [...sections]
+       .map((section) => {
+         const policy = policyMap.get(section.id);
+         return {
+           ...section,
            includePolicy: policy?.includePolicy ?? section.includePolicy,
            order: policy?.order ?? section.order,
            sectionType: section.sectionType ?? section.type,
          } as BaselineSection;
        })
-       .sort((a, b) => a.order - b.order);
+@@ -217,59 +230,58 @@ export class GapDetectionService {
+       return embeddings;
+     } catch {
+       return null;
+     }
    }
  
-   private tokenize(text: string): Set<string> {
-     return new Set(
-       text
-         .toLowerCase()
-         .split(/[^a-z0-9+]+/i)
-         .map((token) => token.trim())
-         .filter((token) => token.length >= 3),
-     );
-   }
- 
-   private buildSectionTokens(sections: BaselineSection[]): SectionTokens[] {
-     return sections.map((section) => ({
-       section,
-       tokens: this.tokenize(section.content ?? ''),
-     }));
-   }
- 
-+  private async buildSectionEmbeddings(sections: BaselineSection[]): Promise<SectionEmbedding[] | null> {
-+    try {
-+      if (!this.embeddingProvider?.isEnabled()) {
-+        return null;
-+      }
-+
-+      const embeddings = await Promise.all(
-+        sections.map(async (section) => ({
-+          section,
-+          embedding: await this.embeddingProvider!.embed(section.content ?? ''),
-+        })),
-+      );
-+
-+      return embeddings;
-+    } catch {
-+      return null;
-+    }
-+  }
-+
    private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
      let bestMatch:
        | {
@@ -431,44 +458,46 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
      return bestMatch;
    }
  
-+  private async findBestEmbeddingMatch(
-+    jdText: string,
-+    sections: SectionEmbedding[],
-+  ): Promise<{ section: BaselineSection; similarity: number } | null> {
-+    if (!this.embeddingProvider) {
-+      return null;
-+    }
-+
-+    const jdEmbedding = await this.embeddingProvider.embed(jdText);
-+    let bestMatch: { section: BaselineSection; similarity: number } | null = null;
-+
-+    for (const candidate of sections) {
-+      const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
-+
-+      if (!bestMatch || similarity > bestMatch.similarity) {
-+        bestMatch = { section: candidate.section, similarity };
-+      }
-+    }
-+
-+    return bestMatch;
-+  }
-+
-+  private cosineSimilarity(a: number[], b: number[]): number {
-+    if (!a.length || !b.length || a.length !== b.length) {
-+      return 0;
-+    }
-+
-+    const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
-+    const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
-+    const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
-+
-+    if (magnitudeA === 0 || magnitudeB === 0) {
-+      return 0;
-+    }
-+
-+    return dotProduct / (magnitudeA * magnitudeB);
-+  }
-+
+-  private async findBestEmbeddingMatch(
+-    jdText: string,
++  private findBestEmbeddingMatch(
++    jdEmbedding: number[],
+     sections: SectionEmbedding[],
+-  ): Promise<{ section: BaselineSection; similarity: number } | null> {
+-    if (!this.embeddingProvider) {
++  ): { section: BaselineSection; similarity: number } | null> {
++    if (!jdEmbedding.length) {
+       return null;
+     }
+ 
+-    const jdEmbedding = await this.embeddingProvider.embed(jdText);
+     let bestMatch: { section: BaselineSection; similarity: number } | null = null;
+ 
+     for (const candidate of sections) {
+       const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
+ 
+       if (!bestMatch || similarity > bestMatch.similarity) {
+         bestMatch = { section: candidate.section, similarity };
+       }
+     }
+ 
+     return bestMatch;
+   }
+ 
+   private cosineSimilarity(a: number[], b: number[]): number {
+     if (!a.length || !b.length || a.length !== b.length) {
+       return 0;
+     }
+ 
+     const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
+     const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
+     const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
+ 
+     if (magnitudeA === 0 || magnitudeB === 0) {
+       return 0;
+     }
+@@ -279,50 +291,120 @@ export class GapDetectionService {
+ 
    private resolveConfidence(coverageRatio: number): GapConfidence {
      if (coverageRatio === 0) {
        return 'high';
@@ -493,4 +522,98 @@ index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48
      return `${trimmed.slice(0, 297)}...`;
    }
  
++  private clusterAndOrderGaps(candidates: GapCandidate[]): InterviewGap[] {
++    if (!candidates.length) {
++      return [];
++    }
++
++    const clusters: GapCandidate[][] = [];
++
++    for (const candidate of candidates) {
++      const bestClusterIndex = this.findBestClusterIndex(candidate, clusters);
++
++      if (bestClusterIndex === -1) {
++        clusters.push([candidate]);
++      } else {
++        clusters[bestClusterIndex].push(candidate);
++      }
++    }
++
++    return clusters.flatMap((cluster) => cluster.map((entry) => entry.gap));
++  }
++
++  private findBestClusterIndex(candidate: GapCandidate, clusters: GapCandidate[][]): number {
++    let bestIndex = -1;
++    let bestSimilarity = 0;
++
++    clusters.forEach((cluster, index) => {
++      const seed = cluster[0];
++      const similarity = this.resolveSimilarity(candidate, seed);
++
++      if (similarity >= GAP_CLUSTER_EMBEDDING_THRESHOLD && similarity > bestSimilarity) {
++        bestSimilarity = similarity;
++        bestIndex = index;
++      }
++    });
++
++    if (bestIndex !== -1) {
++      return bestIndex;
++    }
++
++    clusters.forEach((cluster, index) => {
++      const seed = cluster[0];
++      const similarity = this.tokenSimilarity(candidate.tokens, seed.tokens);
++
++      if (similarity >= GAP_CLUSTER_TOKEN_THRESHOLD && similarity > bestSimilarity) {
++        bestSimilarity = similarity;
++        bestIndex = index;
++      }
++    });
++
++    return bestIndex;
++  }
++
++  private resolveSimilarity(a: GapCandidate, b: GapCandidate): number {
++    if (!a.embedding || !b.embedding) {
++      return 0;
++    }
++
++    return this.cosineSimilarity(a.embedding, b.embedding);
++  }
++
++  private tokenSimilarity(a: Set<string>, b: Set<string>): number {
++    if (!a.size || !b.size) {
++      return 0;
++    }
++
++    const shared = [...a].filter((token) => b.has(token)).length;
++    const normalizer = Math.max(a.size, b.size);
++
++    return shared / normalizer;
++  }
++
    private inferDomain(text: string): GapDomain {
+     const value = text.toLowerCase();
+ 
+     const leadershipKeywords = ['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'];
+     if (leadershipKeywords.some((keyword) => value.includes(keyword))) {
+       return 'leadership';
+     }
+ 
+     const toolingKeywords = ['sql', 'python', 'javascript', 'aws', 'gcp', 'azure', 'tool', 'framework', 'platform'];
+     if (toolingKeywords.some((keyword) => value.includes(keyword))) {
+       return 'tooling';
+     }
+ 
+     const scopeKeywords = ['scale', 'scalable', 'enterprise', 'multiple teams', 'cross-functional', 'global'];
+     if (scopeKeywords.some((keyword) => value.includes(keyword))) {
+       return 'scope';
+     }
+ 
+     const industryKeywords = ['healthcare', 'finance', 'fintech', 'ecommerce', 'retail', 'government'];
+     if (industryKeywords.some((keyword) => value.includes(keyword))) {
+       return 'industry';
+     }
+ 
+     return 'experience';
+   }

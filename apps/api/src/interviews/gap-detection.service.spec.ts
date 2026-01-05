@@ -264,4 +264,204 @@ describe('GapDetectionService', () => {
     expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
     expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
   });
+
+  it('clusters semantically similar JD gaps together while preserving deterministic ordering', async () => {
+    const jobRepository = createMockRepository();
+    const baselineVersionRepository = createMockRepository();
+    const baselineSectionRepository = createMockRepository();
+    const baselineBlockPolicyRepository = createMockRepository();
+
+    const embeddingVectors: Record<string, number[]> = {
+      'Build analytics dashboards': [1, 0],
+      'Develop analytics dashboards and reporting': [0.98, 0.05],
+      'Scale distributed systems': [0, 1],
+      'Operations handbook': [0, 1],
+      'Team leadership': [0, 1],
+    };
+
+    const embeddingProvider: GapEmbeddingProvider = {
+      isEnabled: () => true,
+      embed: jest.fn(async (text: string) => embeddingVectors[text] ?? [0, 0]),
+    };
+
+    const job: Job = {
+      id: 'job-3',
+      userId: 'user-3',
+      title: null,
+      company: null,
+      rawDescription: 'sample',
+      sourceUrl: null,
+      normalizedRequirements: ['Build analytics dashboards', 'Scale distributed systems', 'Develop analytics dashboards and reporting'],
+      normalizedResponsibilities: [],
+      jdIngestionMethod: 'PASTE' as never,
+      jdParsedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const baseline: Baseline = {
+      id: 'baseline-3',
+      userId: 'user-3',
+      version: 1,
+      originalFilename: 'file.pdf',
+      mimeType: 'application/pdf',
+      storagePath: '/tmp/file.pdf',
+      hash: null,
+      sections: [],
+      versions: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const baselineVersion: BaselineVersion = {
+      id: 'baseline-version-3',
+      baselineId: baseline.id,
+      baseline,
+      blockPolicies: [],
+      fileHash: null,
+      storagePath: '/tmp/file.pdf',
+      versionNumber: 1,
+      createdAt: new Date(),
+      hash: null,
+    };
+
+    jobRepository.findOne.mockResolvedValue(job);
+    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
+    baselineSectionRepository.find.mockResolvedValue([
+      {
+        id: 'section-3a',
+        baselineId: baseline.id,
+        baseline,
+        sectionType: 'EXPERIENCE' as never,
+        title: 'Operations',
+        content: 'Operations handbook',
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        type: 'EXPERIENCE' as never,
+        orderIndex: 1,
+      } as unknown as BaselineSection,
+      {
+        id: 'section-3b',
+        baselineId: baseline.id,
+        baseline,
+        sectionType: 'EXPERIENCE' as never,
+        title: 'Leadership',
+        content: 'Team leadership',
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: 2,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        type: 'EXPERIENCE' as never,
+        orderIndex: 2,
+      } as unknown as BaselineSection,
+    ]);
+    baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const service = createService(
+      jobRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      embeddingProvider,
+    );
+
+    const firstRun = await service.detectGaps({
+      userId: 'user-3',
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+    });
+
+    const secondRun = await service.detectGaps({
+      userId: 'user-3',
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+    });
+
+    const expectedOrder = [
+      'Build analytics dashboards',
+      'Develop analytics dashboards and reporting',
+      'Scale distributed systems',
+    ];
+
+    expect(firstRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
+    expect(secondRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
+    expect(firstRun.gaps).toHaveLength(3);
+  });
+
+  it('avoids clustering dissimilar JD gaps', async () => {
+    const jobRepository = createMockRepository();
+    const baselineVersionRepository = createMockRepository();
+    const baselineSectionRepository = createMockRepository();
+    const baselineBlockPolicyRepository = createMockRepository();
+
+    const embeddingProvider: GapEmbeddingProvider = {
+      isEnabled: () => false,
+      embed: jest.fn(),
+    };
+
+    const job: Job = {
+      id: 'job-4',
+      userId: 'user-4',
+      title: null,
+      company: null,
+      rawDescription: 'sample',
+      sourceUrl: null,
+      normalizedRequirements: ['Cloud security architecture', 'Frontend component libraries', 'Experimental data science'],
+      normalizedResponsibilities: [],
+      jdIngestionMethod: 'PASTE' as never,
+      jdParsedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const baseline: Baseline = {
+      id: 'baseline-4',
+      userId: 'user-4',
+      version: 1,
+      originalFilename: 'file.pdf',
+      mimeType: 'application/pdf',
+      storagePath: '/tmp/file.pdf',
+      hash: null,
+      sections: [],
+      versions: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const baselineVersion: BaselineVersion = {
+      id: 'baseline-version-4',
+      baselineId: baseline.id,
+      baseline,
+      blockPolicies: [],
+      fileHash: null,
+      storagePath: '/tmp/file.pdf',
+      versionNumber: 1,
+      createdAt: new Date(),
+      hash: null,
+    };
+
+    jobRepository.findOne.mockResolvedValue(job);
+    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
+    baselineSectionRepository.find.mockResolvedValue([]);
+    baselineBlockPolicyRepository.find.mockResolvedValue([]);
+
+    const service = createService(
+      jobRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      embeddingProvider,
+    );
+
+    const result = await service.detectGaps({
+      userId: 'user-4',
+      jobId: job.id,
+      baselineVersionId: baselineVersion.id,
+    });
+
+    expect(result.gaps.map((gap) => gap.jdExcerpt)).toEqual(job.normalizedRequirements);
+    expect(result.gaps).toHaveLength(3);
+  });
 });
