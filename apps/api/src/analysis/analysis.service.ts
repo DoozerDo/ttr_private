@@ -987,11 +987,19 @@ export class AnalysisService {
       assessment.gaps ?? [],
     );
 
+    const baselineVersionRecord = assessment.baselineVersion
+      ? await this.baselineVersionRepository.findOne({
+          where: { baselineId: assessment.baselineId, versionNumber: assessment.baselineVersion },
+          order: { createdAt: 'DESC' },
+        })
+      : null;
+
     return {
       ok: true,
       assessmentId: assessment.id,
       jobId: assessment.jobId,
       baselineId: assessment.baselineId,
+      baselineVersionId: baselineVersionRecord?.id ?? null,
       baselineVersion: assessment.baselineVersion,
       overallScore: assessment.overallScore,
       score: assessment.overallScore,

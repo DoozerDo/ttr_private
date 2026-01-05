@@ -20,6 +20,12 @@ import { FitScoringService } from './fit-scoring.service';
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
   let complianceService: ComplianceService;
+  let baselineVersionRepository: { findOne: jest.Mock };
+  let fitAssessmentRepository: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+  };
 
   const baselineVersion: Partial<BaselineVersion> = {
     id: 'bv-1',
@@ -68,6 +74,8 @@ describe('AnalysisService - fit scores contract', () => {
   };
 
   beforeEach(async () => {
+    baselineVersionRepository = { findOne: jest.fn().mockResolvedValue(baselineVersion) };
+
     const module = await Test.createTestingModule({
       providers: [
         AnalysisService,
@@ -91,18 +99,20 @@ describe('AnalysisService - fit scores contract', () => {
           provide: getRepositoryToken(BaselineBlockPolicy),
           useValue: { find: jest.fn().mockResolvedValue([]) },
         },
-        {
-          provide: getRepositoryToken(BaselineVersion),
-          useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
-        },
+        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
         { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
         { provide: getRepositoryToken(Interview), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(FitAssessment),
-          useValue: {
-            create: jest.fn((payload) => payload),
-            save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
-          },
+          useValue: (() => {
+            fitAssessmentRepository = {
+              create: jest.fn((payload) => payload),
+              save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
+              findOne: jest.fn(),
+            };
+            
+            return fitAssessmentRepository;
+          })(),
         },
         {
           provide: getRepositoryToken(ExpandedFitAssessment),
@@ -126,6 +136,37 @@ describe('AnalysisService - fit scores contract', () => {
 
     service = module.get(AnalysisService);
     complianceService = module.get(ComplianceService);
+  });
+
+  it('returns the baseline version id for the latest assessment', async () => {
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      createdAt: new Date(),
+    });
+
+    const result = await service.getLatestAssessment('user-1', 'job-1');
+
+    expect(result.baselineVersionId).toBe('bv-1');
+    expect(baselineVersionRepository.findOne).toHaveBeenCalledWith({
+      where: { baselineId: 'b-1', versionNumber: 2 },
+      order: { createdAt: 'DESC' },
+    });
   });
 
   it('rejects ambiguous JD inputs', async () => {

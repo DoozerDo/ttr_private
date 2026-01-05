@@ -18,6 +18,8 @@ type FitDimensionScores = {
 type FitAssessment = {
   jobId?: string;
   baselineId?: string;
+  baselineVersion?: number | null;
+  baselineVersionId?: string | null;
   overallScore?: number;
   score?: number;
   summary?: string;
@@ -234,16 +236,22 @@ export default function FitReviewClient() {
       return;
     }
 
+    if (!assessment?.baselineVersionId) {
+      setStartError("Missing baseline version for this assessment.");
+      return;
+    }
+
     setStarting(true);
     setStartError(null);
 
     try {
-      const response = await fetch("/api/interviews/start", {
+      const response = await fetch("/api/interview-records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId: assessment.jobId,
           baselineId: assessment.baselineId,
+          baselineVersionId: assessment.baselineVersionId,
         }),
       });
 
@@ -340,7 +348,12 @@ export default function FitReviewClient() {
             <button
               type="button"
               onClick={handleStartInterview}
-              disabled={starting || !assessment?.jobId || !assessment?.baselineId}
+              disabled={
+                starting ||
+                !assessment?.jobId ||
+                !assessment?.baselineId ||
+                !assessment?.baselineVersionId
+              }
               style={{
                 ...ttrComponents.primaryButton,
                 cursor: starting ? "not-allowed" : "pointer",
