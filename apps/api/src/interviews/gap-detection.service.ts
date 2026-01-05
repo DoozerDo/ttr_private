@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
@@ -27,8 +33,22 @@ type SectionTokens = {
   tokens: Set<string>;
 };
 
+export interface GapEmbeddingProvider {
+  isEnabled(): boolean;
+  embed(text: string): Promise<number[]>;
+}
+
+export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
+
+type SectionEmbedding = {
+  section: BaselineSection;
+  embedding: number[];
+};
+
 @Injectable()
 export class GapDetectionService {
+  private readonly embeddingMatchThreshold = 0.75;
+
   constructor(
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
@@ -38,6 +58,9 @@ export class GapDetectionService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+    @Optional()
+    @Inject(GAP_EMBEDDING_PROVIDER)
+    private readonly embeddingProvider?: GapEmbeddingProvider,
   ) {}
 
   async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
@@ -80,6 +103,7 @@ export class GapDetectionService {
     );
 
     const sectionTokens = this.buildSectionTokens(normalizedSections);
+    let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
 
     const jdItems = [
       ...(job.normalizedRequirements ?? []),
@@ -99,6 +123,18 @@ export class GapDetectionService {
       const match = this.findBestSectionMatch(jdTokens, sectionTokens);
       const coverage = match?.overlap ?? 0;
       const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
+
+      if (sectionEmbeddings) {
+        try {
+          const embeddingMatch = await this.findBestEmbeddingMatch(item, sectionEmbeddings);
+          const similarity = embeddingMatch?.similarity ?? 0;
+          if (similarity >= this.embeddingMatchThreshold) {
+            continue;
+          }
+        } catch {
+          sectionEmbeddings = null;
+        }
+      }
 
       if (coverageRatio >= 0.5) {
         continue;
@@ -165,6 +201,25 @@ export class GapDetectionService {
     }));
   }
 
+  private async buildSectionEmbeddings(sections: BaselineSection[]): Promise<SectionEmbedding[] | null> {
+    try {
+      if (!this.embeddingProvider?.isEnabled()) {
+        return null;
+      }
+
+      const embeddings = await Promise.all(
+        sections.map(async (section) => ({
+          section,
+          embedding: await this.embeddingProvider!.embed(section.content ?? ''),
+        })),
+      );
+
+      return embeddings;
+    } catch {
+      return null;
+    }
+  }
+
   private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
     let bestMatch:
       | {
@@ -182,6 +237,44 @@ export class GapDetectionService {
     }
 
     return bestMatch;
+  }
+
+  private async findBestEmbeddingMatch(
+    jdText: string,
+    sections: SectionEmbedding[],
+  ): Promise<{ section: BaselineSection; similarity: number } | null> {
+    if (!this.embeddingProvider) {
+      return null;
+    }
+
+    const jdEmbedding = await this.embeddingProvider.embed(jdText);
+    let bestMatch: { section: BaselineSection; similarity: number } | null = null;
+
+    for (const candidate of sections) {
+      const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
+
+      if (!bestMatch || similarity > bestMatch.similarity) {
+        bestMatch = { section: candidate.section, similarity };
+      }
+    }
+
+    return bestMatch;
+  }
+
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (!a.length || !b.length || a.length !== b.length) {
+      return 0;
+    }
+
+    const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
+    const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
+    const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
+
+    if (magnitudeA === 0 || magnitudeB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (magnitudeA * magnitudeB);
   }
 
   private resolveConfidence(coverageRatio: number): GapConfidence {

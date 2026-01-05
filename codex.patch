@@ -1,750 +1,496 @@
-diff --git a/apps/web/app/api/interviews/[id]/decisions/route.ts b/apps/web/app/api/interviews/[id]/decisions/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..1994b40894d66319497d4a402d3e0879592b9ba1
---- /dev/null
-+++ b/apps/web/app/api/interviews/[id]/decisions/route.ts
-@@ -0,0 +1,37 @@
-+import { NextRequest, NextResponse } from "next/server";
-+
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
-+
-+export async function POST(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+
-+  const baseUrl = getApiBaseUrl();
-+  const { token, error } = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return NextResponse.json(
-+      { error: "API base URL is not configured" },
-+      { status: 500 },
-+    );
-+  }
-+
-+  if (!token) {
-+    return error;
-+  }
-+
-+  const body = await req.json();
-+
-+  const response = await fetch(`${baseUrl}/interview-records/${id}/decisions`, {
-+    method: "POST",
-+    headers: {
-+      Authorization: `Bearer ${token}`,
-+      "Content-Type": "application/json",
-+    },
-+    body: JSON.stringify(body),
-+  });
-+
-+  return relayApiResponse(response);
-+}
-diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
-index b5950de3dde56581211eb09c259ea1d2622c1392..ac71d11510250b3da971b390d496966d7e7ec7e3 100644
---- a/apps/web/app/interviews/[id]/page.tsx
-+++ b/apps/web/app/interviews/[id]/page.tsx
-@@ -1,34 +1,41 @@
- "use client";
+diff --git a/apps/api/src/interviews/gap-detection.service.spec.ts b/apps/api/src/interviews/gap-detection.service.spec.ts
+index 87a976d1a9e7e260a6a5865564d36236c0b2109a..3a20f99c3ba357e4403e71b6d706008da8d369c4 100644
+--- a/apps/api/src/interviews/gap-detection.service.spec.ts
++++ b/apps/api/src/interviews/gap-detection.service.spec.ts
+@@ -1,50 +1,52 @@
+ import { BadRequestException, NotFoundException } from '@nestjs/common';
+ import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+-import { GapDetectionService } from './gap-detection.service';
++import { GapDetectionService, GapEmbeddingProvider } from './gap-detection.service';
+ import { Job } from '../jobs/job.entity';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
  
--import { useEffect, useMemo, useState } from "react";
-+import { useCallback, useEffect, useMemo, useState } from "react";
- import Link from "next/link";
- import { useParams, useRouter } from "next/navigation";
- 
- import { InstrumentShell } from "../../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
--import type { InterviewGap, InterviewQuestion, InterviewSessionDto } from "../../../lib/interviews";
-+import type {
-+  AdditionDecisionPayload,
-+  InterviewGap,
-+  InterviewQuestion,
-+  InterviewSessionDto,
-+  RecommendedAddition,
-+  RecommendedAdditionDecision,
-+} from "../../../lib/interviews";
- 
- type ComplianceFlag = {
-   code?: string;
-   message?: string;
-   severity?: string;
-   questionIndex?: number;
-   recommendationIndex?: number;
- };
- 
- type ComplianceLookup = {
-   general: ComplianceFlag[];
-   questions: Record<number, ComplianceFlag[]>;
-   recommendations: Record<number, ComplianceFlag[]>;
- };
- 
- function normalizeCompliance(validationResults?: Record<string, unknown>): ComplianceLookup {
-   const lookup: ComplianceLookup = { general: [], questions: {}, recommendations: {} };
-   if (!validationResults) return lookup;
- 
-   const rawFlags =
-     (validationResults as { complianceFlags?: unknown; compliance_flags?: unknown }).complianceFlags ??
-     (validationResults as { compliance_flags?: unknown }).compliance_flags ??
-     [];
- 
-   const flagsArray = Array.isArray(rawFlags) ? rawFlags : [];
-@@ -49,114 +56,172 @@ function normalizeCompliance(validationResults?: Record<string, unknown>): Compl
-               recommendationIndex:
-                 (flag as { recommendationIndex?: number }).recommendationIndex ??
-                 (flag as { recommendation_index?: number }).recommendation_index ??
-                 (flag as { recommendationIdx?: number }).recommendationIdx,
-             }
-           : {};
- 
-     if (normalized.questionIndex !== undefined && normalized.questionIndex >= 0) {
-       const existing = lookup.questions[normalized.questionIndex] ?? [];
-       lookup.questions[normalized.questionIndex] = [...existing, normalized];
-       return;
-     }
- 
-     if (normalized.recommendationIndex !== undefined && normalized.recommendationIndex >= 0) {
-       const existing = lookup.recommendations[normalized.recommendationIndex] ?? [];
-       lookup.recommendations[normalized.recommendationIndex] = [...existing, normalized];
-       return;
-     }
- 
-     lookup.general.push(normalized);
+ describe('GapDetectionService', () => {
+   const createMockRepository = () => ({
+     findOne: jest.fn(),
+     find: jest.fn(),
    });
  
-   return lookup;
- }
+   const createService = (
+     jobRepository = createMockRepository(),
+     baselineSectionRepository = createMockRepository(),
+     baselineVersionRepository = createMockRepository(),
+     baselineBlockPolicyRepository = createMockRepository(),
++    embeddingProvider?: GapEmbeddingProvider,
+   ) =>
+     new GapDetectionService(
+       jobRepository as never,
+       baselineSectionRepository as never,
+       baselineVersionRepository as never,
+       baselineBlockPolicyRepository as never,
++      embeddingProvider as never,
+     );
  
-+function readNumericField(payload: unknown, keys: string[]): number | null {
-+  if (!payload || typeof payload !== "object") return null;
-+
-+  for (const key of keys) {
-+    const value = (payload as Record<string, unknown>)[key];
-+    if (typeof value === "number") return value;
-+  }
-+
-+  return null;
-+}
-+
- export default function InterviewSessionPage() {
-   const params = useParams<{ id: string }>();
-   const router = useRouter();
-   const sessionId = params?.id;
-   const [session, setSession] = useState<InterviewSessionDto | null>(null);
-   const [answers, setAnswers] = useState<string[]>([]);
-   const [saving, setSaving] = useState(false);
-   const [message, setMessage] = useState<string | null>(null);
-   const [error, setError] = useState<string | null>(null);
--  const [recommendationDecisions, setRecommendationDecisions] = useState<
--    Record<number, "accept" | "reject" | "defer">
--  >({});
-+  const [decisionSavingId, setDecisionSavingId] = useState<string | null>(null);
-+
-+  const applySessionUpdate = useCallback(
-+    (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
-+      setSession(data);
-+
-+      if (options?.preserveAnswers) {
-+        return;
-+      }
-+
-+      const questionCount = data?.questions?.length ?? 0;
-+      const existingResponses =
-+        Array.isArray(data?.responses) && data.responses.length
-+          ? data.responses.map((entry) => entry?.toString() ?? "")
-+          : [];
-+
-+      setAnswers((prev) => {
-+        if (prev.length === questionCount && existingResponses.length === 0) {
-+          return prev;
-+        }
-+        return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
-+      });
-+    },
-+    [],
-+  );
+   afterEach(() => {
+     jest.restoreAllMocks();
+   });
  
-   useEffect(() => {
-     if (!sessionId) return;
+   it('detects gaps only when baseline coverage is weak', async () => {
+     const jobRepository = createMockRepository();
+     const baselineVersionRepository = createMockRepository();
+     const baselineSectionRepository = createMockRepository();
+     const baselineBlockPolicyRepository = createMockRepository();
  
-     const loadSession = async () => {
-       try {
-         const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
+     const job: Job = {
+       id: 'job-1',
+       userId: 'user-1',
+       title: null,
+       company: null,
+       rawDescription: 'sample',
+       sourceUrl: null,
+       normalizedRequirements: ['Hands-on Kubernetes administration', 'Lead cross-functional teams'],
+       normalizedResponsibilities: [],
+       jdIngestionMethod: 'PASTE' as never,
+       jdParsedAt: null,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+@@ -125,26 +127,141 @@ describe('GapDetectionService', () => {
  
-         if (!response.ok) {
-           throw new Error("Unable to load interview session.");
-         }
+     jobRepository.findOne.mockResolvedValue(null);
  
-         const data = (await response.json()) as InterviewSessionDto;
--        setSession(data);
--
--        const questionCount = data?.questions?.length ?? 0;
--        const existingResponses =
--          Array.isArray(data?.responses) && data.responses.length
--            ? data.responses.map((entry) => entry?.toString() ?? "")
--            : [];
--
--        setAnswers((prev) => {
--          if (prev.length === questionCount && existingResponses.length === 0) {
--            return prev;
--          }
--          return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
--        });
-+        applySessionUpdate(data);
-       } catch (loadError) {
-         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
-       }
-     };
+     await expect(
+       service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
+     ).rejects.toBeInstanceOf(NotFoundException);
  
-     loadSession();
--  }, [sessionId]);
-+  }, [applySessionUpdate, sessionId]);
+     jobRepository.findOne.mockResolvedValue({
+       id: 'job-1',
+       userId: 'user-1',
+       rawDescription: '',
+       normalizedRequirements: [],
+       normalizedResponsibilities: [],
+     } as Job);
  
-   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
-   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
--  const recommendedAdditions: string[] = useMemo(
--    () => session?.recommendedAdditions ?? [],
--    [session?.recommendedAdditions],
--  );
-+  const recommendedAdditions: RecommendedAddition[] = useMemo(() => {
-+    const additions = session?.recommendedAdditions ?? [];
-+    return additions.map((addition) => ({
-+      ...addition,
-+      status: addition.status ?? "proposed",
-+    }));
-+  }, [session?.recommendedAdditions]);
-   const complianceLookup = useMemo(
-     () => normalizeCompliance(session?.validationResults),
-     [session?.validationResults],
-   );
+     baselineVersionRepository.findOne.mockResolvedValue({
+       id: 'bv-1',
+       baselineId: 'b-1',
+       baseline: { userId: 'other-user' } as Baseline,
+     } as BaselineVersion);
  
-   const gapMap = useMemo(() => {
-     const map = new Map<string, InterviewGap>();
-     gaps.forEach((gap) => map.set(gap.gapId, gap));
-     return map;
-   }, [gaps]);
- 
-+  const baselineVersionHash = useMemo(() => {
-+    if (typeof session?.baselineVersionHash === "string") return session.baselineVersionHash;
+     await expect(
+       service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
+     ).rejects.toBeInstanceOf(NotFoundException);
+   });
 +
-+    const validation = session?.validationResults && typeof session.validationResults === "object"
-+      ? session.validationResults
-+      : null;
++  it('uses embeddings to avoid false gaps and falls back to token overlap otherwise', async () => {
++    const jobRepository = createMockRepository();
++    const baselineVersionRepository = createMockRepository();
++    const baselineSectionRepository = createMockRepository();
++    const baselineBlockPolicyRepository = createMockRepository();
 +
-+    if (!validation) return null;
-+
-+    const camelCaseValue = (validation as { baselineVersionHash?: unknown }).baselineVersionHash;
-+    if (typeof camelCaseValue === "string") return camelCaseValue;
-+
-+    const snakeCaseValue = (validation as { baseline_version_hash?: unknown }).baseline_version_hash;
-+    return typeof snakeCaseValue === "string" ? snakeCaseValue : null;
-+  }, [session]);
-+
-+  const baselineVersionReference = useMemo(() => {
-+    const id = session?.baselineVersionId ?? null;
-+    if (id && baselineVersionHash) return `${id} (${baselineVersionHash})`;
-+    return id ?? baselineVersionHash ?? null;
-+  }, [baselineVersionHash, session?.baselineVersionId]);
-+
-+  const expandedFitDetails = useMemo(() => {
-+    const assessment = session?.expandedFitAssessment;
-+    if (!assessment) return null;
-+
-+    const expandedScore = readNumericField(assessment, ["expandedScore", "expanded_score"]);
-+    const originalScore = readNumericField(assessment, ["originalScore", "original_score"]);
-+    const delta = readNumericField(assessment, ["delta"]);
-+
-+    if (expandedScore === null && originalScore === null && delta === null) return null;
-+
-+    return { expandedScore, originalScore, delta };
-+  }, [session?.expandedFitAssessment]);
-+
-   const handleChange = (index: number, value: string) => {
-     setAnswers((prev) => {
-       const next = [...prev];
-       next[index] = value;
-       return next;
-     });
-   };
- 
-   const trimmedResponses = useMemo(
-     () => answers.map((answer) => (answer ?? "").trim()),
-     [answers],
-   );
- 
-   const answeredCount = useMemo(
-     () => trimmedResponses.filter((response) => response.length > 0).length,
-     [trimmedResponses],
-   );
- 
-   const handleSave = async () => {
-     if (!sessionId) return;
- 
-     if (answeredCount === 0) {
-       setError("Add at least one response before saving.");
-       return;
-     }
-@@ -164,66 +229,95 @@ export default function InterviewSessionPage() {
-     setSaving(true);
-     setError(null);
-     setMessage(null);
- 
-     try {
-       const response = await fetch(`/api/interviews/${sessionId}`, {
-         method: "PATCH",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({ responses: trimmedResponses }),
-       });
- 
-       if (!response.ok) {
-         const payload = await response.json().catch(() => null);
-         const messageText = payload?.error ?? payload?.message ?? "Unable to save responses.";
-         throw new Error(messageText);
-       }
- 
-       setMessage("Responses saved. You can revisit this page anytime.");
-     } catch (saveError) {
-       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
-     } finally {
-       setSaving(false);
-     }
-   };
- 
--  const handleDecision = (index: number, decision: "accept" | "reject" | "defer") => {
--    setRecommendationDecisions((prev) => ({ ...prev, [index]: decision }));
-+  const handleDecision = async (addition: RecommendedAddition, decision: RecommendedAdditionDecision) => {
-+    if (!sessionId || !addition?.id) return;
-+
-+    const payload: { decisions: AdditionDecisionPayload[] } = {
-+      decisions: [{ additionId: addition.id, decision }],
++    const embeddingVectors: Record<string, number[]> = {
++      'Stream processing and pipeline optimization': [1, 0],
++      'Backend architecture and api design': [0, 1],
++      'Optimize data pipelines': [0.99, 0.01],
++      'Customer support leadership': [0.5, 0.5],
 +    };
 +
-+    setDecisionSavingId(addition.id);
-+    setError(null);
-+    setMessage(null);
++    const embeddingProvider: GapEmbeddingProvider = {
++      isEnabled: () => true,
++      embed: jest.fn(async (text: string) => embeddingVectors[text] ?? [0, 0]),
++    };
 +
-+    try {
-+      const response = await fetch(`/api/interviews/${sessionId}/decisions`, {
-+        method: "POST",
-+        headers: { "Content-Type": "application/json" },
-+        body: JSON.stringify(payload),
-+      });
++    const job: Job = {
++      id: 'job-2',
++      userId: 'user-2',
++      title: null,
++      company: null,
++      rawDescription: 'sample',
++      sourceUrl: null,
++      normalizedRequirements: ['Optimize data pipelines', 'Customer support leadership'],
++      normalizedResponsibilities: [],
++      jdIngestionMethod: 'PASTE' as never,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
 +
-+      if (!response.ok) {
-+        const payloadResponse = await response.json().catch(() => null);
-+        const messageText = payloadResponse?.error ?? payloadResponse?.message ?? "Unable to save decision.";
-+        throw new Error(messageText);
++    const baseline: Baseline = {
++      id: 'baseline-2',
++      userId: 'user-2',
++      version: 1,
++      originalFilename: 'file.pdf',
++      mimeType: 'application/pdf',
++      storagePath: '/tmp/file.pdf',
++      hash: null,
++      sections: [],
++      versions: [],
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const baselineVersion: BaselineVersion = {
++      id: 'baseline-version-2',
++      baselineId: baseline.id,
++      baseline,
++      blockPolicies: [],
++      fileHash: null,
++      storagePath: '/tmp/file.pdf',
++      versionNumber: 1,
++      createdAt: new Date(),
++      hash: null,
++    };
++
++    jobRepository.findOne.mockResolvedValue(job);
++    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
++    baselineSectionRepository.find.mockResolvedValue([
++      {
++        id: 'section-emb-1',
++        baselineId: baseline.id,
++        baseline,
++        sectionType: 'EXPERIENCE' as never,
++        title: 'Experience',
++        content: 'Stream processing and pipeline optimization',
++        includePolicy: BaselineIncludePolicy.ALWAYS,
++        order: 1,
++        createdAt: new Date(),
++        updatedAt: new Date(),
++        type: 'EXPERIENCE' as never,
++        orderIndex: 1,
++      } as unknown as BaselineSection,
++      {
++        id: 'section-emb-2',
++        baselineId: baseline.id,
++        baseline,
++        sectionType: 'EXPERIENCE' as never,
++        title: 'Leadership',
++        content: 'Backend architecture and api design',
++        includePolicy: BaselineIncludePolicy.ALWAYS,
++        order: 2,
++        createdAt: new Date(),
++        updatedAt: new Date(),
++        type: 'EXPERIENCE' as never,
++        orderIndex: 2,
++      } as unknown as BaselineSection,
++    ]);
++    baselineBlockPolicyRepository.find.mockResolvedValue([]);
++
++    const service = createService(
++      jobRepository,
++      baselineSectionRepository,
++      baselineVersionRepository,
++      baselineBlockPolicyRepository,
++      embeddingProvider,
++    );
++
++    const result = await service.detectGaps({
++      userId: 'user-2',
++      jobId: job.id,
++      baselineVersionId: baselineVersion.id,
++    });
++
++    expect(result.gaps).toHaveLength(1);
++    expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
++    expect(embeddingProvider.embed).toHaveBeenCalledWith('Optimize data pipelines');
++    expect(embeddingProvider.embed).toHaveBeenCalledWith('Customer support leadership');
++    expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
++    expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
++  });
+ });
+diff --git a/apps/api/src/interviews/gap-detection.service.ts b/apps/api/src/interviews/gap-detection.service.ts
+index b1c68a16d26cf576eef3d25e54154dfc71b03f8e..d04739453717b0b28cf92c581ce57f48659a391a 100644
+--- a/apps/api/src/interviews/gap-detection.service.ts
++++ b/apps/api/src/interviews/gap-detection.service.ts
+@@ -1,127 +1,163 @@
+-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import {
++  BadRequestException,
++  Inject,
++  Injectable,
++  NotFoundException,
++  Optional,
++} from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { randomUUID } from 'node:crypto';
+ import { Repository } from 'typeorm';
+ import {
+   BaselineIncludePolicy,
+   BaselineSection,
+ } from '../baseline/baseline-section.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+ import { Job } from '../jobs/job.entity';
+ import {
+   GapConfidence,
+   GapDetectionResult,
+   GapDomain,
+   InterviewGap,
+ } from './interview-types';
+ 
+ type DetectionInputs = {
+   userId: string;
+   jobId: string;
+   baselineVersionId: string;
+ };
+ 
+ type SectionTokens = {
+   section: BaselineSection;
+   tokens: Set<string>;
+ };
+ 
++export interface GapEmbeddingProvider {
++  isEnabled(): boolean;
++  embed(text: string): Promise<number[]>;
++}
++
++export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
++
++type SectionEmbedding = {
++  section: BaselineSection;
++  embedding: number[];
++};
++
+ @Injectable()
+ export class GapDetectionService {
++  private readonly embeddingMatchThreshold = 0.75;
++
+   constructor(
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+     @InjectRepository(BaselineSection)
+     private readonly baselineSectionRepository: Repository<BaselineSection>,
+     @InjectRepository(BaselineVersion)
+     private readonly baselineVersionRepository: Repository<BaselineVersion>,
+     @InjectRepository(BaselineBlockPolicy)
+     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
++    @Optional()
++    @Inject(GAP_EMBEDDING_PROVIDER)
++    private readonly embeddingProvider?: GapEmbeddingProvider,
+   ) {}
+ 
+   async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
+     const jobId = inputs.jobId?.trim();
+     const baselineVersionId = inputs.baselineVersionId?.trim();
+ 
+     if (!jobId || !baselineVersionId) {
+       throw new BadRequestException('jobId and baselineVersionId are required');
+     }
+ 
+     const job = await this.jobRepository.findOne({
+       where: { id: jobId, userId: inputs.userId },
+     });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: { id: baselineVersionId },
+       relations: ['baseline'],
+     });
+ 
+     if (!baselineVersion || !baselineVersion.baseline || baselineVersion.baseline.userId !== inputs.userId) {
+       throw new NotFoundException('Baseline version not found');
+     }
+ 
+     const [sections, blockPolicies] = await Promise.all([
+       this.baselineSectionRepository.find({
+         where: { baselineId: baselineVersion.baselineId },
+         order: { order: 'ASC' },
+       }),
+       this.baselineBlockPolicyRepository.find({
+         where: { baselineVersionId },
+       }),
+     ]);
+ 
+     const normalizedSections = this.applyPoliciesToSections(sections, blockPolicies).filter(
+       (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+     );
+ 
+     const sectionTokens = this.buildSectionTokens(normalizedSections);
++    let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
+ 
+     const jdItems = [
+       ...(job.normalizedRequirements ?? []),
+       ...(job.normalizedResponsibilities ?? []),
+     ]
+       .map((item) => item.trim())
+       .filter(Boolean);
+ 
+     const gaps: InterviewGap[] = [];
+ 
+     for (const item of jdItems) {
+       const jdTokens = this.tokenize(item);
+       if (!jdTokens.size) {
+         continue;
+       }
+ 
+       const match = this.findBestSectionMatch(jdTokens, sectionTokens);
+       const coverage = match?.overlap ?? 0;
+       const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
+ 
++      if (sectionEmbeddings) {
++        try {
++          const embeddingMatch = await this.findBestEmbeddingMatch(item, sectionEmbeddings);
++          const similarity = embeddingMatch?.similarity ?? 0;
++          if (similarity >= this.embeddingMatchThreshold) {
++            continue;
++          }
++        } catch {
++          sectionEmbeddings = null;
++        }
 +      }
 +
-+      const updatedSession = (await response.json()) as InterviewSessionDto;
-+      applySessionUpdate(updatedSession, { preserveAnswers: true });
-+      setMessage("Decision saved.");
-+    } catch (decisionError) {
-+      setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
-+    } finally {
-+      setDecisionSavingId(null);
-+    }
-   };
+       if (coverageRatio >= 0.5) {
+         continue;
+       }
  
-   const recommendationStats = useMemo(() => {
-     return recommendedAdditions.reduce(
--      (acc, _, index) => {
--        const decision = recommendationDecisions[index];
--        if (decision === "accept") acc.accepted += 1;
--        else if (decision === "reject") acc.rejected += 1;
--        else if (decision === "defer") acc.deferred += 1;
-+      (acc, addition) => {
-+        if (addition.status === "accepted") acc.accepted += 1;
-+        else if (addition.status === "rejected") acc.rejected += 1;
-+        else if (addition.status === "deferred") acc.deferred += 1;
-         return acc;
-       },
-       { accepted: 0, rejected: 0, deferred: 0 },
+       const confidence = this.resolveConfidence(coverageRatio);
+ 
+       gaps.push({
+         gapId: randomUUID(),
+         domain: this.inferDomain(item),
+         jdExcerpt: item,
+         baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
+         confidence,
+       });
+     }
+ 
+     return {
+       baselineId: baselineVersion.baselineId,
+       baselineVersionId,
+       jobId,
+       gaps,
+     };
+   }
+ 
+   private applyPoliciesToSections(
+     sections: BaselineSection[],
+@@ -143,69 +179,126 @@ export class GapDetectionService {
+           includePolicy: policy?.includePolicy ?? section.includePolicy,
+           order: policy?.order ?? section.order,
+           sectionType: section.sectionType ?? section.type,
+         } as BaselineSection;
+       })
+       .sort((a, b) => a.order - b.order);
+   }
+ 
+   private tokenize(text: string): Set<string> {
+     return new Set(
+       text
+         .toLowerCase()
+         .split(/[^a-z0-9+]+/i)
+         .map((token) => token.trim())
+         .filter((token) => token.length >= 3),
      );
--  }, [recommendationDecisions, recommendedAdditions]);
-+  }, [recommendedAdditions]);
+   }
  
-   return (
-     <InstrumentShell
-       kicker="Interview session"
-       title="Fit Review"
-       subtitle="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
-     >
-       <div style={ttrLayout.panelsRow}>
-         <section style={{ ...ttrComponents.basePanel, flex: 1.4, display: "flex", flexDirection: "column", gap: 12 }}>
-           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-             <span style={ttrTypography.subtleLabel}>Session details</span>
-             <h2 style={ttrTypography.h2}>Interview prompts</h2>
-           </div>
+   private buildSectionTokens(sections: BaselineSection[]): SectionTokens[] {
+     return sections.map((section) => ({
+       section,
+       tokens: this.tokenize(section.content ?? ''),
+     }));
+   }
  
-           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-             {questions.length === 0 ? (
-               <div style={ttrComponents.warningBox}>No interview questions were generated for this session.</div>
-             ) : (
-               questions.map((question, index) => {
-                 const gap = gapMap.get(question.gapId);
-                 const complianceFlags = complianceLookup.questions[index] ?? [];
- 
-                 return (
-                   <div key={`${question.prompt}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-@@ -296,53 +390,53 @@ export default function InterviewSessionPage() {
-                 {saving ? "Saving..." : "Save responses"}
-               </button>
-               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
-                 Session ID: {sessionId}
-               </span>
-             </div>
- 
-             {message ? <div style={ttrComponents.successBox}>{message}</div> : null}
-             {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-           </div>
-         </section>
- 
-         <section style={{ ...ttrComponents.basePanel, flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
-           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-             <span style={ttrTypography.subtleLabel}>Session</span>
-             <h2 style={ttrTypography.h2}>Overview</h2>
-           </div>
- 
-           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-             <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
-               Status: <strong>{session?.status ?? "loading"}</strong>
-             </div>
-             <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-               Baseline: {session?.baselineId ?? "..."}
-             </div>
--            {session?.baselineVersionId ? (
-+            {baselineVersionReference ? (
-               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
--                Baseline version: {session.baselineVersionId}
-+                Baseline version reference: {baselineVersionReference}
-               </div>
-             ) : null}
-             {session?.jobId ? (
-               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-                 Job: {session.jobId}
-               </div>
-             ) : null}
-             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-               Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
-             </div>
-             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-               Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
-             </div>
-           </div>
- 
-           <div>
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-               <span style={ttrTypography.subtleLabel}>Detected gaps</span>
-               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                 {gaps.length === 0 ? (
-                   <div style={ttrComponents.warningBox}>No gaps were returned for this interview.</div>
-                 ) : (
-                   gaps.map((gap) => (
-                     <div
-                       key={gap.gapId}
-@@ -365,103 +459,137 @@ export default function InterviewSessionPage() {
-                           Confidence: {gap.confidence}
-                         </span>
-                       </div>
-                       <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)" }}>
-                         JD: <em>{gap.jdExcerpt}</em>
-                       </div>
-                       {gap.baselineExcerpt ? (
-                         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
-                           Baseline: <em>{gap.baselineExcerpt}</em>
-                         </div>
-                       ) : null}
-                     </div>
-                   ))
-                 )}
-               </div>
-             </div>
-           </div>
- 
-           <div>
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-               <span style={ttrTypography.subtleLabel}>Recommendations</span>
-               {recommendedAdditions.length === 0 ? (
-                 <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
-               ) : (
-                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
--                  {recommendedAdditions.map((item, index) => {
--                    const decision = recommendationDecisions[index];
-+                  {recommendedAdditions.map((addition, index) => {
-                     const complianceFlags = complianceLookup.recommendations[index] ?? [];
-                     const acceptBlocked = complianceFlags.length > 0;
-+                    const isSavingDecision = decisionSavingId === addition.id;
-+                    const status = addition.status;
++  private async buildSectionEmbeddings(sections: BaselineSection[]): Promise<SectionEmbedding[] | null> {
++    try {
++      if (!this.embeddingProvider?.isEnabled()) {
++        return null;
++      }
 +
-+                    const statusBadge =
-+                      status === "accepted"
-+                        ? { label: "Accepted", background: "rgba(74,222,128,0.15)", color: "#86efac" }
-+                        : status === "rejected"
-+                          ? { label: "Rejected", background: "rgba(248,113,113,0.18)", color: "#fca5a5" }
-+                          : status === "deferred"
-+                            ? { label: "Deferred", background: "rgba(251,191,36,0.15)", color: "#fcd34d" }
-+                            : { label: "Proposed", background: "rgba(148,163,184,0.18)", color: "#cbd5e1" };
- 
-                     return (
-                       <div
--                        key={`${item}-${index}`}
-+                        key={addition.id ?? `${addition.text}-${index}`}
-                         style={{
-                           padding: 12,
-                           borderRadius: 10,
-                           border: "1px solid rgba(148,163,184,0.28)",
-                           background: "rgba(15,23,42,0.6)",
-                           display: "flex",
-                           flexDirection: "column",
-                           gap: 8,
-                         }}
-                       >
-                         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
--                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>{item}</div>
--                          {decision === "accept" ? (
--                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.15)", color: "#86efac", fontSize: 12 }}>
--                              Staged
-+                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>
-+                            {addition.text || addition.id}
-+                          </div>
-+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-+                            <span
-+                              style={{
-+                                padding: "4px 8px",
-+                                borderRadius: 6,
-+                                background: statusBadge.background,
-+                                color: statusBadge.color,
-+                                fontSize: 12,
-+                              }}
-+                            >
-+                              {isSavingDecision ? "Saving..." : statusBadge.label}
-                             </span>
--                          ) : null}
-+                          </div>
-                         </div>
- 
-                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                           <button
-                             type="button"
--                            onClick={() => handleDecision(index, "accept")}
--                            disabled={acceptBlocked}
-+                            onClick={() => handleDecision(addition, "accept")}
-+                            disabled={acceptBlocked || isSavingDecision}
-                             style={{
-                               ...ttrComponents.primaryButton,
-                               padding: "6px 12px",
-                               fontSize: 13,
--                              opacity: acceptBlocked ? 0.5 : 1,
--                              cursor: acceptBlocked ? "not-allowed" : "pointer",
-+                              opacity: acceptBlocked || isSavingDecision ? 0.5 : 1,
-+                              cursor: acceptBlocked || isSavingDecision ? "not-allowed" : "pointer",
-                             }}
-                           >
-                             Accept
-                           </button>
-                           <button
-                             type="button"
--                            onClick={() => handleDecision(index, "reject")}
--                            style={{ ...ttrComponents.secondaryButton, padding: "6px 12px", fontSize: 13 }}
-+                            onClick={() => handleDecision(addition, "reject")}
-+                            disabled={isSavingDecision}
-+                            style={{
-+                              ...ttrComponents.secondaryButton,
-+                              padding: "6px 12px",
-+                              fontSize: 13,
-+                              opacity: isSavingDecision ? 0.6 : 1,
-+                              cursor: isSavingDecision ? "not-allowed" : "pointer",
-+                            }}
-                           >
-                             Reject
-                           </button>
-                           <button
-                             type="button"
--                            onClick={() => handleDecision(index, "defer")}
--                            style={{ ...ttrComponents.quietButton, padding: "6px 12px", fontSize: 13 }}
-+                            onClick={() => handleDecision(addition, "defer")}
-+                            disabled={isSavingDecision}
-+                            style={{
-+                              ...ttrComponents.quietButton,
-+                              padding: "6px 12px",
-+                              fontSize: 13,
-+                              opacity: isSavingDecision ? 0.6 : 1,
-+                              cursor: isSavingDecision ? "not-allowed" : "pointer",
-+                            }}
-                           >
-                             Defer
-                           </button>
-                         </div>
- 
-                         {complianceFlags.length ? (
-                           <div style={ttrComponents.warningBox}>
-                             <strong>Compliance flags:</strong>
-                             <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
-                               {complianceFlags.map((flag, flagIndex) => (
-                                 <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
-                                   {flag.code ? `${flag.code}: ` : ""}
-                                   {flag.message ?? "Flagged recommendation"}
-                                   {flag.severity ? ` (severity: ${flag.severity})` : ""}
-                                 </li>
-                               ))}
-                             </ul>
-                           </div>
-                         ) : null}
-                       </div>
-                     );
-                   })}
-                 </div>
-               )}
-             </div>
-@@ -471,45 +599,64 @@ export default function InterviewSessionPage() {
-             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-               <span style={ttrTypography.subtleLabel}>Completion</span>
-               <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Summary</h3>
-             </div>
-             <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Detected gaps</div>
-                 <div style={{ fontSize: 24, fontWeight: 700 }}>{gaps.length}</div>
-               </div>
-               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Questions answered</div>
-                 <div style={{ fontSize: 24, fontWeight: 700 }}>
-                   {answeredCount} / {questions.length}
-                 </div>
-               </div>
-               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Recommendations</div>
-                 <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                   Accepted: <strong>{recommendationStats.accepted}</strong>
-                   <br />
-                   Rejected: <strong>{recommendationStats.rejected}</strong>
-                   <br />
-                   Deferred: <strong>{recommendationStats.deferred}</strong>
-                 </div>
-               </div>
-+              {expandedFitDetails ? (
-+                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Expanded fit score</div>
-+                  <div style={{ fontSize: 24, fontWeight: 700 }}>
-+                    {expandedFitDetails.expandedScore ?? "—"}
-+                  </div>
-+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
-+                    {expandedFitDetails.originalScore !== null && expandedFitDetails.originalScore !== undefined ? (
-+                      <>
-+                        Original: {expandedFitDetails.originalScore}
-+                        <br />
-+                      </>
-+                    ) : null}
-+                    {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined ? (
-+                      <>Delta: {expandedFitDetails.delta >= 0 ? "+" : ""}{expandedFitDetails.delta}</>
-+                    ) : null}
-+                  </div>
-+                </div>
-+              ) : null}
-             </div>
- 
-             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-               <button
-                 type="button"
-                 onClick={() => router.push("/fit-review")}
-                 style={{ ...ttrComponents.secondaryButton, padding: "10px 14px" }}
-               >
-                 Back to fit review
-               </button>
-               <Link href="/results" style={{ ...ttrComponents.primaryButton, padding: "10px 14px", textDecoration: "none" }}>
-                 Continue
-               </Link>
-             </div>
-           </div>
-         </section>
-       </div>
-     </InstrumentShell>
-   );
- }
-diff --git a/apps/web/lib/interviews.ts b/apps/web/lib/interviews.ts
-index c2f54e3cb903a0905a578ab3756700c22c38a600..2bf8187c459765be007974db25a9c0a477f93274 100644
---- a/apps/web/lib/interviews.ts
-+++ b/apps/web/lib/interviews.ts
-@@ -2,47 +2,79 @@ export type GapDomain = "experience" | "tooling" | "scope" | "leadership" | "ind
- 
- export type GapConfidence = "low" | "medium" | "high";
- 
- export interface InterviewGap {
-   gapId: string;
-   domain: GapDomain;
-   jdExcerpt: string;
-   baselineExcerpt: string | null;
-   confidence: GapConfidence;
- }
- 
- export type InterviewQuestionCategory =
-   | "Direct Experience"
-   | "Context"
-   | "Scope"
-   | "Tooling"
-   | "Impact";
- 
- export interface InterviewQuestion {
-   gapId: string;
-   category: InterviewQuestionCategory;
-   prompt: string;
-   jdReference: string;
- }
- 
-+export type RecommendedAdditionStatus = "proposed" | "accepted" | "rejected" | "deferred";
++      const embeddings = await Promise.all(
++        sections.map(async (section) => ({
++          section,
++          embedding: await this.embeddingProvider!.embed(section.content ?? ''),
++        })),
++      );
 +
-+export type RecommendedAdditionSource = {
-+  gapId?: string;
-+  questionIndex?: number;
-+  questionPrompt?: string;
-+};
++      return embeddings;
++    } catch {
++      return null;
++    }
++  }
 +
-+export interface RecommendedAddition {
-+  id: string;
-+  text: string;
-+  sources?: RecommendedAdditionSource[];
-+  status: RecommendedAdditionStatus;
-+}
-+
-+export type RecommendedAdditionDecision = "accept" | "reject" | "defer";
-+
-+export type AdditionDecisionPayload = {
-+  additionId: string;
-+  decision: RecommendedAdditionDecision;
-+};
-+
-+export interface ExpandedFitAssessment {
-+  expandedScore?: number | null;
-+  originalScore?: number | null;
-+  delta?: number | null;
-+  [key: string]: unknown;
-+}
-+
- export interface InterviewResponseDto {
-   id: string;
-   question: string;
-   response: string;
-   createdAt: string;
-   updatedAt: string;
- }
+   private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
+     let bestMatch:
+       | {
+           section: BaselineSection;
+           overlap: number;
+         }
+       | null = null;
  
- export interface InterviewSessionDto {
-   id: string;
-   baselineId: string | null;
-   baselineVersionId: string | null;
-+  baselineVersionHash?: string | null;
-+  baselineVersion?: number | null;
-   jobId: string | null;
-   status: string;
-   gapList?: InterviewGap[];
-   questions?: InterviewQuestion[];
-   responses?: string[];
-   validationResults?: Record<string, unknown>;
--  recommendedAdditions?: string[];
-+  recommendedAdditions?: RecommendedAddition[];
-+  expandedFitAssessment?: ExpandedFitAssessment | null;
-   createdAt: string;
-   updatedAt: string;
- }
+     for (const candidate of sections) {
+       const overlap = [...jdTokens].filter((token) => candidate.tokens.has(token)).length;
+ 
+       if (!bestMatch || overlap > bestMatch.overlap) {
+         bestMatch = { section: candidate.section, overlap };
+       }
+     }
+ 
+     return bestMatch;
+   }
+ 
++  private async findBestEmbeddingMatch(
++    jdText: string,
++    sections: SectionEmbedding[],
++  ): Promise<{ section: BaselineSection; similarity: number } | null> {
++    if (!this.embeddingProvider) {
++      return null;
++    }
++
++    const jdEmbedding = await this.embeddingProvider.embed(jdText);
++    let bestMatch: { section: BaselineSection; similarity: number } | null = null;
++
++    for (const candidate of sections) {
++      const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
++
++      if (!bestMatch || similarity > bestMatch.similarity) {
++        bestMatch = { section: candidate.section, similarity };
++      }
++    }
++
++    return bestMatch;
++  }
++
++  private cosineSimilarity(a: number[], b: number[]): number {
++    if (!a.length || !b.length || a.length !== b.length) {
++      return 0;
++    }
++
++    const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
++    const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
++    const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
++
++    if (magnitudeA === 0 || magnitudeB === 0) {
++      return 0;
++    }
++
++    return dotProduct / (magnitudeA * magnitudeB);
++  }
++
+   private resolveConfidence(coverageRatio: number): GapConfidence {
+     if (coverageRatio === 0) {
+       return 'high';
+     }
+     if (coverageRatio < 0.25) {
+       return 'medium';
+     }
+     return 'low';
+   }
+ 
+   private buildBaselineExcerpt(content: string | null): string | null {
+     if (!content) {
+       return null;
+     }
+ 
+     const trimmed = content.trim();
+ 
+     if (trimmed.length <= 300) {
+       return trimmed;
+     }
+ 
+     return `${trimmed.slice(0, 297)}...`;
+   }
+ 
+   private inferDomain(text: string): GapDomain {
