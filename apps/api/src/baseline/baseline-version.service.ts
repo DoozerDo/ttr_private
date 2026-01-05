@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Interview } from '../interviews/interview.entity';
+import { ComplianceFlagSeverity } from '../compliance/compliance.types';
+import { ComplianceService } from '../compliance/compliance.service';
 import {
   BaselineIncludePolicy,
   BaselineSection,
@@ -36,6 +38,7 @@ export class BaselineVersionService {
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(Interview)
     private readonly interviewRepository: Repository<Interview>,
+    private readonly complianceService: ComplianceService,
   ) {}
 
   private normalizePoliciesFromSections(sections: BaselineSection[]): PolicyState[] {
@@ -126,6 +129,22 @@ export class BaselineVersionService {
       where: { baselineId },
       order: { order: 'ASC' },
     });
+
+    const technologyFlags = this.complianceService.enforceTechnologyConsistency({
+      baselineSections: sections,
+      generatedSections: additions.map((content, index) => ({
+        title: `Addition ${index + 1}`,
+        content,
+      })),
+    });
+
+    const blockingTechnologyFlag = technologyFlags.find(
+      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
+    );
+
+    if (blockingTechnologyFlag) {
+      throw new BadRequestException(blockingTechnologyFlag.message);
+    }
 
     const existingPolicies = latestVersion
       ? await this.baselineBlockPolicyRepository.find({

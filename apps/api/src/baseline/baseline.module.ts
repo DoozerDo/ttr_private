@@ -15,10 +15,12 @@ import { BaselineParserService } from './baseline-parser.service';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { Interview } from '../interviews/interview.entity';
+import { ComplianceModule } from '../compliance/compliance.module';
 
 @Module({
   imports: [
     ConfigModule,
+    ComplianceModule,
     TypeOrmModule.forFeature([
       Baseline,
       BaselineSection,

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
@@ -11,6 +12,8 @@ import {
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { Interview } from '../interviews/interview.entity';
+import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
 
 describe('BaselineVersionService', () => {
   let service: BaselineVersionService;
@@ -19,6 +22,7 @@ describe('BaselineVersionService', () => {
   let baselineSectionRepository: any;
   let baselineBlockPolicyRepository: any;
   let interviewRepository: any;
+  let complianceService: ComplianceService;
 
   const baseline: Baseline = {
     id: 'baseline-1',
@@ -97,10 +101,17 @@ describe('BaselineVersionService', () => {
         { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
         { provide: getRepositoryToken(BaselineBlockPolicy), useValue: baselineBlockPolicyRepository },
         { provide: getRepositoryToken(Interview), useValue: interviewRepository },
+        {
+          provide: ComplianceService,
+          useValue: {
+            enforceTechnologyConsistency: jest.fn().mockReturnValue([]),
+          },
+        },
       ],
     }).compile();
 
     service = moduleRef.get(BaselineVersionService);
+    complianceService = moduleRef.get(ComplianceService);
   });
 
   it('creates a new version without mutating prior versions', async () => {
@@ -138,5 +149,22 @@ describe('BaselineVersionService', () => {
     });
 
     expect(result.hash).toBe(expectedHash);
+  });
+
+  it('rejects additions that introduce technologies outside the baseline vocabulary', async () => {
+    jest.spyOn(complianceService, 'enforceTechnologyConsistency').mockReturnValue([
+      {
+        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Technology "ImaginaryDB" not found in baseline.',
+      },
+    ]);
+
+    await expect(
+      service.approveVerifiedAdditions('user-1', {
+        baselineId: 'baseline-1',
+        additions: ['Built ImaginaryDB cluster'],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

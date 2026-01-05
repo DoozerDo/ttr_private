@@ -5,6 +5,7 @@ import {
   ComplianceFlagCode,
   ComplianceFlagSeverity,
 } from './compliance.types';
+import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
 const buildAuditRepo = () => {
   const create = jest.fn((payload) => payload);
@@ -145,5 +146,54 @@ describe('ComplianceService', () => {
         severity: ComplianceFlagSeverity.BLOCK,
       }),
     ]);
+  });
+
+  it('allows technologies present in baseline vocabulary', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [
+        {
+          title: 'Skills',
+          content: 'AWS, PostgreSQL, Terraform',
+          sectionType: BaselineSectionType.SKILLS,
+        },
+      ],
+      generatedSections: [{ content: 'Led AWS migration with PostgreSQL.' }],
+    });
+
+    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
+  });
+
+  it('blocks technologies not present in baseline', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [
+        {
+          title: 'Skills',
+          content: 'AWS, PostgreSQL',
+          sectionType: BaselineSectionType.SKILLS,
+        },
+      ],
+      generatedSections: [{ content: 'Implemented QuantumOS pipelines.' }],
+    });
+
+    expect(flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY, severity: ComplianceFlagSeverity.BLOCK }),
+      ]),
+    );
+  });
+
+  it('is conservative and avoids over-flagging generic terms', () => {
+    const flags = service.enforceResumeWritingRules({
+      baselineSections: [
+        {
+          title: 'Experience',
+          content: 'AWS migration and platform leadership.',
+          sectionType: BaselineSectionType.EXPERIENCE,
+        },
+      ],
+      generatedSections: [{ content: 'Collaborated with cross-functional teams to improve processes.' }],
+    });
+
+    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
   });
 });

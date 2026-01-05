@@ -14,6 +14,7 @@ export enum ComplianceFlagCode {
   INVENTED_ROLE = 'invented_role',
   INVENTED_METRIC = 'invented_metric',
   STYLIZED_PUNCTUATION = 'stylized_punctuation',
+  FICTIONAL_TECHNOLOGY = 'fictional_technology',
 }
 
 export enum ComplianceFlagSeverity {
