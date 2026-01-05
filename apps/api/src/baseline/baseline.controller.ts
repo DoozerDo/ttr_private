@@ -16,11 +16,15 @@ import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Express } from 'express';
 import { BaselineService } from './baseline.service';
+import { BaselineVersionService } from './baseline-version.service';
 
 @Controller('baselines')
 @UseGuards(AuthGuard('jwt'))
 export class BaselineController {
-  constructor(private readonly baselineService: BaselineService) {}
+  constructor(
+    private readonly baselineService: BaselineService,
+    private readonly baselineVersionService: BaselineVersionService,
+  ) {}
 
   @Post()
   @UseInterceptors(FileInterceptor('file'))
@@ -139,5 +143,24 @@ export class BaselineController {
     }
 
     return this.baselineService.updateBlockPolicies(userId, id, body);
+  }
+
+  @Post(':id/promote')
+  async promoteBaselineVersion(
+    @Param('id') id: string,
+    @Body() body: { interviewId?: string; additions?: string[] },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineVersionService.approveVerifiedAdditions(userId, {
+      baselineId: id,
+      interviewId: body.interviewId,
+      additions: body.additions,
+    });
   }
 }

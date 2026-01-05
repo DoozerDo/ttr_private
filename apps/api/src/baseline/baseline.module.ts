@@ -13,6 +13,8 @@ import { BaselineService } from './baseline.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import { BaselineParserService } from './baseline-parser.service';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
+import { BaselineVersionService } from './baseline-version.service';
+import { Interview } from '../interviews/interview.entity';
 
 @Module({
   imports: [
@@ -22,6 +24,7 @@ import { BaselineBlockPolicy } from './baseline-block-policy.entity';
       BaselineSection,
       BaselineVersion,
       BaselineBlockPolicy,
+      Interview,
     ]),
     MulterModule.registerAsync({
       imports: [ConfigModule],
@@ -59,6 +62,7 @@ import { BaselineBlockPolicy } from './baseline-block-policy.entity';
   ],
   providers: [
     BaselineService,
+    BaselineVersionService,
     BaselineTextExtractor,
     BaselineParserService,
   ],

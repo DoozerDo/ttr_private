@@ -14,6 +14,7 @@ export type FitScoringInput = {
     version?: number | null;
     sections: Array<{ type?: string; content: string }>;
   };
+  verifiedAdditions?: string[];
 };
 
 export type DimensionWeightOverrides = Partial<Record<keyof FitDimensionScores, number>>;
@@ -26,6 +27,11 @@ export type FitScoringResult = {
   gaps: string[];
   complianceFlags: string[];
   summary: string;
+  originalScore: number;
+  expandedScore: number;
+  delta: number;
+  expandedDimensionScores: FitDimensionScores | null;
+  appliedAdditions: string[];
 };
 
 const STOPWORDS = new Set([
@@ -460,6 +466,33 @@ const buildVerdict = (overallScore: number) => {
 
 @Injectable()
 export class FitScoringService {
+  private buildDimensionScores(
+    jobText: string,
+    responsibilitiesText: string,
+    requirementsText: string,
+    baselineText: string,
+    baselineSkillsText: string,
+    baselineExperienceText: string,
+  ): FitDimensionScores {
+    const experienceAlignment = scoreExperienceAlignment(
+      responsibilitiesText,
+      requirementsText,
+      baselineExperienceText,
+    );
+    const leadershipLevel = scoreLeadership(jobText, baselineText);
+    const technicalPlatformFit = scoreTechnicalFit(jobText, baselineSkillsText);
+    const industryContext = scoreIndustry(jobText, baselineText);
+    const strategicTacticalFit = scoreStrategicTactical(jobText, baselineExperienceText);
+
+    return {
+      experienceAlignment,
+      leadershipLevel,
+      technicalPlatformFit,
+      industryContext,
+      strategicTacticalFit,
+    };
+  }
+
   score(
     input: FitScoringInput,
     dimensionWeights?: DimensionWeightOverrides | null,
@@ -482,23 +515,14 @@ export class FitScoringService {
     const responsibilitiesText = input.job.normalizedResponsibilities.join('\n');
     const requirementsText = input.job.normalizedRequirements.join('\n');
 
-    const experienceAlignment = scoreExperienceAlignment(
+    const dimensionScores = this.buildDimensionScores(
+      jobText,
       responsibilitiesText,
       requirementsText,
+      baselineText,
+      baselineSkillsText,
       baselineExperienceText,
     );
-    const leadershipLevel = scoreLeadership(jobText, baselineText);
-    const technicalPlatformFit = scoreTechnicalFit(jobText, baselineSkillsText);
-    const industryContext = scoreIndustry(jobText, baselineText);
-    const strategicTacticalFit = scoreStrategicTactical(jobText, baselineExperienceText);
-
-    const dimensionScores: FitDimensionScores = {
-      experienceAlignment,
-      leadershipLevel,
-      technicalPlatformFit,
-      industryContext,
-      strategicTacticalFit,
-    };
 
     const defaultWeights: Record<keyof FitDimensionScores, number> = {
       experienceAlignment: 0.3,
@@ -536,11 +560,11 @@ export class FitScoringService {
         : (Object.values(defaultWeights).reduce((sum, value) => sum + value, 0));
 
     const overallScore = clampScore(
-      (experienceAlignment * weightedDefaults.values.experienceAlignment +
-        technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
-        leadershipLevel * weightedDefaults.values.leadershipLevel +
-        strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
-        industryContext * weightedDefaults.values.industryContext) /
+      (dimensionScores.experienceAlignment * weightedDefaults.values.experienceAlignment +
+        dimensionScores.technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
+        dimensionScores.leadershipLevel * weightedDefaults.values.leadershipLevel +
+        dimensionScores.strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
+        dimensionScores.industryContext * weightedDefaults.values.industryContext) /
         normalizedTotal,
     );
 
@@ -557,6 +581,46 @@ export class FitScoringService {
       input.job.sourceUrl,
     );
 
+    const additions = (input.verifiedAdditions ?? [])
+      .map((entry) => entry?.trim())
+      .filter((entry): entry is string => Boolean(entry));
+
+    // Expanded scoring is additive-only and never overwrites the baseline-only score.
+    const additionText = additions.length ? `\n${additions.join('\n')}` : '';
+    const expandedBaselineText = `${baselineText}${additionText}`.trim();
+    const expandedBaselineSkillsText = `${baselineSkillsText}${additionText}`.trim();
+    const expandedBaselineExperienceText = `${baselineExperienceText}${additionText}`.trim();
+
+    const expandedDimensionScores =
+      additions.length > 0
+        ? this.buildDimensionScores(
+            jobText,
+            responsibilitiesText,
+            requirementsText,
+            expandedBaselineText,
+            expandedBaselineSkillsText,
+            expandedBaselineExperienceText,
+          )
+        : null;
+
+    const expandedScore = expandedDimensionScores
+      ? clampScore(
+          (expandedDimensionScores.experienceAlignment *
+            weightedDefaults.values.experienceAlignment +
+            expandedDimensionScores.technicalPlatformFit *
+              weightedDefaults.values.technicalPlatformFit +
+            expandedDimensionScores.leadershipLevel *
+              weightedDefaults.values.leadershipLevel +
+            expandedDimensionScores.strategicTacticalFit *
+              weightedDefaults.values.strategicTacticalFit +
+            expandedDimensionScores.industryContext *
+              weightedDefaults.values.industryContext) /
+            normalizedTotal,
+        )
+      : overallScore;
+
+    const delta = expandedScore - overallScore;
+
     return {
       overallScore,
       verdict: buildVerdict(overallScore),
@@ -565,6 +629,11 @@ export class FitScoringService {
       gaps,
       complianceFlags,
       summary: buildSummary(strengths, gaps),
+      originalScore: overallScore,
+      expandedScore,
+      delta,
+      expandedDimensionScores,
+      appliedAdditions: additions,
     };
   }
 

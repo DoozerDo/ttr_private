@@ -51,6 +51,12 @@ type PolicyState = {
   order: number;
 };
 
+type PolicySectionInput = {
+  id: string;
+  includePolicy?: BaselineIncludePolicy | null;
+  order?: number | null;
+};
+
 @Injectable()
 export class BaselineService {
   constructor(
@@ -112,7 +118,11 @@ export class BaselineService {
     }
   }
 
-  private buildVersionHash(baselineHash: string | null, policies: PolicyState[]) {
+  private buildVersionHash(
+    baselineHash: string | null,
+    policies: PolicyState[],
+    additions: string[] = [],
+  ) {
     const normalized = [...policies]
       .map((policy) => ({
         id: policy.baselineSectionId,
@@ -125,8 +135,16 @@ export class BaselineService {
         return a.order - b.order;
       });
 
+    const normalizedAdditions = [...additions].sort((a, b) => a.localeCompare(b));
+
     return createHash('sha256')
-      .update(JSON.stringify({ baselineHash: baselineHash ?? null, policies: normalized }))
+      .update(
+        JSON.stringify({
+          baselineHash: baselineHash ?? null,
+          policies: normalized,
+          additions: normalizedAdditions,
+        }),
+      )
       .digest('hex');
   }
 
@@ -183,7 +201,7 @@ export class BaselineService {
     });
   }
 
-  private normalizePoliciesFromSections(sections: BaselineSection[]): PolicyState[] {
+  private normalizePoliciesFromSections(sections: PolicySectionInput[]): PolicyState[] {
     return sections.map((section, index) => ({
       baselineSectionId: section.id,
       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
@@ -246,7 +264,7 @@ export class BaselineService {
       const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
 
       const policyState = this.normalizePoliciesFromSections(
-        savedBaseline.sections ?? [],
+        (savedBaseline.sections ?? []) as PolicySectionInput[],
       );
       const versionHash = this.buildVersionHash(fileHash, policyState);
 
@@ -255,6 +273,9 @@ export class BaselineService {
         versionNumber: nextVersionNumber,
         fileHash: versionHash,
         storagePath: savedBaseline.storagePath,
+        verifiedAdditions: [],
+        additionDiff: null,
+        promotedFromInterviewId: null,
       });
 
       const savedVersion = await manager.save(versionRecord);
@@ -317,10 +338,7 @@ export class BaselineService {
         order: { order: 'ASC' },
       });
 
-      baseline.sections = this.applyPoliciesToSections(
-        baseline.sections ?? [],
-        policies,
-      );
+      baseline.sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
     }
 
     return baseline;
@@ -370,14 +388,23 @@ export class BaselineService {
       const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
       const nextVersionNumber =
         (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
-      const policyState = this.normalizePoliciesFromSections(baseline.sections);
-      const versionHash = this.buildVersionHash(baseline.hash, policyState);
+      const policyState = this.normalizePoliciesFromSections(
+        (baseline.sections ?? []) as PolicySectionInput[],
+      );
+      const versionHash = this.buildVersionHash(
+        baseline.hash,
+        policyState,
+        latestVersion?.verifiedAdditions ?? [],
+      );
 
       const versionRecord = manager.create(BaselineVersion, {
         baselineId: baseline.id,
         versionNumber: nextVersionNumber,
         fileHash: versionHash,
         storagePath: baseline.storagePath,
+        verifiedAdditions: [],
+        additionDiff: null,
+        promotedFromInterviewId: null,
       });
 
       const savedVersion = await manager.save(versionRecord);
@@ -442,14 +469,30 @@ export class BaselineService {
       order: { order: 'ASC' },
     });
 
-    const sections = this.applyPoliciesToSections(
-      baseline.sections ?? [],
-      policies,
-    );
+    const sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
 
-    const policyState = this.normalizePoliciesFromSections(sections);
+    const additionSections =
+      (baselineVersion.verifiedAdditions ?? []).map((content, index) => ({
+        id: `addition-${index}`,
+        sectionType: BaselineSectionType.OTHER,
+        title: 'Verified addition',
+        content,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: sections.length + index,
+      })) ?? [];
+
+    const versionSections = [...sections, ...additionSections];
+
+    const policyState = this.normalizePoliciesFromSections(
+      versionSections as PolicySectionInput[],
+    );
     const versionHash =
-      baselineVersion.fileHash ?? this.buildVersionHash(baseline.hash, policyState);
+      baselineVersion.fileHash ??
+      this.buildVersionHash(
+        baseline.hash,
+        policyState,
+        baselineVersion.verifiedAdditions ?? [],
+      );
 
     if (!baselineVersion.fileHash && versionHash) {
       baselineVersion.fileHash = versionHash;
@@ -459,7 +502,7 @@ export class BaselineService {
     return {
       baseline_version_id: baselineVersion.id,
       baseline_version_hash: versionHash ?? null,
-      blocks: sections.map((section) => ({
+      blocks: versionSections.map((section) => ({
         id: section.id,
         section_type: section.sectionType ?? BaselineSectionType.OTHER,
         title: section.title ?? null,
@@ -554,10 +597,15 @@ export class BaselineService {
             includePolicy: policy.includePolicy,
             order: policy.order,
           }))
-        : this.normalizePoliciesFromSections(sections);
+        : this.normalizePoliciesFromSections(sections as PolicySectionInput[]);
 
     const currentVersionHash =
-      latestVersion.fileHash ?? this.buildVersionHash(baseline.hash, currentPolicyState);
+      latestVersion.fileHash ??
+      this.buildVersionHash(
+        baseline.hash,
+        currentPolicyState,
+        latestVersion.verifiedAdditions ?? [],
+      );
 
     if (requestedVersion.id !== latestVersion.id) {
       this.raiseConflict(latestVersion, currentVersionHash);
@@ -590,7 +638,11 @@ export class BaselineService {
       };
     });
 
-    const newVersionHash = this.buildVersionHash(baseline.hash, nextPolicies);
+    const newVersionHash = this.buildVersionHash(
+      baseline.hash,
+      nextPolicies,
+      latestVersion.verifiedAdditions ?? [],
+    );
     const nextVersionNumber =
       (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
 
@@ -600,6 +652,9 @@ export class BaselineService {
         versionNumber: nextVersionNumber,
         fileHash: newVersionHash,
         storagePath: baseline.storagePath,
+        verifiedAdditions: latestVersion.verifiedAdditions ?? [],
+        additionDiff: latestVersion.additionDiff ?? null,
+        promotedFromInterviewId: latestVersion.promotedFromInterviewId ?? null,
       });
 
       const savedVersion = await manager.save(newVersion);
@@ -622,8 +677,7 @@ export class BaselineService {
         );
 
         section.includePolicy = applied?.includePolicy ?? section.includePolicy;
-        section.order =
-          applied?.order ?? section.order ?? section.orderIndex ?? 0;
+        section.order = applied?.order ?? section.order ?? section.orderIndex ?? 0;
 
         return section;
       });

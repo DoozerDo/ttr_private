@@ -145,7 +145,45 @@ describe('FitScoringService', () => {
         gaps: expect.any(Array),
         complianceFlags: expect.any(Array),
         summary: expect.any(String),
+        originalScore: expect.any(Number),
+        expandedScore: expect.any(Number),
+        delta: expect.any(Number),
+        expandedDimensionScores: expect.anything(),
+        appliedAdditions: expect.any(Array),
       }),
     );
+  });
+
+  it('computes expanded scoring without overwriting the original score', () => {
+    const result = service.score(
+      buildInput(),
+      undefined,
+      // verified additions should be passed through even when weights are default
+    );
+    expect(result.originalScore).toBe(result.overallScore);
+    expect(result.expandedScore).toBe(result.originalScore);
+    expect(result.delta).toBe(0);
+  });
+
+  it('increases expanded score using verified additions while capping at 100', () => {
+    const result = service.score(
+      buildInput({
+        baseline: {
+          version: 1,
+          sections: [
+            {
+              type: 'EXPERIENCE',
+              content: 'Legacy on-prem operations with little cloud experience.',
+            },
+          ],
+        },
+        verifiedAdditions: ['Deep AWS and Kubernetes delivery experience'],
+      }),
+    );
+
+    expect(result.originalScore).toBeLessThan(result.expandedScore);
+    expect(result.expandedScore).toBeLessThanOrEqual(100);
+    expect(result.delta).toBe(result.expandedScore - result.originalScore);
+    expect(result.appliedAdditions).toEqual(['Deep AWS and Kubernetes delivery experience']);
   });
 });

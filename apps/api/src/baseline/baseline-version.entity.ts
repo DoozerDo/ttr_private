@@ -34,6 +34,15 @@ export class BaselineVersion {
     return this.fileHash;
   }
 
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  verifiedAdditions!: string[];
+
+  @Column({ type: 'jsonb', nullable: true })
+  additionDiff!: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  promotedFromInterviewId!: string | null;
+
   @OneToMany(() => BaselineBlockPolicy, (policy) => policy.baselineVersion, {
     cascade: true,
   })

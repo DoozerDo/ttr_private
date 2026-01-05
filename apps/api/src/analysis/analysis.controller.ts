@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { AnalysisService } from './analysis.service';
 import type { AnalysisRequest } from './analysis.service';
 import { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+import { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
 
 @Controller('analysis')
 @UseGuards(AuthGuard('jwt'))
@@ -46,6 +47,20 @@ export class AnalysisController {
     }
 
     return this.analysisService.runFitAssessment(userId, body);
+  }
+
+  @Post('run-expanded')
+  async runExpandedFitAssessment(
+    @Body() body: RunExpandedFitAssessmentDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.runExpandedFitAssessment(userId, body);
   }
 
   @Get('fit-assessments')

@@ -11,6 +11,8 @@ import { ComplianceAction } from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
+import { Interview } from '../interviews/interview.entity';
+import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisService } from './analysis.service';
 import { FitAssessment } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
@@ -94,11 +96,19 @@ describe('AnalysisService - fit scores contract', () => {
           useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
         },
         { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Interview), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(FitAssessment),
           useValue: {
             create: jest.fn((payload) => payload),
             save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
+          },
+        },
+        {
+          provide: getRepositoryToken(ExpandedFitAssessment),
+          useValue: {
+            create: jest.fn((payload) => payload),
+            save: jest.fn(async (payload) => ({ ...payload, id: 'exp-1', createdAt: new Date() })),
           },
         },
         {

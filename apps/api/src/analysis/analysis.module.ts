@@ -5,9 +5,11 @@ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { Interview } from '../interviews/interview.entity';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { FitAssessment } from './fit-assessment.entity';
+import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisController } from './analysis.controller';
 import { CalibrationController } from './calibration.controller';
 import { FitScoresController } from './fit-scores.controller';
@@ -23,6 +25,8 @@ import { FitScoringService } from './fit-scoring.service';
       BaselineBlockPolicy,
       Job,
       FitAssessment,
+      ExpandedFitAssessment,
+      Interview,
       User,
     ]),
     ComplianceModule,

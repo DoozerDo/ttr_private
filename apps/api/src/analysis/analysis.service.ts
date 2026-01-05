@@ -10,15 +10,23 @@ import { Baseline } from '../baseline/baseline.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
+  BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceService } from '../compliance/compliance.service';
-import { ComplianceAction, ComplianceFlag, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlag,
+  ComplianceFlagSeverity,
+} from '../compliance/compliance.types';
+import { Interview } from '../interviews/interview.entity';
 import { Job } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
+import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
 import {
   DimensionWeightOverrides,
   FitScoringService,
@@ -95,8 +103,12 @@ export class AnalysisService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
+    @InjectRepository(Interview)
+    private readonly interviewRepository: Repository<Interview>,
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+    @InjectRepository(ExpandedFitAssessment)
+    private readonly expandedFitAssessmentRepository: Repository<ExpandedFitAssessment>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     private readonly fitScoringService: FitScoringService,
@@ -119,10 +131,11 @@ export class AnalysisService {
   };
 
   private normalizeKeywords(text: string) {
-    const tokens = text
-      .toLowerCase()
-      .match(/[a-z0-9]+/g)
-      ?.filter((token) => token.length >= 3) ?? [];
+    const tokens =
+      text
+        .toLowerCase()
+        .match(/[a-z0-9]+/g)
+        ?.filter((token) => token.length >= 3) ?? [];
 
     const frequencies = new Map<string, number>();
     for (const token of tokens) {
@@ -184,9 +197,7 @@ export class AnalysisService {
       calibration: dimensionWeights,
     };
 
-    return createHash('sha256')
-      .update(JSON.stringify(payload))
-      .digest('hex');
+    return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   }
 
   private coerceComplianceFlags(flags: string[] | undefined | null) {
@@ -194,13 +205,22 @@ export class AnalysisService {
     return flags.map((flag) => ({ code: flag, message: flag }));
   }
 
-  private mapComplianceStringsToFlags(flags?: string[] | null): ComplianceFlag[] | undefined {
+  private mapComplianceStringsToFlags(
+    flags?: string[] | null,
+  ): ComplianceFlag[] | undefined {
     if (!flags?.length) return undefined;
     return flags.map((flag) => ({
       code: flag as any,
       message: flag,
       severity: ComplianceFlagSeverity.BLOCK,
     }));
+  }
+
+  private normalizeAdditions(additions?: string[] | null) {
+    if (!additions?.length) return [];
+    return additions
+      .map((entry) => entry?.trim())
+      .filter((entry): entry is string => Boolean(entry));
   }
 
   private assertJobInput(job?: FitScoreJobInput) {
@@ -217,7 +237,10 @@ export class AnalysisService {
 
     if (hasId && providedCount > 0) {
       throw new BadRequestException({
-        error: { code: 'JD_INPUT_AMBIGUOUS', message: 'Provide either job.id or JD content, not both.' },
+        error: {
+          code: 'JD_INPUT_AMBIGUOUS',
+          message: 'Provide either job.id or JD content, not both.',
+        },
       });
     }
 
@@ -247,9 +270,11 @@ export class AnalysisService {
       throw new NotFoundException('User not found');
     }
 
-    const profileName = user.calibrationProfileName ?? this.defaultCalibration.profileName;
+    const profileName =
+      user.calibrationProfileName ?? this.defaultCalibration.profileName;
     const weights =
-      user.calibrationWeights ?? ({ ...this.defaultCalibration.weights } as CalibrationWeights);
+      user.calibrationWeights ??
+      ({ ...this.defaultCalibration.weights } as CalibrationWeights);
 
     return { ok: true, profileName, weights };
   }
@@ -368,10 +393,23 @@ export class AnalysisService {
       order: { order: 'ASC' },
     });
 
-    baseline.sections = this.applyPoliciesToSections(
-      baseline.sections ?? [],
-      policies,
-    );
+    baseline.sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
+
+    const additionSections =
+      (baselineVersion.verifiedAdditions ?? []).map((content, index) => {
+        const section: Partial<BaselineSection> = {
+          id: `addition-${index}`,
+          baselineId: baseline.id,
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Verified addition',
+          content,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: (baseline.sections?.length ?? 0) + index,
+        };
+        return section as BaselineSection;
+      }) ?? [];
+
+    baseline.sections = [...(baseline.sections ?? []), ...additionSections];
 
     return { baseline, baselineVersion };
   }
@@ -782,10 +820,140 @@ export class AnalysisService {
     };
   }
 
+  async runExpandedFitAssessment(userId: string, payload: RunExpandedFitAssessmentDto) {
+    const baselineId = payload.baselineId?.trim();
+    const jobId = payload.jobId?.trim();
+
+    if (!baselineId || !jobId) {
+      throw new BadRequestException('baselineId and jobId are required');
+    }
+
+    if (payload.baselineVersion !== undefined) {
+      const version = Number(payload.baselineVersion);
+      if (!Number.isInteger(version) || version < 1) {
+        throw new BadRequestException('baselineVersion must be a positive integer');
+      }
+    }
+
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      relations: ['sections'],
+      order: { sections: { order: 'ASC' } },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    if (!baseline.sections?.length) {
+      baseline.sections = await this.baselineSectionRepository.find({
+        where: { baselineId: baseline.id },
+        order: { order: 'ASC' },
+      });
+    }
+
+    const job = await this.jobRepository.findOne({
+      where: { id: jobId, userId },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const interviewId = payload.interviewId?.trim();
+    const interview = interviewId
+      ? await this.interviewRepository.findOne({
+          where: { id: interviewId, userId },
+        })
+      : null;
+
+    if (interviewId && !interview) {
+      throw new NotFoundException('Interview not found');
+    }
+
+    const additionsFromPayload = this.normalizeAdditions(payload.verifiedAdditions);
+    const additions = additionsFromPayload.length
+      ? additionsFromPayload
+      : this.normalizeAdditions(interview?.recommendedAdditions);
+
+    if (!additions.length) {
+      throw new BadRequestException('verified additions are required for expanded scoring');
+    }
+
+    const includedSections =
+      baseline.sections?.filter(
+        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+      ) ?? [];
+
+    const calibration = await this.getCalibration(userId);
+    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
+
+    const scoring = this.fitScoringService.score(
+      {
+        job: {
+          rawDescription: job.rawDescription,
+          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+          normalizedRequirements: job.normalizedRequirements ?? [],
+          title: job.title ?? null,
+          company: job.company ?? null,
+          sourceUrl: job.sourceUrl ?? null,
+        },
+        baseline: {
+          version: payload.baselineVersion ?? baseline.version ?? null,
+          sections: includedSections.map((section) => ({
+            type: section.sectionType ?? section.type,
+            content: section.content,
+          })),
+        },
+        verifiedAdditions: additions,
+      },
+      dimensionWeights,
+    );
+
+    const linkedAssessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, jobId, baselineId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const expansion = this.expandedFitAssessmentRepository.create({
+      userId,
+      jobId,
+      baselineId,
+      baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
+      fitAssessmentId: linkedAssessment?.id ?? undefined,
+      interviewId: interview?.id ?? undefined,
+      originalScore: scoring.originalScore,
+      expandedScore: scoring.expandedScore,
+      delta: scoring.delta,
+      additions,
+      expandedDimensionScores: scoring.expandedDimensionScores ?? scoring.dimensionScores,
+    });
+
+    const savedExpansion = await this.expandedFitAssessmentRepository.save(expansion);
+
+    return {
+      ok: true,
+      expansionId: savedExpansion.id,
+      fitAssessmentId: linkedAssessment?.id ?? null,
+      interviewId: interview?.id ?? null,
+      baselineId,
+      baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
+      jobId,
+      originalScore: scoring.originalScore,
+      expandedScore: scoring.expandedScore,
+      delta: scoring.delta,
+      expandedDimensionScores: scoring.expandedDimensionScores ?? scoring.dimensionScores,
+      dimensionScores: scoring.dimensionScores,
+      strengths: scoring.strengths,
+      gaps: scoring.gaps,
+      complianceFlags: scoring.complianceFlags,
+      appliedAdditions: scoring.appliedAdditions,
+      summary: scoring.summary,
+    };
+  }
+
   async getFitAssessments(userId: string, jobId?: string) {
-    const where = jobId?.trim()
-      ? { userId, jobId: jobId.trim() }
-      : { userId };
+    const where = jobId?.trim() ? { userId, jobId: jobId.trim() } : { userId };
 
     return this.fitAssessmentRepository.find({
       where,
