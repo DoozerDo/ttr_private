@@ -1,285 +1,443 @@
-diff --git a/apps/api/src/analysis/analysis.service.spec.ts b/apps/api/src/analysis/analysis.service.spec.ts
-index 8d6358e1dc1db480e501eb6d38c574b9b51f901f..b987bf48d8a4d57bc7f747e60bf48ca2fd79fa80 100644
---- a/apps/api/src/analysis/analysis.service.spec.ts
-+++ b/apps/api/src/analysis/analysis.service.spec.ts
-@@ -1,155 +1,196 @@
- import { Test } from '@nestjs/testing';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { ComplianceAction } from '../compliance/compliance.types';
- import { ComplianceService } from '../compliance/compliance.service';
- import { Job } from '../jobs/job.entity';
- import { User } from '../users/user.entity';
- import { Interview } from '../interviews/interview.entity';
- import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
- import { AnalysisService } from './analysis.service';
- import { FitAssessment } from './fit-assessment.entity';
- import { FitScoringService } from './fit-scoring.service';
- 
- describe('AnalysisService - fit scores contract', () => {
-   let service: AnalysisService;
-   let complianceService: ComplianceService;
-+  let baselineVersionRepository: { findOne: jest.Mock };
-+  let fitAssessmentRepository: {
-+    create: jest.Mock;
-+    save: jest.Mock;
-+    findOne: jest.Mock;
-+  };
- 
-   const baselineVersion: Partial<BaselineVersion> = {
-     id: 'bv-1',
-     baselineId: 'b-1',
-     versionNumber: 2,
-     baseline: { id: 'b-1', userId: 'user-1' } as Baseline,
-   };
- 
-   const baselineSections: BaselineSection[] = [
-     {
-       id: 's-1',
-       baselineId: 'b-1',
-       sectionType: 'EXPERIENCE' as any,
-       title: null,
-       content: 'Implemented distributed systems and led platform teams.',
-       includePolicy: BaselineIncludePolicy.OPTIONAL,
-       order: 0,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     } as BaselineSection,
-     {
-       id: 's-2',
-       baselineId: 'b-1',
-       sectionType: 'SKILLS' as any,
-       title: null,
-       content: 'AWS, Kubernetes, Terraform',
-       includePolicy: BaselineIncludePolicy.OPTIONAL,
-       order: 1,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     } as BaselineSection,
-   ];
- 
-   const baseline: Baseline = {
-     id: 'b-1',
-     userId: 'user-1',
-     version: 2,
-     originalFilename: 'resume.pdf',
-     mimeType: 'application/pdf',
-     storagePath: '/tmp/resume.pdf',
-     hash: 'hash',
-     sections: baselineSections,
-     versions: [],
-     createdAt: new Date(),
-     updatedAt: new Date(),
-   };
- 
-   beforeEach(async () => {
-+    baselineVersionRepository = { findOne: jest.fn().mockResolvedValue(baselineVersion) };
+diff --git a/apps/api/src/interviews/interview-toolkit.controller.ts b/apps/api/src/interviews/interview-toolkit.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b87a3e14ba43cd99c67ec08544868872b07a0a9
+--- /dev/null
++++ b/apps/api/src/interviews/interview-toolkit.controller.ts
+@@ -0,0 +1,44 @@
++import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++import type { Request } from 'express';
++import { InterviewToolkitService } from './interview-toolkit.service';
 +
-     const module = await Test.createTestingModule({
-       providers: [
-         AnalysisService,
-         FitScoringService,
-         {
-           provide: ComplianceService,
-           useValue: {
-             validateAndAudit: jest.fn().mockResolvedValue({
-               complianceFlags: [],
-               blocked: false,
-               audit: { id: 'audit-1' },
-             }),
-           },
-         },
-         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
-         {
-           provide: getRepositoryToken(BaselineSection),
-           useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
-         },
-         {
-           provide: getRepositoryToken(BaselineBlockPolicy),
-           useValue: { find: jest.fn().mockResolvedValue([]) },
-         },
--        {
--          provide: getRepositoryToken(BaselineVersion),
--          useValue: { findOne: jest.fn().mockResolvedValue(baselineVersion) },
--        },
-+        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-         { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
-         { provide: getRepositoryToken(Interview), useValue: { findOne: jest.fn() } },
-         {
-           provide: getRepositoryToken(FitAssessment),
--          useValue: {
--            create: jest.fn((payload) => payload),
--            save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
--          },
-+          useValue: (() => {
-+            fitAssessmentRepository = {
-+              create: jest.fn((payload) => payload),
-+              save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
-+              findOne: jest.fn(),
-+            };
-+            
-+            return fitAssessmentRepository;
-+          })(),
-         },
-         {
-           provide: getRepositoryToken(ExpandedFitAssessment),
-           useValue: {
-             create: jest.fn((payload) => payload),
-             save: jest.fn(async (payload) => ({ ...payload, id: 'exp-1', createdAt: new Date() })),
-           },
-         },
-         {
-           provide: getRepositoryToken(User),
-           useValue: {
-             findOne: jest.fn().mockResolvedValue({
-               id: 'user-1',
-               calibrationProfileName: null,
-               calibrationWeights: null,
-             }),
-           },
-         },
-       ],
-     }).compile();
- 
-     service = module.get(AnalysisService);
-     complianceService = module.get(ComplianceService);
-   });
- 
-+  it('returns the baseline version id for the latest assessment', async () => {
-+    fitAssessmentRepository.findOne.mockResolvedValue({
++@UseGuards(AuthGuard('jwt'))
++@Controller('interview-toolkit')
++export class InterviewToolkitController {
++  constructor(private readonly interviewToolkitService: InterviewToolkitService) {}
++
++  @Get(':jobId/study-packet')
++  async getStudyPacket(@Param('jobId') jobId: string, @Req() request: Request & { user?: { id?: string } }) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    if (!jobId?.trim()) {
++      throw new BadRequestException('jobId is required');
++    }
++
++    return this.interviewToolkitService.buildStudyPacket(userId, jobId.trim());
++  }
++
++  @Post(':jobId/follow-up')
++  async generateFollowUp(
++    @Param('jobId') jobId: string,
++    @Body() body: { notes?: string },
++    @Req() request: Request & { user?: { id?: string } },
++  ) {
++    const userId = request.user?.id;
++
++    if (!userId) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    if (!jobId?.trim()) {
++      throw new BadRequestException('jobId is required');
++    }
++
++    return this.interviewToolkitService.generateFollowUp(userId, jobId.trim(), body?.notes);
++  }
++}
+diff --git a/apps/api/src/interviews/interview-toolkit.service.spec.ts b/apps/api/src/interviews/interview-toolkit.service.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..84d7381b5353ee14114f046adaa7c452814d0897
+--- /dev/null
++++ b/apps/api/src/interviews/interview-toolkit.service.spec.ts
+@@ -0,0 +1,138 @@
++import { Test } from '@nestjs/testing';
++import { getRepositoryToken } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
++import { ComplianceService } from '../compliance/compliance.service';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { Job } from '../jobs/job.entity';
++import { StarStory } from '../star-stories/star-story.entity';
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import { InterviewToolkitService } from './interview-toolkit.service';
++
++const buildRepository = <T>(overrides: Partial<Repository<T>> = {}): Partial<Repository<T>> => ({
++  findOne: jest.fn(),
++  find: jest.fn(),
++  ...overrides,
++});
++
++describe('InterviewToolkitService', () => {
++  let service: InterviewToolkitService;
++  let jobRepository: Partial<Repository<Job>>;
++  let fitAssessmentRepository: Partial<Repository<FitAssessment>>;
++  let starStoryRepository: Partial<Repository<StarStory>>;
++  let questionGenerator: Partial<InterviewQuestionGeneratorService>;
++
++  beforeEach(async () => {
++    jobRepository = buildRepository();
++    fitAssessmentRepository = buildRepository();
++    starStoryRepository = buildRepository();
++    questionGenerator = {
++      generateQuestions: jest.fn().mockReturnValue([{ gapId: 'gap-1', prompt: 'Q1', category: 'Context', jdReference: '' }]),
++    } as any;
++
++    const moduleRef = await Test.createTestingModule({
++      providers: [
++        InterviewToolkitService,
++        { provide: getRepositoryToken(Job), useValue: jobRepository },
++        { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
++        { provide: getRepositoryToken(StarStory), useValue: starStoryRepository },
++        { provide: InterviewQuestionGeneratorService, useValue: questionGenerator },
++        {
++          provide: ComplianceService,
++          useValue: {
++            validateAndAudit: jest.fn().mockResolvedValue({ blocked: false, complianceFlags: [] }),
++          },
++        },
++      ],
++    }).compile();
++
++    service = moduleRef.get(InterviewToolkitService);
++  });
++
++  it('builds a study packet from latest assessment and stories', async () => {
++    const job: Job = {
++      id: 'job-1',
++      userId: 'user-1',
++      title: 'Senior Engineer',
++      company: 'TestCo',
++      rawDescription: 'Line one',
++      sourceUrl: null,
++      normalizedResponsibilities: ['Lead systems', 'Coach team'],
++      normalizedRequirements: [],
++      jdIngestionMethod: 'PASTE' as any,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    const assessment: FitAssessment = {
 +      id: 'fit-1',
 +      userId: 'user-1',
 +      jobId: 'job-1',
-+      baselineId: 'b-1',
-+      baselineVersion: 2,
-+      overallScore: 82,
++      baselineId: 'baseline-1',
++      baselineVersion: 1,
++      overallScore: 92,
 +      verdict: 'APPLY',
 +      dimensionScores: {
-+        experienceAlignment: 10,
-+        leadershipLevel: 9,
-+        technicalPlatformFit: 8,
-+        industryContext: 7,
-+        strategicTacticalFit: 6,
++        experienceAlignment: 1,
++        leadershipLevel: 1,
++        technicalPlatformFit: 1,
++        industryContext: 1,
++        strategicTacticalFit: 1,
 +      },
-+      strengths: ['aws'],
-+      gaps: ['golang'],
++      strengths: ['impact'],
++      gaps: ['systems design'],
 +      complianceFlags: [],
++      inputsHash: null,
 +      createdAt: new Date(),
-+    });
++    } as any;
 +
-+    const result = await service.getLatestAssessment('user-1', 'job-1');
++    (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
++    (fitAssessmentRepository.findOne as jest.Mock).mockResolvedValue(assessment);
++    (starStoryRepository.find as jest.Mock).mockResolvedValue([
++      {
++        id: 'story-1',
++        title: 'Scaling project',
++        situation: '',
++        task: '',
++        action: '',
++        result: '',
++        reflections: null,
++        competencies: ['systems'],
++        userId: 'user-1',
++        createdAt: new Date(),
++        updatedAt: new Date(),
++      } as any,
++    ]);
 +
-+    expect(result.baselineVersionId).toBe('bv-1');
-+    expect(baselineVersionRepository.findOne).toHaveBeenCalledWith({
-+      where: { baselineId: 'b-1', versionNumber: 2 },
-+      order: { createdAt: 'DESC' },
-+    });
++    const packet = await service.buildStudyPacket('user-1', 'job-1');
++
++    expect(packet.job).toEqual({ id: 'job-1', title: 'Senior Engineer', company: 'TestCo' });
++    expect(packet.fitSnapshot?.overallScore).toBe(92);
++    expect(packet.recommendedStories).toHaveLength(1);
++    expect(packet.questions).toHaveLength(1);
 +  });
 +
-   it('rejects ambiguous JD inputs', async () => {
-     await expect(
-       service.scoreCompatibility('user-1', {
-         baseline_version_id: 'bv-1',
-         job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
-       }),
-     ).rejects.toThrowError(expect.objectContaining({ response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }) }) }));
-   });
- 
-   it('rejects missing JD inputs', async () => {
-     await expect(
-       service.scoreCompatibility('user-1', { baseline_version_id: 'bv-1', job: {} }),
-     ).rejects.toThrowError(
-       expect.objectContaining({
-         response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }) }),
-       }),
-     );
-   });
- 
-   it('returns a contract-compliant success response', async () => {
-     const result = await service.scoreCompatibility('user-1', {
-       baseline_version_id: 'bv-1',
-       job: { raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.' },
-     });
- 
-diff --git a/apps/api/src/analysis/analysis.service.ts b/apps/api/src/analysis/analysis.service.ts
-index c07d0c1b8f3fa6784e1335875c0d63dce1ca4300..3aed836ce4bdb1c33e6334dbaa6866e7f1783a7c 100644
---- a/apps/api/src/analysis/analysis.service.ts
-+++ b/apps/api/src/analysis/analysis.service.ts
-@@ -965,47 +965,55 @@ export class AnalysisService {
-     const assessments = await this.getFitAssessments(userId, jobId);
- 
-     return assessments.map((assessment) => ({
-       id: assessment.id,
-       jobId: assessment.jobId,
-       fitScore: assessment.overallScore,
-       createdAt: assessment.createdAt,
-     }));
-   }
- 
-   async getLatestAssessment(userId: string, jobId: string) {
-     const assessment = await this.fitAssessmentRepository.findOne({
-       where: { userId, jobId },
-       order: { createdAt: 'DESC' },
-     });
- 
-     if (!assessment) {
-       throw new NotFoundException('Fit assessment not found');
-     }
- 
-     const summary = this.buildSummaryFromTerms(
-       assessment.strengths ?? [],
-       assessment.gaps ?? [],
-     );
- 
-+    const baselineVersionRecord = assessment.baselineVersion
-+      ? await this.baselineVersionRepository.findOne({
-+          where: { baselineId: assessment.baselineId, versionNumber: assessment.baselineVersion },
-+          order: { createdAt: 'DESC' },
-+        })
++  it('generates follow up copy through compliance', async () => {
++    const job: Job = {
++      id: 'job-2',
++      userId: 'user-1',
++      title: 'PM',
++      company: 'Acme',
++      rawDescription: 'JD',
++      sourceUrl: null,
++      normalizedResponsibilities: [],
++      normalizedRequirements: [],
++      jdIngestionMethod: 'PASTE' as any,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
++
++    const result = await service.generateFollowUp('user-1', 'job-2', 'roadmap planning');
++
++    expect(result.content).toContain('roadmap planning');
++    expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
++  });
++});
+diff --git a/apps/api/src/interviews/interview-toolkit.service.ts b/apps/api/src/interviews/interview-toolkit.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..345d15702dd14f9119567991d9e693b538b4af42
+--- /dev/null
++++ b/apps/api/src/interviews/interview-toolkit.service.ts
+@@ -0,0 +1,173 @@
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectRepository } from '@nestjs/typeorm';
++import { createHash } from 'node:crypto';
++import { Repository } from 'typeorm';
++import { ComplianceService } from '../compliance/compliance.service';
++import { ComplianceAction } from '../compliance/compliance.types';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { Job } from '../jobs/job.entity';
++import { StarStory } from '../star-stories/star-story.entity';
++import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
++import type { InterviewGap } from './interview-types';
++
++export type StudyPacket = {
++  job: Pick<Job, 'id' | 'title' | 'company'>;
++  fitSnapshot: {
++    assessmentId: string;
++    baselineId: string;
++    overallScore: number;
++    verdict: string;
++    strengths: string[];
++    gaps: string[];
++    createdAt: string;
++  } | null;
++  recommendedStories: StarStory[];
++  recentStories: StarStory[];
++  questions: ReturnType<InterviewQuestionGeneratorService['generateQuestions']>;
++};
++
++@Injectable()
++export class InterviewToolkitService {
++  constructor(
++    @InjectRepository(Job)
++    private readonly jobRepository: Repository<Job>,
++    @InjectRepository(FitAssessment)
++    private readonly fitAssessmentRepository: Repository<FitAssessment>,
++    @InjectRepository(StarStory)
++    private readonly starStoryRepository: Repository<StarStory>,
++    private readonly questionGenerator: InterviewQuestionGeneratorService,
++    private readonly complianceService: ComplianceService,
++  ) {}
++
++  private async requireJob(jobId: string, userId: string) {
++    const job = await this.jobRepository.findOne({ where: { id: jobId, userId } });
++
++    if (!job) {
++      throw new NotFoundException('Job not found');
++    }
++
++    return job;
++  }
++
++  async buildStudyPacket(userId: string, jobId: string): Promise<StudyPacket> {
++    const job = await this.requireJob(jobId, userId);
++
++    const assessment = await this.fitAssessmentRepository.findOne({
++      where: { userId, jobId },
++      order: { createdAt: 'DESC' },
++    });
++
++    const fitSnapshot = assessment
++      ? {
++          assessmentId: assessment.id,
++          baselineId: assessment.baselineId,
++          overallScore: assessment.overallScore,
++          verdict: assessment.verdict,
++          strengths: assessment.strengths ?? [],
++          gaps: assessment.gaps ?? [],
++          createdAt: assessment.createdAt.toISOString(),
++        }
 +      : null;
 +
-     return {
-       ok: true,
-       assessmentId: assessment.id,
-       jobId: assessment.jobId,
-       baselineId: assessment.baselineId,
-+      baselineVersionId: baselineVersionRecord?.id ?? null,
-       baselineVersion: assessment.baselineVersion,
-       overallScore: assessment.overallScore,
-       score: assessment.overallScore,
-       verdict: assessment.verdict,
-       dimensionScores: assessment.dimensionScores,
-       strengths: assessment.strengths,
-       gaps: assessment.gaps,
-       complianceFlags: assessment.complianceFlags,
-       summary,
-       createdAt: assessment.createdAt,
-     };
-   }
- }
++    const stories = await this.starStoryRepository.find({
++      where: { userId },
++      order: { createdAt: 'DESC' },
++      take: 12,
++    });
++
++    const normalizedGaps = fitSnapshot?.gaps ?? [];
++    const storyMatches = normalizedGaps.length
++      ? stories.filter((story) => this.matchesAnyGap(story, normalizedGaps))
++      : [];
++
++    const recommendedStories = storyMatches.length
++      ? storyMatches.slice(0, 5)
++      : stories.slice(0, 5);
++
++    const gapsForQuestions = normalizedGaps.length
++      ? normalizedGaps.map((gap, index) => this.gapFromText(gap, index))
++      : this.defaultGapsFromJob(job);
++
++    const questions = this.questionGenerator.generateQuestions(gapsForQuestions);
++
++    return {
++      job: { id: job.id, title: job.title, company: job.company },
++      fitSnapshot,
++      recommendedStories,
++      recentStories: stories.slice(0, 5),
++      questions,
++    };
++  }
++
++  async generateFollowUp(userId: string, jobId: string, notes?: string) {
++    const job = await this.requireJob(jobId, userId);
++
++    const header = job.company ? `Hi ${job.company} team,` : 'Hi there,';
++    const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : undefined;
++    const notesLine = notes?.trim() ? `I appreciated discussing ${notes.trim()}.` : undefined;
++    const close = 'Please let me know if any additional context would be helpful.';
++
++    const paragraphs = [header, roleLine, notesLine, 'I remain excited about the opportunity to contribute.', close]
++      .filter(Boolean)
++      .join(' ');
++
++    const content = `${paragraphs} Thank you for your time.`.trim();
++
++    const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
++      action: ComplianceAction.COVER_LETTER_GENERATION,
++      actorId: userId,
++      job,
++      outputHash: createHash('sha256').update(content).digest('hex'),
++      extraFlags: [],
++    });
++
++    if (blocked) {
++      const message = complianceFlags
++        .map((flag) => flag.message)
++        .filter(Boolean)
++        .join('; ');
++      throw new BadRequestException(message || 'Follow up could not be generated due to compliance.');
++    }
++
++    return { job: { id: job.id, title: job.title, company: job.company }, content, complianceFlags };
++  }
++
++  private matchesAnyGap(story: StarStory, gaps: string[]): boolean {
++    const haystack = `${story.title} ${story.competencies?.join(' ') ?? ''}`.toLowerCase();
++    return gaps.some((gap) => haystack.includes((gap ?? '').toLowerCase()));
++  }
++
++  private gapFromText(gap: string, index: number): InterviewGap {
++    const trimmed = gap?.trim() || 'Interview prep focus';
++    return {
++      gapId: `gap-${index + 1}`,
++      domain: 'experience',
++      jdExcerpt: trimmed,
++      baselineExcerpt: null,
++      confidence: 'medium',
++    };
++  }
++
++  private defaultGapsFromJob(job: Job): InterviewGap[] {
++    const snippets = (job.normalizedResponsibilities ?? []).slice(0, 3);
++
++    if (snippets.length === 0 && job.rawDescription) {
++      const lines = job.rawDescription.split(/\n+/).filter(Boolean);
++      snippets.push(...lines.slice(0, 2));
++    }
++
++    if (snippets.length === 0) {
++      return [
++        {
++          gapId: 'gap-1',
++          domain: 'experience',
++          jdExcerpt: 'Key responsibilities for this role',
++          baselineExcerpt: null,
++          confidence: 'medium',
++        },
++      ];
++    }
++
++    return snippets.map((text, index) => this.gapFromText(text, index));
++  }
++}
+diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
+index 33de0a15664087d7ac33d3deede2582b09de4c20..539ef29419913fcffdba4099ef1bc9dd4ac86933 100644
+--- a/apps/api/src/interviews/interviews.module.ts
++++ b/apps/api/src/interviews/interviews.module.ts
+@@ -1,40 +1,49 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { Baseline } from '../baseline/baseline.entity';
+ import { BaselineSection } from '../baseline/baseline-section.entity';
+ import { BaselineVersion } from '../baseline/baseline-version.entity';
+ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { ComplianceModule } from '../compliance/compliance.module';
+ import { Job } from '../jobs/job.entity';
+ import { Interview } from './interview.entity';
++import { InterviewToolkitController } from './interview-toolkit.controller';
++import { InterviewToolkitService } from './interview-toolkit.service';
+ import { InterviewRecordsController } from './interview-records.controller';
+ import { InterviewRecordsService } from './interview-records.service';
+ import { InterviewResponse } from './interview-response.entity';
+ import { InterviewSession } from './interview-session.entity';
+ import { GapDetectionService } from './gap-detection.service';
+ import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+ import { InterviewsController } from './interviews.controller';
+ import { InterviewsService } from './interviews.service';
++import { StarStory } from '../star-stories/star-story.entity';
  
- // VERIFY:
- // - Calibration weights are fetched per user and default to 1.0 for missing dimensions.
- // - Inputs hash incorporates calibration to avoid stale assessments.
-diff --git a/apps/web/app/api/interview-records/route.ts b/apps/web/app/api/interview-records/route.ts
+ @Module({
+   imports: [
+     TypeOrmModule.forFeature([
+       InterviewSession,
+       InterviewResponse,
+       Interview,
+       Job,
++      FitAssessment,
+       Baseline,
+       BaselineSection,
+       BaselineVersion,
+       BaselineBlockPolicy,
++      StarStory,
+     ]),
++    ComplianceModule,
+   ],
+-  controllers: [InterviewsController, InterviewRecordsController],
++  controllers: [InterviewsController, InterviewRecordsController, InterviewToolkitController],
+   providers: [
+     InterviewsService,
+     InterviewRecordsService,
+     GapDetectionService,
+     InterviewQuestionGeneratorService,
++    InterviewToolkitService,
+   ],
+   exports: [InterviewsService, InterviewRecordsService],
+ })
+ export class InterviewsModule {}
+diff --git a/apps/web/app/api/interview-toolkit/[jobId]/follow-up/route.ts b/apps/web/app/api/interview-toolkit/[jobId]/follow-up/route.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..3a45f89756480e13c5eec427bb24a30223251f34
+index 0000000000000000000000000000000000000000..2083a965c975d0f9bfb6c5d41a6cf3240faa2184
 --- /dev/null
-+++ b/apps/web/app/api/interview-records/route.ts
-@@ -0,0 +1,31 @@
++++ b/apps/web/app/api/interview-toolkit/[jobId]/follow-up/route.ts
+@@ -0,0 +1,28 @@
 +import { NextRequest, NextResponse } from "next/server";
 +
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 +
-+export const runtime = "nodejs";
-+
-+export async function POST(req: NextRequest) {
++export async function POST(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
++  const { jobId } = await context.params;
 +  const baseUrl = getApiBaseUrl();
 +  const auth = requireAuthToken(req);
 +
@@ -287,198 +445,519 @@ index 0000000000000000000000000000000000000000..3a45f89756480e13c5eec427bb24a302
 +    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
 +  }
 +
-+  if (!auth.token) {
-+    return auth.error;
-+  }
++  if (!auth.token) return auth.error;
 +
 +  const body = await req.json();
 +
-+  const response = await fetch(`${baseUrl}/interview-records`, {
++  const response = await fetch(`${baseUrl}/interview-toolkit/${encodeURIComponent(jobId)}/follow-up`, {
 +    method: "POST",
 +    headers: {
 +      Authorization: `Bearer ${auth.token}`,
 +      "Content-Type": "application/json",
 +    },
-+    body: JSON.stringify(body),
++    body: JSON.stringify(body ?? {}),
 +  });
 +
 +  return relayApiResponse(response);
 +}
-diff --git a/apps/web/app/fit-review/FitReviewClient.tsx b/apps/web/app/fit-review/FitReviewClient.tsx
-index a02f1daf627285b2b24076b05042f5d672a5fc49..1704260ba58d840ac33b9562f15e2aa998637c63 100644
---- a/apps/web/app/fit-review/FitReviewClient.tsx
-+++ b/apps/web/app/fit-review/FitReviewClient.tsx
-@@ -1,45 +1,47 @@
- "use client";
- 
- import { useEffect, useMemo, useState } from "react";
- import Link from "next/link";
- import { useRouter, useSearchParams } from "next/navigation";
- 
- import { InstrumentShell } from "../ui/InstrumentShell";
- import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
- 
- type FitDimensionScores = {
-   experienceAlignment?: number;
-   leadershipLevel?: number;
-   technicalPlatformFit?: number;
-   industryContext?: number;
-   strategicTacticalFit?: number;
- };
- 
- type FitAssessment = {
-   jobId?: string;
-   baselineId?: string;
-+  baselineVersion?: number | null;
-+  baselineVersionId?: string | null;
-   overallScore?: number;
-   score?: number;
-   summary?: string;
-   dimensionScores?: FitDimensionScores;
-   breakdown?: {
-     experience_alignment?: number;
-     leadership_level?: number;
-     technical_platform_fit?: number;
-     industry_context?: number;
-     strategic_vs_tactical?: number;
-   };
-   strengths?: string[];
-   gaps?: string[];
-   complianceFlags?: string[] | Array<{ code?: string; message?: string }>;
-   compliance_flags?: Array<{ code?: string; message?: string }>;
- };
- 
- const DIMENSION_LABELS: Record<keyof Required<FitDimensionScores>, string> = {
-   experienceAlignment: "Experience alignment",
-   leadershipLevel: "Leadership level",
-   technicalPlatformFit: "Technical platform fit",
-   industryContext: "Industry & context",
-   strategicTacticalFit: "Strategic vs tactical",
- };
- 
-@@ -212,60 +214,66 @@ export default function FitReviewClient() {
-       } catch (loadError) {
-         if (!cancelled) {
-           const message =
-             loadError instanceof Error ? loadError.message : "Unable to load fit review data.";
-           setError(message);
-         }
-       } finally {
-         if (!cancelled) {
-           setLoading(false);
-         }
-       }
-     };
- 
-     load();
-     return () => {
-       cancelled = true;
-     };
-   }, [jobId]);
- 
-   const handleStartInterview = async () => {
-     if (!assessment?.jobId || !assessment?.baselineId) {
-       setStartError("Missing job or baseline context for this assessment.");
-       return;
-     }
- 
-+    if (!assessment?.baselineVersionId) {
-+      setStartError("Missing baseline version for this assessment.");
+diff --git a/apps/web/app/api/interview-toolkit/[jobId]/study-packet/route.ts b/apps/web/app/api/interview-toolkit/[jobId]/study-packet/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2410650ffd5ac1802ace7c72b72432daf3261c1b
+--- /dev/null
++++ b/apps/web/app/api/interview-toolkit/[jobId]/study-packet/route.ts
+@@ -0,0 +1,25 @@
++import { NextRequest, NextResponse } from "next/server";
++
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
++
++export async function GET(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
++  const { jobId } = await context.params;
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
++  }
++
++  if (!auth.token) return auth.error;
++
++  const response = await fetch(`${baseUrl}/interview-toolkit/${encodeURIComponent(jobId)}/study-packet`, {
++    method: "GET",
++    cache: "no-store",
++    headers: {
++      Authorization: `Bearer ${auth.token}`,
++    },
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/interview-toolkit/page.tsx b/apps/web/app/interview-toolkit/page.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..81269d58542ea2157f6cc8ae4555d7a24e3698c9
+--- /dev/null
++++ b/apps/web/app/interview-toolkit/page.tsx
+@@ -0,0 +1,364 @@
++"use client";
++
++import { useEffect, useMemo, useState, type CSSProperties } from "react";
++import Link from "next/link";
++
++import type { StudyPacket, FollowUpPayload } from "../../lib/interviewToolkit";
++import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
++
++interface JobDto {
++  id: string;
++  title: string | null;
++  company: string | null;
++}
++
++export default function InterviewToolkitPage() {
++  const [jobs, setJobs] = useState<JobDto[]>([]);
++  const [jobState, setJobState] = useState<"idle" | "loading" | "error">("loading");
++  const [jobError, setJobError] = useState<string | null>(null);
++  const [selectedJobId, setSelectedJobId] = useState<string>("");
++
++  const [packet, setPacket] = useState<StudyPacket | null>(null);
++  const [packetState, setPacketState] = useState<"idle" | "loading" | "error">("idle");
++  const [packetError, setPacketError] = useState<string | null>(null);
++
++  const [followUpNotes, setFollowUpNotes] = useState<string>("");
++  const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
++  const [followUpState, setFollowUpState] = useState<"idle" | "loading" | "error">("idle");
++  const [followUpError, setFollowUpError] = useState<string | null>(null);
++  const [copied, setCopied] = useState<boolean>(false);
++
++  useEffect(() => {
++    const loadJobs = async () => {
++      setJobState("loading");
++      setJobError(null);
++      try {
++        const res = await fetch("/api/jobs", { cache: "no-store" });
++        if (!res.ok) {
++          throw new Error((await res.text()) || "Unable to load jobs");
++        }
++        const data = (await res.json()) as JobDto[];
++        setJobs(Array.isArray(data) ? data : []);
++        if (Array.isArray(data) && data.length > 0) {
++          setSelectedJobId((prev) => {
++            if (prev && data.some((j) => j.id === prev)) return prev;
++            return data[0].id;
++          });
++        }
++        setJobState("idle");
++      } catch (error) {
++        setJobError(error instanceof Error ? error.message : "Unable to load jobs");
++        setJobs([]);
++        setJobState("error");
++      }
++    };
++
++    loadJobs();
++  }, []);
++
++  useEffect(() => {
++    if (!selectedJobId) {
++      setPacket(null);
 +      return;
 +    }
 +
-     setStarting(true);
-     setStartError(null);
- 
-     try {
--      const response = await fetch("/api/interviews/start", {
-+      const response = await fetch("/api/interview-records", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({
-           jobId: assessment.jobId,
-           baselineId: assessment.baselineId,
-+          baselineVersionId: assessment.baselineVersionId,
-         }),
-       });
- 
-       if (!response.ok) {
-         const payload = await response.json().catch(() => null);
-         const message = payload?.error || payload?.message || "Unable to start an interview.";
-         throw new Error(typeof message === "string" ? message : "Unable to start an interview.");
-       }
- 
-       const data = (await response.json()) as { id?: string };
-       const interviewId = data?.id;
- 
-       if (interviewId) {
-         setStartedInterviewId(interviewId);
-         router.push(`/interviews/${interviewId}`);
-       } else {
-         setStartedInterviewId(null);
-       }
-     } catch (startIssue) {
-       const message =
-         startIssue instanceof Error ? startIssue.message : "Unable to start an interview.";
-       setStartError(message);
-     } finally {
-       setStarting(false);
-     }
-@@ -318,51 +326,56 @@ export default function FitReviewClient() {
-                 </div>
-               ) : null}
- 
-               {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-               {!error && !loading && !assessment ? (
-                 <div style={ttrComponents.warningBox}>Run an analysis first to view Fit Review.</div>
-               ) : null}
-             </div>
-           </div>
-         </section>
- 
-         <section style={{ ...ttrComponents.basePanel, flex: 0.9 }}>
++    const loadPacket = async () => {
++      setPacketState("loading");
++      setPacketError(null);
++      try {
++        const res = await fetch(`/api/interview-toolkit/${selectedJobId}/study-packet`, { cache: "no-store" });
++        if (!res.ok) {
++          throw new Error((await res.text()) || "Unable to load study packet");
++        }
++        const data = (await res.json()) as StudyPacket;
++        setPacket(data);
++        setPacketState("idle");
++      } catch (error) {
++        setPacketError(error instanceof Error ? error.message : "Unable to load study packet");
++        setPacket(null);
++        setPacketState("error");
++      }
++    };
++
++    void loadPacket();
++  }, [selectedJobId]);
++
++  const handleGenerateFollowUp = async () => {
++    if (!selectedJobId) return;
++    setFollowUpState("loading");
++    setFollowUpError(null);
++    setCopied(false);
++    try {
++      const res = await fetch(`/api/interview-toolkit/${selectedJobId}/follow-up`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ notes: followUpNotes }),
++      });
++      if (!res.ok) {
++        throw new Error((await res.text()) || "Unable to generate follow up");
++      }
++      const data = (await res.json()) as FollowUpPayload;
++      setFollowUp(data);
++      setFollowUpState("idle");
++    } catch (error) {
++      setFollowUpError(error instanceof Error ? error.message : "Unable to generate follow up");
++      setFollowUpState("error");
++      setFollowUp(null);
++    }
++  };
++
++  const handleCopy = async () => {
++    if (!followUp?.content || !navigator?.clipboard) return;
++    try {
++      await navigator.clipboard.writeText(followUp.content);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 1200);
++    } catch {
++      setCopied(false);
++    }
++  };
++
++  const selectedJob = useMemo(() => jobs.find((j) => j.id === selectedJobId) ?? null, [jobs, selectedJobId]);
++
++  const sectionTitleStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
++
++  const chip: CSSProperties = {
++    display: "inline-flex",
++    padding: "4px 8px",
++    borderRadius: 999,
++    background: "rgba(255,255,255,0.06)",
++    border: "1px solid rgba(255,255,255,0.08)",
++    fontSize: 13,
++  };
++
++  return (
++    <div style={ttrLayout.shell}>
++      <div style={{ ...ttrLayout.container, maxWidth: 1120 }}>
++        <header style={ttrComponents.headerCard}>
++          <div style={sectionTitleStyle}>
++            <span style={ttrTypography.kicker}>Interview Toolkit</span>
++            <h1 style={ttrTypography.h1}>Job-ready flows</h1>
++            <p style={ttrTypography.paragraph}>
++              Morning-of checklist, study packet, and follow-up copy tied to your saved job.
++            </p>
++          </div>
++
++          <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
++            <label style={ttrTypography.subtleLabel}>Job</label>
++            {jobState === "loading" ? (
++              <div style={chip}>Loading jobs…</div>
++            ) : jobs.length === 0 ? (
++              <div style={ttrComponents.warningBox}>Save a job to unlock the Interview Toolkit.</div>
++            ) : (
++              <select
++                value={selectedJobId}
++                onChange={(e) => setSelectedJobId(e.target.value)}
++                style={{
++                  padding: "12px 14px",
++                  background: "rgba(255,255,255,0.06)",
++                  border: "1px solid rgba(255,255,255,0.14)",
++                  borderRadius: 10,
++                  color: "#e2e8f0",
++                }}
++              >
++                {jobs.map((job) => (
++                  <option key={job.id} value={job.id}>
++                    {[job.title, job.company].filter(Boolean).join(" — ") || job.id}
++                  </option>
++                ))}
++              </select>
++            )}
++            {jobError && <div style={ttrComponents.dangerBox}>{jobError}</div>}
++          </div>
++        </header>
++
++        <div style={{ ...ttrLayout.panelsRow, alignItems: "stretch" }}>
++          <section style={{ ...ttrComponents.basePanel, flex: 1 }}>
++            <div style={sectionTitleStyle}>
++              <span style={ttrTypography.subtleLabel}>Pre-interview</span>
++              <h2 style={ttrTypography.h2}>Morning Of</h2>
++            </div>
++
++            <p style={{ ...ttrTypography.paragraph, marginTop: 10 }}>
++              Ground yourself before the call. These reminders stay tied to the selected job.
++            </p>
++
++            <ul style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10, paddingLeft: 18 }}>
++              <li>Re-read the job description and your baseline highlights mapped to this role.</li>
++              <li>Pick 2-3 STAR stories that fit the role&apos;s gaps and keep them handy.</li>
++              <li>Write down the company&apos;s product, user, and one recent headline to mention.</li>
++              <li>Have the interviewer names, dial-in details, and time zones confirmed.</li>
++              <li>Keep a one-line "why me for this role" ready as your opener.</li>
++            </ul>
++          </section>
++
++          <section style={{ ...ttrComponents.basePanel, flex: 1 }}>
++            <div style={sectionTitleStyle}>
++              <span style={ttrTypography.subtleLabel}>Study packet</span>
++              <h2 style={ttrTypography.h2}>Study Packet</h2>
++            </div>
++
++            {packetState === "loading" && <div style={chip}>Building study packet…</div>}
++            {packetError && <div style={ttrComponents.dangerBox}>{packetError}</div>}
++
++            {packet && (
++              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
++                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
++                  <span style={ttrTypography.subtleLabel}>Job</span>
++                  <div style={ttrTypography.h3}>
++                    {[packet.job.title, packet.job.company].filter(Boolean).join(" at ") || packet.job.id}
++                  </div>
++                </div>
++
++                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
++                  {packet.fitSnapshot ? (
++                    <div style={chip}>
++                      Fit score {packet.fitSnapshot.overallScore} · {packet.fitSnapshot.verdict}
++                    </div>
++                  ) : (
++                    <div style={ttrComponents.warningBox}>Run Analyze or Fit Review to see strengths and gaps.</div>
++                  )}
++                  {packet.fitSnapshot && packet.fitSnapshot.strengths.length > 0 && (
++                    <div style={chip}>Top strength: {packet.fitSnapshot.strengths[0]}</div>
++                  )}
++                  {packet.fitSnapshot && packet.fitSnapshot.gaps.length > 0 && (
++                    <div style={chip}>Key gap: {packet.fitSnapshot.gaps[0]}</div>
++                  )}
++                </div>
++
++                <div>
++                  <h3 style={ttrTypography.h3}>Recommended STAR stories</h3>
++                  {packet.recommendedStories.length === 0 ? (
++                    <div style={ttrComponents.warningBox}>No STAR stories saved yet.</div>
++                  ) : (
++                    <ul style={{ paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
++                      {packet.recommendedStories.map((story) => (
++                        <li key={story.id}>
++                          <span style={{ fontWeight: 600 }}>{story.title}</span>
++                          {story.competencies?.length ? (
++                            <span style={{ color: "#cbd5e1", marginLeft: 8 }}>
++                              {story.competencies.slice(0, 3).join(", ")}
++                              {story.competencies.length > 3 ? "…" : ""}
++                            </span>
++                          ) : null}
++                        </li>
++                      ))}
++                    </ul>
++                  )}
++                </div>
++
++                <div>
++                  <h3 style={ttrTypography.h3}>Likely questions</h3>
++                  {packet.questions.length === 0 ? (
++                    <div style={ttrComponents.warningBox}>No questions available for this job yet.</div>
++                  ) : (
++                    <ul style={{ paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
++                      {packet.questions.map((question) => (
++                        <li key={`${question.gapId}-${question.prompt}`}>
++                          <div style={{ fontWeight: 600 }}>{question.prompt}</div>
++                          <div style={{ color: "#cbd5e1", fontSize: 13 }}>{question.jdReference}</div>
++                        </li>
++                      ))}
++                    </ul>
++                  )}
++                </div>
++
++                {packet.recentStories.length > 0 && (
++                  <div>
++                    <h4 style={ttrTypography.h4}>Recent STAR stories</h4>
++                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
++                      {packet.recentStories.map((story) => (
++                        <div key={story.id} style={chip}>
++                          {story.title}
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                )}
++              </div>
++            )}
++          </section>
++        </div>
++
++        <section style={{ ...ttrComponents.basePanel, marginTop: 16 }}>
++          <div style={sectionTitleStyle}>
++            <span style={ttrTypography.subtleLabel}>Post-interview</span>
++            <h2 style={ttrTypography.h2}>Follow Up</h2>
++          </div>
++
++          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
++            <label style={ttrTypography.subtleLabel} htmlFor="followUpNotes">
++              Notes to weave in
++            </label>
++            <textarea
++              id="followUpNotes"
++              value={followUpNotes}
++              onChange={(e) => setFollowUpNotes(e.target.value)}
++              placeholder="Mention what resonated, next steps, or shared priorities"
++              style={{
++                minHeight: 100,
++                padding: 12,
++                borderRadius: 10,
++                border: "1px solid rgba(255,255,255,0.12)",
++                background: "rgba(255,255,255,0.04)",
++                color: "#e2e8f0",
++              }}
++            />
++
++            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
++              <button
++                onClick={handleGenerateFollowUp}
++                disabled={!selectedJobId || followUpState === "loading"}
++                style={{
++                  ...ttrComponents.primaryButton,
++                  padding: "10px 16px",
++                  cursor: followUpState === "loading" ? "wait" : "pointer",
++                }}
++              >
++                {followUpState === "loading" ? "Generating…" : "Generate follow up"}
++              </button>
++              {followUpError && <div style={ttrComponents.dangerBox}>{followUpError}</div>}
++            </div>
++
++            {followUp && (
++              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
++                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
++                  <div style={ttrTypography.h4}>Draft</div>
++                  <button
++                    onClick={handleCopy}
++                    style={{ ...ttrComponents.secondaryButton, padding: "8px 12px" }}
++                    disabled={!followUp.content}
++                  >
++                    {copied ? "Copied" : "Copy"}
++                  </button>
++                </div>
++                <div
++                  style={{
++                    border: "1px solid rgba(255,255,255,0.1)",
++                    borderRadius: 12,
++                    padding: 12,
++                    background: "rgba(255,255,255,0.03)",
++                    whiteSpace: "pre-wrap",
++                  }}
++                >
++                  {followUp.content}
++                </div>
++                {followUp.complianceFlags?.length ? (
++                  <div style={ttrComponents.warningBox}>
++                    Compliance notices: {followUp.complianceFlags.map((f) => f.message || f.code).join(", ")}
++                  </div>
++                ) : null}
++              </div>
++            )}
++
++            {!selectedJob && <div style={ttrComponents.warningBox}>Select a job to enable follow ups.</div>}
++          </div>
++        </section>
++
++        <div style={{ marginTop: 12, color: "#cbd5e1", fontSize: 13 }}>
++          Need to add STAR stories? <Link href="/cover-letters" style={{ color: "#c084fc" }}>Use your library</Link>.
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
+index 10c83ec6e8b6c6e2b79ef9208fcd5acd34c30403..e5a59c1ecfbe98f884c675f2eda3c2e2b6438765 100644
+--- a/apps/web/app/page.tsx
++++ b/apps/web/app/page.tsx
+@@ -64,50 +64,53 @@ export default async function Home() {
+     <main style={pageShellStyle}>
+       <div style={pageContainerStyle}>
+         <div style={headerCardStyle}>
            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-             <span style={ttrTypography.subtleLabel}>Action</span>
-             <h2 style={ttrTypography.h2}>Next steps</h2>
-           </div>
- 
-           <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-             <p style={{ margin: 0, color: "rgba(226,232,240,0.8)", fontSize: 14 }}>
-               Ready to move forward? Start a structured interview session tied to this role.
+             <span style={sectionKicker}>Console</span>
+             <h1 style={ttrTypography.h1}>Dashboard</h1>
+             <p style={ttrTypography.paragraph}>
+               Session hub. Pick up where you left off and move to the next step.
              </p>
- 
-             <button
-               type="button"
-               onClick={handleStartInterview}
--              disabled={starting || !assessment?.jobId || !assessment?.baselineId}
-+              disabled={
-+                starting ||
-+                !assessment?.jobId ||
-+                !assessment?.baselineId ||
-+                !assessment?.baselineVersionId
-+              }
-               style={{
-                 ...ttrComponents.primaryButton,
-                 cursor: starting ? "not-allowed" : "pointer",
-                 opacity: starting ? 0.7 : 1,
-               }}
-             >
-               {starting ? "Starting..." : "I think I'm qualified"}
-             </button>
- 
-             {startError ? <div style={ttrComponents.dangerBox}>{startError}</div> : null}
- 
-             {startedInterviewId ? (
-               <div style={ttrComponents.successBox}>
-                 Interview created.{" "}
-                 <Link href={`/interviews/${startedInterviewId}`} style={{ color: "#c084fc", textDecoration: "underline" }}>
-                   Open interview
-                 </Link>
-               </div>
-             ) : null}
            </div>
-         </section>
-       </div>
  
-       <div style={ttrLayout.panelsRow}>
-         <section style={{ ...ttrComponents.basePanel, flex: 1.05 }}>
+           <div
+             style={{
+               display: "flex",
+               gap: 10,
+               flexWrap: "wrap",
+               justifyContent: "flex-end",
+             }}
+           >
+             <Link href="/baseline" style={topNavPill}>
+               Baseline
+             </Link>
+             <Link href="/analyze" style={topNavPrimary}>
+               Analyze
+             </Link>
++            <Link href="/interview-toolkit" style={topNavPill}>
++              Interview Toolkit
++            </Link>
+             <Link href="/calibrate" style={topNavPill}>
+               Calibrate
+             </Link>
+             <Link href="/results" style={topNavPill}>
+               Results
+             </Link>
+           </div>
+         </div>
+ 
+         <div style={ttrLayout.panelsRow}>
+           <section style={{ ...basePanelStyle, flex: 1.2 }}>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Session</span>
+               <h2 style={ttrTypography.h2}>Current state</h2>
+             </div>
+ 
+             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+               <NextStepCard />
+               <LastAnalysisCard />
+             </div>
+           </section>
+ 
+           <section style={{ ...basePanelStyle, flex: 0.95 }}>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Identity</span>
+diff --git a/apps/web/lib/interviewToolkit.ts b/apps/web/lib/interviewToolkit.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..34ce5d6c5e616f7d73acc46f3e1ed76359213abb
+--- /dev/null
++++ b/apps/web/lib/interviewToolkit.ts
+@@ -0,0 +1,36 @@
++import type { InterviewQuestion } from "./interviews";
++
++export type StudyPacket = {
++  job: { id: string; title: string | null; company: string | null };
++  fitSnapshot: {
++    assessmentId: string;
++    baselineId: string;
++    overallScore: number;
++    verdict: string;
++    strengths: string[];
++    gaps: string[];
++    createdAt: string;
++  } | null;
++  recommendedStories: StarStory[];
++  recentStories: StarStory[];
++  questions: InterviewQuestion[];
++};
++
++export type StarStory = {
++  id: string;
++  title: string;
++  situation: string;
++  task: string;
++  action: string;
++  result: string;
++  reflections: string | null;
++  competencies: string[];
++  createdAt: string;
++  updatedAt: string;
++};
++
++export type FollowUpPayload = {
++  content: string;
++  complianceFlags?: Array<{ code?: string; message?: string }>;
++  job: { id: string; title: string | null; company: string | null };
++};

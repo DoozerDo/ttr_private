@@ -86,6 +86,9 @@ export default async function Home() {
             <Link href="/analyze" style={topNavPrimary}>
               Analyze
             </Link>
+            <Link href="/interview-toolkit" style={topNavPill}>
+              Interview Toolkit
+            </Link>
             <Link href="/calibrate" style={topNavPill}>
               Calibrate
             </Link>
