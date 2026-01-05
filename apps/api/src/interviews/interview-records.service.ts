@@ -1,12 +1,21 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import { CreateInterviewRecordDto } from './dto/create-interview.dto';
 import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
 import { Interview } from './interview.entity';
-import { InterviewGap, InterviewQuestion } from './interview-types';
+import {
+  InterviewGap,
+  InterviewQuestion,
+  RecommendedAddition,
+  RecommendedAdditionSource,
+  RecommendedAdditionStatus,
+} from './interview-types';
+import { RecommendedAdditionsService } from './recommended-additions.service';
 
 function normalizeStringArray(value?: unknown[]): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -24,6 +33,77 @@ function normalizeQuestionList(value?: unknown[]): InterviewQuestion[] {
     : [];
 }
 
+function normalizeAdditionStatus(value?: unknown): RecommendedAdditionStatus {
+  return value === 'accepted' || value === 'rejected' ? value : 'proposed';
+}
+
+function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry): RecommendedAdditionSource | null => {
+      if (!entry || typeof entry !== 'object') return null;
+
+      const raw = entry as Partial<RecommendedAdditionSource>;
+
+      const gapId = typeof raw.gapId === 'string' ? raw.gapId : undefined;
+      const questionIndex = typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
+      const questionPrompt = typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
+
+      // If nothing meaningful exists, drop the entry.
+      if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) return null;
+
+      // IMPORTANT: omit undefined fields to satisfy exactOptionalPropertyTypes.
+      const source: RecommendedAdditionSource = {
+        ...(gapId !== undefined ? { gapId } : {}),
+        ...(questionIndex !== undefined ? { questionIndex } : {}),
+        ...(questionPrompt !== undefined ? { questionPrompt } : {}),
+      };
+
+      return source;
+    })
+    .filter((entry): entry is RecommendedAdditionSource => entry !== null);
+}
+
+function buildAdditionId(text: string, sources: RecommendedAdditionSource[]): string {
+  return createHash('sha256').update(JSON.stringify({ text, sources })).digest('hex');
+}
+
+function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        const text = entry.trim();
+        if (!text) return null;
+        return {
+          id: buildAdditionId(text, []),
+          text,
+          sources: [],
+          status: 'proposed' as const,
+        };
+      }
+
+      if (!entry || typeof entry !== 'object') return null;
+
+      const addition = entry as RecommendedAddition;
+      const text = typeof addition.text === 'string' ? addition.text.trim() : '';
+      if (!text) return null;
+
+      const sources = normalizeAdditionSources(addition.sources);
+      const status = normalizeAdditionStatus(addition.status);
+
+      return {
+        id: typeof addition.id === 'string' && addition.id ? addition.id : buildAdditionId(text, sources),
+        text,
+        sources,
+        status,
+      };
+    })
+    .filter((entry): entry is RecommendedAddition => Boolean(entry));
+}
+
 @Injectable()
 export class InterviewRecordsService {
   constructor(
@@ -31,6 +111,7 @@ export class InterviewRecordsService {
     private readonly interviewsRepo: Repository<Interview>,
     private readonly gapDetectionService: GapDetectionService,
     private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
+    private readonly recommendedAdditionsService: RecommendedAdditionsService,
   ) {}
 
   private requireJobId(jobId?: string): string {
@@ -51,6 +132,18 @@ export class InterviewRecordsService {
     }
 
     return normalized;
+  }
+
+  private hasBlockingCompliance(validationResults: Record<string, unknown> | undefined | null): boolean {
+    if (!validationResults) return false;
+
+    const blocked = Boolean((validationResults as { blocked?: boolean }).blocked);
+    if (blocked) return true;
+
+    const flags = (validationResults as { complianceFlags?: Array<{ severity?: string }> }).complianceFlags;
+    if (!Array.isArray(flags)) return false;
+
+    return flags.some((flag) => flag?.severity === ComplianceFlagSeverity.BLOCK);
   }
 
   async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
@@ -77,7 +170,7 @@ export class InterviewRecordsService {
       questions,
       responses: normalizeStringArray(dto.responses),
       validationResults: dto.validationResults ?? {},
-      recommendedAdditions: normalizeStringArray(dto.recommendedAdditions),
+      recommendedAdditions: normalizeRecommendedAdditions(dto.recommendedAdditions),
     });
 
     return this.interviewsRepo.save(interview);
@@ -143,8 +236,14 @@ export class InterviewRecordsService {
       interview.validationResults = dto.validationResults ?? {};
     }
 
-    if (dto.recommendedAdditions !== undefined) {
-      interview.recommendedAdditions = normalizeStringArray(dto.recommendedAdditions);
+    if (this.hasBlockingCompliance(interview.validationResults)) {
+      interview.recommendedAdditions = [];
+    } else {
+      interview.recommendedAdditions = this.recommendedAdditionsService.generateFromResponses({
+        responses: interview.responses,
+        questions: interview.questions,
+        gaps: interview.gapList,
+      });
     }
 
     return this.interviewsRepo.save(interview);

@@ -1,4 +1,4 @@
-import { InterviewGap, InterviewQuestion } from '../interview-types';
+import { InterviewGap, InterviewQuestion, RecommendedAddition } from '../interview-types';
 
 export class UpdateInterviewRecordDto {
   jobId?: string;
@@ -8,5 +8,5 @@ export class UpdateInterviewRecordDto {
   questions?: InterviewQuestion[];
   responses?: string[];
   validationResults?: Record<string, unknown>;
-  recommendedAdditions?: string[];
+  recommendedAdditions?: RecommendedAddition[];
 }

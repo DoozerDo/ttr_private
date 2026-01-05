@@ -1,9 +1,10 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { Interview } from './interview.entity';
 import { InterviewRecordsService } from './interview-records.service';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
-import { InterviewGap, InterviewQuestion } from './interview-types';
+import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
 
 describe('InterviewRecordsService', () => {
   const mockInterview: Interview = {
@@ -16,7 +17,16 @@ describe('InterviewRecordsService', () => {
     questions: [],
     responses: ['r1'],
     validationResults: { ok: true },
-    recommendedAdditions: ['add'],
+    recommendedAdditions: [
+      {
+        id: createHash('sha256')
+          .update(JSON.stringify({ text: 'add', sources: [] }))
+          .digest('hex'),
+        text: 'add',
+        sources: [],
+        status: 'proposed',
+      },
+    ],
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
   };
@@ -33,11 +43,15 @@ describe('InterviewRecordsService', () => {
     repository = createMockRepository(),
     gapDetectionService: Partial<GapDetectionService> = {},
     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
+    recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
+      generateFromResponses: jest.fn().mockReturnValue([]),
+    },
   ) =>
     new InterviewRecordsService(
       repository as never,
       gapDetectionService as GapDetectionService,
       interviewQuestionGenerator as InterviewQuestionGeneratorService,
+      recommendedAdditionsService as any,
     );
 
   afterEach(() => {
@@ -92,7 +106,14 @@ describe('InterviewRecordsService', () => {
         gapList,
         questions,
         responses: [' a '],
-        recommendedAdditions: [' add '],
+        recommendedAdditions: [
+          {
+            id: expect.any(String),
+            sources: [],
+            status: 'proposed',
+            text: 'add',
+          },
+        ],
       }),
     );
     expect(result.jobId).toBe('job-2');
@@ -136,20 +157,25 @@ describe('InterviewRecordsService', () => {
   it('updates an interview record with validation', async () => {
     const repository = createMockRepository();
     repository.findOne.mockResolvedValue({ ...mockInterview });
-    const service = createService(repository);
+    const recommendedAdditions = [
+      { id: 'abc', text: 'addition', sources: [], status: 'proposed' as const },
+    ];
+    const service = createService(repository, {}, {}, {
+      generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
+    });
 
     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
       jobId: ' job-3 ',
       gapList: [{ gapId: 'gap-2' }],
       validationResults: { ok: false },
-      recommendedAdditions: [' new '],
+      responses: [' a '],
     });
 
     expect(repository.save).toHaveBeenCalled();
     expect(result.jobId).toBe('job-3');
     expect(result.gapList).toEqual([{ gapId: 'gap-2' }]);
     expect(result.validationResults).toEqual({ ok: false });
-    expect(result.recommendedAdditions).toEqual([' new ']);
+    expect(result.recommendedAdditions).toEqual(recommendedAdditions);
   });
 
   it('throws when updating with empty jobId', async () => {
@@ -160,6 +186,51 @@ describe('InterviewRecordsService', () => {
     await expect(
       service.updateInterviewRecord('interview-1', 'user-1', { jobId: '' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('generates recommended additions when compliance allows', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({ ...mockInterview, recommendedAdditions: [] });
+    const additions = [
+      { id: 'a', text: 'Addition 1', sources: [], status: 'proposed' as const },
+    ];
+    const recommendedAdditionsService = {
+      generateFromResponses: jest.fn().mockReturnValue(additions),
+    };
+    const service = createService(repository, {}, {}, recommendedAdditionsService);
+
+    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
+      responses: [' Response '],
+    });
+
+    expect(recommendedAdditionsService.generateFromResponses).toHaveBeenCalledWith({
+      responses: [' Response '],
+      questions: [],
+      gaps: [],
+    });
+    expect(result.recommendedAdditions).toEqual(additions);
+  });
+
+  it('skips recommendations when compliance blocks', async () => {
+    const repository = createMockRepository();
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      validationResults: {
+        blocked: false,
+        complianceFlags: [{ severity: 'block' }],
+      },
+    });
+    const recommendedAdditionsService = {
+      generateFromResponses: jest.fn(),
+    };
+    const service = createService(repository, {}, {}, recommendedAdditionsService);
+
+    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
+      responses: [' Response '],
+    });
+
+    expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
+    expect(result.recommendedAdditions).toEqual([]);
   });
 
   it('deletes an interview record', async () => {

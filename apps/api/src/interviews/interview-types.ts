@@ -29,6 +29,21 @@ export type InterviewQuestion = {
   jdReference: string;
 };
 
+export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected';
+
+export type RecommendedAdditionSource = {
+  gapId?: string;
+  questionIndex?: number;
+  questionPrompt?: string;
+};
+
+export type RecommendedAddition = {
+  id: string;
+  text: string;
+  sources: RecommendedAdditionSource[];
+  status: RecommendedAdditionStatus;
+};
+
 export type GapDetectionResult = {
   baselineId: string;
   baselineVersionId: string;

@@ -21,6 +21,7 @@ import {
   ComplianceFlagSeverity,
 } from '../compliance/compliance.types';
 import { Interview } from '../interviews/interview.entity';
+import { RecommendedAddition } from '../interviews/interview-types';
 import { Job } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
@@ -216,10 +217,10 @@ export class AnalysisService {
     }));
   }
 
-  private normalizeAdditions(additions?: string[] | null) {
+  private normalizeAdditions(additions?: (string | RecommendedAddition)[] | null) {
     if (!additions?.length) return [];
     return additions
-      .map((entry) => entry?.trim())
+      .map((entry) => (typeof entry === 'string' ? entry : entry?.text)?.trim())
       .filter((entry): entry is string => Boolean(entry));
   }
 

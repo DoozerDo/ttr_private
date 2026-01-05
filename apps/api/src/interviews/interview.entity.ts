@@ -5,7 +5,11 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { InterviewGap, InterviewQuestion } from './interview-types';
+import {
+  InterviewGap,
+  InterviewQuestion,
+  RecommendedAddition,
+} from './interview-types';
 
 @Entity({ name: 'interviews' })
 export class Interview {
@@ -37,7 +41,7 @@ export class Interview {
   validationResults!: Record<string, unknown>;
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-  recommendedAdditions!: string[];
+  recommendedAdditions!: RecommendedAddition[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

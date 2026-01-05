@@ -12,6 +12,7 @@ import { InterviewToolkitController } from './interview-toolkit.controller';
 import { InterviewToolkitService } from './interview-toolkit.service';
 import { InterviewRecordsController } from './interview-records.controller';
 import { InterviewRecordsService } from './interview-records.service';
+import { RecommendedAdditionsService } from './recommended-additions.service';
 import { InterviewResponse } from './interview-response.entity';
 import { InterviewSession } from './interview-session.entity';
 import { GapDetectionService } from './gap-detection.service';
@@ -43,6 +44,7 @@ import { StarStory } from '../star-stories/star-story.entity';
     GapDetectionService,
     InterviewQuestionGeneratorService,
     InterviewToolkitService,
+    RecommendedAdditionsService,
   ],
   exports: [InterviewsService, InterviewRecordsService],
 })
