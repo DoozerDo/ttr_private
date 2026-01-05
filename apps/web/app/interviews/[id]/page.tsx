@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
 import { InstrumentShell } from "../../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
-import type { InterviewGap, InterviewQuestion, InterviewSessionDto } from "../../../lib/interviews";
+import type {
+  AdditionDecisionPayload,
+  InterviewGap,
+  InterviewQuestion,
+  InterviewSessionDto,
+  RecommendedAddition,
+  RecommendedAdditionDecision,
+} from "../../../lib/interviews";
 
 type ComplianceFlag = {
   code?: string;
@@ -71,6 +78,17 @@ function normalizeCompliance(validationResults?: Record<string, unknown>): Compl
   return lookup;
 }
 
+function readNumericField(payload: unknown, keys: string[]): number | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  for (const key of keys) {
+    const value = (payload as Record<string, unknown>)[key];
+    if (typeof value === "number") return value;
+  }
+
+  return null;
+}
+
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -80,9 +98,31 @@ export default function InterviewSessionPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recommendationDecisions, setRecommendationDecisions] = useState<
-    Record<number, "accept" | "reject" | "defer">
-  >({});
+  const [decisionSavingId, setDecisionSavingId] = useState<string | null>(null);
+
+  const applySessionUpdate = useCallback(
+    (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
+      setSession(data);
+
+      if (options?.preserveAnswers) {
+        return;
+      }
+
+      const questionCount = data?.questions?.length ?? 0;
+      const existingResponses =
+        Array.isArray(data?.responses) && data.responses.length
+          ? data.responses.map((entry) => entry?.toString() ?? "")
+          : [];
+
+      setAnswers((prev) => {
+        if (prev.length === questionCount && existingResponses.length === 0) {
+          return prev;
+        }
+        return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!sessionId) return;
@@ -96,34 +136,24 @@ export default function InterviewSessionPage() {
         }
 
         const data = (await response.json()) as InterviewSessionDto;
-        setSession(data);
-
-        const questionCount = data?.questions?.length ?? 0;
-        const existingResponses =
-          Array.isArray(data?.responses) && data.responses.length
-            ? data.responses.map((entry) => entry?.toString() ?? "")
-            : [];
-
-        setAnswers((prev) => {
-          if (prev.length === questionCount && existingResponses.length === 0) {
-            return prev;
-          }
-          return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
-        });
+        applySessionUpdate(data);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
       }
     };
 
     loadSession();
-  }, [sessionId]);
+  }, [applySessionUpdate, sessionId]);
 
   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
-  const recommendedAdditions: string[] = useMemo(
-    () => session?.recommendedAdditions ?? [],
-    [session?.recommendedAdditions],
-  );
+  const recommendedAdditions: RecommendedAddition[] = useMemo(() => {
+    const additions = session?.recommendedAdditions ?? [];
+    return additions.map((addition) => ({
+      ...addition,
+      status: addition.status ?? "proposed",
+    }));
+  }, [session?.recommendedAdditions]);
   const complianceLookup = useMemo(
     () => normalizeCompliance(session?.validationResults),
     [session?.validationResults],
@@ -134,6 +164,41 @@ export default function InterviewSessionPage() {
     gaps.forEach((gap) => map.set(gap.gapId, gap));
     return map;
   }, [gaps]);
+
+  const baselineVersionHash = useMemo(() => {
+    if (typeof session?.baselineVersionHash === "string") return session.baselineVersionHash;
+
+    const validation = session?.validationResults && typeof session.validationResults === "object"
+      ? session.validationResults
+      : null;
+
+    if (!validation) return null;
+
+    const camelCaseValue = (validation as { baselineVersionHash?: unknown }).baselineVersionHash;
+    if (typeof camelCaseValue === "string") return camelCaseValue;
+
+    const snakeCaseValue = (validation as { baseline_version_hash?: unknown }).baseline_version_hash;
+    return typeof snakeCaseValue === "string" ? snakeCaseValue : null;
+  }, [session]);
+
+  const baselineVersionReference = useMemo(() => {
+    const id = session?.baselineVersionId ?? null;
+    if (id && baselineVersionHash) return `${id} (${baselineVersionHash})`;
+    return id ?? baselineVersionHash ?? null;
+  }, [baselineVersionHash, session?.baselineVersionId]);
+
+  const expandedFitDetails = useMemo(() => {
+    const assessment = session?.expandedFitAssessment;
+    if (!assessment) return null;
+
+    const expandedScore = readNumericField(assessment, ["expandedScore", "expanded_score"]);
+    const originalScore = readNumericField(assessment, ["originalScore", "original_score"]);
+    const delta = readNumericField(assessment, ["delta"]);
+
+    if (expandedScore === null && originalScore === null && delta === null) return null;
+
+    return { expandedScore, originalScore, delta };
+  }, [session?.expandedFitAssessment]);
 
   const handleChange = (index: number, value: string) => {
     setAnswers((prev) => {
@@ -186,22 +251,51 @@ export default function InterviewSessionPage() {
     }
   };
 
-  const handleDecision = (index: number, decision: "accept" | "reject" | "defer") => {
-    setRecommendationDecisions((prev) => ({ ...prev, [index]: decision }));
+  const handleDecision = async (addition: RecommendedAddition, decision: RecommendedAdditionDecision) => {
+    if (!sessionId || !addition?.id) return;
+
+    const payload: { decisions: AdditionDecisionPayload[] } = {
+      decisions: [{ additionId: addition.id, decision }],
+    };
+
+    setDecisionSavingId(addition.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/interviews/${sessionId}/decisions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const payloadResponse = await response.json().catch(() => null);
+        const messageText = payloadResponse?.error ?? payloadResponse?.message ?? "Unable to save decision.";
+        throw new Error(messageText);
+      }
+
+      const updatedSession = (await response.json()) as InterviewSessionDto;
+      applySessionUpdate(updatedSession, { preserveAnswers: true });
+      setMessage("Decision saved.");
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
+    } finally {
+      setDecisionSavingId(null);
+    }
   };
 
   const recommendationStats = useMemo(() => {
     return recommendedAdditions.reduce(
-      (acc, _, index) => {
-        const decision = recommendationDecisions[index];
-        if (decision === "accept") acc.accepted += 1;
-        else if (decision === "reject") acc.rejected += 1;
-        else if (decision === "defer") acc.deferred += 1;
+      (acc, addition) => {
+        if (addition.status === "accepted") acc.accepted += 1;
+        else if (addition.status === "rejected") acc.rejected += 1;
+        else if (addition.status === "deferred") acc.deferred += 1;
         return acc;
       },
       { accepted: 0, rejected: 0, deferred: 0 },
     );
-  }, [recommendationDecisions, recommendedAdditions]);
+  }, [recommendedAdditions]);
 
   return (
     <InstrumentShell
@@ -318,9 +412,9 @@ export default function InterviewSessionPage() {
             <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
               Baseline: {session?.baselineId ?? "..."}
             </div>
-            {session?.baselineVersionId ? (
+            {baselineVersionReference ? (
               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-                Baseline version: {session.baselineVersionId}
+                Baseline version reference: {baselineVersionReference}
               </div>
             ) : null}
             {session?.jobId ? (
@@ -387,14 +481,24 @@ export default function InterviewSessionPage() {
                 <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {recommendedAdditions.map((item, index) => {
-                    const decision = recommendationDecisions[index];
+                  {recommendedAdditions.map((addition, index) => {
                     const complianceFlags = complianceLookup.recommendations[index] ?? [];
                     const acceptBlocked = complianceFlags.length > 0;
+                    const isSavingDecision = decisionSavingId === addition.id;
+                    const status = addition.status;
+
+                    const statusBadge =
+                      status === "accepted"
+                        ? { label: "Accepted", background: "rgba(74,222,128,0.15)", color: "#86efac" }
+                        : status === "rejected"
+                          ? { label: "Rejected", background: "rgba(248,113,113,0.18)", color: "#fca5a5" }
+                          : status === "deferred"
+                            ? { label: "Deferred", background: "rgba(251,191,36,0.15)", color: "#fcd34d" }
+                            : { label: "Proposed", background: "rgba(148,163,184,0.18)", color: "#cbd5e1" };
 
                     return (
                       <div
-                        key={`${item}-${index}`}
+                        key={addition.id ?? `${addition.text}-${index}`}
                         style={{
                           padding: 12,
                           borderRadius: 10,
@@ -406,40 +510,64 @@ export default function InterviewSessionPage() {
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
-                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>{item}</div>
-                          {decision === "accept" ? (
-                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.15)", color: "#86efac", fontSize: 12 }}>
-                              Staged
+                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>
+                            {addition.text || addition.id}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 6,
+                                background: statusBadge.background,
+                                color: statusBadge.color,
+                                fontSize: 12,
+                              }}
+                            >
+                              {isSavingDecision ? "Saving..." : statusBadge.label}
                             </span>
-                          ) : null}
+                          </div>
                         </div>
 
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             type="button"
-                            onClick={() => handleDecision(index, "accept")}
-                            disabled={acceptBlocked}
+                            onClick={() => handleDecision(addition, "accept")}
+                            disabled={acceptBlocked || isSavingDecision}
                             style={{
                               ...ttrComponents.primaryButton,
                               padding: "6px 12px",
                               fontSize: 13,
-                              opacity: acceptBlocked ? 0.5 : 1,
-                              cursor: acceptBlocked ? "not-allowed" : "pointer",
+                              opacity: acceptBlocked || isSavingDecision ? 0.5 : 1,
+                              cursor: acceptBlocked || isSavingDecision ? "not-allowed" : "pointer",
                             }}
                           >
                             Accept
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDecision(index, "reject")}
-                            style={{ ...ttrComponents.secondaryButton, padding: "6px 12px", fontSize: 13 }}
+                            onClick={() => handleDecision(addition, "reject")}
+                            disabled={isSavingDecision}
+                            style={{
+                              ...ttrComponents.secondaryButton,
+                              padding: "6px 12px",
+                              fontSize: 13,
+                              opacity: isSavingDecision ? 0.6 : 1,
+                              cursor: isSavingDecision ? "not-allowed" : "pointer",
+                            }}
                           >
                             Reject
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDecision(index, "defer")}
-                            style={{ ...ttrComponents.quietButton, padding: "6px 12px", fontSize: 13 }}
+                            onClick={() => handleDecision(addition, "defer")}
+                            disabled={isSavingDecision}
+                            style={{
+                              ...ttrComponents.quietButton,
+                              padding: "6px 12px",
+                              fontSize: 13,
+                              opacity: isSavingDecision ? 0.6 : 1,
+                              cursor: isSavingDecision ? "not-allowed" : "pointer",
+                            }}
                           >
                             Defer
                           </button>
@@ -493,6 +621,25 @@ export default function InterviewSessionPage() {
                   Deferred: <strong>{recommendationStats.deferred}</strong>
                 </div>
               </div>
+              {expandedFitDetails ? (
+                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Expanded fit score</div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>
+                    {expandedFitDetails.expandedScore ?? "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
+                    {expandedFitDetails.originalScore !== null && expandedFitDetails.originalScore !== undefined ? (
+                      <>
+                        Original: {expandedFitDetails.originalScore}
+                        <br />
+                      </>
+                    ) : null}
+                    {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined ? (
+                      <>Delta: {expandedFitDetails.delta >= 0 ? "+" : ""}{expandedFitDetails.delta}</>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>

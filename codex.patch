@@ -1,820 +1,750 @@
-diff --git a/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts b/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts
+diff --git a/apps/web/app/api/interviews/[id]/decisions/route.ts b/apps/web/app/api/interviews/[id]/decisions/route.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..1762e3a06dd18ee966f6150301030b96b00fea2f
+index 0000000000000000000000000000000000000000..1994b40894d66319497d4a402d3e0879592b9ba1
 --- /dev/null
-+++ b/apps/api/src/interviews/dto/apply-addition-decisions.dto.ts
-@@ -0,0 +1,5 @@
-+import { AdditionDecision } from '../interview-types';
++++ b/apps/web/app/api/interviews/[id]/decisions/route.ts
+@@ -0,0 +1,37 @@
++import { NextRequest, NextResponse } from "next/server";
 +
-+export class ApplyAdditionDecisionsDto {
-+  decisions!: AdditionDecision[];
-+}
-diff --git a/apps/api/src/interviews/interview-records.controller.ts b/apps/api/src/interviews/interview-records.controller.ts
-index 036ddbcdf20ffd1cfa99c4d7e39e468985c48c90..51342dba53551cbf65389a1534ee1513d2fdd1d1 100644
---- a/apps/api/src/interviews/interview-records.controller.ts
-+++ b/apps/api/src/interviews/interview-records.controller.ts
-@@ -1,40 +1,41 @@
- import {
-   BadRequestException,
-   Body,
-   Controller,
-   Delete,
-   Get,
-   Param,
-   Patch,
-   Post,
-   Req,
-   UseGuards,
- } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Request } from 'express';
- import { CreateInterviewRecordDto } from './dto/create-interview.dto';
-+import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
- import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
- import { InterviewRecordsService } from './interview-records.service';
- 
- @Controller('interview-records')
- @UseGuards(AuthGuard('jwt'))
- export class InterviewRecordsController {
-   constructor(private readonly interviewRecordsService: InterviewRecordsService) {}
- 
-   @Post()
-   async createInterviewRecord(
-     @Body() body: CreateInterviewRecordDto,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.interviewRecordsService.createInterviewRecord(userId, body);
-   }
- 
-   @Get()
-   async listInterviewRecords(
-     @Req() request: Request & { user?: { id?: string } },
-@@ -55,39 +56,54 @@ export class InterviewRecordsController {
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.interviewRecordsService.getInterviewRecordForUser(id, userId);
-   }
- 
-   @Patch(':id')
-   async updateInterviewRecord(
-     @Param('id') id: string,
-     @Body() body: UpdateInterviewRecordDto,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
-   }
- 
-+  @Post(':id/decisions')
-+  async applyAdditionDecisions(
-+    @Param('id') id: string,
-+    @Body() body: ApplyAdditionDecisionsDto,
-+    @Req() request: Request & { user?: { id?: string } },
-+  ) {
-+    const userId = request.user?.id;
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 +
-+    if (!userId) {
-+      throw new BadRequestException('Invalid user context');
-+    }
++export async function POST(
++  req: NextRequest,
++  context: { params: Promise<{ id: string }> },
++) {
++  const { id } = await context.params;
 +
-+    return this.interviewRecordsService.applyAdditionDecisions(id, userId, body);
++  const baseUrl = getApiBaseUrl();
++  const { token, error } = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return NextResponse.json(
++      { error: "API base URL is not configured" },
++      { status: 500 },
++    );
 +  }
 +
-   @Delete(':id')
-   async deleteInterviewRecord(
-     @Param('id') id: string,
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
++  if (!token) {
++    return error;
++  }
++
++  const body = await req.json();
++
++  const response = await fetch(`${baseUrl}/interview-records/${id}/decisions`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${token}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify(body),
++  });
++
++  return relayApiResponse(response);
++}
+diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
+index b5950de3dde56581211eb09c259ea1d2622c1392..ac71d11510250b3da971b390d496966d7e7ec7e3 100644
+--- a/apps/web/app/interviews/[id]/page.tsx
++++ b/apps/web/app/interviews/[id]/page.tsx
+@@ -1,34 +1,41 @@
+ "use client";
  
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
+-import { useEffect, useMemo, useState } from "react";
++import { useCallback, useEffect, useMemo, useState } from "react";
+ import Link from "next/link";
+ import { useParams, useRouter } from "next/navigation";
+ 
+ import { InstrumentShell } from "../../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
+-import type { InterviewGap, InterviewQuestion, InterviewSessionDto } from "../../../lib/interviews";
++import type {
++  AdditionDecisionPayload,
++  InterviewGap,
++  InterviewQuestion,
++  InterviewSessionDto,
++  RecommendedAddition,
++  RecommendedAdditionDecision,
++} from "../../../lib/interviews";
+ 
+ type ComplianceFlag = {
+   code?: string;
+   message?: string;
+   severity?: string;
+   questionIndex?: number;
+   recommendationIndex?: number;
+ };
+ 
+ type ComplianceLookup = {
+   general: ComplianceFlag[];
+   questions: Record<number, ComplianceFlag[]>;
+   recommendations: Record<number, ComplianceFlag[]>;
+ };
+ 
+ function normalizeCompliance(validationResults?: Record<string, unknown>): ComplianceLookup {
+   const lookup: ComplianceLookup = { general: [], questions: {}, recommendations: {} };
+   if (!validationResults) return lookup;
+ 
+   const rawFlags =
+     (validationResults as { complianceFlags?: unknown; compliance_flags?: unknown }).complianceFlags ??
+     (validationResults as { compliance_flags?: unknown }).compliance_flags ??
+     [];
+ 
+   const flagsArray = Array.isArray(rawFlags) ? rawFlags : [];
+@@ -49,114 +56,172 @@ function normalizeCompliance(validationResults?: Record<string, unknown>): Compl
+               recommendationIndex:
+                 (flag as { recommendationIndex?: number }).recommendationIndex ??
+                 (flag as { recommendation_index?: number }).recommendation_index ??
+                 (flag as { recommendationIdx?: number }).recommendationIdx,
+             }
+           : {};
+ 
+     if (normalized.questionIndex !== undefined && normalized.questionIndex >= 0) {
+       const existing = lookup.questions[normalized.questionIndex] ?? [];
+       lookup.questions[normalized.questionIndex] = [...existing, normalized];
+       return;
      }
  
-     return this.interviewRecordsService.deleteInterviewRecord(id, userId);
-   }
- }
-diff --git a/apps/api/src/interviews/interview-records.service.spec.ts b/apps/api/src/interviews/interview-records.service.spec.ts
-index 8f1654c873de1d39cda0a61e9dce9323e39bec7f..95edc33fd1da3e36b04f4f3dc12b7318f49491f6 100644
---- a/apps/api/src/interviews/interview-records.service.spec.ts
-+++ b/apps/api/src/interviews/interview-records.service.spec.ts
-@@ -1,79 +1,88 @@
- import { BadRequestException, NotFoundException } from '@nestjs/common';
- import { createHash } from 'crypto';
- import { Interview } from './interview.entity';
- import { InterviewRecordsService } from './interview-records.service';
- import { GapDetectionService } from './gap-detection.service';
- import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
-+import { BaselineVersionService } from '../baseline/baseline-version.service';
-+import { AnalysisService } from '../analysis/analysis.service';
+     if (normalized.recommendationIndex !== undefined && normalized.recommendationIndex >= 0) {
+       const existing = lookup.recommendations[normalized.recommendationIndex] ?? [];
+       lookup.recommendations[normalized.recommendationIndex] = [...existing, normalized];
+       return;
+     }
  
- describe('InterviewRecordsService', () => {
-   const mockInterview: Interview = {
-     id: 'interview-1',
-     userId: 'user-1',
-     baselineId: 'baseline-1',
-     baselineVersionId: 'baseline-version-1',
-     jobId: 'job-1',
-     gapList: [],
-     questions: [],
-     responses: ['r1'],
-     validationResults: { ok: true },
-     recommendedAdditions: [
-       {
-         id: createHash('sha256')
-           .update(JSON.stringify({ text: 'add', sources: [] }))
-           .digest('hex'),
-         text: 'add',
-         sources: [],
-         status: 'proposed',
-       },
-     ],
-+    expandedFitAssessment: null,
-     createdAt: new Date('2024-01-01T00:00:00Z'),
-     updatedAt: new Date('2024-01-01T00:00:00Z'),
+     lookup.general.push(normalized);
+   });
+ 
+   return lookup;
+ }
+ 
++function readNumericField(payload: unknown, keys: string[]): number | null {
++  if (!payload || typeof payload !== "object") return null;
++
++  for (const key of keys) {
++    const value = (payload as Record<string, unknown>)[key];
++    if (typeof value === "number") return value;
++  }
++
++  return null;
++}
++
+ export default function InterviewSessionPage() {
+   const params = useParams<{ id: string }>();
+   const router = useRouter();
+   const sessionId = params?.id;
+   const [session, setSession] = useState<InterviewSessionDto | null>(null);
+   const [answers, setAnswers] = useState<string[]>([]);
+   const [saving, setSaving] = useState(false);
+   const [message, setMessage] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
+-  const [recommendationDecisions, setRecommendationDecisions] = useState<
+-    Record<number, "accept" | "reject" | "defer">
+-  >({});
++  const [decisionSavingId, setDecisionSavingId] = useState<string | null>(null);
++
++  const applySessionUpdate = useCallback(
++    (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
++      setSession(data);
++
++      if (options?.preserveAnswers) {
++        return;
++      }
++
++      const questionCount = data?.questions?.length ?? 0;
++      const existingResponses =
++        Array.isArray(data?.responses) && data.responses.length
++          ? data.responses.map((entry) => entry?.toString() ?? "")
++          : [];
++
++      setAnswers((prev) => {
++        if (prev.length === questionCount && existingResponses.length === 0) {
++          return prev;
++        }
++        return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
++      });
++    },
++    [],
++  );
+ 
+   useEffect(() => {
+     if (!sessionId) return;
+ 
+     const loadSession = async () => {
+       try {
+         const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
+ 
+         if (!response.ok) {
+           throw new Error("Unable to load interview session.");
+         }
+ 
+         const data = (await response.json()) as InterviewSessionDto;
+-        setSession(data);
+-
+-        const questionCount = data?.questions?.length ?? 0;
+-        const existingResponses =
+-          Array.isArray(data?.responses) && data.responses.length
+-            ? data.responses.map((entry) => entry?.toString() ?? "")
+-            : [];
+-
+-        setAnswers((prev) => {
+-          if (prev.length === questionCount && existingResponses.length === 0) {
+-            return prev;
+-          }
+-          return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
+-        });
++        applySessionUpdate(data);
+       } catch (loadError) {
+         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
+       }
+     };
+ 
+     loadSession();
+-  }, [sessionId]);
++  }, [applySessionUpdate, sessionId]);
+ 
+   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
+   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
+-  const recommendedAdditions: string[] = useMemo(
+-    () => session?.recommendedAdditions ?? [],
+-    [session?.recommendedAdditions],
+-  );
++  const recommendedAdditions: RecommendedAddition[] = useMemo(() => {
++    const additions = session?.recommendedAdditions ?? [];
++    return additions.map((addition) => ({
++      ...addition,
++      status: addition.status ?? "proposed",
++    }));
++  }, [session?.recommendedAdditions]);
+   const complianceLookup = useMemo(
+     () => normalizeCompliance(session?.validationResults),
+     [session?.validationResults],
+   );
+ 
+   const gapMap = useMemo(() => {
+     const map = new Map<string, InterviewGap>();
+     gaps.forEach((gap) => map.set(gap.gapId, gap));
+     return map;
+   }, [gaps]);
+ 
++  const baselineVersionHash = useMemo(() => {
++    if (typeof session?.baselineVersionHash === "string") return session.baselineVersionHash;
++
++    const validation = session?.validationResults && typeof session.validationResults === "object"
++      ? session.validationResults
++      : null;
++
++    if (!validation) return null;
++
++    const camelCaseValue = (validation as { baselineVersionHash?: unknown }).baselineVersionHash;
++    if (typeof camelCaseValue === "string") return camelCaseValue;
++
++    const snakeCaseValue = (validation as { baseline_version_hash?: unknown }).baseline_version_hash;
++    return typeof snakeCaseValue === "string" ? snakeCaseValue : null;
++  }, [session]);
++
++  const baselineVersionReference = useMemo(() => {
++    const id = session?.baselineVersionId ?? null;
++    if (id && baselineVersionHash) return `${id} (${baselineVersionHash})`;
++    return id ?? baselineVersionHash ?? null;
++  }, [baselineVersionHash, session?.baselineVersionId]);
++
++  const expandedFitDetails = useMemo(() => {
++    const assessment = session?.expandedFitAssessment;
++    if (!assessment) return null;
++
++    const expandedScore = readNumericField(assessment, ["expandedScore", "expanded_score"]);
++    const originalScore = readNumericField(assessment, ["originalScore", "original_score"]);
++    const delta = readNumericField(assessment, ["delta"]);
++
++    if (expandedScore === null && originalScore === null && delta === null) return null;
++
++    return { expandedScore, originalScore, delta };
++  }, [session?.expandedFitAssessment]);
++
+   const handleChange = (index: number, value: string) => {
+     setAnswers((prev) => {
+       const next = [...prev];
+       next[index] = value;
+       return next;
+     });
    };
  
-   const createMockRepository = () => ({
-     create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
-     save: jest.fn(async (data: Interview) => data),
-     find: jest.fn(),
-     findOne: jest.fn(),
-     remove: jest.fn(async (data: Interview) => data),
-   });
+   const trimmedResponses = useMemo(
+     () => answers.map((answer) => (answer ?? "").trim()),
+     [answers],
+   );
  
-   const createService = (
-     repository = createMockRepository(),
-     gapDetectionService: Partial<GapDetectionService> = {},
-     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
-     recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
-       generateFromResponses: jest.fn().mockReturnValue([]),
-     },
-+    baselineVersionService: Partial<BaselineVersionService> = {
-+      approveVerifiedAdditions: jest.fn(),
-+    },
-+    analysisService?: Partial<AnalysisService>,
-   ) =>
-     new InterviewRecordsService(
-       repository as never,
-       gapDetectionService as GapDetectionService,
-       interviewQuestionGenerator as InterviewQuestionGeneratorService,
-       recommendedAdditionsService as any,
-+      baselineVersionService as BaselineVersionService,
-+      analysisService as AnalysisService,
-     );
+   const answeredCount = useMemo(
+     () => trimmedResponses.filter((response) => response.length > 0).length,
+     [trimmedResponses],
+   );
  
-   afterEach(() => {
-     jest.restoreAllMocks();
-   });
+   const handleSave = async () => {
+     if (!sessionId) return;
  
-   it('creates an interview record with required jobId and sanitization', async () => {
-     const repository = createMockRepository();
-     const gapList: InterviewGap[] = [
-       {
-         gapId: 'gap-1',
-         domain: 'experience',
-         jdExcerpt: 'JD item',
-         baselineExcerpt: null,
-         confidence: 'high',
-       },
-     ];
-     const questions: InterviewQuestion[] = [
-       {
-         gapId: 'gap-1',
-         category: 'Direct Experience',
-         prompt: 'Question',
-         jdReference: 'JD item',
-       },
-     ];
-@@ -211,36 +220,160 @@ describe('InterviewRecordsService', () => {
-     expect(result.recommendedAdditions).toEqual(additions);
-   });
+     if (answeredCount === 0) {
+       setError("Add at least one response before saving.");
+       return;
+     }
+@@ -164,66 +229,95 @@ export default function InterviewSessionPage() {
+     setSaving(true);
+     setError(null);
+     setMessage(null);
  
-   it('skips recommendations when compliance blocks', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue({
-       ...mockInterview,
-       validationResults: {
-         blocked: false,
-         complianceFlags: [{ severity: 'block' }],
-       },
-     });
-     const recommendedAdditionsService = {
-       generateFromResponses: jest.fn(),
-     };
-     const service = createService(repository, {}, {}, recommendedAdditionsService);
+     try {
+       const response = await fetch(`/api/interviews/${sessionId}`, {
+         method: "PATCH",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ responses: trimmedResponses }),
+       });
  
-     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-       responses: [' Response '],
-     });
- 
-     expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
-     expect(result.recommendedAdditions).toEqual([]);
-   });
- 
-+  it('applies decisions to recommended additions', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({
-+      ...mockInterview,
-+      recommendedAdditions: [
-+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-+        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
-+      ],
-+    });
-+    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
-+
-+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-+      decisions: [
-+        { additionId: 'a1', decision: 'reject' },
-+        { additionId: 'a2', decision: 'defer' },
-+      ],
-+    });
-+
-+    expect(repository.save).toHaveBeenCalledTimes(1);
-+    expect(result.recommendedAdditions).toEqual([
-+      { id: 'a1', text: 'Addition A', sources: [], status: 'rejected' },
-+      { id: 'a2', text: 'Addition B', sources: [], status: 'deferred' },
-+    ]);
-+    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
-+  });
-+
-+  it('approves accepted additions and stores baseline version reference', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({
-+      ...mockInterview,
-+      recommendedAdditions: [
-+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-+        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
-+      ],
-+    });
-+    const baselineVersionService = {
-+      approveVerifiedAdditions: jest.fn().mockResolvedValue({
-+        baseline_version_id: 'new-version',
-+        version_number: 3,
-+        hash: 'hash',
-+        diff: {},
-+      }),
-+    };
-+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
-+
-+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-+      decisions: [
-+        { additionId: 'a1', decision: 'accept' },
-+        { additionId: 'a2', decision: 'reject' },
-+      ],
-+    });
-+
-+    expect(baselineVersionService.approveVerifiedAdditions).toHaveBeenCalledWith('user-1', {
-+      baselineId: 'baseline-1',
-+      interviewId: 'interview-1',
-+      additions: [
-+        { id: 'a1', text: 'Addition A', sources: [], status: 'accepted' },
-+      ],
-+    });
-+    expect(repository.save).toHaveBeenCalledTimes(2);
-+    expect(result.baselineVersionId).toBe('new-version');
-+    expect(result.recommendedAdditions[0].status).toBe('accepted');
-+  });
-+
-+  it('does not approve baseline when no additions are accepted', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({
-+      ...mockInterview,
-+      recommendedAdditions: [
-+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-+      ],
-+    });
-+    const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-+    const service = createService(repository, {}, {}, undefined, baselineVersionService);
-+
-+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-+      decisions: [{ additionId: 'a1', decision: 'reject' }],
-+    });
-+
-+    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
-+    expect(repository.save).toHaveBeenCalledTimes(1);
-+    expect(result.recommendedAdditions[0].status).toBe('rejected');
-+  });
-+
-+  it('runs expanded fit assessment when available', async () => {
-+    const repository = createMockRepository();
-+    repository.findOne.mockResolvedValue({
-+      ...mockInterview,
-+      recommendedAdditions: [
-+        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-+      ],
-+    });
-+    const baselineVersionService = {
-+      approveVerifiedAdditions: jest.fn().mockResolvedValue({
-+        baseline_version_id: 'new-version',
-+        version_number: 4,
-+        hash: 'hash',
-+        diff: {},
-+      }),
-+    };
-+    const analysisService = {
-+      runExpandedFitAssessment: jest.fn().mockResolvedValue({
-+        ok: true,
-+        expandedScore: 98,
-+      }),
-+    };
-+    const service = createService(repository, {}, {}, undefined, baselineVersionService, analysisService);
-+
-+    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-+      decisions: [{ additionId: 'a1', decision: 'accept' }],
-+    });
-+
-+    expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith('user-1', {
-+      jobId: 'job-1',
-+      baselineId: 'baseline-1',
-+      baselineVersion: 4,
-+      interviewId: 'interview-1',
-+      verifiedAdditions: ['Addition A'],
-+    });
-+    expect(result.expandedFitAssessment).toEqual({ ok: true, expandedScore: 98 });
-+    expect(result.baselineVersionId).toBe('new-version');
-+  });
-+
-   it('deletes an interview record', async () => {
-     const repository = createMockRepository();
-     repository.findOne.mockResolvedValue(mockInterview);
-     const service = createService(repository);
- 
-     const result = await service.deleteInterviewRecord('interview-1', 'user-1');
- 
-     expect(repository.remove).toHaveBeenCalledWith(mockInterview);
-     expect(result).toEqual({ deleted: true, id: 'interview-1' });
-   });
- });
-diff --git a/apps/api/src/interviews/interview-records.service.ts b/apps/api/src/interviews/interview-records.service.ts
-index ae19e0081d59f3b45b25cc7d57ebbc8fadc87903..4d0302ceab5c400b42bd0f94fb4469cc33d952d1 100644
---- a/apps/api/src/interviews/interview-records.service.ts
-+++ b/apps/api/src/interviews/interview-records.service.ts
-@@ -1,62 +1,67 @@
--import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'node:crypto';
- import { Repository } from 'typeorm';
-+import { AnalysisService } from '../analysis/analysis.service';
-+import { BaselineVersionService } from '../baseline/baseline-version.service';
- import { ComplianceFlagSeverity } from '../compliance/compliance.types';
-+import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
- import { GapDetectionService } from './gap-detection.service';
- import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import { CreateInterviewRecordDto } from './dto/create-interview.dto';
- import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
- import { Interview } from './interview.entity';
- import {
-+  AdditionDecision,
-   InterviewGap,
-   InterviewQuestion,
-   RecommendedAddition,
-+  RecommendedAdditionDecision,
-   RecommendedAdditionSource,
-   RecommendedAdditionStatus,
- } from './interview-types';
- import { RecommendedAdditionsService } from './recommended-additions.service';
- 
- function normalizeStringArray(value?: unknown[]): string[] {
-   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
- }
- 
- function normalizeGapList(value?: unknown[]): InterviewGap[] {
-   return Array.isArray(value)
-     ? value.filter((entry): entry is InterviewGap => typeof entry === 'object' && entry !== null)
-     : [];
- }
- 
- function normalizeQuestionList(value?: unknown[]): InterviewQuestion[] {
-   return Array.isArray(value)
-     ? value.filter((entry): entry is InterviewQuestion => typeof entry === 'object' && entry !== null)
-     : [];
- }
- 
- function normalizeAdditionStatus(value?: unknown): RecommendedAdditionStatus {
--  return value === 'accepted' || value === 'rejected' ? value : 'proposed';
-+  return value === 'accepted' || value === 'rejected' || value === 'deferred' ? value : 'proposed';
- }
- 
- function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] {
-   if (!Array.isArray(value)) return [];
- 
-   return value
-     .map((entry): RecommendedAdditionSource | null => {
-       if (!entry || typeof entry !== 'object') return null;
- 
-       const raw = entry as Partial<RecommendedAdditionSource>;
- 
-       const gapId = typeof raw.gapId === 'string' ? raw.gapId : undefined;
-       const questionIndex = typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
-       const questionPrompt = typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
- 
-       // If nothing meaningful exists, drop the entry.
-       if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) return null;
- 
-       // IMPORTANT: omit undefined fields to satisfy exactOptionalPropertyTypes.
-       const source: RecommendedAdditionSource = {
-         ...(gapId !== undefined ? { gapId } : {}),
-         ...(questionIndex !== undefined ? { questionIndex } : {}),
-         ...(questionPrompt !== undefined ? { questionPrompt } : {}),
-       };
- 
-@@ -82,58 +87,85 @@ function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[]
-           text,
-           sources: [],
-           status: 'proposed' as const,
-         };
+       if (!response.ok) {
+         const payload = await response.json().catch(() => null);
+         const messageText = payload?.error ?? payload?.message ?? "Unable to save responses.";
+         throw new Error(messageText);
        }
  
-       if (!entry || typeof entry !== 'object') return null;
- 
-       const addition = entry as RecommendedAddition;
-       const text = typeof addition.text === 'string' ? addition.text.trim() : '';
-       if (!text) return null;
- 
-       const sources = normalizeAdditionSources(addition.sources);
-       const status = normalizeAdditionStatus(addition.status);
- 
-       return {
-         id: typeof addition.id === 'string' && addition.id ? addition.id : buildAdditionId(text, sources),
-         text,
-         sources,
-         status,
-       };
-     })
-     .filter((entry): entry is RecommendedAddition => Boolean(entry));
- }
- 
-+type NormalizedDecision = {
-+  additionId: string;
-+  decision: RecommendedAdditionDecision;
-+};
-+
-+function normalizeDecisions(value?: AdditionDecision[]): NormalizedDecision[] {
-+  if (!Array.isArray(value)) return [];
-+
-+  return value
-+    .map((entry) => {
-+      if (!entry || typeof entry !== 'object') return null;
-+
-+      const additionId = typeof entry.additionId === 'string' ? entry.additionId.trim() : '';
-+      const decision = typeof entry.decision === 'string' ? entry.decision.trim() : '';
-+
-+      if (!additionId || !decision) return null;
-+      if (decision !== 'accept' && decision !== 'reject' && decision !== 'defer') {
-+        throw new BadRequestException('decision must be accept, reject, or defer');
-+      }
-+
-+      return { additionId, decision };
-+    })
-+    .filter((entry): entry is NormalizedDecision => Boolean(entry));
-+}
-+
- @Injectable()
- export class InterviewRecordsService {
-   constructor(
-     @InjectRepository(Interview)
-     private readonly interviewsRepo: Repository<Interview>,
-     private readonly gapDetectionService: GapDetectionService,
-     private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
-     private readonly recommendedAdditionsService: RecommendedAdditionsService,
-+    private readonly baselineVersionService: BaselineVersionService,
-+    @Optional() private readonly analysisService?: AnalysisService,
-   ) {}
- 
-   private requireJobId(jobId?: string): string {
-     const normalized = jobId?.trim();
- 
-     if (!normalized) {
-       throw new BadRequestException('jobId is required');
+       setMessage("Responses saved. You can revisit this page anytime.");
+     } catch (saveError) {
+       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
+     } finally {
+       setSaving(false);
      }
+   };
  
-     return normalized;
-   }
- 
-   private requireBaselineVersionId(baselineVersionId?: string): string {
-     const normalized = baselineVersionId?.trim();
- 
-     if (!normalized) {
-       throw new BadRequestException('baselineVersionId is required');
-     }
- 
-     return normalized;
-   }
- 
-   private hasBlockingCompliance(validationResults: Record<string, unknown> | undefined | null): boolean {
-     if (!validationResults) return false;
- 
-@@ -227,45 +259,129 @@ export class InterviewRecordsService {
-     if (dto.questions !== undefined) {
-       interview.questions = normalizeQuestionList(dto.questions);
-     }
- 
-     if (dto.responses !== undefined) {
-       interview.responses = normalizeStringArray(dto.responses);
-     }
- 
-     if (dto.validationResults !== undefined) {
-       interview.validationResults = dto.validationResults ?? {};
-     }
- 
-     if (this.hasBlockingCompliance(interview.validationResults)) {
-       interview.recommendedAdditions = [];
-     } else {
-       interview.recommendedAdditions = this.recommendedAdditionsService.generateFromResponses({
-         responses: interview.responses,
-         questions: interview.questions,
-         gaps: interview.gapList,
-       });
-     }
- 
-     return this.interviewsRepo.save(interview);
-   }
- 
-+  async applyAdditionDecisions(
-+    id: string,
-+    userId: string,
-+    dto: ApplyAdditionDecisionsDto,
-+  ): Promise<Interview> {
-+    const interview = await this.getInterviewRecordForUser(id, userId);
-+    const decisions = normalizeDecisions(dto?.decisions);
+-  const handleDecision = (index: number, decision: "accept" | "reject" | "defer") => {
+-    setRecommendationDecisions((prev) => ({ ...prev, [index]: decision }));
++  const handleDecision = async (addition: RecommendedAddition, decision: RecommendedAdditionDecision) => {
++    if (!sessionId || !addition?.id) return;
 +
-+    if (!decisions.length) {
-+      throw new BadRequestException('decisions are required');
-+    }
++    const payload: { decisions: AdditionDecisionPayload[] } = {
++      decisions: [{ additionId: addition.id, decision }],
++    };
 +
-+    if (!interview.recommendedAdditions?.length) {
-+      throw new NotFoundException('No recommended additions found for this interview');
-+    }
++    setDecisionSavingId(addition.id);
++    setError(null);
++    setMessage(null);
 +
-+    const additionIds = new Set(interview.recommendedAdditions.map((addition) => addition.id));
-+
-+    decisions.forEach((decision) => {
-+      if (!additionIds.has(decision.additionId)) {
-+        throw new NotFoundException(`Recommended addition ${decision.additionId} not found`);
-+      }
-+    });
-+
-+    const decisionMap = new Map<string, RecommendedAdditionDecision>(
-+      decisions.map((entry) => [entry.additionId, entry.decision]),
-+    );
-+
-+    const acceptedAdditions: RecommendedAddition[] = [];
-+
-+    interview.recommendedAdditions = interview.recommendedAdditions.map((addition) => {
-+      const decision = decisionMap.get(addition.id);
-+      if (!decision) return addition;
-+
-+      const status: RecommendedAdditionStatus =
-+        decision === 'accept'
-+          ? 'accepted'
-+          : decision === 'reject'
-+            ? 'rejected'
-+            : 'deferred';
-+      const updated = { ...addition, status };
-+
-+      if (status === 'accepted') {
-+        acceptedAdditions.push(updated);
-+      }
-+
-+      return updated;
-+    });
-+
-+    let savedInterview = await this.interviewsRepo.save(interview);
-+
-+    if (!acceptedAdditions.length) {
-+      return savedInterview;
-+    }
-+
-+    if (!savedInterview.baselineId?.trim()) {
-+      throw new BadRequestException('baselineId is required to approve additions');
-+    }
-+
-+    const promotion = await this.baselineVersionService.approveVerifiedAdditions(userId, {
-+      baselineId: savedInterview.baselineId,
-+      interviewId: savedInterview.id,
-+      additions: acceptedAdditions,
-+    });
-+
-+    savedInterview.baselineVersionId = promotion?.baseline_version_id ?? savedInterview.baselineVersionId ?? null;
-+
-+    if (this.analysisService && savedInterview.jobId?.trim()) {
-+      const expanded = await this.analysisService.runExpandedFitAssessment(userId, {
-+        jobId: savedInterview.jobId,
-+        baselineId: savedInterview.baselineId,
-+        baselineVersion: promotion?.version_number,
-+        interviewId: savedInterview.id,
-+        verifiedAdditions: acceptedAdditions.map((addition) => addition.text),
++    try {
++      const response = await fetch(`/api/interviews/${sessionId}/decisions`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify(payload),
 +      });
 +
-+      savedInterview.expandedFitAssessment = expanded;
++      if (!response.ok) {
++        const payloadResponse = await response.json().catch(() => null);
++        const messageText = payloadResponse?.error ?? payloadResponse?.message ?? "Unable to save decision.";
++        throw new Error(messageText);
++      }
++
++      const updatedSession = (await response.json()) as InterviewSessionDto;
++      applySessionUpdate(updatedSession, { preserveAnswers: true });
++      setMessage("Decision saved.");
++    } catch (decisionError) {
++      setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
++    } finally {
++      setDecisionSavingId(null);
 +    }
+   };
+ 
+   const recommendationStats = useMemo(() => {
+     return recommendedAdditions.reduce(
+-      (acc, _, index) => {
+-        const decision = recommendationDecisions[index];
+-        if (decision === "accept") acc.accepted += 1;
+-        else if (decision === "reject") acc.rejected += 1;
+-        else if (decision === "defer") acc.deferred += 1;
++      (acc, addition) => {
++        if (addition.status === "accepted") acc.accepted += 1;
++        else if (addition.status === "rejected") acc.rejected += 1;
++        else if (addition.status === "deferred") acc.deferred += 1;
+         return acc;
+       },
+       { accepted: 0, rejected: 0, deferred: 0 },
+     );
+-  }, [recommendationDecisions, recommendedAdditions]);
++  }, [recommendedAdditions]);
+ 
+   return (
+     <InstrumentShell
+       kicker="Interview session"
+       title="Fit Review"
+       subtitle="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
+     >
+       <div style={ttrLayout.panelsRow}>
+         <section style={{ ...ttrComponents.basePanel, flex: 1.4, display: "flex", flexDirection: "column", gap: 12 }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Session details</span>
+             <h2 style={ttrTypography.h2}>Interview prompts</h2>
+           </div>
+ 
+           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+             {questions.length === 0 ? (
+               <div style={ttrComponents.warningBox}>No interview questions were generated for this session.</div>
+             ) : (
+               questions.map((question, index) => {
+                 const gap = gapMap.get(question.gapId);
+                 const complianceFlags = complianceLookup.questions[index] ?? [];
+ 
+                 return (
+                   <div key={`${question.prompt}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+@@ -296,53 +390,53 @@ export default function InterviewSessionPage() {
+                 {saving ? "Saving..." : "Save responses"}
+               </button>
+               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                 Session ID: {sessionId}
+               </span>
+             </div>
+ 
+             {message ? <div style={ttrComponents.successBox}>{message}</div> : null}
+             {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
+           </div>
+         </section>
+ 
+         <section style={{ ...ttrComponents.basePanel, flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Session</span>
+             <h2 style={ttrTypography.h2}>Overview</h2>
+           </div>
+ 
+           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+             <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
+               Status: <strong>{session?.status ?? "loading"}</strong>
+             </div>
+             <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+               Baseline: {session?.baselineId ?? "..."}
+             </div>
+-            {session?.baselineVersionId ? (
++            {baselineVersionReference ? (
+               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+-                Baseline version: {session.baselineVersionId}
++                Baseline version reference: {baselineVersionReference}
+               </div>
+             ) : null}
+             {session?.jobId ? (
+               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+                 Job: {session.jobId}
+               </div>
+             ) : null}
+             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+               Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
+             </div>
+             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+               Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
+             </div>
+           </div>
+ 
+           <div>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Detected gaps</span>
+               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                 {gaps.length === 0 ? (
+                   <div style={ttrComponents.warningBox}>No gaps were returned for this interview.</div>
+                 ) : (
+                   gaps.map((gap) => (
+                     <div
+                       key={gap.gapId}
+@@ -365,103 +459,137 @@ export default function InterviewSessionPage() {
+                           Confidence: {gap.confidence}
+                         </span>
+                       </div>
+                       <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)" }}>
+                         JD: <em>{gap.jdExcerpt}</em>
+                       </div>
+                       {gap.baselineExcerpt ? (
+                         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                           Baseline: <em>{gap.baselineExcerpt}</em>
+                         </div>
+                       ) : null}
+                     </div>
+                   ))
+                 )}
+               </div>
+             </div>
+           </div>
+ 
+           <div>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Recommendations</span>
+               {recommendedAdditions.length === 0 ? (
+                 <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
+               ) : (
+                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+-                  {recommendedAdditions.map((item, index) => {
+-                    const decision = recommendationDecisions[index];
++                  {recommendedAdditions.map((addition, index) => {
+                     const complianceFlags = complianceLookup.recommendations[index] ?? [];
+                     const acceptBlocked = complianceFlags.length > 0;
++                    const isSavingDecision = decisionSavingId === addition.id;
++                    const status = addition.status;
 +
-+    savedInterview = await this.interviewsRepo.save(savedInterview);
-+
-+    return savedInterview;
-+  }
-+
-   async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
-     const interview = await this.getInterviewRecordForUser(id, userId);
++                    const statusBadge =
++                      status === "accepted"
++                        ? { label: "Accepted", background: "rgba(74,222,128,0.15)", color: "#86efac" }
++                        : status === "rejected"
++                          ? { label: "Rejected", background: "rgba(248,113,113,0.18)", color: "#fca5a5" }
++                          : status === "deferred"
++                            ? { label: "Deferred", background: "rgba(251,191,36,0.15)", color: "#fcd34d" }
++                            : { label: "Proposed", background: "rgba(148,163,184,0.18)", color: "#cbd5e1" };
  
-     await this.interviewsRepo.remove(interview);
+                     return (
+                       <div
+-                        key={`${item}-${index}`}
++                        key={addition.id ?? `${addition.text}-${index}`}
+                         style={{
+                           padding: 12,
+                           borderRadius: 10,
+                           border: "1px solid rgba(148,163,184,0.28)",
+                           background: "rgba(15,23,42,0.6)",
+                           display: "flex",
+                           flexDirection: "column",
+                           gap: 8,
+                         }}
+                       >
+                         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+-                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>{item}</div>
+-                          {decision === "accept" ? (
+-                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.15)", color: "#86efac", fontSize: 12 }}>
+-                              Staged
++                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>
++                            {addition.text || addition.id}
++                          </div>
++                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++                            <span
++                              style={{
++                                padding: "4px 8px",
++                                borderRadius: 6,
++                                background: statusBadge.background,
++                                color: statusBadge.color,
++                                fontSize: 12,
++                              }}
++                            >
++                              {isSavingDecision ? "Saving..." : statusBadge.label}
+                             </span>
+-                          ) : null}
++                          </div>
+                         </div>
  
-     return { deleted: true, id };
-   }
+                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                           <button
+                             type="button"
+-                            onClick={() => handleDecision(index, "accept")}
+-                            disabled={acceptBlocked}
++                            onClick={() => handleDecision(addition, "accept")}
++                            disabled={acceptBlocked || isSavingDecision}
+                             style={{
+                               ...ttrComponents.primaryButton,
+                               padding: "6px 12px",
+                               fontSize: 13,
+-                              opacity: acceptBlocked ? 0.5 : 1,
+-                              cursor: acceptBlocked ? "not-allowed" : "pointer",
++                              opacity: acceptBlocked || isSavingDecision ? 0.5 : 1,
++                              cursor: acceptBlocked || isSavingDecision ? "not-allowed" : "pointer",
+                             }}
+                           >
+                             Accept
+                           </button>
+                           <button
+                             type="button"
+-                            onClick={() => handleDecision(index, "reject")}
+-                            style={{ ...ttrComponents.secondaryButton, padding: "6px 12px", fontSize: 13 }}
++                            onClick={() => handleDecision(addition, "reject")}
++                            disabled={isSavingDecision}
++                            style={{
++                              ...ttrComponents.secondaryButton,
++                              padding: "6px 12px",
++                              fontSize: 13,
++                              opacity: isSavingDecision ? 0.6 : 1,
++                              cursor: isSavingDecision ? "not-allowed" : "pointer",
++                            }}
+                           >
+                             Reject
+                           </button>
+                           <button
+                             type="button"
+-                            onClick={() => handleDecision(index, "defer")}
+-                            style={{ ...ttrComponents.quietButton, padding: "6px 12px", fontSize: 13 }}
++                            onClick={() => handleDecision(addition, "defer")}
++                            disabled={isSavingDecision}
++                            style={{
++                              ...ttrComponents.quietButton,
++                              padding: "6px 12px",
++                              fontSize: 13,
++                              opacity: isSavingDecision ? 0.6 : 1,
++                              cursor: isSavingDecision ? "not-allowed" : "pointer",
++                            }}
+                           >
+                             Defer
+                           </button>
+                         </div>
  
-   async createInterview(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
-     return this.createInterviewRecord(userId, dto);
-   }
+                         {complianceFlags.length ? (
+                           <div style={ttrComponents.warningBox}>
+                             <strong>Compliance flags:</strong>
+                             <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
+                               {complianceFlags.map((flag, flagIndex) => (
+                                 <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
+                                   {flag.code ? `${flag.code}: ` : ""}
+                                   {flag.message ?? "Flagged recommendation"}
+                                   {flag.severity ? ` (severity: ${flag.severity})` : ""}
+                                 </li>
+                               ))}
+                             </ul>
+                           </div>
+                         ) : null}
+                       </div>
+                     );
+                   })}
+                 </div>
+               )}
+             </div>
+@@ -471,45 +599,64 @@ export default function InterviewSessionPage() {
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+               <span style={ttrTypography.subtleLabel}>Completion</span>
+               <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Summary</h3>
+             </div>
+             <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Detected gaps</div>
+                 <div style={{ fontSize: 24, fontWeight: 700 }}>{gaps.length}</div>
+               </div>
+               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Questions answered</div>
+                 <div style={{ fontSize: 24, fontWeight: 700 }}>
+                   {answeredCount} / {questions.length}
+                 </div>
+               </div>
+               <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                 <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Recommendations</div>
+                 <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                   Accepted: <strong>{recommendationStats.accepted}</strong>
+                   <br />
+                   Rejected: <strong>{recommendationStats.rejected}</strong>
+                   <br />
+                   Deferred: <strong>{recommendationStats.deferred}</strong>
+                 </div>
+               </div>
++              {expandedFitDetails ? (
++                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
++                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Expanded fit score</div>
++                  <div style={{ fontSize: 24, fontWeight: 700 }}>
++                    {expandedFitDetails.expandedScore ?? "—"}
++                  </div>
++                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
++                    {expandedFitDetails.originalScore !== null && expandedFitDetails.originalScore !== undefined ? (
++                      <>
++                        Original: {expandedFitDetails.originalScore}
++                        <br />
++                      </>
++                    ) : null}
++                    {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined ? (
++                      <>Delta: {expandedFitDetails.delta >= 0 ? "+" : ""}{expandedFitDetails.delta}</>
++                    ) : null}
++                  </div>
++                </div>
++              ) : null}
+             </div>
  
-   async getInterviewsForUser(userId: string): Promise<Interview[]> {
-     return this.listInterviewRecordsForUser(userId);
-   }
- 
-   async getInterviewById(userId: string, interviewId: string): Promise<Interview> {
-     return this.getInterviewRecordForUser(interviewId, userId);
-   }
+             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+               <button
+                 type="button"
+                 onClick={() => router.push("/fit-review")}
+                 style={{ ...ttrComponents.secondaryButton, padding: "10px 14px" }}
+               >
+                 Back to fit review
+               </button>
+               <Link href="/results" style={{ ...ttrComponents.primaryButton, padding: "10px 14px", textDecoration: "none" }}>
+                 Continue
+               </Link>
+             </div>
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
  }
-diff --git a/apps/api/src/interviews/interview-types.ts b/apps/api/src/interviews/interview-types.ts
-index 37465fd1d1f349d265b5a0f7f4a3f05596c5c1b1..d01b93eea7195c6bc32e3f42844c6df52cb466fa 100644
---- a/apps/api/src/interviews/interview-types.ts
-+++ b/apps/api/src/interviews/interview-types.ts
-@@ -7,46 +7,53 @@ export type GapDomain =
+diff --git a/apps/web/lib/interviews.ts b/apps/web/lib/interviews.ts
+index c2f54e3cb903a0905a578ab3756700c22c38a600..2bf8187c459765be007974db25a9c0a477f93274 100644
+--- a/apps/web/lib/interviews.ts
++++ b/apps/web/lib/interviews.ts
+@@ -2,47 +2,79 @@ export type GapDomain = "experience" | "tooling" | "scope" | "leadership" | "ind
  
- export type GapConfidence = 'low' | 'medium' | 'high';
+ export type GapConfidence = "low" | "medium" | "high";
  
- export type InterviewGap = {
+ export interface InterviewGap {
    gapId: string;
    domain: GapDomain;
    jdExcerpt: string;
    baselineExcerpt: string | null;
    confidence: GapConfidence;
- };
+ }
  
  export type InterviewQuestionCategory =
-   | 'Direct Experience'
-   | 'Context'
-   | 'Scope'
-   | 'Tooling'
-   | 'Impact';
+   | "Direct Experience"
+   | "Context"
+   | "Scope"
+   | "Tooling"
+   | "Impact";
  
- export type InterviewQuestion = {
+ export interface InterviewQuestion {
    gapId: string;
    category: InterviewQuestionCategory;
    prompt: string;
    jdReference: string;
- };
+ }
  
--export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected';
-+export type RecommendedAdditionStatus = 'proposed' | 'accepted' | 'rejected' | 'deferred';
- 
- export type RecommendedAdditionSource = {
-   gapId?: string;
-   questionIndex?: number;
-   questionPrompt?: string;
- };
- 
- export type RecommendedAddition = {
-   id: string;
-   text: string;
-   sources: RecommendedAdditionSource[];
-   status: RecommendedAdditionStatus;
- };
- 
-+export type RecommendedAdditionDecision = 'accept' | 'reject' | 'defer';
++export type RecommendedAdditionStatus = "proposed" | "accepted" | "rejected" | "deferred";
 +
-+export type AdditionDecision = {
++export type RecommendedAdditionSource = {
++  gapId?: string;
++  questionIndex?: number;
++  questionPrompt?: string;
++};
++
++export interface RecommendedAddition {
++  id: string;
++  text: string;
++  sources?: RecommendedAdditionSource[];
++  status: RecommendedAdditionStatus;
++}
++
++export type RecommendedAdditionDecision = "accept" | "reject" | "defer";
++
++export type AdditionDecisionPayload = {
 +  additionId: string;
 +  decision: RecommendedAdditionDecision;
 +};
 +
- export type GapDetectionResult = {
-   baselineId: string;
-   baselineVersionId: string;
-   jobId: string;
-   gaps: InterviewGap[];
- };
-diff --git a/apps/api/src/interviews/interview.entity.ts b/apps/api/src/interviews/interview.entity.ts
-index d60e393f98bd22551b7c29774b553287cc43c38f..3f9bd7aca8c7f6deb62f636a4423a1c94117af69 100644
---- a/apps/api/src/interviews/interview.entity.ts
-+++ b/apps/api/src/interviews/interview.entity.ts
-@@ -21,31 +21,34 @@ export class Interview {
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   baselineId!: string | null;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   baselineVersionId!: string | null;
- 
-   @Column({ type: 'varchar', length: 255 })
-   jobId!: string;
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   gapList!: InterviewGap[];
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   questions!: InterviewQuestion[];
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   responses!: string[];
- 
-   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-   validationResults!: Record<string, unknown>;
- 
-   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
-   recommendedAdditions!: RecommendedAddition[];
- 
-+  @Column({ type: 'jsonb', nullable: true })
-+  expandedFitAssessment?: Record<string, unknown> | null;
++export interface ExpandedFitAssessment {
++  expandedScore?: number | null;
++  originalScore?: number | null;
++  delta?: number | null;
++  [key: string]: unknown;
++}
 +
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
+ export interface InterviewResponseDto {
+   id: string;
+   question: string;
+   response: string;
+   createdAt: string;
+   updatedAt: string;
  }
-diff --git a/apps/api/src/interviews/interviews.module.ts b/apps/api/src/interviews/interviews.module.ts
-index 17407a926e13234903c679e0dc10816b8441bcd7..b20aa81cea8c787810cc497e49fc8232bd7d8392 100644
---- a/apps/api/src/interviews/interviews.module.ts
-+++ b/apps/api/src/interviews/interviews.module.ts
-@@ -1,51 +1,61 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { Baseline } from '../baseline/baseline.entity';
- import { BaselineSection } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { FitAssessment } from '../analysis/fit-assessment.entity';
-+import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
-+import { AnalysisService } from '../analysis/analysis.service';
-+import { FitScoringService } from '../analysis/fit-scoring.service';
- import { ComplianceModule } from '../compliance/compliance.module';
- import { Job } from '../jobs/job.entity';
-+import { User } from '../users/user.entity';
- import { Interview } from './interview.entity';
- import { InterviewToolkitController } from './interview-toolkit.controller';
- import { InterviewToolkitService } from './interview-toolkit.service';
- import { InterviewRecordsController } from './interview-records.controller';
- import { InterviewRecordsService } from './interview-records.service';
- import { RecommendedAdditionsService } from './recommended-additions.service';
- import { InterviewResponse } from './interview-response.entity';
- import { InterviewSession } from './interview-session.entity';
- import { GapDetectionService } from './gap-detection.service';
- import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import { InterviewsController } from './interviews.controller';
- import { InterviewsService } from './interviews.service';
- import { StarStory } from '../star-stories/star-story.entity';
-+import { BaselineVersionService } from '../baseline/baseline-version.service';
  
- @Module({
-   imports: [
-     TypeOrmModule.forFeature([
-       InterviewSession,
-       InterviewResponse,
-       Interview,
-       Job,
-       FitAssessment,
-       Baseline,
-       BaselineSection,
-       BaselineVersion,
-       BaselineBlockPolicy,
-+      ExpandedFitAssessment,
-+      User,
-       StarStory,
-     ]),
-     ComplianceModule,
-   ],
-   controllers: [InterviewsController, InterviewRecordsController, InterviewToolkitController],
-   providers: [
-     InterviewsService,
-     InterviewRecordsService,
-     GapDetectionService,
-     InterviewQuestionGeneratorService,
-     InterviewToolkitService,
-     RecommendedAdditionsService,
-+    BaselineVersionService,
-+    AnalysisService,
-+    FitScoringService,
-   ],
-   exports: [InterviewsService, InterviewRecordsService],
- })
- export class InterviewsModule {}
+ export interface InterviewSessionDto {
+   id: string;
+   baselineId: string | null;
+   baselineVersionId: string | null;
++  baselineVersionHash?: string | null;
++  baselineVersion?: number | null;
+   jobId: string | null;
+   status: string;
+   gapList?: InterviewGap[];
+   questions?: InterviewQuestion[];
+   responses?: string[];
+   validationResults?: Record<string, unknown>;
+-  recommendedAdditions?: string[];
++  recommendedAdditions?: RecommendedAddition[];
++  expandedFitAssessment?: ExpandedFitAssessment | null;
+   createdAt: string;
+   updatedAt: string;
+ }
