@@ -1,26 +1,88 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 
 import { InstrumentShell } from "../../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
-import type { InterviewSessionDto } from "../../../lib/interviews";
+import type { InterviewGap, InterviewQuestion, InterviewSessionDto } from "../../../lib/interviews";
 
-const QUESTIONS = [
-  "Walk me through the most relevant accomplishment in your baseline.",
-  "What would your first 30 days look like if you joined this team?",
-  "Which parts of the role feel like the biggest stretch for you?",
-];
+type ComplianceFlag = {
+  code?: string;
+  message?: string;
+  severity?: string;
+  questionIndex?: number;
+  recommendationIndex?: number;
+};
+
+type ComplianceLookup = {
+  general: ComplianceFlag[];
+  questions: Record<number, ComplianceFlag[]>;
+  recommendations: Record<number, ComplianceFlag[]>;
+};
+
+function normalizeCompliance(validationResults?: Record<string, unknown>): ComplianceLookup {
+  const lookup: ComplianceLookup = { general: [], questions: {}, recommendations: {} };
+  if (!validationResults) return lookup;
+
+  const rawFlags =
+    (validationResults as { complianceFlags?: unknown; compliance_flags?: unknown }).complianceFlags ??
+    (validationResults as { compliance_flags?: unknown }).compliance_flags ??
+    [];
+
+  const flagsArray = Array.isArray(rawFlags) ? rawFlags : [];
+
+  flagsArray.forEach((flag) => {
+    const normalized: ComplianceFlag =
+      typeof flag === "string"
+        ? { message: flag }
+        : typeof flag === "object" && flag !== null
+          ? {
+              code: (flag as { code?: string }).code,
+              message: (flag as { message?: string }).message,
+              severity: (flag as { severity?: string }).severity,
+              questionIndex:
+                (flag as { questionIndex?: number }).questionIndex ??
+                (flag as { question_index?: number }).question_index ??
+                (flag as { questionIdx?: number }).questionIdx,
+              recommendationIndex:
+                (flag as { recommendationIndex?: number }).recommendationIndex ??
+                (flag as { recommendation_index?: number }).recommendation_index ??
+                (flag as { recommendationIdx?: number }).recommendationIdx,
+            }
+          : {};
+
+    if (normalized.questionIndex !== undefined && normalized.questionIndex >= 0) {
+      const existing = lookup.questions[normalized.questionIndex] ?? [];
+      lookup.questions[normalized.questionIndex] = [...existing, normalized];
+      return;
+    }
+
+    if (normalized.recommendationIndex !== undefined && normalized.recommendationIndex >= 0) {
+      const existing = lookup.recommendations[normalized.recommendationIndex] ?? [];
+      lookup.recommendations[normalized.recommendationIndex] = [...existing, normalized];
+      return;
+    }
+
+    lookup.general.push(normalized);
+  });
+
+  return lookup;
+}
 
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const sessionId = params?.id;
   const [session, setSession] = useState<InterviewSessionDto | null>(null);
-  const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
+  const [answers, setAnswers] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recommendationDecisions, setRecommendationDecisions] = useState<
+    Record<number, "accept" | "reject" | "defer">
+  >({});
 
   useEffect(() => {
     if (!sessionId) return;
@@ -36,10 +98,18 @@ export default function InterviewSessionPage() {
         const data = (await response.json()) as InterviewSessionDto;
         setSession(data);
 
-        if (data?.responses?.length) {
-          const responseMap = new Map(data.responses.map((item) => [item.question, item.response]));
-          setAnswers(QUESTIONS.map((question) => responseMap.get(question) ?? ""));
-        }
+        const questionCount = data?.questions?.length ?? 0;
+        const existingResponses =
+          Array.isArray(data?.responses) && data.responses.length
+            ? data.responses.map((entry) => entry?.toString() ?? "")
+            : [];
+
+        setAnswers((prev) => {
+          if (prev.length === questionCount && existingResponses.length === 0) {
+            return prev;
+          }
+          return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
+        });
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
       }
@@ -47,6 +117,23 @@ export default function InterviewSessionPage() {
 
     loadSession();
   }, [sessionId]);
+
+  const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
+  const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
+  const recommendedAdditions: string[] = useMemo(
+    () => session?.recommendedAdditions ?? [],
+    [session?.recommendedAdditions],
+  );
+  const complianceLookup = useMemo(
+    () => normalizeCompliance(session?.validationResults),
+    [session?.validationResults],
+  );
+
+  const gapMap = useMemo(() => {
+    const map = new Map<string, InterviewGap>();
+    gaps.forEach((gap) => map.set(gap.gapId, gap));
+    return map;
+  }, [gaps]);
 
   const handleChange = (index: number, value: string) => {
     setAnswers((prev) => {
@@ -56,17 +143,20 @@ export default function InterviewSessionPage() {
     });
   };
 
-  const populatedResponses = useMemo(() => {
-    return QUESTIONS.map((question, index) => ({
-      question,
-      response: answers[index]?.trim() ?? "",
-    })).filter((item) => item.response.length > 0);
-  }, [answers]);
+  const trimmedResponses = useMemo(
+    () => answers.map((answer) => (answer ?? "").trim()),
+    [answers],
+  );
+
+  const answeredCount = useMemo(
+    () => trimmedResponses.filter((response) => response.length > 0).length,
+    [trimmedResponses],
+  );
 
   const handleSave = async () => {
     if (!sessionId) return;
 
-    if (populatedResponses.length === 0) {
+    if (answeredCount === 0) {
       setError("Add at least one response before saving.");
       return;
     }
@@ -76,15 +166,15 @@ export default function InterviewSessionPage() {
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/interviews/${sessionId}/responses`, {
-        method: "POST",
+      const response = await fetch(`/api/interviews/${sessionId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ responses: populatedResponses }),
+        body: JSON.stringify({ responses: trimmedResponses }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        const messageText = payload?.error ?? "Unable to save responses.";
+        const messageText = payload?.error ?? payload?.message ?? "Unable to save responses.";
         throw new Error(messageText);
       }
 
@@ -96,30 +186,101 @@ export default function InterviewSessionPage() {
     }
   };
 
+  const handleDecision = (index: number, decision: "accept" | "reject" | "defer") => {
+    setRecommendationDecisions((prev) => ({ ...prev, [index]: decision }));
+  };
+
+  const recommendationStats = useMemo(() => {
+    return recommendedAdditions.reduce(
+      (acc, _, index) => {
+        const decision = recommendationDecisions[index];
+        if (decision === "accept") acc.accepted += 1;
+        else if (decision === "reject") acc.rejected += 1;
+        else if (decision === "defer") acc.deferred += 1;
+        return acc;
+      },
+      { accepted: 0, rejected: 0, deferred: 0 },
+    );
+  }, [recommendationDecisions, recommendedAdditions]);
+
   return (
     <InstrumentShell
       kicker="Interview session"
       title="Fit Review"
-      subtitle="Capture a few quick responses while the role context is fresh."
+      subtitle="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
     >
       <div style={ttrLayout.panelsRow}>
-        <section style={{ ...ttrComponents.basePanel, flex: 1.2 }}>
+        <section style={{ ...ttrComponents.basePanel, flex: 1.4, display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={ttrTypography.subtleLabel}>Session details</span>
             <h2 style={ttrTypography.h2}>Interview prompts</h2>
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
-            {QUESTIONS.map((question, index) => (
-              <div key={question} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={ttrComponents.fieldLabel}>{question}</label>
-                <textarea
-                  style={{ ...ttrComponents.textArea, minHeight: 120 }}
-                  value={answers[index] ?? ""}
-                  onChange={(event) => handleChange(index, event.target.value)}
-                />
-              </div>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {questions.length === 0 ? (
+              <div style={ttrComponents.warningBox}>No interview questions were generated for this session.</div>
+            ) : (
+              questions.map((question, index) => {
+                const gap = gapMap.get(question.gapId);
+                const complianceFlags = complianceLookup.questions[index] ?? [];
+
+                return (
+                  <div key={`${question.prompt}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={ttrComponents.fieldLabel}>{question.prompt}</label>
+                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.72)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
+                          Category: {question.category}
+                        </span>
+                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
+                          Gap: {question.gapId}
+                        </span>
+                        {gap ? (
+                          <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
+                            Domain: {gap.domain} | Confidence: {gap.confidence}
+                          </span>
+                        ) : null}
+                      </div>
+                      {gap ? (
+                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
+                          JD excerpt: <em>{gap.jdExcerpt}</em>
+                          {gap.baselineExcerpt ? (
+                            <>
+                              {" "}
+                              | Baseline: <em>{gap.baselineExcerpt}</em>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>
+                        Reason: Generated from gap {question.gapId}.
+                      </div>
+                    </div>
+
+                    <textarea
+                      style={{ ...ttrComponents.textArea, minHeight: 120 }}
+                      value={answers[index] ?? ""}
+                      onChange={(event) => handleChange(index, event.target.value)}
+                    />
+
+                    {complianceFlags.length ? (
+                      <div style={ttrComponents.warningBox}>
+                        <strong>Compliance checks:</strong>
+                        <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
+                          {complianceFlags.map((flag, flagIndex) => (
+                            <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
+                              {flag.code ? `${flag.code}: ` : ""}
+                              {flag.message ?? "Flagged response"}
+                              {flag.severity ? ` (severity: ${flag.severity})` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <button
@@ -144,19 +305,24 @@ export default function InterviewSessionPage() {
           </div>
         </section>
 
-        <section style={{ ...ttrComponents.basePanel, flex: 0.8 }}>
+        <section style={{ ...ttrComponents.basePanel, flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={ttrTypography.subtleLabel}>Session</span>
             <h2 style={ttrTypography.h2}>Overview</h2>
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
               Status: <strong>{session?.status ?? "loading"}</strong>
             </div>
             <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
               Baseline: {session?.baselineId ?? "..."}
             </div>
+            {session?.baselineVersionId ? (
+              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+                Baseline version: {session.baselineVersionId}
+              </div>
+            ) : null}
             {session?.jobId ? (
               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
                 Job: {session.jobId}
@@ -164,6 +330,182 @@ export default function InterviewSessionPage() {
             ) : null}
             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
               Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+              Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Detected gaps</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {gaps.length === 0 ? (
+                  <div style={ttrComponents.warningBox}>No gaps were returned for this interview.</div>
+                ) : (
+                  gaps.map((gap) => (
+                    <div
+                      key={gap.gapId}
+                      style={{
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid rgba(148,163,184,0.3)",
+                        background: "rgba(15,23,42,0.6)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                        <strong style={{ color: "#e2e8f0" }}>{gap.gapId}</strong>
+                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
+                          Domain: {gap.domain}
+                        </span>
+                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
+                          Confidence: {gap.confidence}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)" }}>
+                        JD: <em>{gap.jdExcerpt}</em>
+                      </div>
+                      {gap.baselineExcerpt ? (
+                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
+                          Baseline: <em>{gap.baselineExcerpt}</em>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Recommendations</span>
+              {recommendedAdditions.length === 0 ? (
+                <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {recommendedAdditions.map((item, index) => {
+                    const decision = recommendationDecisions[index];
+                    const complianceFlags = complianceLookup.recommendations[index] ?? [];
+                    const acceptBlocked = complianceFlags.length > 0;
+
+                    return (
+                      <div
+                        key={`${item}-${index}`}
+                        style={{
+                          padding: 12,
+                          borderRadius: 10,
+                          border: "1px solid rgba(148,163,184,0.28)",
+                          background: "rgba(15,23,42,0.6)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
+                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>{item}</div>
+                          {decision === "accept" ? (
+                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.15)", color: "#86efac", fontSize: 12 }}>
+                              Staged
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDecision(index, "accept")}
+                            disabled={acceptBlocked}
+                            style={{
+                              ...ttrComponents.primaryButton,
+                              padding: "6px 12px",
+                              fontSize: 13,
+                              opacity: acceptBlocked ? 0.5 : 1,
+                              cursor: acceptBlocked ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecision(index, "reject")}
+                            style={{ ...ttrComponents.secondaryButton, padding: "6px 12px", fontSize: 13 }}
+                          >
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecision(index, "defer")}
+                            style={{ ...ttrComponents.quietButton, padding: "6px 12px", fontSize: 13 }}
+                          >
+                            Defer
+                          </button>
+                        </div>
+
+                        {complianceFlags.length ? (
+                          <div style={ttrComponents.warningBox}>
+                            <strong>Compliance flags:</strong>
+                            <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
+                              {complianceFlags.map((flag, flagIndex) => (
+                                <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
+                                  {flag.code ? `${flag.code}: ` : ""}
+                                  {flag.message ?? "Flagged recommendation"}
+                                  {flag.severity ? ` (severity: ${flag.severity})` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Completion</span>
+              <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Summary</h3>
+            </div>
+            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Detected gaps</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{gaps.length}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Questions answered</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>
+                  {answeredCount} / {questions.length}
+                </div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Recommendations</div>
+                <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                  Accepted: <strong>{recommendationStats.accepted}</strong>
+                  <br />
+                  Rejected: <strong>{recommendationStats.rejected}</strong>
+                  <br />
+                  Deferred: <strong>{recommendationStats.deferred}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => router.push("/fit-review")}
+                style={{ ...ttrComponents.secondaryButton, padding: "10px 14px" }}
+              >
+                Back to fit review
+              </button>
+              <Link href="/results" style={{ ...ttrComponents.primaryButton, padding: "10px 14px", textDecoration: "none" }}>
+                Continue
+              </Link>
             </div>
           </div>
         </section>

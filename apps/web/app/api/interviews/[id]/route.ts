@@ -21,7 +21,7 @@ export async function GET(
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
+  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
     method: "GET",
     cache: "no-store",
     headers: {
@@ -54,7 +54,7 @@ export async function PATCH(
 
   const body = await req.json();
 
-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
+  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -86,7 +86,7 @@ export async function DELETE(
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
+  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,

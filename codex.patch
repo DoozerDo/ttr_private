@@ -1,873 +1,718 @@
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index de8eaa2e5c72ccfcfc97e4e5ba372bbefac4d4e4..1b14e0a0220a8927e59086796a2ac627221cd8f5 100644
---- a/apps/api/src/compliance/compliance.service.ts
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -1,156 +1,170 @@
- import { Injectable } from '@nestjs/common';
- import { createHash } from 'node:crypto';
- import type { BaselineVersion } from '../baseline/baseline-version.entity';
- import type { Job } from '../jobs/job.entity';
- import {
-   ComplianceAction,
-+  ComplianceFlagCode,
-   ComplianceFlag,
-   ComplianceFlagSeverity,
- } from './compliance.types';
-+import { ScopeInflationDetector } from './scope-inflation-detector';
+diff --git a/apps/web/app/api/interviews/[id]/route.ts b/apps/web/app/api/interviews/[id]/route.ts
+index 50bb8e9136200ab482b3e207e94365d78ab8c1c1..b32ff6583d4bd57968104fdb71b317f5b27ee615 100644
+--- a/apps/web/app/api/interviews/[id]/route.ts
++++ b/apps/web/app/api/interviews/[id]/route.ts
+@@ -1,97 +1,97 @@
+ import { NextRequest, NextResponse } from "next/server";
  
- export type ValidateAndAuditRequest = {
-   action: ComplianceAction;
-   actorId: string;
+ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselines/helpers";
  
-   baselineVersion?: BaselineVersion | null;
-   job?: Job | null;
+ export async function GET(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ) {
+   const { id } = await context.params;
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
  
-   outputHash: string;
- 
-   extraFlags?: ComplianceFlag[] | undefined;
- 
-   scopeInflationDetected?: boolean;
-   techMismatchDetected?: boolean;
- 
-   [key: string]: unknown;
- };
- 
- export type ValidateAndAuditResult = {
-   blocked: boolean;
-   complianceFlags: ComplianceFlag[];
-   audit: {
-     id: string;
-     outputHash: string;
-     action: ComplianceAction;
-     actorId: string;
-     baselineVersionHash: string | null;
-     jobId: string | null;
-     createdAt: string;
-   };
- };
- 
- @Injectable()
- export class ComplianceService {
-+  private readonly scopeInflationDetector = new ScopeInflationDetector();
-+
-   public normalizeText(input: string): string {
-     return (input ?? '').replace(/\s+/g, ' ').trim();
-   }
- 
-   // Preserve section shape so downstream callers can still reference `title`, etc.
-   public normalizeSectionsForOutput<
-     T extends { content?: string | null; title?: string | null; [key: string]: any },
-   >(sections: T[]): T[] {
-     if (!Array.isArray(sections)) return [];
- 
-     return sections.map((s) => ({
-       ...s,
-       title: s?.title ?? null,
-       content: this.normalizeText(String(s?.content ?? '')),
-     }));
-   }
- 
-   public enforceResumeWritingRules(payload: {
-     normalizedContent?: string;
-     rawContent?: string;
-     [key: string]: unknown;
-   }): ComplianceFlag[] {
-     const content =
-       this.normalizeText(payload.normalizedContent ?? payload.rawContent ?? '');
- 
-     if (!content) return [];
- 
-     const flags: ComplianceFlag[] = [];
- 
-     if (content.includes('\u0000')) {
-       flags.push(
-         this.flag(
-           'invalid_null_bytes',
-           'Content contains invalid null bytes.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-     return flags;
-   }
- 
-+  public detectScopeInflation(payload: {
-+    baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
-+    generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
-+  }): ComplianceFlag[] {
-+    const baselineSections = payload.baselineSections ?? [];
-+    const generatedSections = payload.generatedSections ?? [];
-+    return this.scopeInflationDetector.detect(baselineSections, generatedSections);
-+  }
-+
-   public enforceTechnologyConsistency(payload: {
-     baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
-     jobText?: string | null;
-     [key: string]: unknown;
-   }): ComplianceFlag[] {
-     void payload;
-     return [];
-   }
- 
-   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
-     const flags: ComplianceFlag[] = [];
- 
-     const actorId = String(payload.actorId ?? '').trim();
-     const outputHash = String(payload.outputHash ?? '').trim();
- 
-     if (!actorId) {
-       flags.push(
-         this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
-       );
-     }
- 
-     if (!outputHash) {
-       flags.push(
-         this.flag(
-           'missing_output_hash',
-           'Output hash is required.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
-       for (const f of payload.extraFlags) {
-         if (!f || typeof f.code !== 'string' || !f.code.trim()) continue;
-         flags.push({
-           code: f.code as any,
-           message: f.message,
-           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
-+          evidence: f.evidence,
-         });
-       }
-     }
- 
-     if (payload.scopeInflationDetected === true) {
-       flags.push(
-         this.flag(
--          'scope_inflation_detected',
-+          ComplianceFlagCode.SCOPE_INFLATION,
-           'Potential scope inflation detected.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-     const blocked = flags.some(
-       (f) =>
-         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
      );
+   }
  
-     const auditId = this.buildAuditId(payload);
+   if (!token) {
+     return error;
+   }
  
-     const baselineVersionHash =
-       (payload.baselineVersion as any)?.hash ??
-       (payload.baselineVersion as any)?.fileHash ??
-       null;
+-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
+     method: "GET",
+     cache: "no-store",
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+   });
  
-     const jobId = (payload.job as any)?.id ?? null;
- 
-     return {
-       blocked,
-       complianceFlags: flags,
-       audit: {
-         id: auditId,
-diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
-index 0e309282a0751a43988ddcc74ef003eb3cac9232..d7b909962a46f2b172092ce39a2190146cba9300 100644
---- a/apps/api/src/compliance/compliance.types.ts
-+++ b/apps/api/src/compliance/compliance.types.ts
-@@ -1,28 +1,30 @@
- export enum ComplianceAction {
-   FIT_SCORE = 'fit_score',
-   RESUME_GENERATION = 'resume_gen',
-   COVER_LETTER_GENERATION = 'cover_letter_gen',
-   APPLICATION_EXPORT = 'application_export',
-   RESUME_EXPORT = 'resume_export',
+   return relayApiResponse(response);
  }
  
- export enum ComplianceFlagCode {
-   SCOPE_INFLATION = 'scope_inflation',
-   MISSING_BASELINE_HASH = 'missing_baseline_hash',
-   UNKNOWN_COMPANY = 'unknown_company',
-   INVENTED_COMPANY = 'invented_company',
-   INVENTED_ROLE = 'invented_role',
-   INVENTED_METRIC = 'invented_metric',
-   STYLIZED_PUNCTUATION = 'stylized_punctuation',
-   FICTIONAL_TECHNOLOGY = 'fictional_technology',
+ export async function PATCH(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ) {
+   const { id } = await context.params;
+ 
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+   const body = await req.json();
+ 
+-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
+     method: "PATCH",
+     headers: {
+       Authorization: `Bearer ${token}`,
+       "Content-Type": "application/json",
+     },
+     body: JSON.stringify(body),
+   });
+ 
+   return relayApiResponse(response);
  }
  
- export enum ComplianceFlagSeverity {
-   BLOCK = 'block',
-+  WARN = 'warn',
- }
+ export async function DELETE(
+   req: NextRequest,
+   context: { params: Promise<{ id: string }> },
+ ) {
+   const { id } = await context.params;
  
- export type ComplianceFlag = {
-   code: ComplianceFlagCode;
-   severity: ComplianceFlagSeverity;
-   message: string;
-+  evidence?: Array<{ baseline: string; generated: string }>;
- };
-diff --git a/apps/api/src/compliance/scope-inflation-detector.spec.ts b/apps/api/src/compliance/scope-inflation-detector.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c284240ac84abccef3047a51ce194a2de49825f3
---- /dev/null
-+++ b/apps/api/src/compliance/scope-inflation-detector.spec.ts
-@@ -0,0 +1,58 @@
-+import { BaselineSectionType } from '../baseline/baseline-section.entity';
-+import { ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
-+import { ScopeInflationDetector } from './scope-inflation-detector';
-+
-+describe('ScopeInflationDetector', () => {
-+  const detector = new ScopeInflationDetector();
-+
-+  it('does not flag scope cues that are present in the baseline fingerprint', () => {
-+    const flags = detector.detect(
-+      [
-+        {
-+          sectionType: BaselineSectionType.EXPERIENCE,
-+          title: 'Experience',
-+          content: 'Led a global team delivering a 10% uplift.',
-+        },
-+      ],
-+      [
-+        {
-+          title: 'Generated Resume',
-+          content: 'Led a global team delivering a 10% uplift.',
-+        },
-+      ],
-+    );
-+
-+    expect(flags).toHaveLength(0);
-+  });
-+
-+  it('blocks exaggerated seniority and scale claims beyond the baseline', () => {
-+    const flags = detector.detect(
-+      [
-+        {
-+          sectionType: BaselineSectionType.EXPERIENCE,
-+          title: 'Experience',
-+          content: 'Contributed to feature delivery.',
-+        },
-+      ],
-+      [
-+        {
-+          title: 'Generated Resume',
-+          content: 'Directed a global organization of thousands across regions.',
-+        },
-+      ],
-+    );
-+
-+    expect(flags).toEqual([
-+      expect.objectContaining({
-+        code: ComplianceFlagCode.SCOPE_INFLATION,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        evidence: expect.arrayContaining([
-+          expect.objectContaining({
-+            baseline: expect.any(String),
-+            generated: expect.stringContaining('Directed a global organization'),
-+          }),
-+        ]),
-+      }),
-+    ]);
-+  });
-+});
-diff --git a/apps/api/src/compliance/scope-inflation-detector.ts b/apps/api/src/compliance/scope-inflation-detector.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..5cfcfc2afb690883f675db1b00b264a231596b34
---- /dev/null
-+++ b/apps/api/src/compliance/scope-inflation-detector.ts
-@@ -0,0 +1,216 @@
-+import { BaselineSectionType } from '../baseline/baseline-section.entity';
-+import {
-+  ComplianceFlag,
-+  ComplianceFlagCode,
-+  ComplianceFlagSeverity,
-+} from './compliance.types';
-+
-+type ScopeCategory = 'seniority' | 'ownership' | 'scale';
-+
-+type Fingerprint = {
-+  cues: Record<ScopeCategory, Set<string>>;
-+  evidence: Record<ScopeCategory, Map<string, string>>;
+   const baseUrl = getApiBaseUrl();
+   const { token, error } = requireAuthToken(req);
+ 
+   if (!baseUrl) {
+     return NextResponse.json(
+       { error: "API base URL is not configured" },
+       { status: 500 },
+     );
+   }
+ 
+   if (!token) {
+     return error;
+   }
+ 
+-  const response = await fetch(`${baseUrl}/interviews/${id}`, {
++  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
+     method: "DELETE",
+     headers: {
+       Authorization: `Bearer ${token}`,
+     },
+   });
+ 
+   return relayApiResponse(response);
+ }
+diff --git a/apps/web/app/interviews/[id]/page.tsx b/apps/web/app/interviews/[id]/page.tsx
+index 3951d2c56dce3059e614dc6f1a827d3b29795e91..b5950de3dde56581211eb09c259ea1d2622c1392 100644
+--- a/apps/web/app/interviews/[id]/page.tsx
++++ b/apps/web/app/interviews/[id]/page.tsx
+@@ -1,173 +1,515 @@
+ "use client";
+ 
+ import { useEffect, useMemo, useState } from "react";
+-import { useParams } from "next/navigation";
++import Link from "next/link";
++import { useParams, useRouter } from "next/navigation";
+ 
+ import { InstrumentShell } from "../../ui/InstrumentShell";
+ import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
+-import type { InterviewSessionDto } from "../../../lib/interviews";
++import type { InterviewGap, InterviewQuestion, InterviewSessionDto } from "../../../lib/interviews";
+ 
+-const QUESTIONS = [
+-  "Walk me through the most relevant accomplishment in your baseline.",
+-  "What would your first 30 days look like if you joined this team?",
+-  "Which parts of the role feel like the biggest stretch for you?",
+-];
++type ComplianceFlag = {
++  code?: string;
++  message?: string;
++  severity?: string;
++  questionIndex?: number;
++  recommendationIndex?: number;
 +};
 +
-+type SectionShape = { content?: string | null; title?: string | null; sectionType?: string };
-+
-+const SCOPE_CUES: Record<ScopeCategory, string[]> = {
-+  seniority: [
-+    'director',
-+    'executive director',
-+    'senior director',
-+    'vp',
-+    'vice president',
-+    'svp',
-+    'evp',
-+    'chief',
-+    'cto',
-+    'ceo',
-+    'cpo',
-+    'head of',
-+    'principal',
-+    'executive',
-+    'global head',
-+    'senior vice president',
-+  ],
-+  ownership: [
-+    'owned',
-+    'led',
-+    'architected',
-+    'built',
-+    'drove',
-+    'managed',
-+    'spearheaded',
-+    'transformed',
-+    'accountable for',
-+    'responsible for',
-+    'oversaw',
-+    'directed',
-+    'created',
-+    'launched',
-+    'delivered',
-+    'implemented',
-+  ],
-+  scale: [
-+    'global',
-+    'worldwide',
-+    'multi-region',
-+    'multi region',
-+    'multi-regional',
-+    'company-wide',
-+    'enterprise',
-+    'enterprise-wide',
-+    'nationwide',
-+    'country-wide',
-+    'thousands',
-+    'millions',
-+    'billions',
-+  ],
++type ComplianceLookup = {
++  general: ComplianceFlag[];
++  questions: Record<number, ComplianceFlag[]>;
++  recommendations: Record<number, ComplianceFlag[]>;
 +};
 +
-+const CATEGORY_SEVERITY: Record<ScopeCategory, ComplianceFlagSeverity> = {
-+  seniority: ComplianceFlagSeverity.BLOCK,
-+  scale: ComplianceFlagSeverity.BLOCK,
-+  ownership: ComplianceFlagSeverity.WARN,
-+};
++function normalizeCompliance(validationResults?: Record<string, unknown>): ComplianceLookup {
++  const lookup: ComplianceLookup = { general: [], questions: {}, recommendations: {} };
++  if (!validationResults) return lookup;
 +
-+export class ScopeInflationDetector {
-+  private normalize(text: string) {
-+    return text.toLowerCase().replace(/\s+/g, ' ').trim();
-+  }
++  const rawFlags =
++    (validationResults as { complianceFlags?: unknown; compliance_flags?: unknown }).complianceFlags ??
++    (validationResults as { compliance_flags?: unknown }).compliance_flags ??
++    [];
 +
-+  private extractSnippet(text: string, cue: string) {
-+    const lower = text.toLowerCase();
-+    const index = lower.indexOf(cue);
-+    if (index === -1) {
-+      return text.slice(0, 200).trim();
-+    }
++  const flagsArray = Array.isArray(rawFlags) ? rawFlags : [];
 +
-+    const start = Math.max(0, index - 60);
-+    const end = Math.min(text.length, index + cue.length + 60);
-+    return text.slice(start, end).trim();
-+  }
-+
-+  private buildFingerprint(sections: SectionShape[]): Fingerprint {
-+    const fingerprint: Fingerprint = {
-+      cues: {
-+        seniority: new Set<string>(),
-+        ownership: new Set<string>(),
-+        scale: new Set<string>(),
-+      },
-+      evidence: {
-+        seniority: new Map<string, string>(),
-+        ownership: new Map<string, string>(),
-+        scale: new Map<string, string>(),
-+      },
-+    };
-+
-+    const relevantSections = sections.filter((section) => {
-+      const type = section.sectionType as BaselineSectionType | undefined;
-+      if (!type) return true;
-+      return [
-+        BaselineSectionType.EXPERIENCE,
-+        BaselineSectionType.PROJECT,
-+        BaselineSectionType.SUMMARY,
-+        BaselineSectionType.SKILLS,
-+      ].includes(type);
-+    });
-+
-+    for (const section of relevantSections) {
-+      const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
-+      if (!text) continue;
-+
-+      const normalized = this.normalize(text);
-+      for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
-+        for (const cue of cues) {
-+          if (normalized.includes(cue)) {
-+            fingerprint.cues[category].add(cue);
-+            if (!fingerprint.evidence[category].has(cue)) {
-+              fingerprint.evidence[category].set(cue, this.extractSnippet(text, cue));
++  flagsArray.forEach((flag) => {
++    const normalized: ComplianceFlag =
++      typeof flag === "string"
++        ? { message: flag }
++        : typeof flag === "object" && flag !== null
++          ? {
++              code: (flag as { code?: string }).code,
++              message: (flag as { message?: string }).message,
++              severity: (flag as { severity?: string }).severity,
++              questionIndex:
++                (flag as { questionIndex?: number }).questionIndex ??
++                (flag as { question_index?: number }).question_index ??
++                (flag as { questionIdx?: number }).questionIdx,
++              recommendationIndex:
++                (flag as { recommendationIndex?: number }).recommendationIndex ??
++                (flag as { recommendation_index?: number }).recommendation_index ??
++                (flag as { recommendationIdx?: number }).recommendationIdx,
 +            }
-+          }
-+        }
-+      }
++          : {};
++
++    if (normalized.questionIndex !== undefined && normalized.questionIndex >= 0) {
++      const existing = lookup.questions[normalized.questionIndex] ?? [];
++      lookup.questions[normalized.questionIndex] = [...existing, normalized];
++      return;
 +    }
 +
-+    return fingerprint;
-+  }
-+
-+  private gatherCues(
-+    section: { content?: string | null; title?: string | null },
-+  ): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
-+    const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
-+    if (!text) return [];
-+    const normalized = this.normalize(text);
-+
-+    const matches: Array<{ category: ScopeCategory; cue: string; snippet: string }> = [];
-+
-+    for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
-+      for (const cue of cues) {
-+        if (normalized.includes(cue)) {
-+          matches.push({
-+            category,
-+            cue,
-+            snippet: this.extractSnippet(text, cue),
-+          });
-+        }
-+      }
++    if (normalized.recommendationIndex !== undefined && normalized.recommendationIndex >= 0) {
++      const existing = lookup.recommendations[normalized.recommendationIndex] ?? [];
++      lookup.recommendations[normalized.recommendationIndex] = [...existing, normalized];
++      return;
 +    }
 +
-+    return matches;
-+  }
++    lookup.general.push(normalized);
++  });
 +
-+  detect(
-+    baselineSections: SectionShape[],
-+    generatedSections: Array<{ title?: string | null; content?: string | null }>,
-+  ): ComplianceFlag[] {
-+    const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
-+    const violations: Array<{
-+      category: ScopeCategory;
-+      cue: string;
-+      generated: string;
-+      baseline: string;
-+    }> = [];
-+
-+    for (const section of generatedSections ?? []) {
-+      const cues = this.gatherCues(section);
-+      for (const cue of cues) {
-+        if (!baselineFingerprint.cues[cue.category].has(cue.cue)) {
-+          const baselineEvidence =
-+            baselineFingerprint.evidence[cue.category].get(cue.cue) ??
-+            'Baseline has no matching scope evidence.';
-+          violations.push({
-+            category: cue.category,
-+            cue: cue.cue,
-+            generated: cue.snippet,
-+            baseline: baselineEvidence,
-+          });
-+        }
-+      }
-+    }
-+
-+    if (!violations.length) return [];
-+
-+    const hasBlocking = violations.some(
-+      (violation) => CATEGORY_SEVERITY[violation.category] === ComplianceFlagSeverity.BLOCK,
-+    );
-+
-+    const severity = hasBlocking ? ComplianceFlagSeverity.BLOCK : ComplianceFlagSeverity.WARN;
-+
-+    const evidence = violations.map((violation) => ({
-+      baseline: violation.baseline,
-+      generated: violation.generated,
-+    }));
-+
-+    return [
-+      {
-+        code: ComplianceFlagCode.SCOPE_INFLATION,
-+        severity,
-+        message: hasBlocking
-+          ? 'Potential scope inflation exceeds baseline scope.'
-+          : 'Potential scope inflation cues need review against baseline.',
-+        evidence,
-+      },
-+    ];
-+  }
++  return lookup;
 +}
-diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-index 5e0ff43cc7c09567e60e366d51415de2ad043182..bcd920773b8e3ad364b7804db4cfd8517c77347e 100644
---- a/apps/api/src/cover-letters/cover-letters.service.spec.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-@@ -38,50 +38,51 @@ describe('CoverLettersService', () => {
-         title: 'Experience',
-         content: 'Delivered 15% efficiency improvement with verified metrics.',
-         includePolicy: BaselineIncludePolicy.ALWAYS,
-         order: 0,
-         sectionType: BaselineSectionType.EXPERIENCE,
-       },
-     ],
-   });
-   const baselineVersionRepository = buildRepository<any>({
-     id: 'baseline-version-1',
-     baselineId: 'baseline-1',
-     hash: 'baseline-hash',
-   });
-   const baselineBlockPolicyRepository = buildRepository<any>();
-   const jobRepository = buildRepository<any>({
-     id: 'job-1',
-     userId: 'user-1',
-     title: 'Program Manager',
-     company: 'Acme Corp',
-     normalizedResponsibilities: ['Improve processes by 10%.'],
-     normalizedRequirements: ['Deliver measurable impact.'],
-   });
  
-   const complianceService = {
-     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-+    detectScopeInflation: jest.fn().mockReturnValue([]),
-     validateAndAudit: jest.fn(async (ctx: any) => ({
-       complianceFlags: ctx.extraFlags ?? [],
-       blocked: (ctx.extraFlags ?? []).some(
-         (flag: { severity: ComplianceFlagSeverity }) => flag.severity === ComplianceFlagSeverity.BLOCK,
-       ),
-       audit: { id: 'audit-1' },
-     })),
+ export default function InterviewSessionPage() {
+   const params = useParams<{ id: string }>();
++  const router = useRouter();
+   const sessionId = params?.id;
+   const [session, setSession] = useState<InterviewSessionDto | null>(null);
+-  const [answers, setAnswers] = useState<string[]>(() => QUESTIONS.map(() => ""));
++  const [answers, setAnswers] = useState<string[]>([]);
+   const [saving, setSaving] = useState(false);
+   const [message, setMessage] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
++  const [recommendationDecisions, setRecommendationDecisions] = useState<
++    Record<number, "accept" | "reject" | "defer">
++  >({});
+ 
+   useEffect(() => {
+     if (!sessionId) return;
+ 
+     const loadSession = async () => {
+       try {
+         const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
+ 
+         if (!response.ok) {
+           throw new Error("Unable to load interview session.");
+         }
+ 
+         const data = (await response.json()) as InterviewSessionDto;
+         setSession(data);
+ 
+-        if (data?.responses?.length) {
+-          const responseMap = new Map(data.responses.map((item) => [item.question, item.response]));
+-          setAnswers(QUESTIONS.map((question) => responseMap.get(question) ?? ""));
+-        }
++        const questionCount = data?.questions?.length ?? 0;
++        const existingResponses =
++          Array.isArray(data?.responses) && data.responses.length
++            ? data.responses.map((entry) => entry?.toString() ?? "")
++            : [];
++
++        setAnswers((prev) => {
++          if (prev.length === questionCount && existingResponses.length === 0) {
++            return prev;
++          }
++          return Array.from({ length: questionCount }, (_, index) => existingResponses[index] ?? "");
++        });
+       } catch (loadError) {
+         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
+       }
+     };
+ 
+     loadSession();
+   }, [sessionId]);
+ 
++  const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
++  const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
++  const recommendedAdditions: string[] = useMemo(
++    () => session?.recommendedAdditions ?? [],
++    [session?.recommendedAdditions],
++  );
++  const complianceLookup = useMemo(
++    () => normalizeCompliance(session?.validationResults),
++    [session?.validationResults],
++  );
++
++  const gapMap = useMemo(() => {
++    const map = new Map<string, InterviewGap>();
++    gaps.forEach((gap) => map.set(gap.gapId, gap));
++    return map;
++  }, [gaps]);
++
+   const handleChange = (index: number, value: string) => {
+     setAnswers((prev) => {
+       const next = [...prev];
+       next[index] = value;
+       return next;
+     });
    };
  
-   const dataSource = {
-     getRepository: jest.fn((entity) => {
-       switch ((entity as any)?.name) {
-         case 'CoverLetter':
-           return coverLetterRepository;
-         case 'Baseline':
-           return baselineRepository;
-         case 'BaselineVersion':
-           return baselineVersionRepository;
-         case 'BaselineBlockPolicy':
-           return baselineBlockPolicyRepository;
-         case 'Job':
-           return jobRepository;
-         default:
-           throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
+-  const populatedResponses = useMemo(() => {
+-    return QUESTIONS.map((question, index) => ({
+-      question,
+-      response: answers[index]?.trim() ?? "",
+-    })).filter((item) => item.response.length > 0);
+-  }, [answers]);
++  const trimmedResponses = useMemo(
++    () => answers.map((answer) => (answer ?? "").trim()),
++    [answers],
++  );
++
++  const answeredCount = useMemo(
++    () => trimmedResponses.filter((response) => response.length > 0).length,
++    [trimmedResponses],
++  );
+ 
+   const handleSave = async () => {
+     if (!sessionId) return;
+ 
+-    if (populatedResponses.length === 0) {
++    if (answeredCount === 0) {
+       setError("Add at least one response before saving.");
+       return;
+     }
+ 
+     setSaving(true);
+     setError(null);
+     setMessage(null);
+ 
+     try {
+-      const response = await fetch(`/api/interviews/${sessionId}/responses`, {
+-        method: "POST",
++      const response = await fetch(`/api/interviews/${sessionId}`, {
++        method: "PATCH",
+         headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify({ responses: populatedResponses }),
++        body: JSON.stringify({ responses: trimmedResponses }),
+       });
+ 
+       if (!response.ok) {
+         const payload = await response.json().catch(() => null);
+-        const messageText = payload?.error ?? "Unable to save responses.";
++        const messageText = payload?.error ?? payload?.message ?? "Unable to save responses.";
+         throw new Error(messageText);
        }
-@@ -112,26 +113,47 @@ describe('CoverLettersService', () => {
-     });
  
-     expect(second.closingTemplateKey).toBe('collaborative');
-   });
- 
-   it('blocks invented metrics through compliance checks', async () => {
-     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
-       {
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Metric not found in baseline.',
-       },
-     ]);
- 
-     const service = new CoverLettersService(dataSource, complianceService as any);
- 
-     await expect(
-       service.generateCoverLetter('user-1', {
-         baselineId: 'baseline-1',
-         jobId: 'job-1',
-       }),
-     ).rejects.toThrow(UnprocessableEntityException);
- 
-     expect(complianceService.validateAndAudit).toHaveBeenCalled();
-   });
-+
-+  it('blocks cover letter generation when scope inflation is detected', async () => {
-+    complianceService.detectScopeInflation.mockReturnValueOnce([
-+      {
-+        code: ComplianceFlagCode.SCOPE_INFLATION,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Scope exceeds baseline.',
-+      },
-+    ]);
-+
-+    const service = new CoverLettersService(dataSource, complianceService as any);
-+
-+    await expect(
-+      service.generateCoverLetter('user-1', {
-+        baselineId: 'baseline-1',
-+        jobId: 'job-1',
-+      }),
-+    ).rejects.toThrow(UnprocessableEntityException);
-+
-+    expect(complianceService.validateAndAudit).toHaveBeenCalled();
-+  });
- });
-diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
-index 073716caeb2abb7d9d8b2dcf87a6a95859be247b..5828b097b71846aaa0b31ed71843aef5eac0ce69 100644
---- a/apps/api/src/cover-letters/cover-letters.service.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.ts
-@@ -129,60 +129,69 @@ export class CoverLettersService {
-       baselineId: baseline.id,
-       jobId: job.id,
-       allowedBaselineBlocks: allowedBlocks,
-       job: jobContext,
-       closingTemplate,
-       maxWords: input.maxWords,
-       tone: input.tone,
-     });
- 
-     const normalizedContent = this.complianceService.normalizeText(
-       generation.content,
-     );
- 
-     const complianceBaselineSections = this.buildComplianceBaselineSections(
-       allowedBlocks,
-       jobContext,
-     );
- 
-     const writingFlags = this.complianceService.enforceResumeWritingRules({
-       baselineSections: complianceBaselineSections,
-       generatedSections: [
-         { title: 'Cover Letter', content: generation.content },
-       ],
-     });
- 
-+    const scopeFlags = this.complianceService.detectScopeInflation({
-+      baselineSections: allowedBlocks.map((block) => ({
-+        title: block.title,
-+        content: block.content,
-+        sectionType: block.sectionType,
-+      })),
-+      generatedSections: [{ title: 'Cover Letter', content: generation.content }],
-+    });
-+
-     const { complianceFlags, blocked } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.COVER_LETTER_GENERATION,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash: createHash('sha256')
-           .update(normalizedContent)
-           .digest('hex'),
--        extraFlags: writingFlags,
-+        extraFlags: [...writingFlags, ...scopeFlags],
-         scopeInflationDetected: false,
-       });
- 
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
-         },
-       });
+       setMessage("Responses saved. You can revisit this page anytime.");
+     } catch (saveError) {
+       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
+     } finally {
+       setSaving(false);
      }
+   };
  
-     const coverLetter = this.coverLetterRepository.create({
-       userId,
-       baselineId: baseline.id,
-       jobId: job.id,
-       generatorType: 'template',
-       generatorVersion: 'v1',
-       closingTemplateKey,
-       content: normalizedContent,
-       generationInputsHash,
-     });
- 
-     return this.coverLetterRepository.save(coverLetter);
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
-index 67edc987859473a94dac0dde5f465aae31ea1703..c20fe474c17b2589e01d6f9785eb3f1bd50759d9 100644
---- a/apps/api/src/resume/resume.service.spec.ts
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -42,50 +42,51 @@ const buildService = (
-   fitScore: number,
-   writingFlags: any[] = [],
-   baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
-   complianceOverride: Partial<ComplianceService> = {},
- ) => {
-   const baselineRepository = buildRepository({
-     findOne: jest.fn().mockResolvedValue(mockBaseline),
-   });
-   const baselineVersionRepository = buildRepository({
-     findOne: jest.fn().mockResolvedValue(baselineVersionOverride),
-   });
-   const baselineBlockPolicyRepository = buildRepository({
-     find: jest.fn().mockResolvedValue([]),
-   });
-   const jobsRepository = buildRepository({
-     findOne: jest.fn().mockResolvedValue(mockJob),
-   });
-   const fitAssessmentRepository = buildRepository({
-     findOne: jest.fn().mockResolvedValue({
-       id: 'fit-1',
-       overallScore: fitScore,
-     }),
-   });
-   const complianceService = {
-     enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
-+    detectScopeInflation: jest.fn().mockReturnValue([]),
-     validateAndAudit: jest.fn().mockResolvedValue({
-       complianceFlags: writingFlags,
-       blocked: writingFlags.length > 0,
-       audit: { id: 'audit-1' },
-     }),
-     ...complianceOverride,
-   } as unknown as ComplianceService;
- 
-   return {
-     service: new ResumeService(
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       baselineRepository,
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       baselineVersionRepository,
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       baselineBlockPolicyRepository,
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       jobsRepository,
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       fitAssessmentRepository,
-@@ -167,40 +168,65 @@ describe('ResumeService', () => {
-         baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
-         job: expect.objectContaining({ id: 'job-1' }),
-         outputHash: expect.any(String),
-       }),
-     );
-   });
- 
-   it('blocks generation when invented metrics are present', async () => {
-     const inventedMetricFlag = [
-       {
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Metric not in baseline.',
-       },
-     ];
-     const { service } = buildService(95, inventedMetricFlag);
- 
-     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-       UnprocessableEntityException,
-     );
-   });
- 
-   it('blocks export when compliance flags are blocking', async () => {
-     const complianceService = {
-       enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-+      detectScopeInflation: jest.fn().mockReturnValue([]),
-       validateAndAudit: jest.fn().mockResolvedValue({
-         complianceFlags: [
-           { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
-         ],
-         blocked: true,
-         audit: { id: 'audit-2' },
-       }),
-     } as unknown as ComplianceService;
-     const { service } = buildService(95, [], mockBaselineVersion, complianceService);
- 
-     await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
-       UnprocessableEntityException,
-     );
-   });
++  const handleDecision = (index: number, decision: "accept" | "reject" | "defer") => {
++    setRecommendationDecisions((prev) => ({ ...prev, [index]: decision }));
++  };
 +
-+  it('blocks generation when scope inflation is detected', async () => {
-+    const scopeFlag = [
-+      {
-+        code: ComplianceFlagCode.SCOPE_INFLATION,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+        message: 'Scope exceeds baseline.',
++  const recommendationStats = useMemo(() => {
++    return recommendedAdditions.reduce(
++      (acc, _, index) => {
++        const decision = recommendationDecisions[index];
++        if (decision === "accept") acc.accepted += 1;
++        else if (decision === "reject") acc.rejected += 1;
++        else if (decision === "defer") acc.deferred += 1;
++        return acc;
 +      },
-+    ];
-+
-+    const { service } = buildService(95, [], mockBaselineVersion, {
-+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-+      detectScopeInflation: jest.fn().mockReturnValue(scopeFlag),
-+      validateAndAudit: jest.fn().mockResolvedValue({
-+        complianceFlags: scopeFlag,
-+        blocked: true,
-+        audit: { id: 'audit-3' },
-+      }),
-+    });
-+
-+    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-+      UnprocessableEntityException,
++      { accepted: 0, rejected: 0, deferred: 0 },
 +    );
-+  });
- });
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index d84a49563edea68042a8c9c2de22f5ca064baef9..0a6a1803bf611105313426ffb1590ce284539649 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -187,63 +187,66 @@ export class ResumeService {
-     }));
- 
-     const job = jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: jobId, userId },
-         })
-       : null;
- 
-     if (jobId && !job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     if (request.oneTap && jobId) {
-       await this.ensureOneTapAllowed(userId, jobId);
-     }
- 
-     const outputHash = createHash('sha256')
-       .update(JSON.stringify(this.complianceService.normalizeSectionsForOutput(sections)))
-       .digest('hex');
- 
-     const writingFlags = this.complianceService.enforceResumeWritingRules({
-       baselineSections: baseline.sections ?? [],
-       generatedSections: sections,
-     });
- 
-+    const scopeFlags = this.complianceService.detectScopeInflation({
-+      baselineSections: sections,
-+      generatedSections: sections,
-+    });
++  }, [recommendationDecisions, recommendedAdditions]);
 +
-     const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
+   return (
+     <InstrumentShell
+       kicker="Interview session"
+       title="Fit Review"
+-      subtitle="Capture a few quick responses while the role context is fresh."
++      subtitle="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
+     >
+       <div style={ttrLayout.panelsRow}>
+-        <section style={{ ...ttrComponents.basePanel, flex: 1.2 }}>
++        <section style={{ ...ttrComponents.basePanel, flex: 1.4, display: "flex", flexDirection: "column", gap: 12 }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Session details</span>
+             <h2 style={ttrTypography.h2}>Interview prompts</h2>
+           </div>
  
-     const { complianceFlags, blocked, audit } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.RESUME_GENERATION,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash,
--        scopeInflationDetected: sections.some(
--          (section) => section.includePolicy === BaselineIncludePolicy.NEVER,
--        ),
--        extraFlags: writingFlags,
-+        scopeInflationDetected: false,
-+        extraFlags: [...writingFlags, ...scopeFlags],
-       });
+-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
+-            {QUESTIONS.map((question, index) => (
+-              <div key={question} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+-                <label style={ttrComponents.fieldLabel}>{question}</label>
+-                <textarea
+-                  style={{ ...ttrComponents.textArea, minHeight: 120 }}
+-                  value={answers[index] ?? ""}
+-                  onChange={(event) => handleChange(index, event.target.value)}
+-                />
+-              </div>
+-            ))}
++          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
++            {questions.length === 0 ? (
++              <div style={ttrComponents.warningBox}>No interview questions were generated for this session.</div>
++            ) : (
++              questions.map((question, index) => {
++                const gap = gapMap.get(question.gapId);
++                const complianceFlags = complianceLookup.questions[index] ?? [];
++
++                return (
++                  <div key={`${question.prompt}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
++                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
++                      <label style={ttrComponents.fieldLabel}>{question.prompt}</label>
++                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.72)", display: "flex", flexWrap: "wrap", gap: 8 }}>
++                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
++                          Category: {question.category}
++                        </span>
++                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
++                          Gap: {question.gapId}
++                        </span>
++                        {gap ? (
++                          <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
++                            Domain: {gap.domain} | Confidence: {gap.confidence}
++                          </span>
++                        ) : null}
++                      </div>
++                      {gap ? (
++                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
++                          JD excerpt: <em>{gap.jdExcerpt}</em>
++                          {gap.baselineExcerpt ? (
++                            <>
++                              {" "}
++                              | Baseline: <em>{gap.baselineExcerpt}</em>
++                            </>
++                          ) : null}
++                        </div>
++                      ) : null}
++                      <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>
++                        Reason: Generated from gap {question.gapId}.
++                      </div>
++                    </div>
++
++                    <textarea
++                      style={{ ...ttrComponents.textArea, minHeight: 120 }}
++                      value={answers[index] ?? ""}
++                      onChange={(event) => handleChange(index, event.target.value)}
++                    />
++
++                    {complianceFlags.length ? (
++                      <div style={ttrComponents.warningBox}>
++                        <strong>Compliance checks:</strong>
++                        <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
++                          {complianceFlags.map((flag, flagIndex) => (
++                            <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
++                              {flag.code ? `${flag.code}: ` : ""}
++                              {flag.message ?? "Flagged response"}
++                              {flag.severity ? ` (severity: ${flag.severity})` : ""}
++                            </li>
++                          ))}
++                        </ul>
++                      </div>
++                    ) : null}
++                  </div>
++                );
++              })
++            )}
  
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
-         },
-       });
-     }
+             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+               <button
+                 type="button"
+                 onClick={handleSave}
+                 disabled={saving}
+                 style={{
+                   ...ttrComponents.primaryButton,
+                   opacity: saving ? 0.6 : 1,
+                   cursor: saving ? "not-allowed" : "pointer",
+                 }}
+               >
+                 {saving ? "Saving..." : "Save responses"}
+               </button>
+               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                 Session ID: {sessionId}
+               </span>
+             </div>
  
-     return {
-       ok: true,
-       baselineId: baseline.id,
-       baselineVersionId: baselineVersion.id,
-       jobId: jobId ?? null,
-       sections: normalizedSections,
-       compliance_flags: complianceFlags,
-       audit_id: audit.id,
-     };
-   }
+             {message ? <div style={ttrComponents.successBox}>{message}</div> : null}
+             {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
+           </div>
+         </section>
  
-   async exportResume(
-     userId: string,
+-        <section style={{ ...ttrComponents.basePanel, flex: 0.8 }}>
++        <section style={{ ...ttrComponents.basePanel, flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+             <span style={ttrTypography.subtleLabel}>Session</span>
+             <h2 style={ttrTypography.h2}>Overview</h2>
+           </div>
+ 
+-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
++          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+             <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
+               Status: <strong>{session?.status ?? "loading"}</strong>
+             </div>
+             <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+               Baseline: {session?.baselineId ?? "..."}
+             </div>
++            {session?.baselineVersionId ? (
++              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
++                Baseline version: {session.baselineVersionId}
++              </div>
++            ) : null}
+             {session?.jobId ? (
+               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+                 Job: {session.jobId}
+               </div>
+             ) : null}
+             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
+               Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
+             </div>
++            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
++              Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
++            </div>
++          </div>
++
++          <div>
++            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++              <span style={ttrTypography.subtleLabel}>Detected gaps</span>
++              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
++                {gaps.length === 0 ? (
++                  <div style={ttrComponents.warningBox}>No gaps were returned for this interview.</div>
++                ) : (
++                  gaps.map((gap) => (
++                    <div
++                      key={gap.gapId}
++                      style={{
++                        padding: 10,
++                        borderRadius: 10,
++                        border: "1px solid rgba(148,163,184,0.3)",
++                        background: "rgba(15,23,42,0.6)",
++                        display: "flex",
++                        flexDirection: "column",
++                        gap: 6,
++                      }}
++                    >
++                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
++                        <strong style={{ color: "#e2e8f0" }}>{gap.gapId}</strong>
++                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
++                          Domain: {gap.domain}
++                        </span>
++                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
++                          Confidence: {gap.confidence}
++                        </span>
++                      </div>
++                      <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)" }}>
++                        JD: <em>{gap.jdExcerpt}</em>
++                      </div>
++                      {gap.baselineExcerpt ? (
++                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
++                          Baseline: <em>{gap.baselineExcerpt}</em>
++                        </div>
++                      ) : null}
++                    </div>
++                  ))
++                )}
++              </div>
++            </div>
++          </div>
++
++          <div>
++            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++              <span style={ttrTypography.subtleLabel}>Recommendations</span>
++              {recommendedAdditions.length === 0 ? (
++                <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
++              ) : (
++                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
++                  {recommendedAdditions.map((item, index) => {
++                    const decision = recommendationDecisions[index];
++                    const complianceFlags = complianceLookup.recommendations[index] ?? [];
++                    const acceptBlocked = complianceFlags.length > 0;
++
++                    return (
++                      <div
++                        key={`${item}-${index}`}
++                        style={{
++                          padding: 12,
++                          borderRadius: 10,
++                          border: "1px solid rgba(148,163,184,0.28)",
++                          background: "rgba(15,23,42,0.6)",
++                          display: "flex",
++                          flexDirection: "column",
++                          gap: 8,
++                        }}
++                      >
++                        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
++                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>{item}</div>
++                          {decision === "accept" ? (
++                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.15)", color: "#86efac", fontSize: 12 }}>
++                              Staged
++                            </span>
++                          ) : null}
++                        </div>
++
++                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
++                          <button
++                            type="button"
++                            onClick={() => handleDecision(index, "accept")}
++                            disabled={acceptBlocked}
++                            style={{
++                              ...ttrComponents.primaryButton,
++                              padding: "6px 12px",
++                              fontSize: 13,
++                              opacity: acceptBlocked ? 0.5 : 1,
++                              cursor: acceptBlocked ? "not-allowed" : "pointer",
++                            }}
++                          >
++                            Accept
++                          </button>
++                          <button
++                            type="button"
++                            onClick={() => handleDecision(index, "reject")}
++                            style={{ ...ttrComponents.secondaryButton, padding: "6px 12px", fontSize: 13 }}
++                          >
++                            Reject
++                          </button>
++                          <button
++                            type="button"
++                            onClick={() => handleDecision(index, "defer")}
++                            style={{ ...ttrComponents.quietButton, padding: "6px 12px", fontSize: 13 }}
++                          >
++                            Defer
++                          </button>
++                        </div>
++
++                        {complianceFlags.length ? (
++                          <div style={ttrComponents.warningBox}>
++                            <strong>Compliance flags:</strong>
++                            <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
++                              {complianceFlags.map((flag, flagIndex) => (
++                                <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
++                                  {flag.code ? `${flag.code}: ` : ""}
++                                  {flag.message ?? "Flagged recommendation"}
++                                  {flag.severity ? ` (severity: ${flag.severity})` : ""}
++                                </li>
++                              ))}
++                            </ul>
++                          </div>
++                        ) : null}
++                      </div>
++                    );
++                  })}
++                </div>
++              )}
++            </div>
++          </div>
++
++          <div>
++            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
++              <span style={ttrTypography.subtleLabel}>Completion</span>
++              <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Summary</h3>
++            </div>
++            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
++              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
++                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Detected gaps</div>
++                <div style={{ fontSize: 24, fontWeight: 700 }}>{gaps.length}</div>
++              </div>
++              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
++                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Questions answered</div>
++                <div style={{ fontSize: 24, fontWeight: 700 }}>
++                  {answeredCount} / {questions.length}
++                </div>
++              </div>
++              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
++                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Recommendations</div>
++                <div style={{ fontSize: 14, lineHeight: 1.5 }}>
++                  Accepted: <strong>{recommendationStats.accepted}</strong>
++                  <br />
++                  Rejected: <strong>{recommendationStats.rejected}</strong>
++                  <br />
++                  Deferred: <strong>{recommendationStats.deferred}</strong>
++                </div>
++              </div>
++            </div>
++
++            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
++              <button
++                type="button"
++                onClick={() => router.push("/fit-review")}
++                style={{ ...ttrComponents.secondaryButton, padding: "10px 14px" }}
++              >
++                Back to fit review
++              </button>
++              <Link href="/results" style={{ ...ttrComponents.primaryButton, padding: "10px 14px", textDecoration: "none" }}>
++                Continue
++              </Link>
++            </div>
+           </div>
+         </section>
+       </div>
+     </InstrumentShell>
+   );
+ }
+diff --git a/apps/web/lib/interviews.ts b/apps/web/lib/interviews.ts
+index cfed753a639f342273b5f61f717e88ddad53aa38..c2f54e3cb903a0905a578ab3756700c22c38a600 100644
+--- a/apps/web/lib/interviews.ts
++++ b/apps/web/lib/interviews.ts
+@@ -1,17 +1,48 @@
++export type GapDomain = "experience" | "tooling" | "scope" | "leadership" | "industry";
++
++export type GapConfidence = "low" | "medium" | "high";
++
++export interface InterviewGap {
++  gapId: string;
++  domain: GapDomain;
++  jdExcerpt: string;
++  baselineExcerpt: string | null;
++  confidence: GapConfidence;
++}
++
++export type InterviewQuestionCategory =
++  | "Direct Experience"
++  | "Context"
++  | "Scope"
++  | "Tooling"
++  | "Impact";
++
++export interface InterviewQuestion {
++  gapId: string;
++  category: InterviewQuestionCategory;
++  prompt: string;
++  jdReference: string;
++}
++
+ export interface InterviewResponseDto {
+   id: string;
+   question: string;
+   response: string;
+   createdAt: string;
+   updatedAt: string;
+ }
+ 
+ export interface InterviewSessionDto {
+   id: string;
+-  baselineId: string;
++  baselineId: string | null;
++  baselineVersionId: string | null;
+   jobId: string | null;
+   status: string;
+-  responses?: InterviewResponseDto[];
++  gapList?: InterviewGap[];
++  questions?: InterviewQuestion[];
++  responses?: string[];
++  validationResults?: Record<string, unknown>;
++  recommendedAdditions?: string[];
+   createdAt: string;
+   updatedAt: string;
+ }
