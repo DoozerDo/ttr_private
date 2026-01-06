@@ -1,4 +1,4 @@
-import { UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
@@ -112,6 +112,14 @@ describe('ResumeService', () => {
     );
   });
 
+  it('requires a baselineVersionId for generation', async () => {
+    const { service } = buildService(95);
+
+    await expect(
+      service.generateResume('user-1', { ...request, baselineVersionId: '' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('allows one-tap generation when fit score is at least 92', async () => {
     const { service } = buildService(92);
 
@@ -152,7 +160,7 @@ describe('ResumeService', () => {
     const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
 
     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
+      BadRequestException,
     );
   });
 

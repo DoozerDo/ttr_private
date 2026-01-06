@@ -1,4 +1,4 @@
-import { UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
@@ -98,6 +98,7 @@ describe('CoverLettersService', () => {
 
     await service.generateCoverLetter('user-1', {
       baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
       closingTemplateKey: 'collaborative',
     });
@@ -109,6 +110,7 @@ describe('CoverLettersService', () => {
     // Simulate subsequent call without providing a template key.
     const second = await service.generateCoverLetter('user-1', {
       baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
     });
 
@@ -129,6 +131,7 @@ describe('CoverLettersService', () => {
     await expect(
       service.generateCoverLetter('user-1', {
         baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
         jobId: 'job-1',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
@@ -150,10 +153,23 @@ describe('CoverLettersService', () => {
     await expect(
       service.generateCoverLetter('user-1', {
         baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
         jobId: 'job-1',
       }),
     ).rejects.toThrow(UnprocessableEntityException);
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
+  });
+
+  it('rejects generation without a baseline version id', async () => {
+    const service = new CoverLettersService(dataSource, complianceService as any);
+
+    await expect(
+      service.generateCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        jobId: 'job-1',
+        baselineVersionId: '',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

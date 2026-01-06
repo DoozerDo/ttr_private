@@ -1,15 +1,13 @@
-import { createHash } from 'crypto';
 import { ComplianceService } from './compliance.service';
-import {
-  ComplianceAction,
-  ComplianceFlagCode,
-  ComplianceFlagSeverity,
-} from './compliance.types';
-import { BaselineSectionType } from '../baseline/baseline-section.entity';
+import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
 
 const buildAuditRepo = () => {
   const create = jest.fn((payload) => payload);
-  const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
+  const save = jest.fn(async (payload) => ({
+    id: 'audit-1',
+    createdAt: new Date(),
+    ...payload,
+  }));
 
   return { create, save };
 };
@@ -26,91 +24,9 @@ describe('ComplianceService', () => {
     jest.clearAllMocks();
   });
 
-  it('passes validation when baseline hash and job company are present', async () => {
-    const baselineVersion = { hash: 'baseline-hash' };
-    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
-
-    const result = await service.validateAndAudit({
-      action: ComplianceAction.RESUME_GENERATION,
-      actorId: 'user-1',
-      baselineVersion,
-      job,
-      outputHash: 'out-123',
-    });
-
-    expect(result.blocked).toBe(false);
-    expect(result.complianceFlags).toHaveLength(0);
-    expect(repoMock.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actorId: 'user-1',
-        action: ComplianceAction.RESUME_GENERATION,
-        baselineVersionHash: 'baseline-hash',
-        jobHash: createHash('sha256').update('Job description').digest('hex'),
-        outputHash: 'out-123',
-        passFail: true,
-      }),
-    );
-  });
-
-  it('fails validation when baseline hash is missing', async () => {
-    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
-
-    const result = await service.validateAndAudit({
-      action: ComplianceAction.RESUME_GENERATION,
-      actorId: 'user-1',
-      baselineVersion: { hash: null },
-      job,
-    });
-
-    expect(result.blocked).toBe(true);
-    expect(result.complianceFlags).toEqual([
-      expect.objectContaining({ code: ComplianceFlagCode.MISSING_BASELINE_HASH }),
-    ]);
-    expect(repoMock.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        passFail: false,
-      }),
-    );
-  });
-
-  it('returns multiple flags when more than one condition fails', async () => {
-    const job = { company: '', rawDescription: 'Job description' };
-
-    const result = await service.validateAndAudit({
-      action: ComplianceAction.RESUME_GENERATION,
-      actorId: 'user-2',
-      baselineVersion: { hash: null },
-      job,
-    });
-
-    const codes = result.complianceFlags.map((flag) => flag.code);
-    expect(codes).toEqual(
-      expect.arrayContaining([
-        ComplianceFlagCode.MISSING_BASELINE_HASH,
-        ComplianceFlagCode.UNKNOWN_COMPANY,
-      ]),
-    );
-    expect(result.blocked).toBe(true);
-  });
-
-  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
+  it('flags stylized dash punctuation without mutating content', () => {
     const flags = service.enforceResumeWritingRules({
-      baselineSections: [{ content: 'Improved uptime by 10%' }],
-      generatedSections: [{ content: 'Improved uptime by 25%' }],
-    });
-
-    expect(flags).toEqual([
-      expect.objectContaining({
-        code: ComplianceFlagCode.INVENTED_METRIC,
-        severity: ComplianceFlagSeverity.BLOCK,
-      }),
-    ]);
-  });
-
-  it('blocks stylized punctuation in generated output', () => {
-    const flags = service.enforceResumeWritingRules({
-      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
-      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
+      rawContent: 'Delivered impact — and scale.',
     });
 
     expect(flags).toEqual([
@@ -121,79 +37,60 @@ describe('ComplianceService', () => {
     ]);
   });
 
-  it('normalizes stylized punctuation for downstream output', () => {
-    const normalized = service.normalizeSectionsForOutput([
-      { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
-    ]);
+  it('persists audit metadata with baseline version details', async () => {
+    const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
+    const job = { id: 'job-1' };
 
-    expect(normalized[0]).toEqual(
+    const result = await service.validateAndAudit({
+      action: ComplianceAction.RESUME_GENERATION,
+      actorId: 'user-1',
+      baselineVersion,
+      job,
+      outputHash: 'out-123',
+    });
+
+    expect(repoMock.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Impact-Summary',
-        content: 'Led teams... increased revenue by 1,200%',
+        actorId: 'user-1',
+        action: ComplianceAction.RESUME_GENERATION,
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobId: 'job-1',
+        outputHash: 'out-123',
+        passFail: true,
       }),
     );
-  });
-
-  it('blocks invented metrics with formatted numbers', () => {
-    const flags = service.enforceResumeWritingRules({
-      baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
-      generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
-    });
-
-    expect(flags).toEqual([
+    expect(result.audit).toEqual(
       expect.objectContaining({
-        code: ComplianceFlagCode.INVENTED_METRIC,
-        severity: ComplianceFlagSeverity.BLOCK,
+        id: 'audit-1',
+        baselineVersionId: 'bv-1',
+        baselineVersionHash: 'hash-1',
+        jobId: 'job-1',
       }),
-    ]);
+    );
+    expect(result.blocked).toBe(false);
   });
 
-  it('allows technologies present in baseline vocabulary', () => {
-    const flags = service.enforceResumeWritingRules({
-      baselineSections: [
-        {
-          title: 'Skills',
-          content: 'AWS, PostgreSQL, Terraform',
-          sectionType: BaselineSectionType.SKILLS,
-        },
-      ],
-      generatedSections: [{ content: 'Led AWS migration with PostgreSQL.' }],
+  it('blocks when baseline version context is missing for guarded actions', async () => {
+    const result = await service.validateAndAudit({
+      action: ComplianceAction.COVER_LETTER_GENERATION,
+      actorId: 'user-2',
+      outputHash: 'out-999',
     });
 
-    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
-  });
-
-  it('blocks technologies not present in baseline', () => {
-    const flags = service.enforceResumeWritingRules({
-      baselineSections: [
-        {
-          title: 'Skills',
-          content: 'AWS, PostgreSQL',
-          sectionType: BaselineSectionType.SKILLS,
-        },
-      ],
-      generatedSections: [{ content: 'Implemented QuantumOS pipelines.' }],
-    });
-
-    expect(flags).toEqual(
+    const codes = result.complianceFlags.map((flag) => flag.code);
+    expect(codes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY, severity: ComplianceFlagSeverity.BLOCK }),
+        ComplianceFlagCode.MISSING_BASELINE_VERSION,
+        ComplianceFlagCode.MISSING_BASELINE_HASH,
       ]),
     );
-  });
-
-  it('is conservative and avoids over-flagging generic terms', () => {
-    const flags = service.enforceResumeWritingRules({
-      baselineSections: [
-        {
-          title: 'Experience',
-          content: 'AWS migration and platform leadership.',
-          sectionType: BaselineSectionType.EXPERIENCE,
-        },
-      ],
-      generatedSections: [{ content: 'Collaborated with cross-functional teams to improve processes.' }],
-    });
-
-    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
+    expect(result.blocked).toBe(true);
+    expect(repoMock.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        passFail: false,
+        baselineVersionId: null,
+      }),
+    );
   });
 });

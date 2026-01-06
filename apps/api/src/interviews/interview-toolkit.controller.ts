@@ -26,7 +26,7 @@ export class InterviewToolkitController {
   @Post(':jobId/follow-up')
   async generateFollowUp(
     @Param('jobId') jobId: string,
-    @Body() body: { notes?: string },
+    @Body() body: { notes?: string; baselineVersionId?: string },
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
@@ -39,6 +39,11 @@ export class InterviewToolkitController {
       throw new BadRequestException('jobId is required');
     }
 
-    return this.interviewToolkitService.generateFollowUp(userId, jobId.trim(), body?.notes);
+    return this.interviewToolkitService.generateFollowUp(
+      userId,
+      jobId.trim(),
+      body?.baselineVersionId,
+      body?.notes,
+    );
   }
 }

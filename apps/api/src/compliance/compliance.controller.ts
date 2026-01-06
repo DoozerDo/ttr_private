@@ -56,8 +56,9 @@ export class ComplianceController {
     @Body()
     body: {
       action?: ComplianceAction;
+      baseline_version_id?: string | null;
       baseline_version_hash?: string | null;
-      job_hash?: string | null;
+      job_id?: string | null;
       output_hash?: string | null;
       compliance_flags?: Array<{ code: ComplianceFlagCode; message?: string | null }>;
     },
@@ -85,8 +86,9 @@ export class ComplianceController {
     const audit = this.auditsRepository.create({
       actorId,
       action: body.action,
+      baselineVersionId: body.baseline_version_id ?? null,
       baselineVersionHash: body.baseline_version_hash ?? null,
-      jobHash: body.job_hash ?? null,
+      jobId: body.job_id ?? null,
       outputHash: body.output_hash ?? null,
       complianceFlags,
       passFail: !blocked,

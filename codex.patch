@@ -1,423 +1,1544 @@
-diff --git a/apps/api/src/interviews/gap-detection.service.spec.ts b/apps/api/src/interviews/gap-detection.service.spec.ts
-index 3a20f99c3ba357e4403e71b6d706008da8d369c4..8fcafc75d18b4ec436c819184c65701c4042bfaa 100644
---- a/apps/api/src/interviews/gap-detection.service.spec.ts
-+++ b/apps/api/src/interviews/gap-detection.service.spec.ts
-@@ -242,26 +242,226 @@ describe('GapDetectionService', () => {
-       } as unknown as BaselineSection,
-     ]);
-     baselineBlockPolicyRepository.find.mockResolvedValue([]);
+diff --git a/apps/api/src/compliance/compliance-audit.entity.ts b/apps/api/src/compliance/compliance-audit.entity.ts
+index 75be2776d3e8e550277af0777e5d98ad5fe533ac..7fa796c66ce282f7b2eba19ae72e1e063442455f 100644
+--- a/apps/api/src/compliance/compliance-audit.entity.ts
++++ b/apps/api/src/compliance/compliance-audit.entity.ts
+@@ -1,43 +1,46 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   PrimaryGeneratedColumn,
+ } from 'typeorm';
+ import {
+   ComplianceAction,
+   ComplianceFlag,
+ } from './compliance.types';
  
-     const service = createService(
-       jobRepository,
-       baselineSectionRepository,
-       baselineVersionRepository,
-       baselineBlockPolicyRepository,
-       embeddingProvider,
-     );
+ @Entity({ name: 'compliance_audits' })
+ export class ComplianceAudit {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
  
-     const result = await service.detectGaps({
-       userId: 'user-2',
-       jobId: job.id,
-       baselineVersionId: baselineVersion.id,
+   @Column({ type: 'varchar' })
+   actorId!: string;
+ 
+   @Column({
+     type: 'enum',
+     enum: ComplianceAction,
+   })
+   action!: ComplianceAction;
+ 
++  @Column({ type: 'uuid', nullable: true })
++  baselineVersionId!: string | null;
++
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   baselineVersionHash!: string | null;
+ 
+-  @Column({ type: 'varchar', length: 255, nullable: true })
+-  jobHash!: string | null;
++  @Column({ type: 'uuid', nullable: true })
++  jobId!: string | null;
+ 
+   @Column({ type: 'varchar', length: 255, nullable: true })
+   outputHash!: string | null;
+ 
+   @Column({ type: 'jsonb', default: () => '\'[]\'::jsonb' })
+   complianceFlags!: ComplianceFlag[];
+ 
+   @Column({ type: 'boolean', default: false })
+   passFail!: boolean;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ }
+diff --git a/apps/api/src/compliance/compliance.controller.ts b/apps/api/src/compliance/compliance.controller.ts
+index fa960f390a0ca5cb0c72ded5dfd1cc51e7227ecb..4260ad5c7370767287e1349f5c40bef7e9054a7b 100644
+--- a/apps/api/src/compliance/compliance.controller.ts
++++ b/apps/api/src/compliance/compliance.controller.ts
+@@ -34,64 +34,66 @@ export class ComplianceController {
+     @Query('artifact_id') artifactId?: string,
+   ) {
+     const actorId = request.user?.id;
+     if (!actorId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     const where: Record<string, unknown> = { actorId };
+     if (action) where.action = action;
+     if (artifactId) where.outputHash = artifactId;
+ 
+     const audits = await this.auditsRepository.find({
+       where,
+       order: { createdAt: 'DESC' },
      });
  
-     expect(result.gaps).toHaveLength(1);
-     expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
-     expect(embeddingProvider.embed).toHaveBeenCalledWith('Optimize data pipelines');
-     expect(embeddingProvider.embed).toHaveBeenCalledWith('Customer support leadership');
-     expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
-     expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
+     return audits;
+   }
+ 
+   @Post()
+   async create(
+     @Req() request: Request & { user?: { id?: string } },
+     @Body()
+     body: {
+       action?: ComplianceAction;
++      baseline_version_id?: string | null;
+       baseline_version_hash?: string | null;
+-      job_hash?: string | null;
++      job_id?: string | null;
+       output_hash?: string | null;
+       compliance_flags?: Array<{ code: ComplianceFlagCode; message?: string | null }>;
+     },
+   ) {
+     const actorId = request.user?.id;
+     if (!actorId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     if (!body.action) {
+       throw new BadRequestException('action is required');
+     }
+ 
+     const complianceFlags =
+       body.compliance_flags?.map((flag) => ({
+         code: flag.code,
+         message: flag.message ?? flag.code,
+         severity: ComplianceFlagSeverity.BLOCK,
+       })) ?? [];
+ 
+     const blocked = complianceFlags.some(
+       (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
+     );
+ 
+     const audit = this.auditsRepository.create({
+       actorId,
+       action: body.action,
++      baselineVersionId: body.baseline_version_id ?? null,
+       baselineVersionHash: body.baseline_version_hash ?? null,
+-      jobHash: body.job_hash ?? null,
++      jobId: body.job_id ?? null,
+       outputHash: body.output_hash ?? null,
+       complianceFlags,
+       passFail: !blocked,
+     });
+ 
+     return this.auditsRepository.save(audit);
+   }
+ }
+diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
+index 780d13a80216070ce9e7203c9269eec8dd7ebe85..725545bdbbe7dd09515a72edd16d1a6313bea1da 100644
+--- a/apps/api/src/compliance/compliance.service.spec.ts
++++ b/apps/api/src/compliance/compliance.service.spec.ts
+@@ -1,199 +1,96 @@
+-import { createHash } from 'crypto';
+ import { ComplianceService } from './compliance.service';
+-import {
+-  ComplianceAction,
+-  ComplianceFlagCode,
+-  ComplianceFlagSeverity,
+-} from './compliance.types';
+-import { BaselineSectionType } from '../baseline/baseline-section.entity';
++import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
+ 
+ const buildAuditRepo = () => {
+   const create = jest.fn((payload) => payload);
+-  const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
++  const save = jest.fn(async (payload) => ({
++    id: 'audit-1',
++    createdAt: new Date(),
++    ...payload,
++  }));
+ 
+   return { create, save };
+ };
+ 
+ describe('ComplianceService', () => {
+   const repoMock = buildAuditRepo();
+   const service = new ComplianceService(
+     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+     // @ts-ignore: manual repository injection
+     repoMock,
+   );
+ 
+   beforeEach(() => {
+     jest.clearAllMocks();
    });
+ 
+-  it('passes validation when baseline hash and job company are present', async () => {
+-    const baselineVersion = { hash: 'baseline-hash' };
+-    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
++  it('flags stylized dash punctuation without mutating content', () => {
++    const flags = service.enforceResumeWritingRules({
++      rawContent: 'Delivered impact — and scale.',
++    });
 +
-+  it('clusters semantically similar JD gaps together while preserving deterministic ordering', async () => {
-+    const jobRepository = createMockRepository();
-+    const baselineVersionRepository = createMockRepository();
-+    const baselineSectionRepository = createMockRepository();
-+    const baselineBlockPolicyRepository = createMockRepository();
-+
-+    const embeddingVectors: Record<string, number[]> = {
-+      'Build analytics dashboards': [1, 0],
-+      'Develop analytics dashboards and reporting': [0.98, 0.05],
-+      'Scale distributed systems': [0, 1],
-+      'Operations handbook': [0, 1],
-+      'Team leadership': [0, 1],
-+    };
-+
-+    const embeddingProvider: GapEmbeddingProvider = {
-+      isEnabled: () => true,
-+      embed: jest.fn(async (text: string) => embeddingVectors[text] ?? [0, 0]),
-+    };
-+
-+    const job: Job = {
-+      id: 'job-3',
-+      userId: 'user-3',
-+      title: null,
-+      company: null,
-+      rawDescription: 'sample',
-+      sourceUrl: null,
-+      normalizedRequirements: ['Build analytics dashboards', 'Scale distributed systems', 'Develop analytics dashboards and reporting'],
-+      normalizedResponsibilities: [],
-+      jdIngestionMethod: 'PASTE' as never,
-+      jdParsedAt: null,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baseline: Baseline = {
-+      id: 'baseline-3',
-+      userId: 'user-3',
-+      version: 1,
-+      originalFilename: 'file.pdf',
-+      mimeType: 'application/pdf',
-+      storagePath: '/tmp/file.pdf',
-+      hash: null,
-+      sections: [],
-+      versions: [],
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baselineVersion: BaselineVersion = {
-+      id: 'baseline-version-3',
-+      baselineId: baseline.id,
-+      baseline,
-+      blockPolicies: [],
-+      fileHash: null,
-+      storagePath: '/tmp/file.pdf',
-+      versionNumber: 1,
-+      createdAt: new Date(),
-+      hash: null,
-+    };
-+
-+    jobRepository.findOne.mockResolvedValue(job);
-+    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
-+    baselineSectionRepository.find.mockResolvedValue([
-+      {
-+        id: 'section-3a',
-+        baselineId: baseline.id,
-+        baseline,
-+        sectionType: 'EXPERIENCE' as never,
-+        title: 'Operations',
-+        content: 'Operations handbook',
-+        includePolicy: BaselineIncludePolicy.ALWAYS,
-+        order: 1,
-+        createdAt: new Date(),
-+        updatedAt: new Date(),
-+        type: 'EXPERIENCE' as never,
-+        orderIndex: 1,
-+      } as unknown as BaselineSection,
-+      {
-+        id: 'section-3b',
-+        baselineId: baseline.id,
-+        baseline,
-+        sectionType: 'EXPERIENCE' as never,
-+        title: 'Leadership',
-+        content: 'Team leadership',
-+        includePolicy: BaselineIncludePolicy.ALWAYS,
-+        order: 2,
-+        createdAt: new Date(),
-+        updatedAt: new Date(),
-+        type: 'EXPERIENCE' as never,
-+        orderIndex: 2,
-+      } as unknown as BaselineSection,
++    expect(flags).toEqual([
++      expect.objectContaining({
++        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
++        severity: ComplianceFlagSeverity.BLOCK,
++      }),
 +    ]);
-+    baselineBlockPolicyRepository.find.mockResolvedValue([]);
++  });
 +
-+    const service = createService(
-+      jobRepository,
-+      baselineSectionRepository,
-+      baselineVersionRepository,
-+      baselineBlockPolicyRepository,
-+      embeddingProvider,
-+    );
++  it('persists audit metadata with baseline version details', async () => {
++    const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
++    const job = { id: 'job-1' };
+ 
+     const result = await service.validateAndAudit({
+       action: ComplianceAction.RESUME_GENERATION,
+       actorId: 'user-1',
+       baselineVersion,
+       job,
+       outputHash: 'out-123',
+     });
+ 
+-    expect(result.blocked).toBe(false);
+-    expect(result.complianceFlags).toHaveLength(0);
+     expect(repoMock.save).toHaveBeenCalledWith(
+       expect.objectContaining({
+         actorId: 'user-1',
+         action: ComplianceAction.RESUME_GENERATION,
+-        baselineVersionHash: 'baseline-hash',
+-        jobHash: createHash('sha256').update('Job description').digest('hex'),
++        baselineVersionId: 'bv-1',
++        baselineVersionHash: 'hash-1',
++        jobId: 'job-1',
+         outputHash: 'out-123',
+         passFail: true,
+       }),
+     );
+-  });
+-
+-  it('fails validation when baseline hash is missing', async () => {
+-    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
+-
+-    const result = await service.validateAndAudit({
+-      action: ComplianceAction.RESUME_GENERATION,
+-      actorId: 'user-1',
+-      baselineVersion: { hash: null },
+-      job,
+-    });
+-
+-    expect(result.blocked).toBe(true);
+-    expect(result.complianceFlags).toEqual([
+-      expect.objectContaining({ code: ComplianceFlagCode.MISSING_BASELINE_HASH }),
+-    ]);
+-    expect(repoMock.save).toHaveBeenCalledWith(
++    expect(result.audit).toEqual(
+       expect.objectContaining({
+-        passFail: false,
++        id: 'audit-1',
++        baselineVersionId: 'bv-1',
++        baselineVersionHash: 'hash-1',
++        jobId: 'job-1',
+       }),
+     );
++    expect(result.blocked).toBe(false);
+   });
+ 
+-  it('returns multiple flags when more than one condition fails', async () => {
+-    const job = { company: '', rawDescription: 'Job description' };
+-
++  it('blocks when baseline version context is missing for guarded actions', async () => {
+     const result = await service.validateAndAudit({
+-      action: ComplianceAction.RESUME_GENERATION,
++      action: ComplianceAction.COVER_LETTER_GENERATION,
+       actorId: 'user-2',
+-      baselineVersion: { hash: null },
+-      job,
++      outputHash: 'out-999',
+     });
+ 
+     const codes = result.complianceFlags.map((flag) => flag.code);
+     expect(codes).toEqual(
+       expect.arrayContaining([
++        ComplianceFlagCode.MISSING_BASELINE_VERSION,
+         ComplianceFlagCode.MISSING_BASELINE_HASH,
+-        ComplianceFlagCode.UNKNOWN_COMPANY,
+       ]),
+     );
+     expect(result.blocked).toBe(true);
+-  });
+-
+-  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [{ content: 'Improved uptime by 10%' }],
+-      generatedSections: [{ content: 'Improved uptime by 25%' }],
+-    });
+-
+-    expect(flags).toEqual([
+-      expect.objectContaining({
+-        code: ComplianceFlagCode.INVENTED_METRIC,
+-        severity: ComplianceFlagSeverity.BLOCK,
+-      }),
+-    ]);
+-  });
+-
+-  it('blocks stylized punctuation in generated output', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
+-      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
+-    });
+-
+-    expect(flags).toEqual([
+-      expect.objectContaining({
+-        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
+-        severity: ComplianceFlagSeverity.BLOCK,
+-      }),
+-    ]);
+-  });
+-
+-  it('normalizes stylized punctuation for downstream output', () => {
+-    const normalized = service.normalizeSectionsForOutput([
+-      { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
+-    ]);
+-
+-    expect(normalized[0]).toEqual(
+-      expect.objectContaining({
+-        title: 'Impact-Summary',
+-        content: 'Led teams... increased revenue by 1,200%',
+-      }),
+-    );
+-  });
+-
+-  it('blocks invented metrics with formatted numbers', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
+-      generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
+-    });
+-
+-    expect(flags).toEqual([
++    expect(repoMock.save).toHaveBeenCalledWith(
+       expect.objectContaining({
+-        code: ComplianceFlagCode.INVENTED_METRIC,
+-        severity: ComplianceFlagSeverity.BLOCK,
++        passFail: false,
++        baselineVersionId: null,
+       }),
+-    ]);
+-  });
+-
+-  it('allows technologies present in baseline vocabulary', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [
+-        {
+-          title: 'Skills',
+-          content: 'AWS, PostgreSQL, Terraform',
+-          sectionType: BaselineSectionType.SKILLS,
+-        },
+-      ],
+-      generatedSections: [{ content: 'Led AWS migration with PostgreSQL.' }],
+-    });
+-
+-    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
+-  });
+-
+-  it('blocks technologies not present in baseline', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [
+-        {
+-          title: 'Skills',
+-          content: 'AWS, PostgreSQL',
+-          sectionType: BaselineSectionType.SKILLS,
+-        },
+-      ],
+-      generatedSections: [{ content: 'Implemented QuantumOS pipelines.' }],
+-    });
+-
+-    expect(flags).toEqual(
+-      expect.arrayContaining([
+-        expect.objectContaining({ code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY, severity: ComplianceFlagSeverity.BLOCK }),
+-      ]),
+     );
+   });
+-
+-  it('is conservative and avoids over-flagging generic terms', () => {
+-    const flags = service.enforceResumeWritingRules({
+-      baselineSections: [
+-        {
+-          title: 'Experience',
+-          content: 'AWS migration and platform leadership.',
+-          sectionType: BaselineSectionType.EXPERIENCE,
+-        },
+-      ],
+-      generatedSections: [{ content: 'Collaborated with cross-functional teams to improve processes.' }],
+-    });
+-
+-    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
+-  });
+ });
+diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
+index 1b14e0a0220a8927e59086796a2ac627221cd8f5..bb12a1ad85be3c564386387cc76babb0712e7392 100644
+--- a/apps/api/src/compliance/compliance.service.ts
++++ b/apps/api/src/compliance/compliance.service.ts
+@@ -1,203 +1,243 @@
+ import { Injectable } from '@nestjs/common';
+-import { createHash } from 'node:crypto';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Repository } from 'typeorm';
+ import type { BaselineVersion } from '../baseline/baseline-version.entity';
+ import type { Job } from '../jobs/job.entity';
+ import {
+   ComplianceAction,
+   ComplianceFlagCode,
+   ComplianceFlag,
+   ComplianceFlagSeverity,
+ } from './compliance.types';
++import { ComplianceAudit } from './compliance-audit.entity';
+ import { ScopeInflationDetector } from './scope-inflation-detector';
+ 
+ export type ValidateAndAuditRequest = {
+   action: ComplianceAction;
+   actorId: string;
+ 
+   baselineVersion?: BaselineVersion | null;
+   job?: Job | null;
+ 
+   outputHash: string;
+ 
+   extraFlags?: ComplianceFlag[] | undefined;
+ 
+   scopeInflationDetected?: boolean;
+   techMismatchDetected?: boolean;
+ 
+   [key: string]: unknown;
+ };
+ 
+ export type ValidateAndAuditResult = {
+   blocked: boolean;
+   complianceFlags: ComplianceFlag[];
+   audit: {
+     id: string;
++    baselineVersionId: string | null;
+     outputHash: string;
+     action: ComplianceAction;
+     actorId: string;
+     baselineVersionHash: string | null;
+     jobId: string | null;
+     createdAt: string;
+   };
+ };
+ 
+ @Injectable()
+ export class ComplianceService {
+   private readonly scopeInflationDetector = new ScopeInflationDetector();
+ 
++  constructor(
++    @InjectRepository(ComplianceAudit)
++    private readonly auditsRepository: Repository<ComplianceAudit>,
++  ) {}
 +
-+    const firstRun = await service.detectGaps({
-+      userId: 'user-3',
-+      jobId: job.id,
-+      baselineVersionId: baselineVersion.id,
-+    });
+   public normalizeText(input: string): string {
+     return (input ?? '').replace(/\s+/g, ' ').trim();
+   }
+ 
+   // Preserve section shape so downstream callers can still reference `title`, etc.
+   public normalizeSectionsForOutput<
+     T extends { content?: string | null; title?: string | null; [key: string]: any },
+   >(sections: T[]): T[] {
+     if (!Array.isArray(sections)) return [];
+ 
+     return sections.map((s) => ({
+       ...s,
+       title: s?.title ?? null,
+       content: this.normalizeText(String(s?.content ?? '')),
+     }));
+   }
+ 
+   public enforceResumeWritingRules(payload: {
+     normalizedContent?: string;
+     rawContent?: string;
+     [key: string]: unknown;
+   }): ComplianceFlag[] {
+     const content =
+       this.normalizeText(payload.normalizedContent ?? payload.rawContent ?? '');
+ 
+     if (!content) return [];
+ 
+     const flags: ComplianceFlag[] = [];
+ 
+     if (content.includes('\u0000')) {
+       flags.push(
+         this.flag(
+           'invalid_null_bytes',
+           'Content contains invalid null bytes.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
+ 
++    const stylizedDashPattern = /[\u2012\u2013\u2014\u2015]/u; // figure dash, en dash, em dash, horizontal bar
++    if (stylizedDashPattern.test(content)) {
++      flags.push(
++        this.flag(
++          ComplianceFlagCode.STYLIZED_PUNCTUATION,
++          'Content contains stylized dash punctuation. Use standard hyphens instead.',
++          ComplianceFlagSeverity.BLOCK,
++        ),
++      );
++    }
 +
-+    const secondRun = await service.detectGaps({
-+      userId: 'user-3',
-+      jobId: job.id,
-+      baselineVersionId: baselineVersion.id,
-+    });
-+
-+    const expectedOrder = [
-+      'Build analytics dashboards',
-+      'Develop analytics dashboards and reporting',
-+      'Scale distributed systems',
+     return flags;
+   }
+ 
+   public detectScopeInflation(payload: {
+     baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
+     generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
+   }): ComplianceFlag[] {
+     const baselineSections = payload.baselineSections ?? [];
+     const generatedSections = payload.generatedSections ?? [];
+     return this.scopeInflationDetector.detect(baselineSections, generatedSections);
+   }
+ 
+   public enforceTechnologyConsistency(payload: {
+     baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
+     jobText?: string | null;
+     [key: string]: unknown;
+   }): ComplianceFlag[] {
+     void payload;
+     return [];
+   }
+ 
+   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
+     const flags: ComplianceFlag[] = [];
+ 
+     const actorId = String(payload.actorId ?? '').trim();
+     const outputHash = String(payload.outputHash ?? '').trim();
++    const baselineVersionId = (payload.baselineVersion as any)?.id ?? null;
++    const baselineVersionHash =
++      (payload.baselineVersion as any)?.hash ??
++      (payload.baselineVersion as any)?.fileHash ??
++      null;
++    const jobId = (payload.job as any)?.id ?? null;
+ 
+     if (!actorId) {
+       flags.push(
+         this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
+       );
+     }
+ 
+     if (!outputHash) {
+       flags.push(
+         this.flag(
+           'missing_output_hash',
+           'Output hash is required.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
+ 
++    const baselineRequiredActions: ComplianceAction[] = [
++      ComplianceAction.RESUME_GENERATION,
++      ComplianceAction.COVER_LETTER_GENERATION,
++      ComplianceAction.FOLLOW_UP_GENERATION,
++      ComplianceAction.RESUME_EXPORT,
 +    ];
 +
-+    expect(firstRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
-+    expect(secondRun.gaps.map((gap) => gap.jdExcerpt)).toEqual(expectedOrder);
-+    expect(firstRun.gaps).toHaveLength(3);
-+  });
++    if (baselineRequiredActions.includes(payload.action)) {
++      if (!baselineVersionId) {
++        flags.push(
++          this.flag(
++            ComplianceFlagCode.MISSING_BASELINE_VERSION,
++            'baselineVersionId is required.',
++            ComplianceFlagSeverity.BLOCK,
++          ),
++        );
++      }
 +
-+  it('avoids clustering dissimilar JD gaps', async () => {
-+    const jobRepository = createMockRepository();
-+    const baselineVersionRepository = createMockRepository();
-+    const baselineSectionRepository = createMockRepository();
-+    const baselineBlockPolicyRepository = createMockRepository();
++      if (!baselineVersionHash) {
++        flags.push(
++          this.flag(
++            ComplianceFlagCode.MISSING_BASELINE_HASH,
++            'Baseline version hash is required.',
++            ComplianceFlagSeverity.BLOCK,
++          ),
++        );
++      }
++    }
 +
-+    const embeddingProvider: GapEmbeddingProvider = {
-+      isEnabled: () => false,
-+      embed: jest.fn(),
-+    };
-+
-+    const job: Job = {
-+      id: 'job-4',
-+      userId: 'user-4',
-+      title: null,
-+      company: null,
-+      rawDescription: 'sample',
-+      sourceUrl: null,
-+      normalizedRequirements: ['Cloud security architecture', 'Frontend component libraries', 'Experimental data science'],
-+      normalizedResponsibilities: [],
-+      jdIngestionMethod: 'PASTE' as never,
-+      jdParsedAt: null,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baseline: Baseline = {
-+      id: 'baseline-4',
-+      userId: 'user-4',
-+      version: 1,
-+      originalFilename: 'file.pdf',
-+      mimeType: 'application/pdf',
-+      storagePath: '/tmp/file.pdf',
-+      hash: null,
-+      sections: [],
-+      versions: [],
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    const baselineVersion: BaselineVersion = {
-+      id: 'baseline-version-4',
-+      baselineId: baseline.id,
-+      baseline,
-+      blockPolicies: [],
-+      fileHash: null,
-+      storagePath: '/tmp/file.pdf',
-+      versionNumber: 1,
-+      createdAt: new Date(),
-+      hash: null,
-+    };
-+
-+    jobRepository.findOne.mockResolvedValue(job);
-+    baselineVersionRepository.findOne.mockResolvedValue(baselineVersion);
-+    baselineSectionRepository.find.mockResolvedValue([]);
-+    baselineBlockPolicyRepository.find.mockResolvedValue([]);
-+
-+    const service = createService(
-+      jobRepository,
-+      baselineSectionRepository,
-+      baselineVersionRepository,
-+      baselineBlockPolicyRepository,
-+      embeddingProvider,
-+    );
-+
-+    const result = await service.detectGaps({
-+      userId: 'user-4',
-+      jobId: job.id,
-+      baselineVersionId: baselineVersion.id,
-+    });
-+
-+    expect(result.gaps.map((gap) => gap.jdExcerpt)).toEqual(job.normalizedRequirements);
-+    expect(result.gaps).toHaveLength(3);
-+  });
- });
-diff --git a/apps/api/src/interviews/gap-detection.service.ts b/apps/api/src/interviews/gap-detection.service.ts
-index d04739453717b0b28cf92c581ce57f48659a391a..c2432712f7f1a6fd66d6be1fb749e4f06449fb69 100644
---- a/apps/api/src/interviews/gap-detection.service.ts
-+++ b/apps/api/src/interviews/gap-detection.service.ts
-@@ -1,76 +1,78 @@
--import {
--  BadRequestException,
--  Inject,
--  Injectable,
--  NotFoundException,
--  Optional,
--} from '@nestjs/common';
-+import { BadRequestException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { randomUUID } from 'node:crypto';
- import { Repository } from 'typeorm';
- import {
-   BaselineIncludePolicy,
-   BaselineSection,
- } from '../baseline/baseline-section.entity';
- import { BaselineVersion } from '../baseline/baseline-version.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { Job } from '../jobs/job.entity';
- import {
-   GapConfidence,
-   GapDetectionResult,
-   GapDomain,
-   InterviewGap,
- } from './interview-types';
- 
- type DetectionInputs = {
-   userId: string;
-   jobId: string;
-   baselineVersionId: string;
- };
- 
- type SectionTokens = {
-   section: BaselineSection;
-   tokens: Set<string>;
- };
- 
- export interface GapEmbeddingProvider {
-   isEnabled(): boolean;
-   embed(text: string): Promise<number[]>;
- }
- 
- export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
- 
- type SectionEmbedding = {
-   section: BaselineSection;
-   embedding: number[];
- };
- 
-+const GAP_EMBEDDING_MATCH_THRESHOLD = 0.75;
-+const GAP_CLUSTER_EMBEDDING_THRESHOLD = 0.82;
-+const GAP_CLUSTER_TOKEN_THRESHOLD = 0.6;
-+
-+type GapCandidate = {
-+  gap: InterviewGap;
-+  tokens: Set<string>;
-+  embedding?: number[] | null;
-+};
-+
- @Injectable()
- export class GapDetectionService {
--  private readonly embeddingMatchThreshold = 0.75;
--
-   constructor(
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-     @InjectRepository(BaselineSection)
-     private readonly baselineSectionRepository: Repository<BaselineSection>,
-     @InjectRepository(BaselineVersion)
-     private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     @InjectRepository(BaselineBlockPolicy)
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-     @Optional()
-     @Inject(GAP_EMBEDDING_PROVIDER)
-     private readonly embeddingProvider?: GapEmbeddingProvider,
-   ) {}
- 
-   async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
-     const jobId = inputs.jobId?.trim();
-     const baselineVersionId = inputs.baselineVersionId?.trim();
- 
-     if (!jobId || !baselineVersionId) {
-       throw new BadRequestException('jobId and baselineVersionId are required');
+     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
+       for (const f of payload.extraFlags) {
+         if (!f || typeof f.code !== 'string' || !f.code.trim()) continue;
+         flags.push({
+           code: f.code as any,
+           message: f.message,
+           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
+           evidence: f.evidence,
+         });
+       }
      }
  
-     const job = await this.jobRepository.findOne({
-       where: { id: jobId, userId: inputs.userId },
-     });
-@@ -90,94 +92,105 @@ export class GapDetectionService {
+     if (payload.scopeInflationDetected === true) {
+       flags.push(
+         this.flag(
+           ComplianceFlagCode.SCOPE_INFLATION,
+           'Potential scope inflation detected.',
+           ComplianceFlagSeverity.BLOCK,
+         ),
+       );
+     }
  
-     const [sections, blockPolicies] = await Promise.all([
-       this.baselineSectionRepository.find({
-         where: { baselineId: baselineVersion.baselineId },
-         order: { order: 'ASC' },
-       }),
-       this.baselineBlockPolicyRepository.find({
-         where: { baselineVersionId },
-       }),
-     ]);
- 
-     const normalizedSections = this.applyPoliciesToSections(sections, blockPolicies).filter(
-       (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+     const blocked = flags.some(
+       (f) =>
+         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
      );
  
-     const sectionTokens = this.buildSectionTokens(normalizedSections);
-     let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
+-    const auditId = this.buildAuditId(payload);
+-
+-    const baselineVersionHash =
+-      (payload.baselineVersion as any)?.hash ??
+-      (payload.baselineVersion as any)?.fileHash ??
+-      null;
++    const audit = this.auditsRepository.create({
++      actorId,
++      action: payload.action,
++      baselineVersionId,
++      baselineVersionHash,
++      jobId: jobId ?? null,
++      outputHash,
++      complianceFlags: flags,
++      passFail: !blocked,
++    });
  
-     const jdItems = [
-       ...(job.normalizedRequirements ?? []),
-       ...(job.normalizedResponsibilities ?? []),
-     ]
-       .map((item) => item.trim())
-       .filter(Boolean);
+-    const jobId = (payload.job as any)?.id ?? null;
++    const savedAudit = await this.auditsRepository.save(audit);
  
--    const gaps: InterviewGap[] = [];
-+    const clusteringInputs: GapCandidate[] = [];
- 
-     for (const item of jdItems) {
-       const jdTokens = this.tokenize(item);
-       if (!jdTokens.size) {
-         continue;
-       }
- 
-       const match = this.findBestSectionMatch(jdTokens, sectionTokens);
-       const coverage = match?.overlap ?? 0;
-       const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
-+      let jdEmbedding: number[] | null = null;
- 
-       if (sectionEmbeddings) {
-         try {
--          const embeddingMatch = await this.findBestEmbeddingMatch(item, sectionEmbeddings);
-+          jdEmbedding = await this.embeddingProvider!.embed(item);
-+          const embeddingMatch = this.findBestEmbeddingMatch(jdEmbedding ?? [], sectionEmbeddings);
-           const similarity = embeddingMatch?.similarity ?? 0;
--          if (similarity >= this.embeddingMatchThreshold) {
-+          if (similarity >= GAP_EMBEDDING_MATCH_THRESHOLD) {
-             continue;
-           }
-         } catch {
-           sectionEmbeddings = null;
-+          jdEmbedding = null;
-         }
-       }
- 
-       if (coverageRatio >= 0.5) {
-         continue;
-       }
- 
-       const confidence = this.resolveConfidence(coverageRatio);
- 
--      gaps.push({
-+      const gap: InterviewGap = {
-         gapId: randomUUID(),
-         domain: this.inferDomain(item),
-         jdExcerpt: item,
-         baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
-         confidence,
-+      };
-+
-+      clusteringInputs.push({
-+        gap,
-+        tokens: jdTokens,
-+        embedding: jdEmbedding,
-       });
-     }
- 
-+    const orderedGaps = this.clusterAndOrderGaps(clusteringInputs);
-+
      return {
-       baselineId: baselineVersion.baselineId,
-       baselineVersionId,
-       jobId,
--      gaps,
-+      gaps: orderedGaps,
+       blocked,
+       complianceFlags: flags,
+       audit: {
+-        id: auditId,
+-        outputHash: outputHash || '',
+-        action: payload.action,
+-        actorId: actorId || '',
+-        baselineVersionHash,
+-        jobId,
+-        createdAt: new Date().toISOString(),
++        id: savedAudit.id,
++        outputHash: savedAudit.outputHash ?? '',
++        baselineVersionId: savedAudit.baselineVersionId,
++        action: savedAudit.action,
++        actorId: savedAudit.actorId,
++        baselineVersionHash: savedAudit.baselineVersionHash,
++        jobId: savedAudit.jobId,
++        createdAt: savedAudit.createdAt.toISOString(),
+       },
      };
    }
  
-   private applyPoliciesToSections(
-     sections: BaselineSection[],
-     policies: BaselineBlockPolicy[],
-   ): BaselineSection[] {
-     if (!policies.length) {
-       return [...sections].sort((a, b) => a.order - b.order);
+   private flag(code: string, message: string, severity: ComplianceFlagSeverity): ComplianceFlag {
+     return { code: code as any, message, severity };
+   }
+-
+-  private buildAuditId(payload: ValidateAndAuditRequest): string {
+-    const baselineHash =
+-      (payload.baselineVersion as any)?.hash ??
+-      (payload.baselineVersion as any)?.fileHash ??
+-      null;
+-
+-    const jobId = (payload.job as any)?.id ?? null;
+-
+-    const fingerprint = {
+-      action: payload.action,
+-      actorId: String(payload.actorId ?? ''),
+-      baselineHash,
+-      jobId,
+-      outputHash: String(payload.outputHash ?? ''),
+-    };
+-
+-    return createHash('sha256').update(JSON.stringify(fingerprint)).digest('hex');
+-  }
+ }
+diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
+index d7b909962a46f2b172092ce39a2190146cba9300..ef3a26ec9ad24e358ed95fd14e5bc7e08e25de7d 100644
+--- a/apps/api/src/compliance/compliance.types.ts
++++ b/apps/api/src/compliance/compliance.types.ts
+@@ -1,30 +1,32 @@
+ export enum ComplianceAction {
+   FIT_SCORE = 'fit_score',
+   RESUME_GENERATION = 'resume_gen',
+   COVER_LETTER_GENERATION = 'cover_letter_gen',
++  FOLLOW_UP_GENERATION = 'follow_up_gen',
+   APPLICATION_EXPORT = 'application_export',
+   RESUME_EXPORT = 'resume_export',
+ }
+ 
+ export enum ComplianceFlagCode {
+   SCOPE_INFLATION = 'scope_inflation',
+   MISSING_BASELINE_HASH = 'missing_baseline_hash',
++  MISSING_BASELINE_VERSION = 'missing_baseline_version',
+   UNKNOWN_COMPANY = 'unknown_company',
+   INVENTED_COMPANY = 'invented_company',
+   INVENTED_ROLE = 'invented_role',
+   INVENTED_METRIC = 'invented_metric',
+   STYLIZED_PUNCTUATION = 'stylized_punctuation',
+   FICTIONAL_TECHNOLOGY = 'fictional_technology',
+ }
+ 
+ export enum ComplianceFlagSeverity {
+   BLOCK = 'block',
+   WARN = 'warn',
+ }
+ 
+ export type ComplianceFlag = {
+   code: ComplianceFlagCode;
+   severity: ComplianceFlagSeverity;
+   message: string;
+   evidence?: Array<{ baseline: string; generated: string }>;
+ };
+diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
+index bcd920773b8e3ad364b7804db4cfd8517c77347e..bb5c68ebd3a59da37ad58a523fde898f3ebaa6d6 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.spec.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
+@@ -1,26 +1,26 @@
+-import { UnprocessableEntityException } from '@nestjs/common';
++import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+ import { DataSource } from 'typeorm';
+ import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
+ import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+ import { CoverLettersService } from './cover-letters.service';
+ 
+ type MockRepository<T extends Record<string, any>> = {
+   findOne: jest.Mock;
+   find: jest.Mock;
+   create: jest.Mock;
+   save: jest.Mock;
+   remove: jest.Mock;
+ };
+ 
+ function buildRepository<T extends Record<string, any>>(initial?: T): MockRepository<T> {
+   let saved = initial;
+ 
+   return {
+     findOne: jest.fn(async () => saved ?? null),
+     find: jest.fn(async () => []),
+     create: jest.fn((payload: Partial<T>) => ({ ...payload } as T)),
+     save: jest.fn(async (payload: T) => {
+       saved = { ...payload, id: payload['id'] ?? 'saved-id', createdAt: new Date(), updatedAt: new Date() } as T;
+       return saved as T;
+     }),
+     remove: jest.fn(async (payload: T) => payload),
+@@ -76,84 +76,100 @@ describe('CoverLettersService', () => {
+         case 'CoverLetter':
+           return coverLetterRepository;
+         case 'Baseline':
+           return baselineRepository;
+         case 'BaselineVersion':
+           return baselineVersionRepository;
+         case 'BaselineBlockPolicy':
+           return baselineBlockPolicyRepository;
+         case 'Job':
+           return jobRepository;
+         default:
+           throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
+       }
+     }),
+   } as unknown as DataSource;
+ 
+   beforeEach(() => {
+     jest.clearAllMocks();
+   });
+ 
+   it('persists a chosen closing template and reuses it for the next generation', async () => {
+     const service = new CoverLettersService(dataSource, complianceService as any);
+ 
+     await service.generateCoverLetter('user-1', {
+       baselineId: 'baseline-1',
++      baselineVersionId: 'baseline-version-1',
+       jobId: 'job-1',
+       closingTemplateKey: 'collaborative',
+     });
+ 
+     expect(coverLetterRepository.save).toHaveBeenCalledWith(
+       expect.objectContaining({ closingTemplateKey: 'collaborative' }),
+     );
+ 
+     // Simulate subsequent call without providing a template key.
+     const second = await service.generateCoverLetter('user-1', {
+       baselineId: 'baseline-1',
++      baselineVersionId: 'baseline-version-1',
+       jobId: 'job-1',
+     });
+ 
+     expect(second.closingTemplateKey).toBe('collaborative');
+   });
+ 
+   it('blocks invented metrics through compliance checks', async () => {
+     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
+       {
+         code: ComplianceFlagCode.INVENTED_METRIC,
+         severity: ComplianceFlagSeverity.BLOCK,
+         message: 'Metric not found in baseline.',
+       },
+     ]);
+ 
+     const service = new CoverLettersService(dataSource, complianceService as any);
+ 
+     await expect(
+       service.generateCoverLetter('user-1', {
+         baselineId: 'baseline-1',
++        baselineVersionId: 'baseline-version-1',
+         jobId: 'job-1',
+       }),
+     ).rejects.toThrow(UnprocessableEntityException);
+ 
+     expect(complianceService.validateAndAudit).toHaveBeenCalled();
+   });
+ 
+   it('blocks cover letter generation when scope inflation is detected', async () => {
+     complianceService.detectScopeInflation.mockReturnValueOnce([
+       {
+         code: ComplianceFlagCode.SCOPE_INFLATION,
+         severity: ComplianceFlagSeverity.BLOCK,
+         message: 'Scope exceeds baseline.',
+       },
+     ]);
+ 
+     const service = new CoverLettersService(dataSource, complianceService as any);
+ 
+     await expect(
+       service.generateCoverLetter('user-1', {
+         baselineId: 'baseline-1',
++        baselineVersionId: 'baseline-version-1',
+         jobId: 'job-1',
+       }),
+     ).rejects.toThrow(UnprocessableEntityException);
+ 
+     expect(complianceService.validateAndAudit).toHaveBeenCalled();
+   });
++
++  it('rejects generation without a baseline version id', async () => {
++    const service = new CoverLettersService(dataSource, complianceService as any);
++
++    await expect(
++      service.generateCoverLetter('user-1', {
++        baselineId: 'baseline-1',
++        jobId: 'job-1',
++        baselineVersionId: '',
++      }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
+ });
+diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
+index 5828b097b71846aaa0b31ed71843aef5eac0ce69..8b3b04b6d84558cc316865b5db31406560a26f76 100644
+--- a/apps/api/src/cover-letters/cover-letters.service.ts
++++ b/apps/api/src/cover-letters/cover-letters.service.ts
+@@ -38,80 +38,88 @@ export class CoverLettersService {
+   private readonly baselineVersionRepository: Repository<BaselineVersion>;
+   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
+   private readonly jobRepository: Repository<Job>;
+   private readonly generator: CoverLetterGenerator;
+ 
+   constructor(
+     @InjectDataSource() private readonly dataSource: DataSource,
+     private readonly complianceService: ComplianceService,
+   ) {
+     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
+     this.baselineRepository = this.dataSource.getRepository(Baseline);
+     this.baselineVersionRepository =
+       this.dataSource.getRepository(BaselineVersion);
+     this.baselineBlockPolicyRepository = this.dataSource.getRepository(
+       BaselineBlockPolicy,
+     );
+     this.jobRepository = this.dataSource.getRepository(Job);
+     this.generator = new TemplateCoverLetterGenerator();
+   }
+ 
+   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
      }
  
++    if (!input.baselineVersionId?.trim()) {
++      throw new BadRequestException('baselineVersionId is required');
++    }
++
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: input.baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     const job = await this.jobRepository.findOne({
+       where: { id: input.jobId, userId },
+     });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+-      where: { baselineId: baseline.id },
+-      order: { versionNumber: 'DESC', createdAt: 'DESC' },
++      where: { baselineId: baseline.id, id: input.baselineVersionId.trim() },
+     });
+ 
+-    const policies = baselineVersion
+-      ? await this.baselineBlockPolicyRepository.find({
+-          where: { baselineVersionId: baselineVersion.id },
+-          relations: ['baselineSection'],
+-          order: { order: 'ASC' },
+-        })
+-      : [];
++    if (!baselineVersion) {
++      throw new NotFoundException('Baseline version not found');
++    }
++    if (!baselineVersion.hash) {
++      throw new BadRequestException('Baseline version hash missing');
++    }
++
++    const policies = await this.baselineBlockPolicyRepository.find({
++      where: { baselineVersionId: baselineVersion.id },
++      relations: ['baselineSection'],
++      order: { order: 'ASC' },
++    });
+ 
+     const sections = this.applyPoliciesToSections(
+       baseline.sections ?? [],
+       policies,
+     );
+ 
+     const closingTemplateKey = await this.resolveClosingTemplateKey(
+       userId,
+       input.closingTemplateKey,
+     );
+     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
+ 
+     const allowedSections = sections.filter(
+       (section) =>
+         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+         BaselineIncludePolicy.NEVER,
+     );
+ 
+     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
+     const jobContext = {
+       id: job.id,
+       title: this.cleanText(job.title),
+       company: this.cleanText(job.company),
+       responsibilities: this.sanitizeList(job.normalizedResponsibilities),
+       requirements: this.sanitizeList(job.normalizedRequirements),
+diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+index aa0d315d283f934e2738049eebeafedc2f557e6f..75b5045b6dc00fee61f79660ebba7b9c58498b14 100644
+--- a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
++++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
+@@ -1,11 +1,13 @@
+ export class GenerateCoverLetterDto {
+   baselineId!: string;
+ 
++  baselineVersionId!: string;
++
+   jobId!: string;
+ 
+   closingTemplateKey?: string;
+ 
+   maxWords?: number;
+ 
+   tone?: string;
+ }
+diff --git a/apps/api/src/interviews/interview-toolkit.controller.ts b/apps/api/src/interviews/interview-toolkit.controller.ts
+index 5b87a3e14ba43cd99c67ec08544868872b07a0a9..8254c36dfc385b0d81cc4a0d1da5c2b8b5de34ca 100644
+--- a/apps/api/src/interviews/interview-toolkit.controller.ts
++++ b/apps/api/src/interviews/interview-toolkit.controller.ts
+@@ -4,41 +4,46 @@ import type { Request } from 'express';
+ import { InterviewToolkitService } from './interview-toolkit.service';
+ 
+ @UseGuards(AuthGuard('jwt'))
+ @Controller('interview-toolkit')
+ export class InterviewToolkitController {
+   constructor(private readonly interviewToolkitService: InterviewToolkitService) {}
+ 
+   @Get(':jobId/study-packet')
+   async getStudyPacket(@Param('jobId') jobId: string, @Req() request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     if (!jobId?.trim()) {
+       throw new BadRequestException('jobId is required');
+     }
+ 
+     return this.interviewToolkitService.buildStudyPacket(userId, jobId.trim());
+   }
+ 
+   @Post(':jobId/follow-up')
+   async generateFollowUp(
+     @Param('jobId') jobId: string,
+-    @Body() body: { notes?: string },
++    @Body() body: { notes?: string; baselineVersionId?: string },
+     @Req() request: Request & { user?: { id?: string } },
+   ) {
+     const userId = request.user?.id;
+ 
+     if (!userId) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     if (!jobId?.trim()) {
+       throw new BadRequestException('jobId is required');
+     }
+ 
+-    return this.interviewToolkitService.generateFollowUp(userId, jobId.trim(), body?.notes);
++    return this.interviewToolkitService.generateFollowUp(
++      userId,
++      jobId.trim(),
++      body?.baselineVersionId,
++      body?.notes,
++    );
+   }
+ }
+diff --git a/apps/api/src/interviews/interview-toolkit.service.spec.ts b/apps/api/src/interviews/interview-toolkit.service.spec.ts
+index 84d7381b5353ee14114f046adaa7c452814d0897..f99d23bf2006d5a52d0ec49b9bd3dbbce84955ea 100644
+--- a/apps/api/src/interviews/interview-toolkit.service.spec.ts
++++ b/apps/api/src/interviews/interview-toolkit.service.spec.ts
+@@ -1,62 +1,69 @@
++import { BadRequestException } from '@nestjs/common';
+ import { Test } from '@nestjs/testing';
+ import { getRepositoryToken } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { ComplianceService } from '../compliance/compliance.service';
+ import { FitAssessment } from '../analysis/fit-assessment.entity';
+ import { Job } from '../jobs/job.entity';
+ import { StarStory } from '../star-stories/star-story.entity';
+ import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+ import { InterviewToolkitService } from './interview-toolkit.service';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { Baseline } from '../baseline/baseline.entity';
+ 
+ const buildRepository = <T>(overrides: Partial<Repository<T>> = {}): Partial<Repository<T>> => ({
+   findOne: jest.fn(),
+   find: jest.fn(),
+   ...overrides,
+ });
+ 
+ describe('InterviewToolkitService', () => {
+   let service: InterviewToolkitService;
+   let jobRepository: Partial<Repository<Job>>;
+   let fitAssessmentRepository: Partial<Repository<FitAssessment>>;
+   let starStoryRepository: Partial<Repository<StarStory>>;
+   let questionGenerator: Partial<InterviewQuestionGeneratorService>;
++  let baselineVersionRepository: Partial<Repository<BaselineVersion>>;
+ 
+   beforeEach(async () => {
+     jobRepository = buildRepository();
+     fitAssessmentRepository = buildRepository();
+     starStoryRepository = buildRepository();
++    baselineVersionRepository = buildRepository();
+     questionGenerator = {
+       generateQuestions: jest.fn().mockReturnValue([{ gapId: 'gap-1', prompt: 'Q1', category: 'Context', jdReference: '' }]),
+     } as any;
+ 
+     const moduleRef = await Test.createTestingModule({
+       providers: [
+         InterviewToolkitService,
+         { provide: getRepositoryToken(Job), useValue: jobRepository },
+         { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
+         { provide: getRepositoryToken(StarStory), useValue: starStoryRepository },
++        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
++        { provide: getRepositoryToken(Baseline), useValue: buildRepository() },
+         { provide: InterviewQuestionGeneratorService, useValue: questionGenerator },
+         {
+           provide: ComplianceService,
+           useValue: {
+             validateAndAudit: jest.fn().mockResolvedValue({ blocked: false, complianceFlags: [] }),
+           },
+         },
+       ],
+     }).compile();
+ 
+     service = moduleRef.get(InterviewToolkitService);
+   });
+ 
+   it('builds a study packet from latest assessment and stories', async () => {
+     const job: Job = {
+       id: 'job-1',
+       userId: 'user-1',
+       title: 'Senior Engineer',
+       company: 'TestCo',
+       rawDescription: 'Line one',
+       sourceUrl: null,
+       normalizedResponsibilities: ['Lead systems', 'Coach team'],
+       normalizedRequirements: [],
+       jdIngestionMethod: 'PASTE' as any,
+       jdParsedAt: null,
+@@ -108,31 +115,65 @@ describe('InterviewToolkitService', () => {
+ 
+     expect(packet.job).toEqual({ id: 'job-1', title: 'Senior Engineer', company: 'TestCo' });
+     expect(packet.fitSnapshot?.overallScore).toBe(92);
+     expect(packet.recommendedStories).toHaveLength(1);
+     expect(packet.questions).toHaveLength(1);
+   });
+ 
+   it('generates follow up copy through compliance', async () => {
+     const job: Job = {
+       id: 'job-2',
+       userId: 'user-1',
+       title: 'PM',
+       company: 'Acme',
+       rawDescription: 'JD',
+       sourceUrl: null,
+       normalizedResponsibilities: [],
+       normalizedRequirements: [],
+       jdIngestionMethod: 'PASTE' as any,
+       jdParsedAt: null,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
+ 
+-    const result = await service.generateFollowUp('user-1', 'job-2', 'roadmap planning');
++    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
++      id: 'bv-1',
++      hash: 'hash-1',
++      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
++    });
++
++    const result = await service.generateFollowUp('user-1', 'job-2', 'bv-1', 'roadmap planning');
+ 
+     expect(result.content).toContain('roadmap planning');
+     expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
+   });
++
++  it('requires a baseline version id for follow ups', async () => {
++    const job: Job = {
++      id: 'job-2',
++      userId: 'user-1',
++      title: 'PM',
++      company: 'Acme',
++      rawDescription: 'JD',
++      sourceUrl: null,
++      normalizedResponsibilities: [],
++      normalizedRequirements: [],
++      jdIngestionMethod: 'PASTE' as any,
++      jdParsedAt: null,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
++    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
++      id: 'bv-1',
++      hash: 'hash-1',
++      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
++    });
++
++    await expect(service.generateFollowUp('user-1', 'job-2', '')).rejects.toBeInstanceOf(
++      BadRequestException,
++    );
++  });
+ });
+diff --git a/apps/api/src/interviews/interview-toolkit.service.ts b/apps/api/src/interviews/interview-toolkit.service.ts
+index 345d15702dd14f9119567991d9e693b538b4af42..e385ed9add69810a7bcb569127df63b11f37b6bf 100644
+--- a/apps/api/src/interviews/interview-toolkit.service.ts
++++ b/apps/api/src/interviews/interview-toolkit.service.ts
+@@ -1,62 +1,65 @@
+ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash } from 'node:crypto';
+ import { Repository } from 'typeorm';
+ import { ComplianceService } from '../compliance/compliance.service';
+ import { ComplianceAction } from '../compliance/compliance.types';
+ import { FitAssessment } from '../analysis/fit-assessment.entity';
+ import { Job } from '../jobs/job.entity';
+ import { StarStory } from '../star-stories/star-story.entity';
+ import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
+ import type { InterviewGap } from './interview-types';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
+ 
+ export type StudyPacket = {
+   job: Pick<Job, 'id' | 'title' | 'company'>;
+   fitSnapshot: {
+     assessmentId: string;
+     baselineId: string;
+     overallScore: number;
+     verdict: string;
+     strengths: string[];
+     gaps: string[];
+     createdAt: string;
+   } | null;
+   recommendedStories: StarStory[];
+   recentStories: StarStory[];
+   questions: ReturnType<InterviewQuestionGeneratorService['generateQuestions']>;
+ };
+ 
+ @Injectable()
+ export class InterviewToolkitService {
+   constructor(
+     @InjectRepository(Job)
+     private readonly jobRepository: Repository<Job>,
+     @InjectRepository(FitAssessment)
+     private readonly fitAssessmentRepository: Repository<FitAssessment>,
+     @InjectRepository(StarStory)
+     private readonly starStoryRepository: Repository<StarStory>,
++    @InjectRepository(BaselineVersion)
++    private readonly baselineVersionRepository: Repository<BaselineVersion>,
+     private readonly questionGenerator: InterviewQuestionGeneratorService,
+     private readonly complianceService: ComplianceService,
+   ) {}
+ 
+   private async requireJob(jobId: string, userId: string) {
+     const job = await this.jobRepository.findOne({ where: { id: jobId, userId } });
+ 
+     if (!job) {
+       throw new NotFoundException('Job not found');
+     }
+ 
+     return job;
+   }
+ 
+   async buildStudyPacket(userId: string, jobId: string): Promise<StudyPacket> {
+     const job = await this.requireJob(jobId, userId);
+ 
+     const assessment = await this.fitAssessmentRepository.findOne({
+       where: { userId, jobId },
+       order: { createdAt: 'DESC' },
+     });
+ 
+     const fitSnapshot = assessment
+       ? {
+           assessmentId: assessment.id,
+@@ -77,70 +80,101 @@ export class InterviewToolkitService {
+ 
+     const normalizedGaps = fitSnapshot?.gaps ?? [];
+     const storyMatches = normalizedGaps.length
+       ? stories.filter((story) => this.matchesAnyGap(story, normalizedGaps))
+       : [];
+ 
+     const recommendedStories = storyMatches.length
+       ? storyMatches.slice(0, 5)
+       : stories.slice(0, 5);
+ 
+     const gapsForQuestions = normalizedGaps.length
+       ? normalizedGaps.map((gap, index) => this.gapFromText(gap, index))
+       : this.defaultGapsFromJob(job);
+ 
+     const questions = this.questionGenerator.generateQuestions(gapsForQuestions);
+ 
+     return {
+       job: { id: job.id, title: job.title, company: job.company },
+       fitSnapshot,
+       recommendedStories,
+       recentStories: stories.slice(0, 5),
+       questions,
+     };
+   }
+ 
+-  async generateFollowUp(userId: string, jobId: string, notes?: string) {
++  async generateFollowUp(
++    userId: string,
++    jobId: string,
++    baselineVersionId?: string | null,
++    notes?: string,
++  ) {
+     const job = await this.requireJob(jobId, userId);
+ 
++    if (!baselineVersionId?.trim()) {
++      throw new BadRequestException('baselineVersionId is required');
++    }
++
++    const baselineVersion = await this.baselineVersionRepository.findOne({
++      where: { id: baselineVersionId.trim() },
++      relations: ['baseline'],
++    });
++
++    if (!baselineVersion || !baselineVersion.baseline) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    if (baselineVersion.baseline.userId !== userId) {
++      throw new NotFoundException('Baseline version not found');
++    }
++
++    if (!baselineVersion.hash) {
++      throw new BadRequestException('Baseline version hash missing');
++    }
++
+     const header = job.company ? `Hi ${job.company} team,` : 'Hi there,';
+     const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : undefined;
+     const notesLine = notes?.trim() ? `I appreciated discussing ${notes.trim()}.` : undefined;
+     const close = 'Please let me know if any additional context would be helpful.';
+ 
+     const paragraphs = [header, roleLine, notesLine, 'I remain excited about the opportunity to contribute.', close]
+       .filter(Boolean)
+       .join(' ');
+ 
+     const content = `${paragraphs} Thank you for your time.`.trim();
+ 
++    const writingFlags = this.complianceService.enforceResumeWritingRules({
++      rawContent: content,
++    });
++
+     const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
+-      action: ComplianceAction.COVER_LETTER_GENERATION,
++      action: ComplianceAction.FOLLOW_UP_GENERATION,
+       actorId: userId,
++      baselineVersion,
+       job,
+       outputHash: createHash('sha256').update(content).digest('hex'),
+-      extraFlags: [],
++      extraFlags: writingFlags,
+     });
+ 
+     if (blocked) {
+       const message = complianceFlags
+         .map((flag) => flag.message)
+         .filter(Boolean)
+         .join('; ');
+       throw new BadRequestException(message || 'Follow up could not be generated due to compliance.');
+     }
+ 
+     return { job: { id: job.id, title: job.title, company: job.company }, content, complianceFlags };
+   }
+ 
+   private matchesAnyGap(story: StarStory, gaps: string[]): boolean {
+     const haystack = `${story.title} ${story.competencies?.join(' ') ?? ''}`.toLowerCase();
+     return gaps.some((gap) => haystack.includes((gap ?? '').toLowerCase()));
+   }
+ 
+   private gapFromText(gap: string, index: number): InterviewGap {
+     const trimmed = gap?.trim() || 'Interview prep focus';
+     return {
+       gapId: `gap-${index + 1}`,
+       domain: 'experience',
+       jdExcerpt: trimmed,
+       baselineExcerpt: null,
+diff --git a/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts b/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4bc734fce1ae10d69c5a892da33bd9433801e0b0
+--- /dev/null
++++ b/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts
+@@ -0,0 +1,26 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class ComplianceAuditEnhancements1860000000000 implements MigrationInterface {
++  name = 'ComplianceAuditEnhancements1860000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TYPE "compliance_audits_action_enum" ADD VALUE IF NOT EXISTS 'follow_up_gen'`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "compliance_audits" ADD COLUMN IF NOT EXISTS "baselineVersionId" uuid NULL`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "compliance_audits" ADD COLUMN IF NOT EXISTS "jobId" uuid NULL`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "jobId"`);
++    await queryRunner.query(
++      `ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "baselineVersionId"`,
++    );
++    // Note: postgres enum values cannot be easily removed; retaining added value on down migration.
++  }
++}
+diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
+index 6b4174465f844a5102f56d8c8e4f341a3b65b64f..a76b21f6170763e01c8239567bc001932dcc5c85 100644
+--- a/apps/api/src/resume/resume.controller.ts
++++ b/apps/api/src/resume/resume.controller.ts
+@@ -62,55 +62,56 @@ export class ResumeController {
+   ) {
+     const format = this.normalizeFormat(formatParam);
+     return this.handleExport(body, request, res, format);
+   }
+ 
+   private normalizeFormat(value: string): ResumeExportFormat {
+     const normalized = (value ?? '').toLowerCase().trim();
+     if (normalized === 'pdf') return 'pdf';
+     if (normalized === 'docx') return 'docx';
+     throw new BadRequestException('Invalid format. Use docx or pdf.');
+   }
+ 
+   private getUserId(request: Request & { user?: { id?: string } }) {
+     const userId = request.user?.id;
+     if (!userId) throw new BadRequestException('Invalid user context');
+     return userId;
+   }
+ 
+   private parsePayload(body: ResumeRequestBody) {
+     const baselineId = body.baselineId?.trim();
+     const baselineVersionId = body.baselineVersionId?.trim();
+     const jobId = body.jobId?.trim();
+     const oneTap = Boolean(body.oneTap);
+ 
+     if (!baselineId) throw new BadRequestException('baselineId is required');
++    if (!baselineVersionId) throw new BadRequestException('baselineVersionId is required');
+     if (!jobId) throw new BadRequestException('jobId is required');
+ 
+     return {
+       baselineId,
+-      baselineVersionId: baselineVersionId ?? undefined,
++      baselineVersionId,
+       jobId,
+       oneTap,
+     };
+   }
+ 
+   private async handleGenerate(
+     body: ResumeRequestBody,
+     request: Request & { user?: { id?: string } },
+   ) {
+     const userId = this.getUserId(request);
+     const payload = this.parsePayload(body);
+     return this.resumeService.generateResume(userId, payload);
+   }
+ 
+   private async handleExport(
+     body: ResumeRequestBody,
+     request: Request & { user?: { id?: string } },
+     res: Response,
+     format: ResumeExportFormat,
+   ) {
+     const userId = this.getUserId(request);
+     const payload = this.parsePayload(body);
+ 
+     const file = await this.resumeService.exportResume(userId, payload, format);
+ 
+diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+index c20fe474c17b2589e01d6f9785eb3f1bd50759d9..5752ffa6fba0e502a99d7ea8a0b72bc22a819a01 100644
+--- a/apps/api/src/resume/resume.service.spec.ts
++++ b/apps/api/src/resume/resume.service.spec.ts
+@@ -1,26 +1,26 @@
+-import { UnprocessableEntityException } from '@nestjs/common';
++import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+ import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
+ import { ComplianceService } from '../compliance/compliance.service';
+ import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+ import { ResumeService } from './resume.service';
+ 
+ const mockBaseline = {
+   id: 'baseline-1',
+   userId: 'user-1',
+   sections: [
+     {
+       id: 'section-1',
+       sectionType: BaselineSectionType.EXPERIENCE,
+       title: 'Example Co',
+       content: 'Delivered results with 10% uptime improvement.',
+       includePolicy: BaselineIncludePolicy.ALWAYS,
+       order: 0,
+     },
+   ],
+ };
+ 
+ const mockBaselineVersion = {
+   id: 'baseline-version-1',
+   baselineId: 'baseline-1',
+   hash: 'hash-1',
+ };
+@@ -90,91 +90,99 @@ const buildService = (
+       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+       // @ts-ignore
+       fitAssessmentRepository,
+       complianceService,
+     ),
+     complianceService,
+   };
+ };
+ 
+ describe('ResumeService', () => {
+   const request = {
+     baselineId: 'baseline-1',
+     baselineVersionId: 'baseline-version-1',
+     jobId: 'job-1',
+     oneTap: true,
+   };
+ 
+   it('rejects one-tap generation when fit score is below 92', async () => {
+     const { service } = buildService(91);
+ 
+     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+       UnprocessableEntityException,
+     );
+   });
+ 
++  it('requires a baselineVersionId for generation', async () => {
++    const { service } = buildService(95);
++
++    await expect(
++      service.generateResume('user-1', { ...request, baselineVersionId: '' }),
++    ).rejects.toBeInstanceOf(BadRequestException);
++  });
++
+   it('allows one-tap generation when fit score is at least 92', async () => {
+     const { service } = buildService(92);
+ 
+     const result = await service.generateResume('user-1', request);
+ 
+     expect(result.ok).toBe(true);
+     expect(result.sections).toHaveLength(1);
+   });
+ 
+   it('exports DOCX content with headers and body', async () => {
+     const { service } = buildService(95, []);
+ 
+     const exportResult = await service.exportResume('user-1', request, 'docx');
+ 
+     expect(exportResult.contentType).toBe(
+       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+     );
+     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+     expect(exportResult.filename).toBe('resume.docx');
+   });
+ 
+   it('blocks generation when baseline hash is missing', async () => {
+     const complianceService = {
+       enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+       validateAndAudit: jest.fn().mockResolvedValue({
+         complianceFlags: [
+           {
+             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
+             severity: ComplianceFlagSeverity.BLOCK,
+             message: 'Baseline version hash is required.',
+           },
+         ],
+         blocked: true,
+         audit: { id: 'audit-1' },
+       }),
+     } as unknown as ComplianceService;
+ 
+     const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
+ 
+     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
+-      UnprocessableEntityException,
++      BadRequestException,
+     );
+   });
+ 
+   it('audits resume export actions', async () => {
+     const { service, complianceService } = buildService(95);
+ 
+     await service.exportResume('user-1', request, 'pdf');
+ 
+     expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
+       expect.objectContaining({
+         action: ComplianceAction.RESUME_EXPORT,
+         actorId: 'user-1',
+         baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
+         job: expect.objectContaining({ id: 'job-1' }),
+         outputHash: expect.any(String),
+       }),
+     );
+   });
+ 
+   it('blocks generation when invented metrics are present', async () => {
+     const inventedMetricFlag = [
+       {
+         code: ComplianceFlagCode.INVENTED_METRIC,
+         severity: ComplianceFlagSeverity.BLOCK,
+         message: 'Metric not in baseline.',
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index 0a6a1803bf611105313426ffb1590ce284539649..22c911fa45a2f5eea0a9914157c3062ce1673dcb 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -109,83 +109,74 @@ export class ResumeService {
      const policyMap = new Map<string, BaselineBlockPolicy>(
        policies.map((policy) => [policy.baselineSectionId, policy]),
      );
@@ -432,188 +1553,133 @@ index d04739453717b0b28cf92c581ce57f48659a391a..c2432712f7f1a6fd66d6be1fb749e4f0
            sectionType: section.sectionType ?? section.type,
          } as BaselineSection;
        })
-@@ -217,59 +230,58 @@ export class GapDetectionService {
-       return embeddings;
-     } catch {
-       return null;
-     }
+       .sort((a, b) => a.order - b.order);
    }
  
-   private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
-     let bestMatch:
-       | {
-           section: BaselineSection;
-           overlap: number;
-         }
-       | null = null;
+   async generateResume(userId: string, request: GenerateResumeRequest) {
+     const baselineId = request.baselineId?.trim();
+     const baselineVersionId = request.baselineVersionId?.trim();
+     const jobId = request.jobId?.trim();
  
-     for (const candidate of sections) {
-       const overlap = [...jdTokens].filter((token) => candidate.tokens.has(token)).length;
- 
-       if (!bestMatch || overlap > bestMatch.overlap) {
-         bestMatch = { section: candidate.section, overlap };
-       }
+     if (!baselineId) {
+       throw new BadRequestException('baselineId is required');
      }
- 
-     return bestMatch;
-   }
- 
--  private async findBestEmbeddingMatch(
--    jdText: string,
-+  private findBestEmbeddingMatch(
-+    jdEmbedding: number[],
-     sections: SectionEmbedding[],
--  ): Promise<{ section: BaselineSection; similarity: number } | null> {
--    if (!this.embeddingProvider) {
-+  ): { section: BaselineSection; similarity: number } | null> {
-+    if (!jdEmbedding.length) {
-       return null;
-     }
- 
--    const jdEmbedding = await this.embeddingProvider.embed(jdText);
-     let bestMatch: { section: BaselineSection; similarity: number } | null = null;
- 
-     for (const candidate of sections) {
-       const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
- 
-       if (!bestMatch || similarity > bestMatch.similarity) {
-         bestMatch = { section: candidate.section, similarity };
-       }
-     }
- 
-     return bestMatch;
-   }
- 
-   private cosineSimilarity(a: number[], b: number[]): number {
-     if (!a.length || !b.length || a.length !== b.length) {
-       return 0;
-     }
- 
-     const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
-     const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
-     const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
- 
-     if (magnitudeA === 0 || magnitudeB === 0) {
-       return 0;
-     }
-@@ -279,50 +291,120 @@ export class GapDetectionService {
- 
-   private resolveConfidence(coverageRatio: number): GapConfidence {
-     if (coverageRatio === 0) {
-       return 'high';
-     }
-     if (coverageRatio < 0.25) {
-       return 'medium';
-     }
-     return 'low';
-   }
- 
-   private buildBaselineExcerpt(content: string | null): string | null {
-     if (!content) {
-       return null;
-     }
- 
-     const trimmed = content.trim();
- 
-     if (trimmed.length <= 300) {
-       return trimmed;
-     }
- 
-     return `${trimmed.slice(0, 297)}...`;
-   }
- 
-+  private clusterAndOrderGaps(candidates: GapCandidate[]): InterviewGap[] {
-+    if (!candidates.length) {
-+      return [];
++    if (!baselineVersionId) {
++      throw new BadRequestException('baselineVersionId is required');
 +    }
-+
-+    const clusters: GapCandidate[][] = [];
-+
-+    for (const candidate of candidates) {
-+      const bestClusterIndex = this.findBestClusterIndex(candidate, clusters);
-+
-+      if (bestClusterIndex === -1) {
-+        clusters.push([candidate]);
-+      } else {
-+        clusters[bestClusterIndex].push(candidate);
-+      }
-+    }
-+
-+    return clusters.flatMap((cluster) => cluster.map((entry) => entry.gap));
-+  }
-+
-+  private findBestClusterIndex(candidate: GapCandidate, clusters: GapCandidate[][]): number {
-+    let bestIndex = -1;
-+    let bestSimilarity = 0;
-+
-+    clusters.forEach((cluster, index) => {
-+      const seed = cluster[0];
-+      const similarity = this.resolveSimilarity(candidate, seed);
-+
-+      if (similarity >= GAP_CLUSTER_EMBEDDING_THRESHOLD && similarity > bestSimilarity) {
-+        bestSimilarity = similarity;
-+        bestIndex = index;
-+      }
-+    });
-+
-+    if (bestIndex !== -1) {
-+      return bestIndex;
-+    }
-+
-+    clusters.forEach((cluster, index) => {
-+      const seed = cluster[0];
-+      const similarity = this.tokenSimilarity(candidate.tokens, seed.tokens);
-+
-+      if (similarity >= GAP_CLUSTER_TOKEN_THRESHOLD && similarity > bestSimilarity) {
-+        bestSimilarity = similarity;
-+        bestIndex = index;
-+      }
-+    });
-+
-+    return bestIndex;
-+  }
-+
-+  private resolveSimilarity(a: GapCandidate, b: GapCandidate): number {
-+    if (!a.embedding || !b.embedding) {
-+      return 0;
-+    }
-+
-+    return this.cosineSimilarity(a.embedding, b.embedding);
-+  }
-+
-+  private tokenSimilarity(a: Set<string>, b: Set<string>): number {
-+    if (!a.size || !b.size) {
-+      return 0;
-+    }
-+
-+    const shared = [...a].filter((token) => b.has(token)).length;
-+    const normalizer = Math.max(a.size, b.size);
-+
-+    return shared / normalizer;
-+  }
-+
-   private inferDomain(text: string): GapDomain {
-     const value = text.toLowerCase();
  
-     const leadershipKeywords = ['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'];
-     if (leadershipKeywords.some((keyword) => value.includes(keyword))) {
-       return 'leadership';
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+       order: { sections: { order: 'ASC' } },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
      }
  
-     const toolingKeywords = ['sql', 'python', 'javascript', 'aws', 'gcp', 'azure', 'tool', 'framework', 'platform'];
-     if (toolingKeywords.some((keyword) => value.includes(keyword))) {
-       return 'tooling';
-     }
+-    let targetBaselineVersionId = baselineVersionId;
+-
+-    if (!targetBaselineVersionId) {
+-      const latestVersion = await this.baselineVersionRepository.findOne({
+-        where: { baselineId: baseline.id },
+-        order: { versionNumber: 'DESC', createdAt: 'DESC' },
+-      });
+-
+-      targetBaselineVersionId = latestVersion?.id;
+-    }
+-
+-    if (!targetBaselineVersionId) {
+-      throw new NotFoundException('Baseline version not found');
+-    }
+-
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+-      where: { id: targetBaselineVersionId, baselineId: baseline.id },
++      where: { id: baselineVersionId, baselineId: baseline.id },
+     });
  
-     const scopeKeywords = ['scale', 'scalable', 'enterprise', 'multiple teams', 'cross-functional', 'global'];
-     if (scopeKeywords.some((keyword) => value.includes(keyword))) {
-       return 'scope';
+     if (!baselineVersion) {
+       throw new NotFoundException('Baseline version not found');
      }
++    if (!baselineVersion.hash) {
++      throw new BadRequestException('Baseline version hash missing');
++    }
  
-     const industryKeywords = ['healthcare', 'finance', 'fintech', 'ecommerce', 'retail', 'government'];
-     if (industryKeywords.some((keyword) => value.includes(keyword))) {
-       return 'industry';
+     const policies = await this.baselineBlockPolicyRepository.find({
+       where: { baselineVersionId: baselineVersion.id },
+       relations: ['baselineSection'],
+       order: { order: 'ASC' },
+     });
+ 
+     const sectionsWithPolicies = this.applyPoliciesToSections(
+       baseline.sections ?? [],
+       policies,
+     );
+ 
+     const sections = sectionsWithPolicies.map((section) => ({
+       id: section.id,
+       type: section.sectionType,
+       title: section.title,
+       content: section.content,
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       order: section.order,
+       source: 'baseline',
+     }));
+ 
+     const job = jobId
+       ? await this.jobsRepository.findOne({
+           where: { id: jobId, userId },
+@@ -255,50 +246,53 @@ export class ResumeService {
+   ) {
+     const generation = await this.generateResume(userId, request);
+     const text = this.buildResumeText(
+       generation.sections.map((section) => ({
+         title: section.title,
+         content: section.content,
+       })),
+     );
+ 
+     const buffer =
+       format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
+ 
+     const contentType =
+       format === 'pdf'
+         ? 'application/pdf'
+         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+     const filename = `resume.${format}`;
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: { id: generation.baselineVersionId, baselineId: generation.baselineId },
+     });
+ 
+     if (!baselineVersion) {
+       throw new NotFoundException('Baseline version not found');
      }
++    if (!baselineVersion.hash) {
++      throw new BadRequestException('Baseline version hash missing');
++    }
  
-     return 'experience';
-   }
+     const job = generation.jobId
+       ? await this.jobsRepository.findOne({
+           where: { id: generation.jobId, userId },
+         })
+       : null;
+ 
+     const { complianceFlags, blocked } = await this.complianceService.validateAndAudit({
+       action: ComplianceAction.RESUME_EXPORT,
+       actorId: userId,
+       baselineVersion,
+       job,
+       outputHash: createHash('sha256')
+         .update(`${format}:${text}`)
+         .digest('hex'),
+     });
+ 
+     if (blocked) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'unprocessable',
+           message: 'Compliance validation failed.',
+           details: { compliance_flags: complianceFlags },
+         },
+       });

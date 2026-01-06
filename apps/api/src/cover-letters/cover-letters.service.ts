@@ -60,6 +60,10 @@ export class CoverLettersService {
       throw new BadRequestException('Invalid user context');
     }
 
+    if (!input.baselineVersionId?.trim()) {
+      throw new BadRequestException('baselineVersionId is required');
+    }
+
     const baseline = await this.baselineRepository.findOne({
       where: { id: input.baselineId, userId },
       relations: ['sections'],
@@ -79,17 +83,21 @@ export class CoverLettersService {
     }
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { baselineId: baseline.id },
-      order: { versionNumber: 'DESC', createdAt: 'DESC' },
+      where: { baselineId: baseline.id, id: input.baselineVersionId.trim() },
     });
 
-    const policies = baselineVersion
-      ? await this.baselineBlockPolicyRepository.find({
-          where: { baselineVersionId: baselineVersion.id },
-          relations: ['baselineSection'],
-          order: { order: 'ASC' },
-        })
-      : [];
+    if (!baselineVersion) {
+      throw new NotFoundException('Baseline version not found');
+    }
+    if (!baselineVersion.hash) {
+      throw new BadRequestException('Baseline version hash missing');
+    }
+
+    const policies = await this.baselineBlockPolicyRepository.find({
+      where: { baselineVersionId: baselineVersion.id },
+      relations: ['baselineSection'],
+      order: { order: 'ASC' },
+    });
 
     const sections = this.applyPoliciesToSections(
       baseline.sections ?? [],

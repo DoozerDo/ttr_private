@@ -9,6 +9,7 @@ import { Job } from '../jobs/job.entity';
 import { StarStory } from '../star-stories/star-story.entity';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import type { InterviewGap } from './interview-types';
+import { BaselineVersion } from '../baseline/baseline-version.entity';
 
 export type StudyPacket = {
   job: Pick<Job, 'id' | 'title' | 'company'>;
@@ -35,6 +36,8 @@ export class InterviewToolkitService {
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     @InjectRepository(StarStory)
     private readonly starStoryRepository: Repository<StarStory>,
+    @InjectRepository(BaselineVersion)
+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
     private readonly questionGenerator: InterviewQuestionGeneratorService,
     private readonly complianceService: ComplianceService,
   ) {}
@@ -99,8 +102,34 @@ export class InterviewToolkitService {
     };
   }
 
-  async generateFollowUp(userId: string, jobId: string, notes?: string) {
+  async generateFollowUp(
+    userId: string,
+    jobId: string,
+    baselineVersionId?: string | null,
+    notes?: string,
+  ) {
     const job = await this.requireJob(jobId, userId);
+
+    if (!baselineVersionId?.trim()) {
+      throw new BadRequestException('baselineVersionId is required');
+    }
+
+    const baselineVersion = await this.baselineVersionRepository.findOne({
+      where: { id: baselineVersionId.trim() },
+      relations: ['baseline'],
+    });
+
+    if (!baselineVersion || !baselineVersion.baseline) {
+      throw new NotFoundException('Baseline version not found');
+    }
+
+    if (baselineVersion.baseline.userId !== userId) {
+      throw new NotFoundException('Baseline version not found');
+    }
+
+    if (!baselineVersion.hash) {
+      throw new BadRequestException('Baseline version hash missing');
+    }
 
     const header = job.company ? `Hi ${job.company} team,` : 'Hi there,';
     const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : undefined;
@@ -113,12 +142,17 @@ export class InterviewToolkitService {
 
     const content = `${paragraphs} Thank you for your time.`.trim();
 
+    const writingFlags = this.complianceService.enforceResumeWritingRules({
+      rawContent: content,
+    });
+
     const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
-      action: ComplianceAction.COVER_LETTER_GENERATION,
+      action: ComplianceAction.FOLLOW_UP_GENERATION,
       actorId: userId,
+      baselineVersion,
       job,
       outputHash: createHash('sha256').update(content).digest('hex'),
-      extraFlags: [],
+      extraFlags: writingFlags,
     });
 
     if (blocked) {

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,6 +8,8 @@ import { Job } from '../jobs/job.entity';
 import { StarStory } from '../star-stories/star-story.entity';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import { InterviewToolkitService } from './interview-toolkit.service';
+import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { Baseline } from '../baseline/baseline.entity';
 
 const buildRepository = <T>(overrides: Partial<Repository<T>> = {}): Partial<Repository<T>> => ({
   findOne: jest.fn(),
@@ -20,11 +23,13 @@ describe('InterviewToolkitService', () => {
   let fitAssessmentRepository: Partial<Repository<FitAssessment>>;
   let starStoryRepository: Partial<Repository<StarStory>>;
   let questionGenerator: Partial<InterviewQuestionGeneratorService>;
+  let baselineVersionRepository: Partial<Repository<BaselineVersion>>;
 
   beforeEach(async () => {
     jobRepository = buildRepository();
     fitAssessmentRepository = buildRepository();
     starStoryRepository = buildRepository();
+    baselineVersionRepository = buildRepository();
     questionGenerator = {
       generateQuestions: jest.fn().mockReturnValue([{ gapId: 'gap-1', prompt: 'Q1', category: 'Context', jdReference: '' }]),
     } as any;
@@ -35,6 +40,8 @@ describe('InterviewToolkitService', () => {
         { provide: getRepositoryToken(Job), useValue: jobRepository },
         { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
         { provide: getRepositoryToken(StarStory), useValue: starStoryRepository },
+        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
+        { provide: getRepositoryToken(Baseline), useValue: buildRepository() },
         { provide: InterviewQuestionGeneratorService, useValue: questionGenerator },
         {
           provide: ComplianceService,
@@ -130,9 +137,43 @@ describe('InterviewToolkitService', () => {
 
     (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
 
-    const result = await service.generateFollowUp('user-1', 'job-2', 'roadmap planning');
+    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
+      id: 'bv-1',
+      hash: 'hash-1',
+      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
+    });
+
+    const result = await service.generateFollowUp('user-1', 'job-2', 'bv-1', 'roadmap planning');
 
     expect(result.content).toContain('roadmap planning');
     expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
+  });
+
+  it('requires a baseline version id for follow ups', async () => {
+    const job: Job = {
+      id: 'job-2',
+      userId: 'user-1',
+      title: 'PM',
+      company: 'Acme',
+      rawDescription: 'JD',
+      sourceUrl: null,
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+      jdIngestionMethod: 'PASTE' as any,
+      jdParsedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
+    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
+      id: 'bv-1',
+      hash: 'hash-1',
+      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
+    });
+
+    await expect(service.generateFollowUp('user-1', 'job-2', '')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });

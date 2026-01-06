@@ -23,11 +23,14 @@ export class ComplianceAudit {
   })
   action!: ComplianceAction;
 
+  @Column({ type: 'uuid', nullable: true })
+  baselineVersionId!: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   baselineVersionHash!: string | null;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  jobHash!: string | null;
+  @Column({ type: 'uuid', nullable: true })
+  jobId!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   outputHash!: string | null;

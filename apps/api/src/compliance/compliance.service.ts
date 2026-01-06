@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import type { BaselineVersion } from '../baseline/baseline-version.entity';
 import type { Job } from '../jobs/job.entity';
 import {
@@ -8,6 +9,7 @@ import {
   ComplianceFlag,
   ComplianceFlagSeverity,
 } from './compliance.types';
+import { ComplianceAudit } from './compliance-audit.entity';
 import { ScopeInflationDetector } from './scope-inflation-detector';
 
 export type ValidateAndAuditRequest = {
@@ -32,6 +34,7 @@ export type ValidateAndAuditResult = {
   complianceFlags: ComplianceFlag[];
   audit: {
     id: string;
+    baselineVersionId: string | null;
     outputHash: string;
     action: ComplianceAction;
     actorId: string;
@@ -44,6 +47,11 @@ export type ValidateAndAuditResult = {
 @Injectable()
 export class ComplianceService {
   private readonly scopeInflationDetector = new ScopeInflationDetector();
+
+  constructor(
+    @InjectRepository(ComplianceAudit)
+    private readonly auditsRepository: Repository<ComplianceAudit>,
+  ) {}
 
   public normalizeText(input: string): string {
     return (input ?? '').replace(/\s+/g, ' ').trim();
@@ -84,6 +92,17 @@ export class ComplianceService {
       );
     }
 
+    const stylizedDashPattern = /[\u2012\u2013\u2014\u2015]/u; // figure dash, en dash, em dash, horizontal bar
+    if (stylizedDashPattern.test(content)) {
+      flags.push(
+        this.flag(
+          ComplianceFlagCode.STYLIZED_PUNCTUATION,
+          'Content contains stylized dash punctuation. Use standard hyphens instead.',
+          ComplianceFlagSeverity.BLOCK,
+        ),
+      );
+    }
+
     return flags;
   }
 
@@ -110,6 +129,12 @@ export class ComplianceService {
 
     const actorId = String(payload.actorId ?? '').trim();
     const outputHash = String(payload.outputHash ?? '').trim();
+    const baselineVersionId = (payload.baselineVersion as any)?.id ?? null;
+    const baselineVersionHash =
+      (payload.baselineVersion as any)?.hash ??
+      (payload.baselineVersion as any)?.fileHash ??
+      null;
+    const jobId = (payload.job as any)?.id ?? null;
 
     if (!actorId) {
       flags.push(
@@ -125,6 +150,35 @@ export class ComplianceService {
           ComplianceFlagSeverity.BLOCK,
         ),
       );
+    }
+
+    const baselineRequiredActions: ComplianceAction[] = [
+      ComplianceAction.RESUME_GENERATION,
+      ComplianceAction.COVER_LETTER_GENERATION,
+      ComplianceAction.FOLLOW_UP_GENERATION,
+      ComplianceAction.RESUME_EXPORT,
+    ];
+
+    if (baselineRequiredActions.includes(payload.action)) {
+      if (!baselineVersionId) {
+        flags.push(
+          this.flag(
+            ComplianceFlagCode.MISSING_BASELINE_VERSION,
+            'baselineVersionId is required.',
+            ComplianceFlagSeverity.BLOCK,
+          ),
+        );
+      }
+
+      if (!baselineVersionHash) {
+        flags.push(
+          this.flag(
+            ComplianceFlagCode.MISSING_BASELINE_HASH,
+            'Baseline version hash is required.',
+            ComplianceFlagSeverity.BLOCK,
+          ),
+        );
+      }
     }
 
     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
@@ -154,50 +208,36 @@ export class ComplianceService {
         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
     );
 
-    const auditId = this.buildAuditId(payload);
+    const audit = this.auditsRepository.create({
+      actorId,
+      action: payload.action,
+      baselineVersionId,
+      baselineVersionHash,
+      jobId: jobId ?? null,
+      outputHash,
+      complianceFlags: flags,
+      passFail: !blocked,
+    });
 
-    const baselineVersionHash =
-      (payload.baselineVersion as any)?.hash ??
-      (payload.baselineVersion as any)?.fileHash ??
-      null;
-
-    const jobId = (payload.job as any)?.id ?? null;
+    const savedAudit = await this.auditsRepository.save(audit);
 
     return {
       blocked,
       complianceFlags: flags,
       audit: {
-        id: auditId,
-        outputHash: outputHash || '',
-        action: payload.action,
-        actorId: actorId || '',
-        baselineVersionHash,
-        jobId,
-        createdAt: new Date().toISOString(),
+        id: savedAudit.id,
+        outputHash: savedAudit.outputHash ?? '',
+        baselineVersionId: savedAudit.baselineVersionId,
+        action: savedAudit.action,
+        actorId: savedAudit.actorId,
+        baselineVersionHash: savedAudit.baselineVersionHash,
+        jobId: savedAudit.jobId,
+        createdAt: savedAudit.createdAt.toISOString(),
       },
     };
   }
 
   private flag(code: string, message: string, severity: ComplianceFlagSeverity): ComplianceFlag {
     return { code: code as any, message, severity };
-  }
-
-  private buildAuditId(payload: ValidateAndAuditRequest): string {
-    const baselineHash =
-      (payload.baselineVersion as any)?.hash ??
-      (payload.baselineVersion as any)?.fileHash ??
-      null;
-
-    const jobId = (payload.job as any)?.id ?? null;
-
-    const fingerprint = {
-      action: payload.action,
-      actorId: String(payload.actorId ?? ''),
-      baselineHash,
-      jobId,
-      outputHash: String(payload.outputHash ?? ''),
-    };
-
-    return createHash('sha256').update(JSON.stringify(fingerprint)).digest('hex');
   }
 }

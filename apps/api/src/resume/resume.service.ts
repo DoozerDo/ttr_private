@@ -131,6 +131,9 @@ export class ResumeService {
     if (!baselineId) {
       throw new BadRequestException('baselineId is required');
     }
+    if (!baselineVersionId) {
+      throw new BadRequestException('baselineVersionId is required');
+    }
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
@@ -142,27 +145,15 @@ export class ResumeService {
       throw new NotFoundException('Baseline not found');
     }
 
-    let targetBaselineVersionId = baselineVersionId;
-
-    if (!targetBaselineVersionId) {
-      const latestVersion = await this.baselineVersionRepository.findOne({
-        where: { baselineId: baseline.id },
-        order: { versionNumber: 'DESC', createdAt: 'DESC' },
-      });
-
-      targetBaselineVersionId = latestVersion?.id;
-    }
-
-    if (!targetBaselineVersionId) {
-      throw new NotFoundException('Baseline version not found');
-    }
-
     const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { id: targetBaselineVersionId, baselineId: baseline.id },
+      where: { id: baselineVersionId, baselineId: baseline.id },
     });
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
+    }
+    if (!baselineVersion.hash) {
+      throw new BadRequestException('Baseline version hash missing');
     }
 
     const policies = await this.baselineBlockPolicyRepository.find({
@@ -276,6 +267,9 @@ export class ResumeService {
 
     if (!baselineVersion) {
       throw new NotFoundException('Baseline version not found');
+    }
+    if (!baselineVersion.hash) {
+      throw new BadRequestException('Baseline version hash missing');
     }
 
     const job = generation.jobId

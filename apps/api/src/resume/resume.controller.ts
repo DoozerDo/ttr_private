@@ -84,11 +84,12 @@ export class ResumeController {
     const oneTap = Boolean(body.oneTap);
 
     if (!baselineId) throw new BadRequestException('baselineId is required');
+    if (!baselineVersionId) throw new BadRequestException('baselineVersionId is required');
     if (!jobId) throw new BadRequestException('jobId is required');
 
     return {
       baselineId,
-      baselineVersionId: baselineVersionId ?? undefined,
+      baselineVersionId,
       jobId,
       oneTap,
     };
