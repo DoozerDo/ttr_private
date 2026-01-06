@@ -2,6 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineVersionService } from '../baseline/baseline-version.service';
+import { AnalysisService } from '../analysis/analysis.service';
+import { FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
 import { ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
@@ -110,9 +114,13 @@ export class InterviewRecordsService {
   constructor(
     @InjectRepository(Interview)
     private readonly interviewsRepo: Repository<Interview>,
+    @InjectRepository(BaselineVersion)
+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
     private readonly gapDetectionService: GapDetectionService,
     private readonly interviewQuestionGenerator: InterviewQuestionGeneratorService,
     private readonly recommendedAdditionsService: RecommendedAdditionsService,
+    private readonly baselineVersionService: BaselineVersionService,
+    private readonly analysisService: AnalysisService,
   ) {}
 
   private requireJobId(jobId?: string): string {
@@ -137,6 +145,59 @@ export class InterviewRecordsService {
     if (!Array.isArray(flags)) return false;
 
     return flags.some((flag) => flag?.severity === ComplianceFlagSeverity.BLOCK);
+  }
+
+  private normalizeAcceptedAdditionIds(value?: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    const unique = new Set<string>();
+    value.forEach((entry) => {
+      if (typeof entry !== 'string') return;
+      const trimmed = entry.trim();
+      if (trimmed) unique.add(trimmed);
+    });
+    return Array.from(unique);
+  }
+
+  private filterAcceptedAdditionIds(
+    additions: RecommendedAddition[],
+    acceptedIds?: string[] | null,
+  ): string[] {
+    const acceptedSet = new Set(this.normalizeAcceptedAdditionIds(acceptedIds ?? []));
+    if (!acceptedSet.size) return [];
+    const validIds = new Set(additions.map((addition) => addition.id));
+    return Array.from(acceptedSet).filter((id) => validIds.has(id));
+  }
+
+  private async getBaselineVersionHash(
+    baselineVersionId?: string | null,
+  ): Promise<string | null> {
+    if (!baselineVersionId?.trim()) return null;
+    const record = await this.baselineVersionRepository.findOne({
+      where: { id: baselineVersionId },
+    });
+    return record?.fileHash ?? null;
+  }
+
+  private async getBaselineVersionNumber(
+    baselineVersionId?: string | null,
+  ): Promise<number | undefined> {
+    if (!baselineVersionId?.trim()) return undefined;
+    const record = await this.baselineVersionRepository.findOne({
+      where: { id: baselineVersionId },
+    });
+    return record?.versionNumber ?? undefined;
+  }
+
+  private async buildInterviewResponse(interview: Interview) {
+    const baselineVersionHash = await this.getBaselineVersionHash(interview.baselineVersionId);
+    return { ...interview, baselineVersionHash };
+  }
+
+  private scoreToVerdict(score?: number | null) {
+    if (typeof score !== 'number' || Number.isNaN(score)) return null;
+    if (score >= 80) return FitAssessmentVerdict.APPLY;
+    if (score >= 60) return FitAssessmentVerdict.CONSIDER;
+    return FitAssessmentVerdict.SKIP;
   }
 
   async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
@@ -167,7 +228,8 @@ export class InterviewRecordsService {
       recommendedAdditions: normalizeRecommendedAdditions(dto.recommendedAdditions),
     });
 
-    return this.interviewsRepo.save(interview);
+    const saved = await this.interviewsRepo.save(interview);
+    return this.buildInterviewResponse(saved);
   }
 
   async listInterviewRecordsForUser(userId: string): Promise<Interview[]> {
@@ -187,6 +249,14 @@ export class InterviewRecordsService {
     }
 
     return interview;
+  }
+
+  async getInterviewRecordForUserResponse(
+    id: string,
+    userId: string,
+  ): Promise<Interview> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+    return this.buildInterviewResponse(interview);
   }
 
   async updateInterviewRecord(id: string, userId: string, dto: UpdateInterviewRecordDto): Promise<Interview> {
@@ -232,7 +302,22 @@ export class InterviewRecordsService {
       });
     }
 
-    return this.interviewsRepo.save(interview);
+    interview.acceptedAdditionIds = this.filterAcceptedAdditionIds(
+      interview.recommendedAdditions,
+      interview.acceptedAdditionIds,
+    );
+
+    if (
+      dto.responses !== undefined ||
+      dto.questions !== undefined ||
+      dto.gapList !== undefined ||
+      dto.validationResults !== undefined
+    ) {
+      interview.expandedFitAssessment = null;
+    }
+
+    const saved = await this.interviewsRepo.save(interview);
+    return this.buildInterviewResponse(saved);
   }
 
   async applyAdditionDecisions(id: string, userId: string, body: unknown): Promise<Interview> {
@@ -271,7 +356,129 @@ export class InterviewRecordsService {
       return nextStatus ? { ...addition, status: nextStatus } : addition;
     });
 
-    return this.interviewsRepo.save(interview);
+    const saved = await this.interviewsRepo.save(interview);
+    return this.buildInterviewResponse(saved);
+  }
+
+  async updateAcceptedAdditions(
+    id: string,
+    userId: string,
+    acceptedAdditionIds: string[],
+  ): Promise<Interview> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
+      ? interview.recommendedAdditions
+      : [];
+    const normalizedIds = this.normalizeAcceptedAdditionIds(acceptedAdditionIds);
+    const knownIds = new Set(recommendedAdditions.map((addition) => addition.id));
+    const invalidIds = normalizedIds.filter((additionId) => !knownIds.has(additionId));
+
+    if (invalidIds.length) {
+      throw new BadRequestException('acceptedAdditionIds contain unknown addition ids');
+    }
+
+    interview.acceptedAdditionIds = normalizedIds;
+    interview.expandedFitAssessment = null;
+
+    const saved = await this.interviewsRepo.save(interview);
+    return this.buildInterviewResponse(saved);
+  }
+
+  async computeExpandedFit(id: string, userId: string): Promise<Interview> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    if (!interview.baselineId?.trim()) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    if (!interview.jobId?.trim()) {
+      throw new BadRequestException('jobId is required');
+    }
+
+    const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
+      ? interview.recommendedAdditions
+      : [];
+
+    const acceptedIds = this.normalizeAcceptedAdditionIds(interview.acceptedAdditionIds ?? []);
+    const acceptedSet = new Set(acceptedIds);
+    const additions = acceptedIds.length
+      ? recommendedAdditions.filter((addition) => acceptedSet.has(addition.id))
+      : recommendedAdditions;
+
+    if (!additions.length) {
+      throw new BadRequestException('No additions available for expanded scoring');
+    }
+
+    const baselineVersionNumber = await this.getBaselineVersionNumber(
+      interview.baselineVersionId,
+    );
+
+    const expansion = await this.analysisService.runExpandedFitAssessment(userId, {
+      jobId: interview.jobId,
+      baselineId: interview.baselineId,
+      baselineVersion: baselineVersionNumber,
+      interviewId: interview.id,
+      verifiedAdditions: additions.map((addition) => addition.text),
+    });
+
+    interview.expandedFitAssessment = {
+      ...expansion,
+      originalVerdict: this.scoreToVerdict(expansion.originalScore),
+      expandedVerdict: this.scoreToVerdict(expansion.expandedScore),
+    };
+
+    const saved = await this.interviewsRepo.save(interview);
+    return this.buildInterviewResponse(saved);
+  }
+
+  async promoteAcceptedAdditions(
+    id: string,
+    userId: string,
+  ): Promise<{
+    baselineVersionId: string;
+    baselineVersionHash: string | null;
+    versionNumber: number | null;
+  }> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    if (!interview.baselineId?.trim()) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
+      ? interview.recommendedAdditions
+      : [];
+    const acceptedIds = this.normalizeAcceptedAdditionIds(interview.acceptedAdditionIds ?? []);
+
+    if (!acceptedIds.length) {
+      throw new BadRequestException('At least one accepted addition is required');
+    }
+
+    const acceptedSet = new Set(acceptedIds);
+    const acceptedAdditions = recommendedAdditions.filter((addition) =>
+      acceptedSet.has(addition.id),
+    );
+
+    if (!acceptedAdditions.length) {
+      throw new BadRequestException('Accepted additions were not found on this interview');
+    }
+
+    const promotion = await this.baselineVersionService.approveVerifiedAdditions(userId, {
+      baselineId: interview.baselineId,
+      interviewId: interview.id,
+      additions: acceptedAdditions,
+    });
+
+    interview.promotedBaselineVersionId = promotion.baseline_version_id ?? null;
+
+    await this.interviewsRepo.save(interview);
+
+    return {
+      baselineVersionId: promotion.baseline_version_id,
+      baselineVersionHash: promotion.hash ?? null,
+      versionNumber: promotion.version_number ?? null,
+    };
   }
 
   async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {

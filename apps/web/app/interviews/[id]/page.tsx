@@ -89,6 +89,32 @@ function readNumericField(payload: unknown, keys: string[]): number | null {
   return null;
 }
 
+function readStringField(payload: unknown, keys: string[]): string | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  for (const key of keys) {
+    const value = (payload as Record<string, unknown>)[key];
+    if (typeof value === "string") return value;
+  }
+
+  return null;
+}
+
+function describeAdditionSource(addition: RecommendedAddition): string {
+  const sources = Array.isArray(addition.sources) ? addition.sources : [];
+  const labels: string[] = [];
+
+  sources.forEach((source) => {
+    if (source.gapId) labels.push(`Gap ${source.gapId}`);
+    if (typeof source.questionIndex === "number") labels.push(`Question ${source.questionIndex + 1}`);
+    if (source.questionPrompt) labels.push(`Prompt: ${source.questionPrompt}`);
+  });
+
+  if (!labels.length) return "General addition";
+
+  return labels.slice(0, 2).join(" | ");
+}
+
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -99,6 +125,18 @@ export default function InterviewSessionPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [decisionSavingId, setDecisionSavingId] = useState<string | null>(null);
+  const [acceptedAdditionIds, setAcceptedAdditionIds] = useState<string[]>([]);
+  const [acceptedSaving, setAcceptedSaving] = useState(false);
+  const [acceptedError, setAcceptedError] = useState<string | null>(null);
+  const [expandedComputing, setExpandedComputing] = useState(false);
+  const [expandedComputeError, setExpandedComputeError] = useState<string | null>(null);
+  const [promotionSaving, setPromotionSaving] = useState(false);
+  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionResult, setPromotionResult] = useState<{
+    baselineVersionId: string;
+    baselineVersionHash: string | null;
+  } | null>(null);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
 
   const applySessionUpdate = useCallback(
     (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
@@ -145,6 +183,10 @@ export default function InterviewSessionPage() {
     loadSession();
   }, [applySessionUpdate, sessionId]);
 
+  useEffect(() => {
+    setAcceptedAdditionIds(session?.acceptedAdditionIds ?? []);
+  }, [session?.acceptedAdditionIds]);
+
   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
   const recommendedAdditions: RecommendedAddition[] = useMemo(() => {
@@ -154,6 +196,14 @@ export default function InterviewSessionPage() {
       status: addition.status ?? "proposed",
     }));
   }, [session?.recommendedAdditions]);
+  const acceptedAdditionSet = useMemo(
+    () => new Set(acceptedAdditionIds),
+    [acceptedAdditionIds],
+  );
+  const acceptedAdditions = useMemo(
+    () => recommendedAdditions.filter((addition) => acceptedAdditionSet.has(addition.id)),
+    [acceptedAdditionSet, recommendedAdditions],
+  );
   const complianceLookup = useMemo(
     () => normalizeCompliance(session?.validationResults),
     [session?.validationResults],
@@ -187,6 +237,13 @@ export default function InterviewSessionPage() {
     return id ?? baselineVersionHash ?? null;
   }, [baselineVersionHash, session?.baselineVersionId]);
 
+  const promotedBaselineReference = useMemo(() => {
+    const id = promotionResult?.baselineVersionId ?? session?.promotedBaselineVersionId ?? null;
+    const hash = promotionResult?.baselineVersionHash ?? null;
+    if (id && hash) return `${id} (${hash})`;
+    return id ?? hash ?? null;
+  }, [promotionResult?.baselineVersionHash, promotionResult?.baselineVersionId, session?.promotedBaselineVersionId]);
+
   const expandedFitDetails = useMemo(() => {
     const assessment = session?.expandedFitAssessment;
     if (!assessment) return null;
@@ -194,11 +251,23 @@ export default function InterviewSessionPage() {
     const expandedScore = readNumericField(assessment, ["expandedScore", "expanded_score"]);
     const originalScore = readNumericField(assessment, ["originalScore", "original_score"]);
     const delta = readNumericField(assessment, ["delta"]);
+    const expandedVerdict = readStringField(assessment, ["expandedVerdict", "expanded_verdict"]);
+    const originalVerdict = readStringField(assessment, ["originalVerdict", "original_verdict"]);
 
     if (expandedScore === null && originalScore === null && delta === null) return null;
 
-    return { expandedScore, originalScore, delta };
+    return { expandedScore, originalScore, delta, expandedVerdict, originalVerdict };
   }, [session?.expandedFitAssessment]);
+
+  const verdictFromScore = (score: number | null | undefined) => {
+    if (score === null || score === undefined) return null;
+    if (score >= 80) return "APPLY";
+    if (score >= 60) return "CONSIDER";
+    return "SKIP";
+  };
+
+  const originalVerdict = expandedFitDetails?.originalVerdict ?? verdictFromScore(expandedFitDetails?.originalScore);
+  const expandedVerdict = expandedFitDetails?.expandedVerdict ?? verdictFromScore(expandedFitDetails?.expandedScore);
 
   const handleChange = (index: number, value: string) => {
     setAnswers((prev) => {
@@ -282,6 +351,146 @@ export default function InterviewSessionPage() {
       setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
     } finally {
       setDecisionSavingId(null);
+    }
+  };
+
+  const saveAcceptedAdditions = useCallback(
+    async (nextAcceptedIds: string[]) => {
+      if (!sessionId) return;
+
+      setAcceptedSaving(true);
+      setAcceptedError(null);
+      setReviewMessage(null);
+
+      try {
+        const response = await fetch(`/api/interviews/${sessionId}/accepted-additions`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ acceptedAdditionIds: nextAcceptedIds }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          const messageText = payload?.error ?? payload?.message ?? "Unable to save accepted additions.";
+          throw new Error(messageText);
+        }
+
+        const updatedSession = (await response.json()) as InterviewSessionDto;
+        applySessionUpdate(updatedSession, { preserveAnswers: true });
+        setReviewMessage("Accepted additions updated.");
+      } catch (saveError) {
+        setAcceptedError(saveError instanceof Error ? saveError.message : "Unable to save accepted additions.");
+      } finally {
+        setAcceptedSaving(false);
+      }
+    },
+    [applySessionUpdate, sessionId],
+  );
+
+  const handleAcceptedToggle = (additionId: string) => {
+    setAcceptedAdditionIds((prev) => {
+      const next = prev.includes(additionId) ? prev.filter((id) => id !== additionId) : [...prev, additionId];
+      void saveAcceptedAdditions(next);
+      return next;
+    });
+  };
+
+  const handleRejectAll = async () => {
+    setAcceptedAdditionIds([]);
+    await saveAcceptedAdditions([]);
+    setReviewMessage("All additions rejected. Interview completed.");
+  };
+
+  const handleRecomputeExpandedFit = async () => {
+    if (!sessionId) return;
+
+    setExpandedComputing(true);
+    setExpandedComputeError(null);
+    setReviewMessage(null);
+
+    try {
+      const response = await fetch(`/api/interviews/${sessionId}/compute-expanded-fit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const messageText = payload?.error ?? payload?.message ?? "Unable to compute expanded fit.";
+        throw new Error(messageText);
+      }
+
+      const updatedSession = (await response.json()) as InterviewSessionDto;
+      applySessionUpdate(updatedSession, { preserveAnswers: true });
+      setReviewMessage("Expanded fit score updated.");
+    } catch (computeError) {
+      setExpandedComputeError(
+        computeError instanceof Error ? computeError.message : "Unable to compute expanded fit.",
+      );
+    } finally {
+      setExpandedComputing(false);
+    }
+  };
+
+  const handlePromoteAcceptedAdditions = async () => {
+    if (!sessionId) return;
+
+    if (acceptedAdditionIds.length === 0) {
+      setPromotionError("Select at least one addition to promote.");
+      return;
+    }
+
+    setPromotionSaving(true);
+    setPromotionError(null);
+    setReviewMessage(null);
+
+    try {
+      const response = await fetch(`/api/interviews/${sessionId}/promote-accepted-additions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const messageText = payload?.error ?? payload?.message ?? "Unable to promote additions.";
+        throw new Error(messageText);
+      }
+
+      const payload = (await response.json()) as {
+        baselineVersionId?: string;
+        baselineVersionHash?: string | null;
+        baseline_version_id?: string;
+        hash?: string | null;
+      };
+
+      const baselineVersionId = payload.baselineVersionId ?? payload.baseline_version_id ?? "";
+      const baselineVersionHash = payload.baselineVersionHash ?? payload.hash ?? null;
+
+      if (baselineVersionId) {
+        setSession((prev) =>
+          prev
+            ? {
+                ...prev,
+                promotedBaselineVersionId: baselineVersionId,
+              }
+            : prev,
+        );
+      }
+
+      setPromotionResult(
+        baselineVersionId
+          ? { baselineVersionId, baselineVersionHash }
+          : null,
+      );
+      setReviewMessage("Accepted additions promoted to a new baseline version.");
+    } catch (promoteError) {
+      setPromotionError(
+        promoteError instanceof Error ? promoteError.message : "Unable to promote additions.",
+      );
+    } finally {
+      setPromotionSaving(false);
     }
   };
 
@@ -415,6 +624,11 @@ export default function InterviewSessionPage() {
             {baselineVersionReference ? (
               <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
                 Baseline version reference: {baselineVersionReference}
+              </div>
+            ) : null}
+            {promotedBaselineReference ? (
+              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+                Promoted baseline version: {promotedBaselineReference}
               </div>
             ) : null}
             {session?.jobId ? (
@@ -621,26 +835,161 @@ export default function InterviewSessionPage() {
                   Deferred: <strong>{recommendationStats.deferred}</strong>
                 </div>
               </div>
-              {expandedFitDetails ? (
-                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Expanded fit score</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>
-                    {expandedFitDetails.expandedScore ?? "—"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
-                    {expandedFitDetails.originalScore !== null && expandedFitDetails.originalScore !== undefined ? (
-                      <>
-                        Original: {expandedFitDetails.originalScore}
-                        <br />
-                      </>
-                    ) : null}
-                    {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined ? (
-                      <>Delta: {expandedFitDetails.delta >= 0 ? "+" : ""}{expandedFitDetails.delta}</>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
             </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={ttrTypography.subtleLabel}>Verified additions</span>
+              <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Review verified additions</h3>
+            </div>
+
+            {recommendedAdditions.length === 0 ? (
+              <div style={{ ...ttrComponents.warningBox, marginTop: 8 }}>
+                No verified additions to review. This interview is complete.
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginBottom: 8 }}>
+                    Expanded vs original fit
+                  </div>
+                  {expandedFitDetails ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
+                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Original score</div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{expandedFitDetails.originalScore ?? "-"}</div>
+                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.7)" }}>
+                          Verdict: {originalVerdict ?? "Unknown"}
+                        </div>
+                      </div>
+                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
+                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Expanded score</div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{expandedFitDetails.expandedScore ?? "-"}</div>
+                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.7)" }}>
+                          Verdict: {expandedVerdict ?? "Unknown"}
+                        </div>
+                      </div>
+                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
+                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Delta</div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>
+                          {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined
+                            ? `${expandedFitDetails.delta >= 0 ? "+" : ""}${expandedFitDetails.delta}`
+                            : "-"}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={ttrComponents.warningBox}>
+                      Expanded fit has not been computed for this interview yet.
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRecomputeExpandedFit}
+                    disabled={expandedComputing}
+                    style={{
+                      ...ttrComponents.secondaryButton,
+                      marginTop: 10,
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      opacity: expandedComputing ? 0.6 : 1,
+                      cursor: expandedComputing ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
+                  </button>
+                </div>
+
+                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                  Accepted additions: {acceptedAdditions.length} / {recommendedAdditions.length}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {recommendedAdditions.map((addition, index) => (
+                    <div
+                      key={addition.id ?? `${addition.text}-${index}`}
+                      style={{
+                        padding: 12,
+                        borderRadius: 10,
+                        border: "1px solid rgba(148,163,184,0.28)",
+                        background: "rgba(15,23,42,0.6)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
+                          <input
+                            type="checkbox"
+                            checked={acceptedAdditionSet.has(addition.id)}
+                            onChange={() => handleAcceptedToggle(addition.id)}
+                            style={{ width: 16, height: 16 }}
+                          />
+                          Accept
+                        </label>
+                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 11, color: "rgba(226,232,240,0.75)" }}>
+                          {describeAdditionSource(addition)}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)", lineHeight: 1.5 }}>
+                        {addition.text || addition.id}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={handlePromoteAcceptedAdditions}
+                    disabled={promotionSaving || acceptedAdditionIds.length === 0}
+                    style={{
+                      ...ttrComponents.primaryButton,
+                      padding: "10px 14px",
+                      opacity: promotionSaving || acceptedAdditionIds.length === 0 ? 0.5 : 1,
+                      cursor: promotionSaving || acceptedAdditionIds.length === 0 ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRejectAll}
+                    disabled={acceptedSaving}
+                    style={{
+                      ...ttrComponents.secondaryButton,
+                      padding: "10px 14px",
+                      opacity: acceptedSaving ? 0.6 : 1,
+                      cursor: acceptedSaving ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Reject all and finish
+                  </button>
+                </div>
+
+                {acceptedSaving ? (
+                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                    Saving accepted additions...
+                  </div>
+                ) : null}
+                {acceptedError ? <div style={ttrComponents.dangerBox}>{acceptedError}</div> : null}
+                {expandedComputeError ? <div style={ttrComponents.dangerBox}>{expandedComputeError}</div> : null}
+                {promotionError ? <div style={ttrComponents.dangerBox}>{promotionError}</div> : null}
+                {reviewMessage ? <div style={ttrComponents.successBox}>{reviewMessage}</div> : null}
+                {promotionResult ? (
+                  <div style={ttrComponents.successBox}>
+                    New baseline version: {promotionResult.baselineVersionId}
+                    {promotionResult.baselineVersionHash ? ` (${promotionResult.baselineVersionHash})` : ""}
+                    {" "}
+                    <Link href="/baseline" style={{ color: "#93c5fd", textDecoration: "underline" }}>
+                      Open baseline library
+                    </Link>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
@@ -660,3 +1009,4 @@ export default function InterviewSessionPage() {
     </InstrumentShell>
   );
 }
+

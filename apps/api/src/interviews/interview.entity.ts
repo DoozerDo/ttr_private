@@ -43,8 +43,14 @@ export class Interview {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   recommendedAdditions!: RecommendedAddition[];
 
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  acceptedAdditionIds!: string[];
+
   @Column({ type: 'jsonb', nullable: true })
   expandedFitAssessment?: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  promotedBaselineVersionId!: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

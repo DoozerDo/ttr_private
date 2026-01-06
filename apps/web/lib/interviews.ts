@@ -50,6 +50,8 @@ export interface ExpandedFitAssessment {
   expandedScore?: number | null;
   originalScore?: number | null;
   delta?: number | null;
+  originalVerdict?: string | null;
+  expandedVerdict?: string | null;
   [key: string]: unknown;
 }
 
@@ -69,6 +71,8 @@ export interface InterviewSessionDto {
   baselineVersion?: number | null;
   jobId: string | null;
   status: string;
+  acceptedAdditionIds?: string[];
+  promotedBaselineVersionId?: string | null;
   gapList?: InterviewGap[];
   questions?: InterviewQuestion[];
   responses?: string[];

@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { CreateInterviewRecordDto } from './dto/create-interview.dto';
 import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
 import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
+import { UpdateAcceptedAdditionsDto } from './dto/update-accepted-additions.dto';
 import { InterviewRecordsService } from './interview-records.service';
 
 @Controller('interview-records')
@@ -60,7 +61,7 @@ export class InterviewRecordsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewRecordsService.getInterviewRecordForUser(id, userId);
+    return this.interviewRecordsService.getInterviewRecordForUserResponse(id, userId);
   }
 
   @Patch(':id')
@@ -91,6 +92,53 @@ export class InterviewRecordsController {
     }
 
     return this.interviewRecordsService.applyAdditionDecisions(id, userId, body);
+  }
+
+  @Patch(':id/accepted-additions')
+  async updateAcceptedAdditions(
+    @Param('id') id: string,
+    @Body() body: UpdateAcceptedAdditionsDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.updateAcceptedAdditions(
+      id,
+      userId,
+      body?.acceptedAdditionIds ?? [],
+    );
+  }
+
+  @Post(':id/compute-expanded-fit')
+  async computeExpandedFit(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.computeExpandedFit(id, userId);
+  }
+
+  @Post(':id/promote-accepted-additions')
+  async promoteAcceptedAdditions(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.promoteAcceptedAdditions(id, userId);
   }
 
   @Delete(':id')

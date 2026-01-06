@@ -23,7 +23,7 @@ type PolicyState = {
 type ApproveAdditionsPayload = {
   baselineId: string;
   interviewId?: string;
-  additions?: string[];
+  additions?: Array<string | RecommendedAddition>;
 };
 
 @Injectable()

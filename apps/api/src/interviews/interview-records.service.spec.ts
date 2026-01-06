@@ -29,7 +29,9 @@ describe('InterviewRecordsService', () => {
         status: 'proposed',
       },
     ],
+    acceptedAdditionIds: [],
     expandedFitAssessment: null,
+    promotedBaselineVersionId: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
   };
@@ -44,6 +46,7 @@ describe('InterviewRecordsService', () => {
 
   const createService = (
     repository = createMockRepository(),
+    baselineVersionRepository = { findOne: jest.fn() },
     gapDetectionService: Partial<GapDetectionService> = {},
     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
     recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
@@ -56,6 +59,7 @@ describe('InterviewRecordsService', () => {
   ) =>
     new InterviewRecordsService(
       repository as never,
+      baselineVersionRepository as never,
       gapDetectionService as GapDetectionService,
       interviewQuestionGenerator as InterviewQuestionGeneratorService,
       recommendedAdditionsService as any,
@@ -88,6 +92,7 @@ describe('InterviewRecordsService', () => {
     ];
     const service = createService(
       repository,
+      undefined,
       {
         detectGaps: jest.fn().mockResolvedValue({
           baselineId: 'baseline-1',
@@ -169,7 +174,7 @@ describe('InterviewRecordsService', () => {
     const recommendedAdditions = [
       { id: 'abc', text: 'addition', sources: [], status: 'proposed' as const },
     ];
-    const service = createService(repository, {}, {}, {
+    const service = createService(repository, undefined, {}, {}, {
       generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
     });
 
@@ -206,7 +211,7 @@ describe('InterviewRecordsService', () => {
     const recommendedAdditionsService = {
       generateFromResponses: jest.fn().mockReturnValue(additions),
     };
-    const service = createService(repository, {}, {}, recommendedAdditionsService);
+    const service = createService(repository, undefined, {}, {}, recommendedAdditionsService);
 
     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
       responses: [' Response '],
@@ -232,7 +237,7 @@ describe('InterviewRecordsService', () => {
     const recommendedAdditionsService = {
       generateFromResponses: jest.fn(),
     };
-    const service = createService(repository, {}, {}, recommendedAdditionsService);
+    const service = createService(repository, undefined, {}, {}, recommendedAdditionsService);
 
     const result = await service.updateInterviewRecord('interview-1', 'user-1', {
       responses: [' Response '],
@@ -252,7 +257,7 @@ describe('InterviewRecordsService', () => {
       ],
     });
     const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-    const service = createService(repository, {}, {}, undefined, baselineVersionService);
+    const service = createService(repository, undefined, {}, {}, undefined, baselineVersionService);
 
     const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
       decisions: [
@@ -269,91 +274,56 @@ describe('InterviewRecordsService', () => {
     expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
   });
 
-  it('approves accepted additions and stores baseline version reference', async () => {
-    const repository = createMockRepository();
-    repository.findOne.mockResolvedValue({
-      ...mockInterview,
-      recommendedAdditions: [
-        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
-      ],
-    });
-    const baselineVersionService = {
-      approveVerifiedAdditions: jest.fn().mockResolvedValue({
-        baseline_version_id: 'new-version',
-        version_number: 3,
-        hash: 'hash',
-        diff: {},
-      }),
-    };
-    const service = createService(repository, {}, {}, undefined, baselineVersionService);
-
-    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-      decisions: [
-        { additionId: 'a1', decision: 'accept' },
-        { additionId: 'a2', decision: 'reject' },
-      ],
-    });
-
-    expect(baselineVersionService.approveVerifiedAdditions).toHaveBeenCalledWith('user-1', {
-      baselineId: 'baseline-1',
-      interviewId: 'interview-1',
-      additions: [
-        { id: 'a1', text: 'Addition A', sources: [], status: 'accepted' },
-      ],
-    });
-    expect(repository.save).toHaveBeenCalledTimes(2);
-    expect(result.baselineVersionId).toBe('new-version');
-    expect(result.recommendedAdditions[0].status).toBe('accepted');
-  });
-
-  it('does not approve baseline when no additions are accepted', async () => {
+  it('rejects promotion when no accepted additions are set', async () => {
     const repository = createMockRepository();
     repository.findOne.mockResolvedValue({
       ...mockInterview,
       recommendedAdditions: [
         { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
       ],
+      acceptedAdditionIds: [],
     });
     const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-    const service = createService(repository, {}, {}, undefined, baselineVersionService);
+    const service = createService(repository, undefined, {}, {}, undefined, baselineVersionService);
 
-    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-      decisions: [{ additionId: 'a1', decision: 'reject' }],
-    });
+    await expect(
+      service.promoteAcceptedAdditions('interview-1', 'user-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
-    expect(repository.save).toHaveBeenCalledTimes(1);
-    expect(result.recommendedAdditions[0].status).toBe('rejected');
   });
 
-  it('runs expanded fit assessment when available', async () => {
+  it('stores expanded fit assessment when computed', async () => {
     const repository = createMockRepository();
     repository.findOne.mockResolvedValue({
       ...mockInterview,
       recommendedAdditions: [
         { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
       ],
+      acceptedAdditionIds: ['a1'],
     });
-    const baselineVersionService = {
-      approveVerifiedAdditions: jest.fn().mockResolvedValue({
-        baseline_version_id: 'new-version',
-        version_number: 4,
-        hash: 'hash',
-        diff: {},
-      }),
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue({ versionNumber: 4, fileHash: 'hash' }),
     };
     const analysisService = {
       runExpandedFitAssessment: jest.fn().mockResolvedValue({
         ok: true,
-        expandedScore: 98,
+        originalScore: 72,
+        expandedScore: 90,
+        delta: 18,
       }),
     };
-    const service = createService(repository, {}, {}, undefined, baselineVersionService, analysisService);
+    const service = createService(
+      repository,
+      baselineVersionRepository,
+      {},
+      {},
+      undefined,
+      undefined,
+      analysisService,
+    );
 
-    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-      decisions: [{ additionId: 'a1', decision: 'accept' }],
-    });
+    const result = await service.computeExpandedFit('interview-1', 'user-1');
 
     expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith('user-1', {
       jobId: 'job-1',
@@ -362,8 +332,15 @@ describe('InterviewRecordsService', () => {
       interviewId: 'interview-1',
       verifiedAdditions: ['Addition A'],
     });
-    expect(result.expandedFitAssessment).toEqual({ ok: true, expandedScore: 98 });
-    expect(result.baselineVersionId).toBe('new-version');
+    expect(result.expandedFitAssessment).toEqual(
+      expect.objectContaining({
+        ok: true,
+        originalScore: 72,
+        expandedScore: 90,
+        delta: 18,
+      }),
+    );
+    expect(repository.save).toHaveBeenCalled();
   });
 
   it('deletes an interview record', async () => {
