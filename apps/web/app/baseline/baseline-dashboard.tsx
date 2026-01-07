@@ -9,9 +9,13 @@ import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
+  initialFetchError?: string | null;
 }
 
-export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) {
+export function BaselineDashboard({
+  initialBaselines,
+  initialFetchError,
+}: BaselineDashboardProps) {
   const [baselines, setBaselines] = useState<BaselineDto[]>(initialBaselines);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -281,32 +285,34 @@ export function BaselineDashboard({ initialBaselines }: BaselineDashboardProps) 
 
         <div style={dividerStyle} />
 
-        {sortedBaselines.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-            No baselines uploaded yet.
-          </p>
-        ) : (
-          <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-            {sortedBaselines.map((baseline, index) => (
-              <li
-                key={baseline.id}
-                style={{
-                  ...listItemStyle,
-                  borderTop: index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
-                  <p style={filenameStyle}>{baseline.originalFilename}</p>
-                  <p style={metaStyle}>Uploaded {formatDateTime(baseline.createdAt)}</p>
-                </div>
+          {sortedBaselines.length === 0 ? (
+            initialFetchError ? null : (
+              <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+                No baselines uploaded yet.
+              </p>
+            )
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+              {sortedBaselines.map((baseline, index) => (
+                <li
+                  key={baseline.id}
+                  style={{
+                    ...listItemStyle,
+                    borderTop: index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+                    <p style={filenameStyle}>{baseline.originalFilename}</p>
+                    <p style={metaStyle}>Uploaded {formatDateTime(baseline.createdAt)}</p>
+                  </div>
 
-                <Link href={`/baseline/${baseline.id}`} style={linkStyle}>
-                  View details
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <Link href={`/baseline/${baseline.id}`} style={linkStyle}>
+                    View details
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
       </section>
     </div>
   );

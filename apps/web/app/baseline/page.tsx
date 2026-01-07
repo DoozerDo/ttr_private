@@ -2,6 +2,8 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
+import { Alert } from "@/components/Alert";
+import { RetryButton } from "@/components/RetryButton";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "../../lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
@@ -34,7 +36,12 @@ async function buildInternalFetchOptions(): Promise<RequestInit> {
   };
 }
 
-async function fetchBaselines(): Promise<BaselineDto[]> {
+type BaselineFetchResult = {
+  baselines: BaselineDto[];
+  error: string | null;
+};
+
+async function fetchBaselines(): Promise<BaselineFetchResult> {
   try {
     const res = await fetch(
       await buildInternalApiUrl("/api/baselines"),
@@ -46,13 +53,21 @@ async function fetchBaselines(): Promise<BaselineDto[]> {
     }
 
     if (!res.ok) {
-      return [];
+      const message = (await res.text()) || "Unable to load baselines";
+      throw new Error(message);
     }
 
-    return (await res.json()) as BaselineDto[];
+    return {
+      baselines: (await res.json()) as BaselineDto[],
+      error: null,
+    };
   } catch (error) {
     console.error("Failed to fetch baselines", error);
-    return [];
+    const message = error instanceof Error ? error.message : "Unable to load baselines.";
+    return {
+      baselines: [],
+      error: message,
+    };
   }
 }
 
@@ -64,7 +79,7 @@ export default async function BaselinePage() {
     redirect("/auth/login");
   }
 
-  const baselines = await fetchBaselines();
+  const { baselines, error: baselineFetchError } = await fetchBaselines();
 
   const rightSlot = (
     <Link
@@ -98,7 +113,21 @@ export default async function BaselinePage() {
           </p>
         </div>
 
-        <BaselineDashboard initialBaselines={baselines} />
+        {baselineFetchError ? (
+          <div className="space-y-3">
+            <Alert intent="error" title="Unable to load baselines">
+              <p>{baselineFetchError}</p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <RetryButton label="Try again" />
+              </div>
+            </Alert>
+          </div>
+        ) : null}
+
+        <BaselineDashboard
+          initialBaselines={baselines}
+          initialFetchError={baselineFetchError}
+        />
       </section>
     </InstrumentPanelShell>
   );

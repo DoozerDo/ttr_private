@@ -31,6 +31,7 @@ export default function ResultsPage() {
   const [resumeResponse, setResumeResponse] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingLatest, setLoadingLatest] = useState(false);
   const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
   const [complianceError, setComplianceError] =
     useState<ParsedComplianceError | null>(null);
@@ -42,13 +43,15 @@ export default function ResultsPage() {
   }, [jobId]);
 
   async function loadLatest() {
-    setError(null);
-    setLatest(null);
-
+    if (loadingLatest) return;
     if (!jobId) {
       setError("Job ID is required to load analysis.");
       return;
     }
+
+    setLoadingLatest(true);
+    setError(null);
+    setLatest(null);
 
     try {
       if (!latestEndpoint) throw new Error("Job ID is required.");
@@ -71,6 +74,8 @@ export default function ResultsPage() {
       }
     } catch (e: any) {
       setError(e?.message || "Failed to load analysis");
+    } finally {
+      setLoadingLatest(false);
     }
   }
 
@@ -211,6 +216,11 @@ export default function ResultsPage() {
   }, []);
 
   const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
+  const latestStatusMessage = loadingLatest
+    ? "Loading latest analysis..."
+    : latestEndpoint
+      ? `Calling: ${latestEndpoint}`
+      : "Ready to load data";
 
   return (
     <PageShell>
@@ -252,13 +262,11 @@ export default function ResultsPage() {
               <FormButton
                 variant="secondary"
                 onClick={() => void loadLatest()}
-                disabled={!jobId || loading}
+                disabled={!jobId || loading || loadingLatest}
               >
-                Load latest analysis
+                {loadingLatest ? "Loading latest..." : "Load latest analysis"}
               </FormButton>
-              <span className="text-xs text-slate-400">
-                {latestEndpoint ? 'Calling: ' + latestEndpoint : 'Ready to load data'}
-              </span>
+              <span className="text-xs text-slate-400">{latestStatusMessage}</span>
             </div>
           </section>
 
@@ -296,8 +304,8 @@ export default function ResultsPage() {
                 title="No analysis yet"
                 body="Load the latest analysis to inspect the JSON payload."
                 cta={
-                  <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading}>
-                    Load analysis
+                  <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
+                    {loadingLatest ? "Loading latest..." : "Load analysis"}
                   </FormButton>
                 }
                 className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
