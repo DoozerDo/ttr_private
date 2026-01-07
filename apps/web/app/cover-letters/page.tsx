@@ -1,9 +1,16 @@
 // apps/web/app/cover-letters/page.tsx
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
+import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  formatErrorMessage,
+  parseComplianceError,
+  readResponsePayload,
+  type ParsedComplianceError,
+} from "@/lib/compliance/parseComplianceError";
 import type { BaselineDto } from "../../lib/baselines";
 import type { JobDto } from "../../lib/jobs";
 import { coverLetterClosingTemplates, defaultClosingTemplateKey } from "../../lib/coverLetters";
@@ -24,6 +31,8 @@ type CoverLetterDto = {
 type LoadState = "idle" | "loading" | "error";
 
 type SelectOption = { value: string; label: string };
+
+const LOCKED_GREETING = "Dear Hiring Team,";
 
 function formatJob(job: JobDto | undefined) {
   if (!job) return "Untitled job";
@@ -65,7 +74,7 @@ export default function CoverLettersPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
-  const [complianceFlags, setComplianceFlags] = useState<string[]>([]);
+  const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +214,13 @@ export default function CoverLettersPage() {
     [sortedHistory, selectedLetterId],
   );
 
+  const selectedClosingTemplate = useMemo(
+    () =>
+      coverLetterClosingTemplates.find((template) => template.key === closingTemplateKey) ??
+      coverLetterClosingTemplates[0],
+    [closingTemplateKey],
+  );
+
   const baselineLabel = useMemo(() => {
     if (baselineState === "loading") return "Loading baselines...";
     if (baselineState === "error") return "Baselines unavailable";
@@ -223,14 +239,14 @@ export default function CoverLettersPage() {
     if (!baselineId || !jobId) {
       setStatusMessage(null);
       setErrorMessage("Select a baseline and job to generate a cover letter.");
-      setComplianceFlags([]);
+      setComplianceError(null);
       return;
     }
 
     setIsGenerating(true);
     setStatusMessage(null);
     setErrorMessage(null);
-    setComplianceFlags([]);
+    setComplianceError(null);
 
     try {
       const response = await fetch("/api/cover-letters", {
@@ -240,34 +256,18 @@ export default function CoverLettersPage() {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        let parsed: any = null;
+        const payload = await readResponsePayload(response);
+        const compliance = parseComplianceError({ status: response.status, payload });
 
-        try {
-          parsed = JSON.parse(text);
-        } catch (error) {
-          // ignore parsing issues and use fallback messaging
+        if (compliance) {
+          setComplianceError(compliance);
+          return;
         }
 
-        const message =
-          parsed?.error?.message ||
-          parsed?.message ||
-          (typeof parsed === "string" ? parsed : null) ||
-          text ||
-          "Unable to generate a cover letter right now.";
-
-        const flags =
-          parsed?.error?.details?.compliance_flags ||
-          parsed?.details?.compliance_flags ||
-          parsed?.complianceFlags ||
-          [];
-
-        setComplianceFlags(
-          Array.isArray(flags)
-            ? flags.map((flag: any) => flag?.message || flag?.code || "Compliance validation failed.")
-            : [],
+        const message = formatErrorMessage(
+          payload,
+          "Unable to generate a cover letter right now.",
         );
-
         throw new Error(message);
       }
 
@@ -279,7 +279,7 @@ export default function CoverLettersPage() {
       setSelectedLetterId(data.id);
       setStatusMessage("Cover letter generated successfully.");
       setClosingTemplateKey(data.closingTemplateKey || closingTemplateKey);
-      setComplianceFlags([]);
+      setComplianceError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to generate.";
       setErrorMessage(message);
@@ -415,6 +415,45 @@ export default function CoverLettersPage() {
               false,
             )}
 
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  flex: "1 1 220px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.02)",
+                  padding: 10,
+                }}
+              >
+                <div style={{ ...ttrTypography.subtleLabel, marginBottom: 4 }}>Greeting</div>
+                <div
+                  style={{
+                    ...ttrComponents.input,
+                    padding: "10px 12px",
+                    cursor: "not-allowed",
+                    background: "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  {LOCKED_GREETING}
+                </div>
+              </div>
+              <div
+                style={{
+                  flex: "1 1 280px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.02)",
+                  padding: 10,
+                }}
+              >
+                <div style={{ ...ttrTypography.subtleLabel, marginBottom: 4 }}>Closing template preview</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{selectedClosingTemplate?.label}</div>
+                <div style={{ fontSize: 13, color: "rgba(226,232,240,0.85)", lineHeight: 1.4 }}>
+                  {selectedClosingTemplate?.text}
+                </div>
+              </div>
+            </div>
+
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <button
                 type="button"
@@ -434,20 +473,9 @@ export default function CoverLettersPage() {
               </span>
             </div>
 
+            {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
             {statusMessage ? <div style={ttrComponents.successBox}>{statusMessage}</div> : null}
             {errorMessage ? <div style={ttrComponents.dangerBox}>{errorMessage}</div> : null}
-            {complianceFlags.length ? (
-              <div style={{ ...ttrComponents.dangerBox, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontWeight: 700 }}>Compliance flags</div>
-                <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2 }}>
-                  {complianceFlags.map((flag, index) => (
-                    <li key={`${flag}-${index}`} style={{ fontSize: 13, lineHeight: 1.5 }}>
-                      {flag}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
           </div>
         </section>
 

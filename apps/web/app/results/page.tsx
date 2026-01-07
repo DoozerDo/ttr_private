@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  formatErrorMessage,
+  parseComplianceError,
+  readResponsePayload,
+  type ParsedComplianceError,
+} from "@/lib/compliance/parseComplianceError";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -17,6 +24,8 @@ export default function ResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
+  const [complianceError, setComplianceError] =
+    useState<ParsedComplianceError | null>(null);
 
   const latestEndpoint = useMemo(() => {
     if (!jobId) return null;
@@ -65,6 +74,7 @@ export default function ResultsPage() {
     setLoading(true);
     setError(null);
     setResumeResponse(null);
+    setComplianceError(null);
 
     try {
       const res = await fetch("/api/resume", {
@@ -80,8 +90,16 @@ export default function ResultsPage() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text);
+        const payload = await readResponsePayload(res);
+        const compliance = parseComplianceError({ status: res.status, payload });
+
+        if (compliance) {
+          setComplianceError(compliance);
+          return;
+        }
+
+        const message = formatErrorMessage(payload, "Resume generation failed");
+        throw new Error(message);
       }
 
       const contentType = res.headers.get("content-type") || "";
@@ -115,6 +133,7 @@ export default function ResultsPage() {
 
     setExporting(format);
     setError(null);
+    setComplianceError(null);
 
     try {
       const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
@@ -130,8 +149,16 @@ export default function ResultsPage() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text);
+        const payload = await readResponsePayload(res);
+        const compliance = parseComplianceError({ status: res.status, payload });
+
+        if (compliance) {
+          setComplianceError(compliance);
+          return;
+        }
+
+        const message = formatErrorMessage(payload, "Resume export failed");
+        throw new Error(message);
       }
 
       const blob = await res.blob();
@@ -164,6 +191,11 @@ export default function ResultsPage() {
     <div className="p-8 space-y-6">
       <h1 className="text-2xl font-semibold">Results</h1>
 
+      {complianceError ? (
+        <div style={{ marginTop: 8 }}>
+          <ComplianceViolationPanel error={complianceError} />
+        </div>
+      ) : null}
       {error && (
         <div className="border border-red-400 bg-red-50 text-red-700 p-3 rounded">
           {error}

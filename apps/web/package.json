@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js"
   },
   "dependencies": {
     "next": "16.0.5",

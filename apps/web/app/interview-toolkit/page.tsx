@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 
+import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  formatErrorMessage,
+  parseComplianceError,
+  readResponsePayload,
+  type ParsedComplianceError,
+} from "@/lib/compliance/parseComplianceError";
 import type { StudyPacket, FollowUpPayload } from "../../lib/interviewToolkit";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
 
@@ -26,6 +33,8 @@ export default function InterviewToolkitPage() {
   const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
   const [followUpState, setFollowUpState] = useState<"idle" | "loading" | "error">("idle");
   const [followUpError, setFollowUpError] = useState<string | null>(null);
+  const [followUpComplianceError, setFollowUpComplianceError] =
+    useState<ParsedComplianceError | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   useEffect(() => {
@@ -88,6 +97,7 @@ export default function InterviewToolkitPage() {
     setFollowUpState("loading");
     setFollowUpError(null);
     setCopied(false);
+    setFollowUpComplianceError(null);
     try {
       const res = await fetch(`/api/interview-toolkit/${selectedJobId}/follow-up`, {
         method: "POST",
@@ -95,9 +105,20 @@ export default function InterviewToolkitPage() {
         body: JSON.stringify({ notes: followUpNotes }),
       });
       if (!res.ok) {
-        throw new Error((await res.text()) || "Unable to generate follow up");
+        const payload = await readResponsePayload(res);
+        const compliance = parseComplianceError({ status: res.status, payload });
+
+        if (compliance) {
+          setFollowUpComplianceError(compliance);
+          setFollowUpState("error");
+          return;
+        }
+
+        const message = formatErrorMessage(payload, "Unable to generate follow up");
+        throw new Error(message);
       }
       const data = (await res.json()) as FollowUpPayload;
+      setFollowUpComplianceError(null);
       setFollowUp(data);
       setFollowUpState("idle");
     } catch (error) {
@@ -319,6 +340,12 @@ export default function InterviewToolkitPage() {
               </button>
               {followUpError && <div style={ttrComponents.dangerBox}>{followUpError}</div>}
             </div>
+
+            {followUpComplianceError ? (
+              <div style={{ marginTop: 10 }}>
+                <ComplianceViolationPanel error={followUpComplianceError} />
+              </div>
+            ) : null}
 
             {followUp && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

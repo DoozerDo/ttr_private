@@ -1,23 +1,23 @@
 // apps/web/app/lib/api.ts
 'use client';
 
-type ApiError = {
-  message?: string | string[];
-  error?: string;
-  statusCode?: number;
-};
+import {
+  formatErrorMessage,
+  getPayloadErrorCode,
+  readResponsePayload,
+} from "@/lib/compliance/parseComplianceError";
 
-function errorMessageFromPayload(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== 'object') return fallback;
+export class ApiResponseError extends Error {
+  status: number;
+  payload: unknown;
+  errorCode?: string;
 
-  const p = payload as ApiError;
-
-  if (Array.isArray(p.message)) return p.message.join(', ');
-  if (typeof p.message === 'string' && p.message.trim()) return p.message;
-
-  if (typeof p.error === 'string' && p.error.trim()) return p.error;
-
-  return fallback;
+  constructor(message: string, status: number, payload: unknown, errorCode?: string) {
+    super(message);
+    this.status = status;
+    this.payload = payload;
+    this.errorCode = errorCode;
+  }
 }
 
 function redirectToLoginIfNeeded(res: Response) {
@@ -44,23 +44,12 @@ export async function apiFetchJson<T>(
   if (!res.ok) {
     redirectToLoginIfNeeded(res);
 
-    const contentType = res.headers.get('content-type') || '';
-    const isJson = contentType.includes('application/json');
-
-    let payload: unknown = null;
-
-    try {
-      payload = isJson ? await res.json() : await res.text();
-    } catch {
-      payload = null;
-    }
-
+    const payload = await readResponsePayload(res);
     const fallback = `Request failed with status ${res.status}`;
-    const msg = isJson
-      ? errorMessageFromPayload(payload, fallback)
-      : (typeof payload === 'string' && payload.trim()) ? payload : fallback;
+    const message = formatErrorMessage(payload, fallback);
+    const errorCode = getPayloadErrorCode(payload);
 
-    throw new Error(msg);
+    throw new ApiResponseError(message, res.status, payload, errorCode);
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -87,23 +76,12 @@ export async function apiFetchFileOrJson(
   if (!res.ok) {
     redirectToLoginIfNeeded(res);
 
-    const contentType = res.headers.get('content-type') || '';
-    const isJson = contentType.includes('application/json');
-
-    let payload: unknown = null;
-
-    try {
-      payload = isJson ? await res.json() : await res.text();
-    } catch {
-      payload = null;
-    }
-
+    const payload = await readResponsePayload(res);
     const fallback = `Request failed with status ${res.status}`;
-    const msg = isJson
-      ? errorMessageFromPayload(payload, fallback)
-      : (typeof payload === 'string' && payload.trim()) ? payload : fallback;
+    const message = formatErrorMessage(payload, fallback);
+    const errorCode = getPayloadErrorCode(payload);
 
-    throw new Error(msg);
+    throw new ApiResponseError(message, res.status, payload, errorCode);
   }
 
   const contentType = res.headers.get('content-type') || '';
