@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { User } from './user.entity';
 
 @Injectable()
@@ -18,7 +19,7 @@ export class UsersService {
       calibrationProfileName: null,
       calibrationWeights: null,
       role: 'user',
-      subscriptionTier: 'free',
+      subscriptionTier: SubscriptionTier.FREE,
     });
     return this.usersRepository.save(user);
   }
@@ -29,5 +30,16 @@ export class UsersService {
 
   findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
+  }
+
+  async updateSubscriptionTier(userId: string, tier: SubscriptionTier): Promise<User> {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.subscriptionTier = tier;
+    return this.usersRepository.save(user);
   }
 }

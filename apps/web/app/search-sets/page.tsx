@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { TierGateNotice } from '@/components/TierGateNotice';
+import { parseTierGateError, type TierGateError } from '@/lib/tiers';
 
 type SearchSetPayload = {
   sourceUrl: string;
@@ -30,6 +32,14 @@ function safeParseUrl(input: string): { url?: URL; warning?: string } {
   }
 }
 
+function tryParseJson(value: string): unknown | undefined {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
 async function createSearchSet(payload: SearchSetPayload): Promise<{ id: string }> {
   const envBase =
     (process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined) ??
@@ -47,6 +57,16 @@ async function createSearchSet(payload: SearchSetPayload): Promise<{ id: string 
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    const parsedPayload = tryParseJson(text);
+    const tierGate = parseTierGateError({
+      status: res.status,
+      payload: parsedPayload ?? text,
+    });
+
+    if (tierGate) {
+      throw Object.assign(new Error('TIER_GATED'), { tierGate });
+    }
+
     throw new Error(text || `Request failed (${res.status})`);
   }
 
@@ -67,6 +87,7 @@ export default function SearchSetsPage() {
   const [workMode, setWorkMode] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
 
   const parsed = useMemo(() => safeParseUrl(sourceUrl), [sourceUrl]);
 
@@ -79,6 +100,7 @@ export default function SearchSetsPage() {
 
   const onSubmit = useCallback(async () => {
     setError(undefined);
+    setTierGateError(null);
 
     if (!parsed.url) {
       setError(parsed.warning || 'Invalid job URL.');
@@ -99,7 +121,12 @@ export default function SearchSetsPage() {
       const result = await createSearchSet(payload);
       router.push(`/search-sets/${result.id}`);
     } catch (e) {
-      setError((e as Error).message);
+      const tierGate = (e as any).tierGate as TierGateError | undefined;
+      if (tierGate) {
+        setTierGateError(tierGate);
+      } else {
+        setError((e as Error).message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -166,6 +193,11 @@ export default function SearchSetsPage() {
           </select>
         </div>
 
+        {tierGateError ? (
+          <div className="mt-2">
+            <TierGateNotice error={tierGateError} />
+          </div>
+        ) : null}
         {error && <p className="text-sm text-red-700">{error}</p>}
 
         <button

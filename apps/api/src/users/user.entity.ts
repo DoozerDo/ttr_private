@@ -7,6 +7,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+
 export type CalibrationWeights = {
   dimensionA: number;
   dimensionB: number;
@@ -41,8 +43,12 @@ export class User {
   @Column({ type: 'character varying', length: 50, default: 'user' })
   role!: UserRole;
 
-  @Column({ type: 'character varying', length: 50, default: 'free' })
-  subscriptionTier!: string;
+  @Column({
+    type: 'enum',
+    enum: SubscriptionTier,
+    default: SubscriptionTier.FREE,
+  })
+  subscriptionTier!: SubscriptionTier;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

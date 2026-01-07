@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
   parseComplianceError,
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -26,6 +28,7 @@ export default function ResultsPage() {
   const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
   const [complianceError, setComplianceError] =
     useState<ParsedComplianceError | null>(null);
+  const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
 
   const latestEndpoint = useMemo(() => {
     if (!jobId) return null;
@@ -75,6 +78,7 @@ export default function ResultsPage() {
     setError(null);
     setResumeResponse(null);
     setComplianceError(null);
+    setTierGateError(null);
 
     try {
       const res = await fetch("/api/resume", {
@@ -91,6 +95,13 @@ export default function ResultsPage() {
 
       if (!res.ok) {
         const payload = await readResponsePayload(res);
+        const tierGate = parseTierGateError({ status: res.status, payload });
+
+        if (tierGate) {
+          setTierGateError(tierGate);
+          return;
+        }
+
         const compliance = parseComplianceError({ status: res.status, payload });
 
         if (compliance) {
@@ -134,6 +145,7 @@ export default function ResultsPage() {
     setExporting(format);
     setError(null);
     setComplianceError(null);
+    setTierGateError(null);
 
     try {
       const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
@@ -150,6 +162,13 @@ export default function ResultsPage() {
 
       if (!res.ok) {
         const payload = await readResponsePayload(res);
+        const tierGate = parseTierGateError({ status: res.status, payload });
+
+        if (tierGate) {
+          setTierGateError(tierGate);
+          return;
+        }
+
         const compliance = parseComplianceError({ status: res.status, payload });
 
         if (compliance) {
@@ -191,6 +210,11 @@ export default function ResultsPage() {
     <div className="p-8 space-y-6">
       <h1 className="text-2xl font-semibold">Results</h1>
 
+      {tierGateError ? (
+        <div style={{ marginTop: 8 }}>
+          <TierGateNotice error={tierGateError} />
+        </div>
+      ) : null}
       {complianceError ? (
         <div style={{ marginTop: 8 }}>
           <ComplianceViolationPanel error={complianceError} />

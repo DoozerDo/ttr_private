@@ -7,6 +7,7 @@ import { AuthStatus } from "./components/auth-status";
 import { LastAnalysisCard } from "./components/last-analysis-card";
 import { NextStepCard } from "./components/next-step-card";
 import { AUTH_COOKIE_NAME, decodeJwt } from "../lib/auth";
+import { SubscriptionTier, tierLabels } from "../lib/tiers";
 
 import { ttrComponents, ttrLayout, ttrTypography } from "./ui/ttrStyles";
 
@@ -23,6 +24,11 @@ export default async function Home() {
   if (!payload?.email) {
     redirect("/auth/login");
   }
+
+  const tier =
+    (payload?.subscriptionTier as SubscriptionTier | undefined) ??
+    SubscriptionTier.FREE;
+  const planLabel = tierLabels[tier];
 
   const pageShellStyle: React.CSSProperties = ttrLayout.shell;
   const pageContainerStyle: React.CSSProperties = {
@@ -94,6 +100,34 @@ export default async function Home() {
             </Link>
             <Link href="/results" style={topNavPill}>
               Results
+            </Link>
+            <Link href="/pricing" style={topNavPill}>
+              Plan
+            </Link>
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <span
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.35)",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "rgba(241,245,249,0.85)",
+              }}
+            >
+              Plan: {planLabel}
+            </span>
+            <Link href="/pricing" style={ttrComponents.secondaryButton}>
+              Manage plan
             </Link>
           </div>
         </div>

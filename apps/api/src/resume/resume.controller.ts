@@ -11,6 +11,8 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { ResumeService } from './resume.service';
+import { assertFeatureAvailable, FeatureKey } from '../features/feature-gates';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 type ResumeExportFormat = 'docx' | 'pdf';
 
@@ -22,6 +24,10 @@ interface ResumeRequestBody {
   oneTap?: boolean;
 }
 
+type TieredResumeRequest = Request & {
+  user?: { id?: string; subscriptionTier?: SubscriptionTier };
+};
+
 @Controller('resume')
 @UseGuards(AuthGuard('jwt'))
 export class ResumeController {
@@ -30,7 +36,7 @@ export class ResumeController {
   @Post('generate')
   async generateResume(
     @Body() body: ResumeRequestBody,
-    @Req() request: Request & { user?: { id?: string } },
+    @Req() request: TieredResumeRequest,
   ) {
     return this.handleGenerate(body, request);
   }
@@ -38,7 +44,7 @@ export class ResumeController {
   @Post()
   async createResumeRequest(
     @Body() body: ResumeRequestBody,
-    @Req() request: Request & { user?: { id?: string } },
+    @Req() request: TieredResumeRequest,
   ) {
     return this.handleGenerate(body, request);
   }
@@ -46,7 +52,7 @@ export class ResumeController {
   @Post('export')
   async exportResume(
     @Body() body: ResumeRequestBody,
-    @Req() request: Request & { user?: { id?: string } },
+    @Req() request: TieredResumeRequest,
     @Res() res: Response,
   ) {
     const format: ResumeExportFormat = body.format ?? 'docx';
@@ -57,7 +63,7 @@ export class ResumeController {
   async exportResumeWithFormat(
     @Param('format') formatParam: string,
     @Body() body: ResumeRequestBody,
-    @Req() request: Request & { user?: { id?: string } },
+    @Req() request: TieredResumeRequest,
     @Res() res: Response,
   ) {
     const format = this.normalizeFormat(formatParam);
@@ -71,7 +77,7 @@ export class ResumeController {
     throw new BadRequestException('Invalid format. Use docx or pdf.');
   }
 
-  private getUserId(request: Request & { user?: { id?: string } }) {
+  private getUserId(request: TieredResumeRequest) {
     const userId = request.user?.id;
     if (!userId) throw new BadRequestException('Invalid user context');
     return userId;
@@ -97,21 +103,31 @@ export class ResumeController {
 
   private async handleGenerate(
     body: ResumeRequestBody,
-    request: Request & { user?: { id?: string } },
+    request: TieredResumeRequest,
   ) {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
+
+    assertFeatureAvailable(
+      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
+      FeatureKey.RESUME_EXPORT,
+    );
     return this.resumeService.generateResume(userId, payload);
   }
 
   private async handleExport(
     body: ResumeRequestBody,
-    request: Request & { user?: { id?: string } },
+    request: TieredResumeRequest,
     res: Response,
     format: ResumeExportFormat,
   ) {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
+
+    assertFeatureAvailable(
+      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
+      FeatureKey.RESUME_EXPORT,
+    );
 
     const file = await this.resumeService.exportResume(userId, payload, format);
 

@@ -16,6 +16,8 @@ import { CreateSearchSetDto } from './dto/create-search-set.dto';
 import { UpdateSearchSetDto } from './dto/update-search-set.dto';
 import { SearchSetsRunnerService } from './search-sets-runner.service';
 import { SearchSetsService } from './search-sets.service';
+import { assertFeatureAvailable, FeatureKey } from '../features/feature-gates';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 @Controller('search-sets')
 @UseGuards(AuthGuard('jwt'))
@@ -97,13 +99,18 @@ export class SearchSetsController {
   async runSearchSet(
     @Param('id') id: string,
     @Body() body: { limit?: number; baselineVersionId?: string },
-    @Req() request: Request & { user?: { id?: string } },
+    @Req() request: TieredRequest,
   ) {
     const userId = request.user?.id;
 
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
+
+    assertFeatureAvailable(
+      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
+      FeatureKey.SEARCH_SET_RUN,
+    );
 
     const baselineVersionId = body?.baselineVersionId?.trim();
     if (!baselineVersionId) {
@@ -141,3 +148,6 @@ export class SearchSetsController {
     return this.searchSetsService.parseSearchSetUrl(rawUrl);
   }
 }
+type TieredRequest = Request & {
+  user?: { id?: string; subscriptionTier?: SubscriptionTier };
+};

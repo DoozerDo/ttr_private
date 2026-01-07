@@ -5,12 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
   parseComplianceError,
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import type { BaselineDto } from "../../lib/baselines";
 import type { JobDto } from "../../lib/jobs";
 import { coverLetterClosingTemplates, defaultClosingTemplateKey } from "../../lib/coverLetters";
@@ -75,6 +77,7 @@ export default function CoverLettersPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
+  const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -247,6 +250,7 @@ export default function CoverLettersPage() {
     setStatusMessage(null);
     setErrorMessage(null);
     setComplianceError(null);
+    setTierGateError(null);
 
     try {
       const response = await fetch("/api/cover-letters", {
@@ -257,6 +261,13 @@ export default function CoverLettersPage() {
 
       if (!response.ok) {
         const payload = await readResponsePayload(response);
+        const tierGate = parseTierGateError({ status: response.status, payload });
+
+        if (tierGate) {
+          setTierGateError(tierGate);
+          return;
+        }
+
         const compliance = parseComplianceError({ status: response.status, payload });
 
         if (compliance) {
@@ -473,6 +484,7 @@ export default function CoverLettersPage() {
               </span>
             </div>
 
+            {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
             {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
             {statusMessage ? <div style={ttrComponents.successBox}>{statusMessage}</div> : null}
             {errorMessage ? <div style={ttrComponents.dangerBox}>{errorMessage}</div> : null}

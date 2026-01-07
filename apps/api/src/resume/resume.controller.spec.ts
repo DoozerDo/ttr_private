@@ -1,39 +1,43 @@
+import { ForbiddenException } from '@nestjs/common';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
-describe('ResumeController', () => {
-  it('returns DOCX download with headers', async () => {
-    const send = jest.fn();
-    const setHeader = jest.fn();
-    const response = { setHeader, send };
+describe('ResumeController tier gating', () => {
+  let controller: ResumeController;
+  const resumeService = {
+    generateResume: jest.fn(),
+    exportResume: jest.fn(),
+  } as unknown as ResumeService;
 
-    const resumeService = {
-      exportResume: jest.fn().mockResolvedValue({
-        buffer: Buffer.from('docx-content'),
-        contentType:
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        filename: 'resume.docx',
+  beforeEach(() => {
+    jest.clearAllMocks();
+    controller = new ResumeController(resumeService);
+  });
+
+  it('rejects FREE tier resume generation with TIER_GATED', async () => {
+    const request = {
+      user: { id: 'user-1', subscriptionTier: SubscriptionTier.FREE },
+    } as any;
+
+    let capturedError: unknown;
+
+    try {
+      await controller.generateResume(
+        { baselineId: 'baseline-1', baselineVersionId: 'version-1', jobId: 'job-1' },
+        request,
+      );
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBeInstanceOf(ForbiddenException);
+    expect(capturedError).toMatchObject({
+      response: expect.objectContaining({
+        errorCode: 'TIER_GATED',
       }),
-      generateResume: jest.fn(),
-    } as unknown as ResumeService;
+    });
 
-    const controller = new ResumeController(resumeService);
-
-    await controller.exportResume(
-      { baselineId: 'b', jobId: 'j' },
-      { user: { id: 'user-1' } } as any,
-      response as any,
-    );
-
-    expect(setHeader).toHaveBeenCalledWith(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    );
-    expect(setHeader).toHaveBeenCalledWith(
-      'Content-Disposition',
-      expect.stringContaining('resume.docx'),
-    );
-    expect(setHeader).toHaveBeenCalledWith('Content-Length', expect.any(String));
-    expect(send).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(resumeService.generateResume).not.toHaveBeenCalled();
   });
 });

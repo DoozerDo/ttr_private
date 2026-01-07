@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 
@@ -43,7 +44,7 @@ describe('AuthService', () => {
       calibrationProfileName: null,
       calibrationWeights: null,
       role: 'user',
-      subscriptionTier: 'free',
+      subscriptionTier: SubscriptionTier.FREE,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -64,7 +65,7 @@ describe('AuthService', () => {
       id: savedUser.id,
       email: savedUser.email,
       role: 'user',
-      subscriptionTier: 'free',
+      subscriptionTier: SubscriptionTier.FREE,
     });
     expect(result.user).not.toHaveProperty('passwordHash');
   });
@@ -79,7 +80,7 @@ describe('AuthService', () => {
       calibrationProfileName: null,
       calibrationWeights: null,
       role: 'user',
-      subscriptionTier: 'free',
+      subscriptionTier: SubscriptionTier.FREE,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -93,7 +94,7 @@ describe('AuthService', () => {
       id: savedUser.id,
       email: savedUser.email,
       role: 'user',
-      subscriptionTier: 'free',
+      subscriptionTier: SubscriptionTier.FREE,
     });
   });
 });

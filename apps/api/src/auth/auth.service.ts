@@ -49,7 +49,11 @@ export class AuthService {
   }
 
   private buildAuthResponse(user: User): { user: SanitizedUser; accessToken: string } {
-    const payload = { sub: user.id, email: user.email };
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      subscriptionTier: user.subscriptionTier,
+    };
     const accessToken = this.jwtService.sign(payload);
     const { passwordHash, ...sanitizedUser } = user;
 

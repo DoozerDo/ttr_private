@@ -1,9 +1,12 @@
+import type { SubscriptionTier } from "./tiers";
+
 export const AUTH_COOKIE_NAME = "ttr_token";
 
 export type JwtPayload = {
   sub?: string;
   email?: string;
   exp?: number;
+  subscriptionTier?: SubscriptionTier;
 };
 
 export function decodeJwt(token: string): JwtPayload | null {
