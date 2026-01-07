@@ -12,6 +12,7 @@ describe('SearchSetsController', () => {
       getSearchSetForUser: jest.fn(),
       updateSearchSet: jest.fn(),
       deleteSearchSet: jest.fn(),
+      parseSearchSetUrl: jest.fn(),
     } as unknown as jest.Mocked<SearchSetsService>;
 
     const runnerService = {
@@ -88,10 +89,40 @@ describe('SearchSetsController', () => {
     const { controller, runnerService } = createController();
     runnerService.runSearchSet.mockResolvedValue([{ jobId: 'job-1' }] as any);
 
-    const result = await controller.runSearchSet('set-1', { limit: 5 }, mockRequest('user-1'));
+    const result = await controller.runSearchSet(
+      'set-1',
+      { limit: 5, baselineVersionId: 'baseline-version-1' },
+      mockRequest('user-1'),
+    );
 
-    expect(runnerService.runSearchSet).toHaveBeenCalledWith('set-1', 'user-1', 5);
+    expect(runnerService.runSearchSet).toHaveBeenCalledWith(
+      'set-1',
+      'user-1',
+      'baseline-version-1',
+      5,
+    );
     expect(result).toEqual([{ jobId: 'job-1' }]);
+  });
+
+  it('throws when baselineVersionId is missing', async () => {
+    const { controller } = createController();
+
+    await expect(
+      controller.runSearchSet('set-1', { limit: 5 }, mockRequest('user-1')),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('parses a job board URL', async () => {
+    const { controller, searchSetsService } = createController();
+    searchSetsService.parseSearchSetUrl.mockResolvedValue({ titlePatterns: ['a'] });
+
+    const result = await controller.parseSearchSetUrl(
+      { url: ' https://example.com ' },
+      mockRequest('user-1'),
+    );
+
+    expect(searchSetsService.parseSearchSetUrl).toHaveBeenCalledWith('https://example.com');
+    expect(result).toEqual({ titlePatterns: ['a'] });
   });
 
   it('throws when user context is missing', async () => {

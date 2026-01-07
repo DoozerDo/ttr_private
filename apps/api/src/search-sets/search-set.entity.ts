@@ -33,22 +33,17 @@ export class SearchSet {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   titlePatterns!: string[];
 
-  @Column({
-    type: 'enum',
-    enum: SearchSetSeniority,
-    default: SearchSetSeniority.ANY,
-  })
-  seniority!: SearchSetSeniority;
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  seniority!: SearchSetSeniority[];
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   industry!: string[];
 
-  @Column({
-    type: 'enum',
-    enum: SearchSetWorkMode,
-    default: SearchSetWorkMode.ANY,
-  })
-  workMode!: SearchSetWorkMode;
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  workMode!: SearchSetWorkMode[];
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  location!: string | null;
 
   @Column({ type: 'varchar', length: 2048, nullable: true })
   sourceUrl!: string | null;
