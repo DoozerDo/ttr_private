@@ -7,13 +7,21 @@ import { useParams, useRouter } from "next/navigation";
 import { InstrumentShell } from "../../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
 import type {
-  AdditionDecisionPayload,
   InterviewGap,
   InterviewQuestion,
   InterviewSessionDto,
   RecommendedAddition,
   RecommendedAdditionDecision,
 } from "../../../lib/interviews";
+import {
+  computeInterviewExpandedFit,
+  getInterviewSession,
+  promoteInterviewAcceptedAdditions,
+  saveInterviewResponses,
+  submitInterviewAdditionDecisions,
+  updateInterviewAcceptedAdditions,
+} from "../../../lib/interviewsClient";
+import type { InterviewPromotionResponse } from "../../../lib/interviewsClient";
 
 type ComplianceFlag = {
   code?: string;
@@ -132,10 +140,7 @@ export default function InterviewSessionPage() {
   const [expandedComputeError, setExpandedComputeError] = useState<string | null>(null);
   const [promotionSaving, setPromotionSaving] = useState(false);
   const [promotionError, setPromotionError] = useState<string | null>(null);
-  const [promotionResult, setPromotionResult] = useState<{
-    baselineVersionId: string;
-    baselineVersionHash: string | null;
-  } | null>(null);
+  const [promotionResult, setPromotionResult] = useState<InterviewPromotionResponse | null>(null);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
 
   const applySessionUpdate = useCallback(
@@ -167,13 +172,7 @@ export default function InterviewSessionPage() {
 
     const loadSession = async () => {
       try {
-        const response = await fetch(`/api/interviews/${sessionId}`, { cache: "no-store" });
-
-        if (!response.ok) {
-          throw new Error("Unable to load interview session.");
-        }
-
-        const data = (await response.json()) as InterviewSessionDto;
+        const data = await getInterviewSession(sessionId);
         applySessionUpdate(data);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Unable to load interview session.");
@@ -300,18 +299,7 @@ export default function InterviewSessionPage() {
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/interviews/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ responses: trimmedResponses }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const messageText = payload?.error ?? payload?.message ?? "Unable to save responses.";
-        throw new Error(messageText);
-      }
-
+      await saveInterviewResponses(sessionId, trimmedResponses);
       setMessage("Responses saved. You can revisit this page anytime.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
@@ -323,28 +311,14 @@ export default function InterviewSessionPage() {
   const handleDecision = async (addition: RecommendedAddition, decision: RecommendedAdditionDecision) => {
     if (!sessionId || !addition?.id) return;
 
-    const payload: { decisions: AdditionDecisionPayload[] } = {
-      decisions: [{ additionId: addition.id, decision }],
-    };
-
     setDecisionSavingId(addition.id);
     setError(null);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/interviews/${sessionId}/decisions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const payloadResponse = await response.json().catch(() => null);
-        const messageText = payloadResponse?.error ?? payloadResponse?.message ?? "Unable to save decision.";
-        throw new Error(messageText);
-      }
-
-      const updatedSession = (await response.json()) as InterviewSessionDto;
+      const updatedSession = await submitInterviewAdditionDecisions(sessionId, [
+        { additionId: addition.id, decision },
+      ]);
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setMessage("Decision saved.");
     } catch (decisionError) {
@@ -363,19 +337,10 @@ export default function InterviewSessionPage() {
       setReviewMessage(null);
 
       try {
-        const response = await fetch(`/api/interviews/${sessionId}/accepted-additions`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ acceptedAdditionIds: nextAcceptedIds }),
-        });
-
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null);
-          const messageText = payload?.error ?? payload?.message ?? "Unable to save accepted additions.";
-          throw new Error(messageText);
-        }
-
-        const updatedSession = (await response.json()) as InterviewSessionDto;
+        const updatedSession = await updateInterviewAcceptedAdditions(
+          sessionId,
+          nextAcceptedIds,
+        );
         applySessionUpdate(updatedSession, { preserveAnswers: true });
         setReviewMessage("Accepted additions updated.");
       } catch (saveError) {
@@ -409,19 +374,7 @@ export default function InterviewSessionPage() {
     setReviewMessage(null);
 
     try {
-      const response = await fetch(`/api/interviews/${sessionId}/compute-expanded-fit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const messageText = payload?.error ?? payload?.message ?? "Unable to compute expanded fit.";
-        throw new Error(messageText);
-      }
-
-      const updatedSession = (await response.json()) as InterviewSessionDto;
+      const updatedSession = await computeInterviewExpandedFit(sessionId);
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setReviewMessage("Expanded fit score updated.");
     } catch (computeError) {
@@ -446,27 +399,9 @@ export default function InterviewSessionPage() {
     setReviewMessage(null);
 
     try {
-      const response = await fetch(`/api/interviews/${sessionId}/promote-accepted-additions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const messageText = payload?.error ?? payload?.message ?? "Unable to promote additions.";
-        throw new Error(messageText);
-      }
-
-      const payload = (await response.json()) as {
-        baselineVersionId?: string;
-        baselineVersionHash?: string | null;
-        baseline_version_id?: string;
-        hash?: string | null;
-      };
-
-      const baselineVersionId = payload.baselineVersionId ?? payload.baseline_version_id ?? "";
-      const baselineVersionHash = payload.baselineVersionHash ?? payload.hash ?? null;
+      const promotion = await promoteInterviewAcceptedAdditions(sessionId);
+      const baselineVersionId = promotion.baselineVersionId ?? "";
+      const baselineVersionHash = promotion.baselineVersionHash ?? null;
 
       if (baselineVersionId) {
         setSession((prev) =>
@@ -481,7 +416,11 @@ export default function InterviewSessionPage() {
 
       setPromotionResult(
         baselineVersionId
-          ? { baselineVersionId, baselineVersionHash }
+          ? {
+              baselineVersionId,
+              baselineVersionHash,
+              versionNumber: promotion.versionNumber ?? null,
+            }
           : null,
       );
       setReviewMessage("Accepted additions promoted to a new baseline version.");
@@ -980,12 +919,44 @@ export default function InterviewSessionPage() {
                 {reviewMessage ? <div style={ttrComponents.successBox}>{reviewMessage}</div> : null}
                 {promotionResult ? (
                   <div style={ttrComponents.successBox}>
-                    New baseline version: {promotionResult.baselineVersionId}
-                    {promotionResult.baselineVersionHash ? ` (${promotionResult.baselineVersionHash})` : ""}
-                    {" "}
-                    <Link href="/baseline" style={{ color: "#93c5fd", textDecoration: "underline" }}>
-                      Open baseline library
-                    </Link>
+                    <div style={{ fontSize: 14, marginBottom: 6 }}>
+                      New baseline version: {promotionResult.baselineVersionId ?? "unknown"}
+                      {promotionResult.versionNumber != null ? ` (v${promotionResult.versionNumber})` : ""}
+                      {promotionResult.baselineVersionHash ? ` (${promotionResult.baselineVersionHash})` : ""}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <Link href="/baseline" style={{ color: "#93c5fd", textDecoration: "underline" }}>
+                        Open baseline library
+                      </Link>
+                      {promotionResult.baselineVersionId ? (
+                        <>
+                          <Link
+                            href={`/analyze?baselineVersionId=${encodeURIComponent(
+                              promotionResult.baselineVersionId,
+                            )}`}
+                            style={{
+                              ...ttrComponents.secondaryButton,
+                              padding: "6px 10px",
+                              textDecoration: "none",
+                            }}
+                          >
+                            Analyze with new baseline
+                          </Link>
+                          <Link
+                            href={`/fit-review?baselineVersionId=${encodeURIComponent(
+                              promotionResult.baselineVersionId,
+                            )}`}
+                            style={{
+                              ...ttrComponents.secondaryButton,
+                              padding: "6px 10px",
+                              textDecoration: "none",
+                            }}
+                          >
+                            Continue to Fit Review
+                          </Link>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
               </div>
