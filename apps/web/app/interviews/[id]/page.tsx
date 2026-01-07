@@ -4,8 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
-import { InstrumentShell } from "../../ui/InstrumentShell";
-import { ttrComponents, ttrLayout, ttrTypography } from "../../ui/ttrStyles";
+import { Alert } from "@/components/Alert";
+import { EmptyState } from "@/components/EmptyState";
+import { FormButton } from "@/components/FormButton";
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import type {
   InterviewGap,
   InterviewQuestion,
@@ -446,538 +449,381 @@ export default function InterviewSessionPage() {
   }, [recommendedAdditions]);
 
   return (
-    <InstrumentShell
-      kicker="Interview session"
-      title="Fit Review"
-      subtitle="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
-    >
-      <div style={ttrLayout.panelsRow}>
-        <section style={{ ...ttrComponents.basePanel, flex: 1.4, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={ttrTypography.subtleLabel}>Session details</span>
-            <h2 style={ttrTypography.h2}>Interview prompts</h2>
-          </div>
+    <PageShell>
+      <div className="space-y-6 pb-10">
+        <PageHeader
+          kicker="Interview session"
+          title="Fit Review"
+          description="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
+        />
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div className="grid gap-6 lg:grid-cols-[1.45fr_1fr]">
+          <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Session details</p>
+              <h2 className="text-lg font-semibold text-slate-100">Interview prompts</h2>
+            </div>
             {questions.length === 0 ? (
-              <div style={ttrComponents.warningBox}>No interview questions were generated for this session.</div>
+              <Alert intent="warning">No interview questions were generated for this session.</Alert>
             ) : (
-              questions.map((question, index) => {
-                const gap = gapMap.get(question.gapId);
-                const complianceFlags = complianceLookup.questions[index] ?? [];
-
-                return (
-                  <div key={`${question.prompt}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <label style={ttrComponents.fieldLabel}>{question.prompt}</label>
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.72)", display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
-                          Category: {question.category}
-                        </span>
-                        <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
-                          Gap: {question.gapId}
-                        </span>
-                        {gap ? (
-                          <span style={{ padding: "4px 8px", background: "rgba(148,163,184,0.12)", borderRadius: 6 }}>
-                            Domain: {gap.domain} | Confidence: {gap.confidence}
+              <div className="space-y-6">
+                {questions.map((question, index) => {
+                  const gap = gapMap.get(question.gapId);
+                  const complianceFlags = complianceLookup.questions[index] ?? [];
+                  return (
+                    <div key={(question.prompt ?? index) + "-" + index} className="space-y-4">
+                      <div className="space-y-3">
+                        <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                          {question.prompt}
+                        </label>
+                        <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+                          <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
+                            Category: {question.category}
                           </span>
-                        ) : null}
-                      </div>
-                      {gap ? (
-                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.8)", lineHeight: 1.5 }}>
-                          JD excerpt: <em>{gap.jdExcerpt}</em>
-                          {gap.baselineExcerpt ? (
-                            <>
-                              {" "}
-                              | Baseline: <em>{gap.baselineExcerpt}</em>
-                            </>
+                          <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
+                            Gap: {question.gapId}
+                          </span>
+                          {gap ? (
+                            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
+                              Domain: {gap.domain} ? Confidence: {gap.confidence}
+                            </span>
                           ) : null}
                         </div>
+                        {gap ? (
+                          <p className="text-xs text-slate-400">
+                            JD excerpt: <em>{gap.jdExcerpt}</em>
+                            {gap.baselineExcerpt ? (
+                              <span className="text-xs text-slate-400"> | Baseline: <em>{gap.baselineExcerpt}</em></span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] text-slate-400">Reason: Generated from gap {question.gapId}.</p>
+                      </div>
+                      <textarea
+                        value={answers[index] ?? ""}
+                        onChange={(event) => handleChange(index, event.target.value)}
+                        className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-3 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
+                        rows={6}
+                      />
+                      {complianceFlags.length ? (
+                        <Alert intent="warning" title="Compliance checks">
+                          <ul className="list-disc space-y-1 pl-4 text-xs text-slate-200">
+                            {complianceFlags.map((flag, flagIndex) => (
+                              <li key={(flag.code ?? flag.message ?? flagIndex) + "-" + flagIndex}>
+                                {flag.code ? flag.code + ": " : ""}
+                                {flag.message ?? "Flagged response"}
+                                {flag.severity ? " (severity: " + flag.severity + ")" : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </Alert>
                       ) : null}
-                      <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>
-                        Reason: Generated from gap {question.gapId}.
-                      </div>
                     </div>
-
-                    <textarea
-                      style={{ ...ttrComponents.textArea, minHeight: 120 }}
-                      value={answers[index] ?? ""}
-                      onChange={(event) => handleChange(index, event.target.value)}
-                    />
-
-                    {complianceFlags.length ? (
-                      <div style={ttrComponents.warningBox}>
-                        <strong>Compliance checks:</strong>
-                        <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
-                          {complianceFlags.map((flag, flagIndex) => (
-                            <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
-                              {flag.code ? `${flag.code}: ` : ""}
-                              {flag.message ?? "Flagged response"}
-                              {flag.severity ? ` (severity: ${flag.severity})` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
+                  );
+                })}
+              </div>
             )}
 
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                style={{
-                  ...ttrComponents.primaryButton,
-                  opacity: saving ? 0.6 : 1,
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton onClick={handleSave} disabled={saving}>
                 {saving ? "Saving..." : "Save responses"}
-              </button>
-              <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
-                Session ID: {sessionId}
-              </span>
+              </FormButton>
+              <span className="text-xs text-slate-400">Session ID: {sessionId}</span>
             </div>
+            {message ? <Alert intent="success">{message}</Alert> : null}
+            {error ? <Alert intent="error">{error}</Alert> : null}
+          </section>
 
-            {message ? <div style={ttrComponents.successBox}>{message}</div> : null}
-            {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-          </div>
-        </section>
-
-        <section style={{ ...ttrComponents.basePanel, flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={ttrTypography.subtleLabel}>Session</span>
-            <h2 style={ttrTypography.h2}>Overview</h2>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, color: "rgba(241,245,249,0.85)" }}>
-              Status: <strong>{session?.status ?? "loading"}</strong>
+          <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <div className="space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Session</p>
+              <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
             </div>
-            <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-              Baseline: {session?.baselineId ?? "..."}
-            </div>
-            {baselineVersionReference ? (
-              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-                Baseline version reference: {baselineVersionReference}
+            <div className="space-y-2 text-sm text-slate-200">
+              <div>
+                Status: <strong className="text-slate-100">{session?.status ?? "loading"}</strong>
               </div>
-            ) : null}
-            {promotedBaselineReference ? (
-              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-                Promoted baseline version: {promotedBaselineReference}
+              <div className="text-slate-400">Baseline: {session?.baselineId ?? "..."}</div>
+              {baselineVersionReference ? (
+                <div className="text-slate-400">Baseline version reference: {baselineVersionReference}</div>
+              ) : null}
+              {promotedBaselineReference ? (
+                <div className="text-slate-400">Promoted baseline version: {promotedBaselineReference}</div>
+              ) : null}
+              {session?.jobId ? <div className="text-slate-400">Job: {session.jobId}</div> : null}
+              <div className="text-xs text-slate-400">
+                Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
               </div>
-            ) : null}
-            {session?.jobId ? (
-              <div style={{ fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
-                Job: {session.jobId}
+              <div className="text-xs text-slate-400">
+                Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
               </div>
-            ) : null}
-            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-              Created: {session?.createdAt ? new Date(session.createdAt).toLocaleString() : "..."}
             </div>
-            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-              Updated: {session?.updatedAt ? new Date(session.updatedAt).toLocaleString() : "..."}
-            </div>
-          </div>
 
-          <div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Detected gaps</span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Detected gaps</p>
                 {gaps.length === 0 ? (
-                  <div style={ttrComponents.warningBox}>No gaps were returned for this interview.</div>
+                  <Alert intent="warning">No gaps were returned for this interview.</Alert>
                 ) : (
-                  gaps.map((gap) => (
-                    <div
-                      key={gap.gapId}
-                      style={{
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid rgba(148,163,184,0.3)",
-                        background: "rgba(15,23,42,0.6)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                        <strong style={{ color: "#e2e8f0" }}>{gap.gapId}</strong>
-                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
-                          Domain: {gap.domain}
-                        </span>
-                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 12 }}>
-                          Confidence: {gap.confidence}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)" }}>
-                        JD: <em>{gap.jdExcerpt}</em>
-                      </div>
-                      {gap.baselineExcerpt ? (
-                        <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
-                          Baseline: <em>{gap.baselineExcerpt}</em>
+                  <div className="space-y-3">
+                    {gaps.map((gap) => (
+                      <div
+                        key={gap.gapId}
+                        className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/60 p-4"
+                      >
+                        <div className="flex flex-wrap gap-2 text-xs text-slate-100">
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">{gap.gapId}</span>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Domain: {gap.domain}</span>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">Confidence: {gap.confidence}</span>
                         </div>
-                      ) : null}
+                        <p className="text-xs text-slate-400">JD: <em>{gap.jdExcerpt}</em></p>
+                        {gap.baselineExcerpt ? (
+                          <p className="text-xs text-slate-400">Baseline: <em>{gap.baselineExcerpt}</em></p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recommendations</p>
+                {recommendedAdditions.length === 0 ? (
+                  <Alert intent="warning">No recommended additions for this interview.</Alert>
+                ) : (
+                  <div className="space-y-3">
+                    {recommendedAdditions.map((addition, index) => {
+                      const complianceFlags = complianceLookup.recommendations[index] ?? [];
+                      const acceptBlocked = complianceFlags.length > 0;
+                      const isSavingDecision = decisionSavingId === addition.id;
+                      const status = addition.status;
+                      const statusColors =
+                        status === "accepted"
+                          ? "text-emerald-200 bg-emerald-500/10"
+                          : status === "rejected"
+                            ? "text-rose-200 bg-rose-500/10"
+                            : status === "deferred"
+                              ? "text-amber-200 bg-amber-500/10"
+                              : "text-slate-200 bg-white/5";
+                      return (
+                        <div
+                          key={(addition.id ?? addition.text) + "-" + index}
+                          className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-sm text-slate-100">{addition.text || addition.id}</p>
+                            <span
+                              className={
+                                "rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] " +
+                                statusColors
+                              }
+                            >
+                              {isSavingDecision ? "Saving..." : status ?? "Proposed"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <FormButton
+                              variant="ghost"
+                              className="px-3 py-1 text-xs"
+                              onClick={() => handleDecision(addition, "accept")}
+                              disabled={acceptBlocked || isSavingDecision}
+                            >
+                              Accept
+                            </FormButton>
+                            <FormButton
+                              variant="secondary"
+                              className="px-3 py-1 text-xs"
+                              onClick={() => handleDecision(addition, "reject")}
+                              disabled={isSavingDecision}
+                            >
+                              Reject
+                            </FormButton>
+                            <FormButton
+                              variant="ghost"
+                              className="px-3 py-1 text-xs"
+                              onClick={() => handleDecision(addition, "defer")}
+                              disabled={isSavingDecision}
+                            >
+                              Defer
+                            </FormButton>
+                          </div>
+                          {complianceFlags.length ? (
+                            <Alert intent="warning" title="Compliance flags">
+                              <ul className="list-disc space-y-1 pl-4 text-xs text-slate-200">
+                                {complianceFlags.map((flag, flagIndex) => (
+                                  <li key={(flag.code ?? flag.message ?? flagIndex) + "-" + flagIndex}>
+                                    {flag.code ? flag.code + ": " : ""}
+                                    {flag.message ?? "Flagged recommendation"}
+                                    {flag.severity ? " (severity: " + flag.severity + ")" : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                            </Alert>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Completion</p>
+                <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-2">
+                  <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/60 p-3">
+                    <p className="text-xs text-slate-400">Detected gaps</p>
+                    <p className="text-2xl font-bold text-white">{gaps.length}</p>
+                  </div>
+                  <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/60 p-3">
+                    <p className="text-xs text-slate-400">Questions answered</p>
+                    <p className="text-2xl font-bold text-white">{answeredCount} / {questions.length}</p>
+                  </div>
+                  <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/60 p-3">
+                    <p className="text-xs text-slate-400">Recommendations</p>
+                    <p className="text-sm text-slate-200">
+                      Accepted: <strong>{recommendationStats.accepted}</strong>
+                      <br />
+                      Rejected: <strong>{recommendationStats.rejected}</strong>
+                      <br />
+                      Deferred: <strong>{recommendationStats.deferred}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Verified additions</p>
+                  <h3 className="text-lg font-semibold text-slate-100">Review verified additions</h3>
+                </div>
+                {recommendedAdditions.length === 0 ? (
+                  <Alert intent="warning">No verified additions to review. This interview is complete.</Alert>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+                      {expandedFitDetails ? (
+                        <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-3">
+                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                            <p className="text-xs text-slate-400">Original score</p>
+                            <p className="text-xl font-bold text-white">{expandedFitDetails.originalScore ?? "-"}</p>
+                            <p className="text-xs text-slate-400">Verdict: {originalVerdict ?? "Unknown"}</p>
+                          </div>
+                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                            <p className="text-xs text-slate-400">Expanded score</p>
+                            <p className="text-xl font-bold text-white">{expandedFitDetails.expandedScore ?? "-"}</p>
+                            <p className="text-xs text-slate-400">Verdict: {expandedVerdict ?? "Unknown"}</p>
+                          </div>
+                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                            <p className="text-xs text-slate-400">Delta</p>
+                            <p className="text-xl font-bold text-white">
+                              {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined
+                                ? (expandedFitDetails.delta >= 0 ? "+" : "") + expandedFitDetails.delta
+                                : "-"}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <Alert intent="warning">Expanded fit has not been computed for this interview yet.</Alert>
+                      )}
+                      <FormButton
+                        variant="secondary"
+                        className="px-3 py-1 text-xs"
+                        onClick={handleRecomputeExpandedFit}
+                        disabled={expandedComputing}
+                      >
+                        {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
+                      </FormButton>
                     </div>
-                  ))
+                    <p className="text-xs text-slate-400">
+                      Accepted additions: {acceptedAdditions.length} / {recommendedAdditions.length}
+                    </p>
+                    <div className="space-y-3">
+                      {recommendedAdditions.map((addition, index) => (
+                        <div
+                          key={(addition.id ?? addition.text) + "-" + index}
+                          className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/60 p-3"
+                        >
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-2 text-xs text-slate-200">
+                              <input
+                                type="checkbox"
+                                checked={acceptedAdditionSet.has(addition.id)}
+                                onChange={() => handleAcceptedToggle(addition.id)}
+                                className="h-4 w-4 rounded border border-white/30 bg-slate-900"
+                              />
+                              Accept
+                            </label>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-200">
+                              {describeAdditionSource(addition)}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-100">{addition.text || addition.id}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <FormButton onClick={handlePromoteAcceptedAdditions} disabled={promotionSaving || acceptedAdditionIds.length === 0}>
+                        {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
+                      </FormButton>
+                      <FormButton variant="secondary" onClick={handleRejectAll} disabled={acceptedSaving}>
+                        Reject all and finish
+                      </FormButton>
+                    </div>
+                    {acceptedSaving ? <p className="text-xs text-slate-400">Saving accepted additions...</p> : null}
+                    {acceptedError ? <Alert intent="error">{acceptedError}</Alert> : null}
+                    {expandedComputeError ? <Alert intent="error">{expandedComputeError}</Alert> : null}
+                    {promotionError ? <Alert intent="error">{promotionError}</Alert> : null}
+                    {reviewMessage ? <Alert intent="success">{reviewMessage}</Alert> : null}
+                    {promotionResult ? (
+                      <Alert intent="success">
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-slate-100">
+                            New baseline version: {promotionResult.baselineVersionId ?? "unknown"}
+                            {promotionResult.versionNumber != null ? " (v" + promotionResult.versionNumber + ")" : ""}
+                            {promotionResult.baselineVersionHash ? " (" + promotionResult.baselineVersionHash + ")" : ""}
+                          </p>
+                          <div className="flex flex-wrap gap-3">
+                            <Link href="/baseline" className="text-xs text-sky-300 underline">
+                              Open baseline library
+                            </Link>
+                            {promotionResult.baselineVersionId ? (
+                              <>
+                                <Link
+                                  href={"/analyze?baselineVersionId=" + encodeURIComponent(promotionResult.baselineVersionId)}
+                                  className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200"
+                                >
+                                  Analyze with new baseline
+                                </Link>
+                                <Link
+                                  href={"/fit-review?baselineVersionId=" + encodeURIComponent(promotionResult.baselineVersionId)}
+                                  className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200"
+                                >
+                                  Continue to Fit Review
+                                </Link>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                      </Alert>
+                    ) : null}
+                  </div>
                 )}
               </div>
             </div>
-          </div>
 
-          <div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Recommendations</span>
-              {recommendedAdditions.length === 0 ? (
-                <div style={ttrComponents.warningBox}>No recommended additions for this interview.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {recommendedAdditions.map((addition, index) => {
-                    const complianceFlags = complianceLookup.recommendations[index] ?? [];
-                    const acceptBlocked = complianceFlags.length > 0;
-                    const isSavingDecision = decisionSavingId === addition.id;
-                    const status = addition.status;
-
-                    const statusBadge =
-                      status === "accepted"
-                        ? { label: "Accepted", background: "rgba(74,222,128,0.15)", color: "#86efac" }
-                        : status === "rejected"
-                          ? { label: "Rejected", background: "rgba(248,113,113,0.18)", color: "#fca5a5" }
-                          : status === "deferred"
-                            ? { label: "Deferred", background: "rgba(251,191,36,0.15)", color: "#fcd34d" }
-                            : { label: "Proposed", background: "rgba(148,163,184,0.18)", color: "#cbd5e1" };
-
-                    return (
-                      <div
-                        key={addition.id ?? `${addition.text}-${index}`}
-                        style={{
-                          padding: 12,
-                          borderRadius: 10,
-                          border: "1px solid rgba(148,163,184,0.28)",
-                          background: "rgba(15,23,42,0.6)",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", flexWrap: "wrap" }}>
-                          <div style={{ color: "rgba(226,232,240,0.9)", fontSize: 14, flex: 1 }}>
-                            {addition.text || addition.id}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span
-                              style={{
-                                padding: "4px 8px",
-                                borderRadius: 6,
-                                background: statusBadge.background,
-                                color: statusBadge.color,
-                                fontSize: 12,
-                              }}
-                            >
-                              {isSavingDecision ? "Saving..." : statusBadge.label}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            onClick={() => handleDecision(addition, "accept")}
-                            disabled={acceptBlocked || isSavingDecision}
-                            style={{
-                              ...ttrComponents.primaryButton,
-                              padding: "6px 12px",
-                              fontSize: 13,
-                              opacity: acceptBlocked || isSavingDecision ? 0.5 : 1,
-                              cursor: acceptBlocked || isSavingDecision ? "not-allowed" : "pointer",
-                            }}
-                          >
-                            Accept
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDecision(addition, "reject")}
-                            disabled={isSavingDecision}
-                            style={{
-                              ...ttrComponents.secondaryButton,
-                              padding: "6px 12px",
-                              fontSize: 13,
-                              opacity: isSavingDecision ? 0.6 : 1,
-                              cursor: isSavingDecision ? "not-allowed" : "pointer",
-                            }}
-                          >
-                            Reject
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDecision(addition, "defer")}
-                            disabled={isSavingDecision}
-                            style={{
-                              ...ttrComponents.quietButton,
-                              padding: "6px 12px",
-                              fontSize: 13,
-                              opacity: isSavingDecision ? 0.6 : 1,
-                              cursor: isSavingDecision ? "not-allowed" : "pointer",
-                            }}
-                          >
-                            Defer
-                          </button>
-                        </div>
-
-                        {complianceFlags.length ? (
-                          <div style={ttrComponents.warningBox}>
-                            <strong>Compliance flags:</strong>
-                            <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "rgba(226,232,240,0.85)", fontSize: 13 }}>
-                              {complianceFlags.map((flag, flagIndex) => (
-                                <li key={`${flag.code ?? flag.message ?? flagIndex}-${flagIndex}`}>
-                                  {flag.code ? `${flag.code}: ` : ""}
-                                  {flag.message ?? "Flagged recommendation"}
-                                  {flag.severity ? ` (severity: ${flag.severity})` : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Completion</span>
-              <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Summary</h3>
-            </div>
-            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Detected gaps</div>
-                <div style={{ fontSize: 24, fontWeight: 700 }}>{gaps.length}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Questions answered</div>
-                <div style={{ fontSize: 24, fontWeight: 700 }}>
-                  {answeredCount} / {questions.length}
-                </div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>Recommendations</div>
-                <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                  Accepted: <strong>{recommendationStats.accepted}</strong>
-                  <br />
-                  Rejected: <strong>{recommendationStats.rejected}</strong>
-                  <br />
-                  Deferred: <strong>{recommendationStats.deferred}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Verified additions</span>
-              <h3 style={{ ...ttrTypography.h2, fontSize: 16, margin: 0 }}>Review verified additions</h3>
-            </div>
-
-            {recommendedAdditions.length === 0 ? (
-              <div style={{ ...ttrComponents.warningBox, marginTop: 8 }}>
-                No verified additions to review. This interview is complete.
-              </div>
-            ) : (
-              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ padding: 12, borderRadius: 10, background: "rgba(148,163,184,0.12)", color: "#e2e8f0" }}>
-                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.75)", marginBottom: 8 }}>
-                    Expanded vs original fit
-                  </div>
-                  {expandedFitDetails ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
-                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Original score</div>
-                        <div style={{ fontSize: 18, fontWeight: 700 }}>{expandedFitDetails.originalScore ?? "-"}</div>
-                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.7)" }}>
-                          Verdict: {originalVerdict ?? "Unknown"}
-                        </div>
-                      </div>
-                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
-                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Expanded score</div>
-                        <div style={{ fontSize: 18, fontWeight: 700 }}>{expandedFitDetails.expandedScore ?? "-"}</div>
-                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.7)" }}>
-                          Verdict: {expandedVerdict ?? "Unknown"}
-                        </div>
-                      </div>
-                      <div style={{ padding: 10, borderRadius: 8, background: "rgba(15,23,42,0.6)" }}>
-                        <div style={{ fontSize: 11, color: "rgba(226,232,240,0.65)" }}>Delta</div>
-                        <div style={{ fontSize: 18, fontWeight: 700 }}>
-                          {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined
-                            ? `${expandedFitDetails.delta >= 0 ? "+" : ""}${expandedFitDetails.delta}`
-                            : "-"}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={ttrComponents.warningBox}>
-                      Expanded fit has not been computed for this interview yet.
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRecomputeExpandedFit}
-                    disabled={expandedComputing}
-                    style={{
-                      ...ttrComponents.secondaryButton,
-                      marginTop: 10,
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      opacity: expandedComputing ? 0.6 : 1,
-                      cursor: expandedComputing ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
-                  </button>
-                </div>
-
-                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
-                  Accepted additions: {acceptedAdditions.length} / {recommendedAdditions.length}
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {recommendedAdditions.map((addition, index) => (
-                    <div
-                      key={addition.id ?? `${addition.text}-${index}`}
-                      style={{
-                        padding: 12,
-                        borderRadius: 10,
-                        border: "1px solid rgba(148,163,184,0.28)",
-                        background: "rgba(15,23,42,0.6)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 8,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "rgba(226,232,240,0.8)" }}>
-                          <input
-                            type="checkbox"
-                            checked={acceptedAdditionSet.has(addition.id)}
-                            onChange={() => handleAcceptedToggle(addition.id)}
-                            style={{ width: 16, height: 16 }}
-                          />
-                          Accept
-                        </label>
-                        <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(148,163,184,0.18)", fontSize: 11, color: "rgba(226,232,240,0.75)" }}>
-                          {describeAdditionSource(addition)}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 13, color: "rgba(226,232,240,0.9)", lineHeight: 1.5 }}>
-                        {addition.text || addition.id}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={handlePromoteAcceptedAdditions}
-                    disabled={promotionSaving || acceptedAdditionIds.length === 0}
-                    style={{
-                      ...ttrComponents.primaryButton,
-                      padding: "10px 14px",
-                      opacity: promotionSaving || acceptedAdditionIds.length === 0 ? 0.5 : 1,
-                      cursor: promotionSaving || acceptedAdditionIds.length === 0 ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRejectAll}
-                    disabled={acceptedSaving}
-                    style={{
-                      ...ttrComponents.secondaryButton,
-                      padding: "10px 14px",
-                      opacity: acceptedSaving ? 0.6 : 1,
-                      cursor: acceptedSaving ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Reject all and finish
-                  </button>
-                </div>
-
-                {acceptedSaving ? (
-                  <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
-                    Saving accepted additions...
-                  </div>
-                ) : null}
-                {acceptedError ? <div style={ttrComponents.dangerBox}>{acceptedError}</div> : null}
-                {expandedComputeError ? <div style={ttrComponents.dangerBox}>{expandedComputeError}</div> : null}
-                {promotionError ? <div style={ttrComponents.dangerBox}>{promotionError}</div> : null}
-                {reviewMessage ? <div style={ttrComponents.successBox}>{reviewMessage}</div> : null}
-                {promotionResult ? (
-                  <div style={ttrComponents.successBox}>
-                    <div style={{ fontSize: 14, marginBottom: 6 }}>
-                      New baseline version: {promotionResult.baselineVersionId ?? "unknown"}
-                      {promotionResult.versionNumber != null ? ` (v${promotionResult.versionNumber})` : ""}
-                      {promotionResult.baselineVersionHash ? ` (${promotionResult.baselineVersionHash})` : ""}
-                    </div>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <Link href="/baseline" style={{ color: "#93c5fd", textDecoration: "underline" }}>
-                        Open baseline library
-                      </Link>
-                      {promotionResult.baselineVersionId ? (
-                        <>
-                          <Link
-                            href={`/analyze?baselineVersionId=${encodeURIComponent(
-                              promotionResult.baselineVersionId,
-                            )}`}
-                            style={{
-                              ...ttrComponents.secondaryButton,
-                              padding: "6px 10px",
-                              textDecoration: "none",
-                            }}
-                          >
-                            Analyze with new baseline
-                          </Link>
-                          <Link
-                            href={`/fit-review?baselineVersionId=${encodeURIComponent(
-                              promotionResult.baselineVersionId,
-                            )}`}
-                            style={{
-                              ...ttrComponents.secondaryButton,
-                              padding: "6px 10px",
-                              textDecoration: "none",
-                            }}
-                          >
-                            Continue to Fit Review
-                          </Link>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => router.push("/fit-review")}
-                style={{ ...ttrComponents.secondaryButton, padding: "10px 14px" }}
+            <div className="flex flex-wrap gap-3">
+              <FormButton variant="secondary" onClick={() => router.push("/fit-review")}>Back to fit review</FormButton>
+              <Link
+                href="/results"
+                className="inline-flex items-center justify-center rounded-full border border-white/20 bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2 text-xs font-semibold text-slate-900"
               >
-                Back to fit review
-              </button>
-              <Link href="/results" style={{ ...ttrComponents.primaryButton, padding: "10px 14px", textDecoration: "none" }}>
                 Continue
               </Link>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
-    </InstrumentShell>
+    </PageShell>
   );
 }
 

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { EmptyState } from "@/components/EmptyState";
+import { FormButton } from "@/components/FormButton";
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
+import { TextInput } from "@/components/TextInput";
 import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
@@ -207,135 +213,158 @@ export default function ResultsPage() {
   const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
 
   return (
-    <div className="p-8 space-y-6">
-      <h1 className="text-2xl font-semibold">Results</h1>
+    <PageShell>
+      <div className="space-y-6">
+        <PageHeader
+          title="Results"
+          description="Generate resumes, review the latest analysis, and export artifacts for any job."
+        />
 
-      {tierGateError ? (
-        <div style={{ marginTop: 8 }}>
-          <TierGateNotice error={tierGateError} />
-        </div>
-      ) : null}
-      {complianceError ? (
-        <div style={{ marginTop: 8 }}>
-          <ComplianceViolationPanel error={complianceError} />
-        </div>
-      ) : null}
-      {error && (
-        <div className="border border-red-400 bg-red-50 text-red-700 p-3 rounded">
-          {error}
-        </div>
-      )}
+        {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
+        {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
+        {error ? <Alert intent="error" title="Uh oh">{error}</Alert> : null}
 
-      <div className="grid grid-cols-2 gap-6">
-        <div className="border rounded p-4 space-y-3">
-          <h2 className="font-medium">Selection</h2>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Selection</p>
+              <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Baseline</label>
+                <TextInput
+                  value={baselineId}
+                  onChange={(event) => setBaselineId(event.target.value)}
+                  placeholder="Baseline ID"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Job</label>
+                <TextInput
+                  value={jobId}
+                  onChange={(event) => setJobId(event.target.value)}
+                  placeholder="Job ID"
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton
+                variant="secondary"
+                onClick={() => void loadLatest()}
+                disabled={!jobId || loading}
+              >
+                Load latest analysis
+              </FormButton>
+              <span className="text-xs text-slate-400">
+                {latestEndpoint ? 'Calling: ' + latestEndpoint : 'Ready to load data'}
+              </span>
+            </div>
+          </section>
 
-          <div>
-            <label className="block text-sm">Baseline</label>
-            <input
-              className="border rounded w-full p-2"
-              value={baselineId}
-              onChange={(e) => setBaselineId(e.target.value)}
-              placeholder="Baseline ID"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm">Job</label>
-            <input
-              className="border rounded w-full p-2"
-              value={jobId}
-              onChange={(e) => setJobId(e.target.value)}
-              placeholder="Job ID"
-            />
-          </div>
-
-          <button
-            onClick={loadLatest}
-            className="bg-gray-700 text-white px-4 py-2 rounded"
-            disabled={!jobId}
-          >
-            Load latest analysis
-          </button>
-
-          <div className="text-xs text-gray-500">
-            {latestEndpoint ? `Calling: ${latestEndpoint}` : ""}
-          </div>
-        </div>
-
-      <div className="border rounded p-4">
-        <h2 className="font-medium mb-2">Latest analysis</h2>
-        <div className="flex items-center gap-3 mb-3">
-          <button
-            className="text-sm text-blue-600 underline disabled:text-gray-400"
-              disabled={!latest?.jobId}
-              onClick={() => {
-                if (latest?.jobId) {
-                  window.location.href = `/fit-review?jobId=${encodeURIComponent(latest.jobId)}`;
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Latest analysis</p>
+                <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
+              </div>
+              <div className="text-xs text-slate-400">
+                <div>Job: {latest?.jobId ?? 'n/a'}</div>
+                <div>Fit Score: {latest?.overallScore ?? 'n/a'}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton
+                variant="ghost"
+                onClick={() => {
+                  if (latest?.jobId) {
+                    window.location.href = '/fit-review?jobId=' + encodeURIComponent(latest.jobId);
+                  }
+                }}
+                disabled={!latest?.jobId}
+              >
+                Open Fit Review
+              </FormButton>
+              <p className="text-xs text-slate-400">Review the latest match details in Fit Review.</p>
+            </div>
+            {latest ? (
+              <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
+                {JSON.stringify(latest, null, 2)}
+              </pre>
+            ) : (
+              <EmptyState
+                title="No analysis yet"
+                body="Load the latest analysis to inspect the JSON payload."
+                cta={
+                  <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading}>
+                    Load analysis
+                  </FormButton>
                 }
-              }}
-            >
-              Open Fit Review
-            </button>
-            <span className="text-xs text-gray-500">Job: {latest?.jobId ?? "n/a"}</span>
-            <span className="text-xs text-gray-500">
-              Fit Score: {latest?.overallScore ?? "n/a"}
-            </span>
-          </div>
-          <pre className="text-sm whitespace-pre-wrap">
-            {latest ? JSON.stringify(latest, null, 2) : ""}
-          </pre>
+                className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
+              />
+            )}
+          </section>
+
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Generate resume</p>
+              <h2 className="text-lg font-semibold text-slate-100">Output</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <FormButton
+                onClick={() => generateResume(false)}
+                disabled={!baselineId || !jobId || loading}
+              >
+                {loading ? 'Generating...' : 'Generate resume'}
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => generateResume(true)}
+                disabled={!baselineId || !jobId || !oneTapEligible || loading}
+                title={
+                  oneTapEligible
+                    ? 'Generate immediately with compliance checks'
+                    : 'Requires fit score of at least 92'
+                }
+              >
+                {loading ? 'Checking...' : 'One tap generate (>=92 fit score)'}
+              </FormButton>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <FormButton
+                variant="secondary"
+                onClick={() => exportResume('docx')}
+                disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+              >
+                {exporting === 'docx' ? 'Downloading...' : 'Download DOCX'}
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => exportResume('pdf')}
+                disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+              >
+                {exporting === 'pdf' ? 'Downloading...' : 'Download PDF'}
+              </FormButton>
+            </div>
+            {resumeResponse ? (
+              <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
+                {JSON.stringify(resumeResponse, null, 2)}
+              </pre>
+            ) : (
+              <EmptyState
+                title="No resume yet"
+                body="Generate or export a resume to view the payload."
+                cta={
+                  <FormButton onClick={() => generateResume(false)} disabled={!baselineId || !jobId || loading}>
+                    Generate now
+                  </FormButton>
+                }
+                className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
+              />
+            )}
+          </section>
         </div>
       </div>
-
-      <div className="border rounded p-4 space-y-3">
-        <h2 className="font-medium">Generate resume</h2>
-
-        <button
-          onClick={() => generateResume(false)}
-          disabled={!baselineId || !jobId || loading}
-          className="bg-gray-800 text-white px-4 py-2 rounded"
-        >
-          {loading ? "Generating..." : "Generate resume"}
-        </button>
-
-        <button
-          onClick={() => generateResume(true)}
-          disabled={!baselineId || !jobId || !oneTapEligible || loading}
-          className="bg-emerald-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-          title={
-            oneTapEligible
-              ? "Generate immediately with compliance checks"
-              : "Requires fit score of at least 92"
-          }
-        >
-          {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
-        </button>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => exportResume("docx")}
-            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
-            className="bg-blue-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-          >
-            {exporting === "docx" ? "Downloading..." : "Download DOCX"}
-          </button>
-          <button
-            onClick={() => exportResume("pdf")}
-            disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
-            className="bg-purple-700 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:text-gray-600"
-          >
-            {exporting === "pdf" ? "Downloading..." : "Download PDF"}
-          </button>
-        </div>
-
-        <div>
-          <label className="block text-sm">Resume response</label>
-          <pre className="border rounded p-2 text-sm whitespace-pre-wrap">
-            {resumeResponse ? JSON.stringify(resumeResponse, null, 2) : ""}
-          </pre>
-        </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

@@ -1,24 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
-import { TierGateNotice } from "@/components/TierGateNotice";
+import { EmptyState } from "@/components/EmptyState";
+import { FormButton } from "@/components/FormButton";
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 import {
   formatErrorMessage,
   parseComplianceError,
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import type { StudyPacket, FollowUpPayload } from "../../lib/interviewToolkit";
-import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+import type { FollowUpPayload, StudyPacket } from "../../lib/interviewToolkit";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 interface JobDto {
   id: string;
   title: string | null;
   company: string | null;
+}
+
+function TierGateNotice({ error }: { error: TierGateError }) {
+  return (
+    <Alert intent="warning">
+      {error.message || "This feature is not available on your current plan."}
+    </Alert>
+  );
 }
 
 export default function InterviewToolkitPage() {
@@ -35,11 +46,12 @@ export default function InterviewToolkitPage() {
   const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
   const [followUpState, setFollowUpState] = useState<"idle" | "loading" | "error">("idle");
   const [followUpError, setFollowUpError] = useState<string | null>(null);
-  const [followUpComplianceError, setFollowUpComplianceError] =
-    useState<ParsedComplianceError | null>(null);
+  const [followUpComplianceError, setFollowUpComplianceError] = useState<ParsedComplianceError | null>(null);
+  const [followUpTierGate, setFollowUpTierGate] = useState<TierGateError | null>(null);
+
   const [copied, setCopied] = useState<boolean>(false);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [followUpTierGate, setFollowUpTierGate] = useState<TierGateError | null>(null);
+
   const [storyRefreshKey, setStoryRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -72,230 +84,234 @@ export default function InterviewToolkitPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const handler = () => setStoryRefreshKey((prev) => prev + 1);
     window.addEventListener("starStories.updated", handler);
-    return () => window.removeEventListener("starStories.updated", handler);
+
+    return () => {
+      window.removeEventListener("starStories.updated", handler);
+    };
   }, []);
 
   useEffect(() => {
-    if (!selectedJobId) {
-      setPacket(null);
-      return;
-    }
-
     const loadPacket = async () => {
+      if (!selectedJobId) {
+        setPacket(null);
+        setPacketState("idle");
+        setPacketError(null);
+        return;
+      }
+
       setPacketState("loading");
       setPacketError(null);
+
       try {
-        const res = await fetch(`/api/interview-toolkit/${selectedJobId}/study-packet`, { cache: "no-store" });
+        const res = await fetch(
+          `/api/interview-toolkit/study-packet?jobId=${encodeURIComponent(selectedJobId)}`,
+          {
+            cache: "no-store",
+          },
+        );
+
         if (!res.ok) {
-          throw new Error((await res.text()) || "Unable to load study packet");
+          throw new Error((await res.text()) || "Unable to build study packet");
         }
+
         const data = (await res.json()) as StudyPacket;
-        setPacket(data);
+        setPacket(data ?? null);
         setPacketState("idle");
       } catch (error) {
-        setPacketError(error instanceof Error ? error.message : "Unable to load study packet");
         setPacket(null);
+        setPacketError(error instanceof Error ? error.message : "Unable to build study packet");
         setPacketState("error");
       }
     };
 
-    void loadPacket();
+    loadPacket();
   }, [selectedJobId, storyRefreshKey]);
 
   const handleGenerateFollowUp = async () => {
     if (!selectedJobId) return;
+
     setFollowUpState("loading");
     setFollowUpError(null);
+    setFollowUp(null);
     setCopied(false);
+    setCopyError(null);
     setFollowUpComplianceError(null);
     setFollowUpTierGate(null);
-    setCopyError(null);
+
     try {
-      const res = await fetch(`/api/interview-toolkit/${selectedJobId}/follow-up`, {
+      const res = await fetch("/api/interview-toolkit/follow-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: followUpNotes }),
+        cache: "no-store",
+        body: JSON.stringify({
+          jobId: selectedJobId,
+          notes: followUpNotes,
+        }),
       });
+
       if (!res.ok) {
-        const payload = await readResponsePayload(res);
-        const compliance = parseComplianceError({ status: res.status, payload });
-
-        if (compliance) {
-          setFollowUpComplianceError(compliance);
-          setFollowUpState("error");
-          return;
-        }
-
-        const tierGate = parseTierGateError({ status: res.status, payload });
+        const tierGate = await parseTierGateError(res);
         if (tierGate) {
           setFollowUpTierGate(tierGate);
           setFollowUpState("error");
           return;
         }
 
-        const message = formatErrorMessage(payload, "Unable to generate follow up");
-        throw new Error(message);
+        const compliance = await parseComplianceError(res);
+        if (compliance) {
+          setFollowUpComplianceError(compliance);
+          setFollowUpState("error");
+          return;
+        }
+
+        const payload = await readResponsePayload(res);
+        setFollowUpError(formatErrorMessage(payload, "Unable to generate follow up."));
+        setFollowUpState("error");
+        return;
       }
+
       const data = (await res.json()) as FollowUpPayload;
-      setFollowUpComplianceError(null);
-      setFollowUpTierGate(null);
-      setFollowUpError(null);
-      setFollowUp(data);
+      setFollowUp(data ?? null);
       setFollowUpState("idle");
     } catch (error) {
-      setFollowUpError(error instanceof Error ? error.message : "Unable to generate follow up");
+      setFollowUpError(error instanceof Error ? error.message : "Unable to generate follow up.");
       setFollowUpState("error");
-      setFollowUpTierGate(null);
-      setFollowUp(null);
     }
   };
 
   const handleCopy = async () => {
     setCopyError(null);
-    if (!followUp?.content) {
-      setCopyError("No follow up draft to copy yet.");
-      return;
-    }
 
-    if (!navigator?.clipboard) {
-      setCopyError("Clipboard is not available in this browser.");
-      return;
-    }
+    if (!followUp?.content) return;
 
     try {
       await navigator.clipboard.writeText(followUp.content);
       setCopied(true);
-      setCopyError(null);
       setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-      setCopyError("Unable to copy to clipboard; please copy manually.");
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : "Unable to copy to clipboard.");
     }
   };
 
-  const selectedJob = useMemo(() => jobs.find((j) => j.id === selectedJobId) ?? null, [jobs, selectedJobId]);
-
-  const sectionTitleStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
-
-  const chip: CSSProperties = {
-    display: "inline-flex",
-    padding: "4px 8px",
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    fontSize: 13,
-  };
-
   return (
-    <div style={ttrLayout.shell}>
-      <div style={{ ...ttrLayout.container, maxWidth: 1120 }}>
-        <header style={ttrComponents.headerCard}>
-          <div style={sectionTitleStyle}>
-            <span style={ttrTypography.kicker}>Interview Toolkit</span>
-            <h1 style={ttrTypography.h1}>Job-ready flows</h1>
-            <p style={ttrTypography.paragraph}>
-              Morning-of checklist, study packet, and follow-up copy tied to your saved job.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
-            <label style={ttrTypography.subtleLabel}>Job</label>
-            {jobState === "loading" ? (
-              <div style={chip}>Loading jobs…</div>
-            ) : jobs.length === 0 ? (
-              <div style={ttrComponents.warningBox}>Save a job to unlock the Interview Toolkit.</div>
-            ) : (
-              <select
-                value={selectedJobId}
-                onChange={(e) => setSelectedJobId(e.target.value)}
-                style={{
-                  padding: "12px 14px",
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 10,
-                  color: "#e2e8f0",
-                }}
-              >
-                {jobs.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {[job.title, job.company].filter(Boolean).join(" — ") || job.id}
-                  </option>
-                ))}
-              </select>
-            )}
-            {jobError && <div style={ttrComponents.dangerBox}>{jobError}</div>}
-          </div>
-        </header>
-
-        <div style={{ ...ttrLayout.panelsRow, alignItems: "stretch" }}>
-          <section style={{ ...ttrComponents.basePanel, flex: 1 }}>
-            <div style={sectionTitleStyle}>
-              <span style={ttrTypography.subtleLabel}>Pre-interview</span>
-              <h2 style={ttrTypography.h2}>Morning Of</h2>
+    <PageShell>
+      <div className="space-y-6 pb-10">
+        <PageHeader
+          kicker="Interview Toolkit"
+          title="Job-ready flows"
+          description="Morning-of checklist, study packet, and follow-up copy tied to your saved job."
+          rightSlot={
+            <div className="flex flex-col gap-2 min-w-[240px]">
+              <span className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Job
+              </span>
+              {jobState === "loading" ? (
+                <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
+                  Loading jobs...
+                </div>
+              ) : jobs.length === 0 ? (
+                <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
+                  No saved jobs yet
+                </div>
+              ) : (
+                <select
+                  value={selectedJobId}
+                  onChange={(event) => setSelectedJobId(event.target.value)}
+                  className="rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
+                >
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {([job.title, job.company].filter(Boolean).join(" at ") || job.id)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
+          }
+        />
 
-            <p style={{ ...ttrTypography.paragraph, marginTop: 10 }}>
+        {jobError ? <Alert intent="error">{jobError}</Alert> : null}
+        {jobs.length === 0 && jobState !== "loading" ? (
+          <Alert intent="warning">Save a job to unlock the Interview Toolkit.</Alert>
+        ) : null}
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Pre-interview</p>
+              <h2 className="text-lg font-semibold text-slate-100">Morning Of</h2>
+            </div>
+            <p className="text-sm text-slate-300">
               Ground yourself before the call. These reminders stay tied to the selected job.
             </p>
-
-            <ul style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10, paddingLeft: 18 }}>
+            <ul className="space-y-2 pl-5 text-sm text-slate-300 list-disc">
               <li>Re-read the job description and your baseline highlights mapped to this role.</li>
-              <li>Pick 2-3 STAR stories that fit the role&apos;s gaps and keep them handy.</li>
-              <li>Write down the company&apos;s product, user, and one recent headline to mention.</li>
+              <li>Pick 2-3 STAR stories that fit the role's gaps and keep them handy.</li>
+              <li>Write down the company's product, user, and one recent headline to mention.</li>
               <li>Have the interviewer names, dial-in details, and time zones confirmed.</li>
               <li>Keep a one-line "why me for this role" ready as your opener.</li>
             </ul>
           </section>
 
-          <section style={{ ...ttrComponents.basePanel, flex: 1 }}>
-            <div style={sectionTitleStyle}>
-              <span style={ttrTypography.subtleLabel}>Study packet</span>
-              <h2 style={ttrTypography.h2}>Study Packet</h2>
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Study packet</p>
+              <h2 className="text-lg font-semibold text-slate-100">Study Packet</h2>
             </div>
-
-            {packetState === "loading" && <div style={chip}>Building study packet…</div>}
-            {packetError && <div style={ttrComponents.dangerBox}>{packetError}</div>}
-
-            {packet && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={ttrTypography.subtleLabel}>Job</span>
-                  <div style={ttrTypography.h3}>
-                    {[packet.job.title, packet.job.company].filter(Boolean).join(" at ") || packet.job.id}
-                  </div>
+            {packetState === "loading" ? (
+              <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
+                Building study packet...
+              </div>
+            ) : packetError ? (
+              <Alert intent="error">{packetError}</Alert>
+            ) : packet ? (
+              <div className="space-y-5">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Job</p>
+                  <p className="text-lg font-semibold text-slate-100">
+                    {([packet.job.title, packet.job.company].filter(Boolean).join(" at ") || packet.job.id)}
+                  </p>
                 </div>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div className="flex flex-wrap gap-2">
                   {packet.fitSnapshot ? (
-                    <div style={chip}>
+                    <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-slate-200">
                       Fit score {packet.fitSnapshot.overallScore} · {packet.fitSnapshot.verdict}
-                    </div>
+                    </span>
                   ) : (
-                    <div style={ttrComponents.warningBox}>Run Analyze or Fit Review to see strengths and gaps.</div>
+                    <Alert intent="warning">Run Analyze or Fit Review to see strengths and gaps.</Alert>
                   )}
-                  {packet.fitSnapshot && packet.fitSnapshot.strengths.length > 0 && (
-                    <div style={chip}>Top strength: {packet.fitSnapshot.strengths[0]}</div>
-                  )}
-                  {packet.fitSnapshot && packet.fitSnapshot.gaps.length > 0 && (
-                    <div style={chip}>Key gap: {packet.fitSnapshot.gaps[0]}</div>
-                  )}
+                  {packet.fitSnapshot && packet.fitSnapshot.strengths.length ? (
+                    <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                      Top strength: {packet.fitSnapshot.strengths[0]}
+                    </span>
+                  ) : null}
+                  {packet.fitSnapshot && packet.fitSnapshot.gaps.length ? (
+                    <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                      Key gap: {packet.fitSnapshot.gaps[0]}
+                    </span>
+                  ) : null}
                 </div>
-
-                <div>
-                  <h3 style={ttrTypography.h3}>Recommended STAR stories</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recommended STAR stories</p>
+                    {packet.recommendedStories.length === 0 ? (
+                      <span className="text-xs text-slate-400">None saved</span>
+                    ) : null}
+                  </div>
                   {packet.recommendedStories.length === 0 ? (
-                    <div style={ttrComponents.warningBox}>No STAR stories saved yet.</div>
+                    <Alert intent="warning">No STAR stories saved yet.</Alert>
                   ) : (
-                    <ul style={{ paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <ul className="space-y-2 text-sm text-slate-200">
                       {packet.recommendedStories.map((story) => (
-                        <li key={story.id}>
-                          <span style={{ fontWeight: 600 }}>{story.title}</span>
+                        <li key={story.id} className="flex flex-col gap-1">
+                          <span className="font-semibold text-white">{story.title}</span>
                           {story.competencies?.length ? (
-                            <span style={{ color: "#cbd5e1", marginLeft: 8 }}>
+                            <span className="text-xs text-slate-400">
                               {story.competencies.slice(0, 3).join(", ")}
-                              {story.competencies.length > 3 ? "…" : ""}
+                              {story.competencies.length > 3 ? " and more" : ""}
                             </span>
                           ) : null}
                         </li>
@@ -303,134 +319,116 @@ export default function InterviewToolkitPage() {
                     </ul>
                   )}
                 </div>
-
-                <div>
-                  <h3 style={ttrTypography.h3}>Likely questions</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Likely questions</p>
+                    {packet.questions.length === 0 ? (
+                      <span className="text-xs text-slate-400">None listed</span>
+                    ) : null}
+                  </div>
                   {packet.questions.length === 0 ? (
-                    <div style={ttrComponents.warningBox}>No questions available for this job yet.</div>
+                    <Alert intent="warning">No questions available for this job yet.</Alert>
                   ) : (
-                    <ul style={{ paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <ul className="space-y-2 text-sm text-slate-200 pl-4 list-disc">
                       {packet.questions.map((question) => (
-                        <li key={`${question.gapId}-${question.prompt}`}>
-                          <div style={{ fontWeight: 600 }}>{question.prompt}</div>
-                          <div style={{ color: "#cbd5e1", fontSize: 13 }}>{question.jdReference}</div>
+                        <li key={(question.gapId ?? question.prompt) + "-" + question.prompt} className="space-y-1">
+                          <p className="font-semibold text-white">{question.prompt}</p>
+                          <p className="text-xs text-slate-400">{question.jdReference}</p>
                         </li>
                       ))}
                     </ul>
                   )}
                 </div>
-
-                {packet.recentStories.length > 0 && (
-                  <div>
-                    <h4 style={ttrTypography.h4}>Recent STAR stories</h4>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {packet.recentStories.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recent STAR stories</p>
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                       {packet.recentStories.map((story) => (
-                        <div key={story.id} style={chip}>
+                        <span key={story.id} className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
                           {story.title}
-                        </div>
+                        </span>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
+            ) : (
+              <EmptyState
+                title="No study packet"
+                body="Select a job to build its study packet."
+                className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-6 shadow-none text-slate-400"
+              />
             )}
           </section>
         </div>
 
-        <section style={{ ...ttrComponents.basePanel, marginTop: 16 }}>
-          <div style={sectionTitleStyle}>
-            <span style={ttrTypography.subtleLabel}>Post-interview</span>
-            <h2 style={ttrTypography.h2}>Follow Up</h2>
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Post-interview</p>
+            <h2 className="text-lg font-semibold text-slate-100">Follow Up</h2>
           </div>
 
-          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-            <label style={ttrTypography.subtleLabel} htmlFor="followUpNotes">
+          <div className="space-y-2">
+            <label className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">
               Notes to weave in
             </label>
             <textarea
-              id="followUpNotes"
               value={followUpNotes}
-              onChange={(e) => setFollowUpNotes(e.target.value)}
+              onChange={(event) => setFollowUpNotes(event.target.value)}
               placeholder="Mention what resonated, next steps, or shared priorities"
-              style={{
-                minHeight: 100,
-                padding: 12,
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.04)",
-                color: "#e2e8f0",
-              }}
+              rows={4}
+              className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-4 py-3 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
             />
-
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button
-                onClick={handleGenerateFollowUp}
-                disabled={!selectedJobId || followUpState === "loading"}
-                style={{
-                  ...ttrComponents.primaryButton,
-                  padding: "10px 16px",
-                  cursor: followUpState === "loading" ? "wait" : "pointer",
-                }}
-              >
-                {followUpState === "loading" ? "Generating…" : "Generate follow up"}
-              </button>
-              {followUpError && <div style={ttrComponents.dangerBox}>{followUpError}</div>}
-            </div>
-
-            {followUpTierGate ? (
-              <div style={{ marginTop: 10 }}>
-                <TierGateNotice error={followUpTierGate} />
-              </div>
-            ) : null}
-
-            {followUpComplianceError ? (
-              <div style={{ marginTop: 10 }}>
-                <ComplianceViolationPanel error={followUpComplianceError} />
-              </div>
-            ) : null}
-
-            {followUp && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={ttrTypography.h4}>Draft</div>
-                <button
-                  onClick={handleCopy}
-                  style={{ ...ttrComponents.secondaryButton, padding: "8px 12px" }}
-                  disabled={!followUp.content}
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              {copyError ? (
-                <div style={{ ...ttrComponents.dangerBox, marginTop: 6 }}>{copyError}</div>
-              ) : null}
-                <div
-                  style={{
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 12,
-                    padding: 12,
-                    background: "rgba(255,255,255,0.03)",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {followUp.content}
-                </div>
-                {followUp.complianceFlags?.length ? (
-                  <div style={ttrComponents.warningBox}>
-                    Compliance notices: {followUp.complianceFlags.map((f) => f.message || f.code).join(", ")}
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {!selectedJob && <div style={ttrComponents.warningBox}>Select a job to enable follow ups.</div>}
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <FormButton onClick={handleGenerateFollowUp} disabled={!selectedJobId || followUpState === "loading"}>
+              {followUpState === "loading" ? "Generating..." : "Generate follow up"}
+            </FormButton>
+            {followUpError ? <Alert intent="error">{followUpError}</Alert> : null}
+          </div>
+
+          {followUpTierGate ? <TierGateNotice error={followUpTierGate} /> : null}
+          {followUpComplianceError ? <ComplianceViolationPanel error={followUpComplianceError} /> : null}
+
+          {followUp ? (
+            <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-100">Draft</h3>
+                <FormButton variant="secondary" onClick={handleCopy} disabled={!followUp.content || copied}>
+                  {copied ? "Copied" : "Copy"}
+                </FormButton>
+              </div>
+              {copyError ? <Alert intent="error">{copyError}</Alert> : null}
+              <div className="rounded-2xl border border-white/10 bg-slate-950 p-4 text-sm text-slate-100 whitespace-pre-wrap">
+                {followUp.content}
+              </div>
+              {followUp.complianceFlags?.length ? (
+                <Alert intent="warning">
+                  Compliance notices:{" "}
+                  {followUp.complianceFlags.map((flag) => flag.message || flag.code).join(", ")}
+                </Alert>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!selectedJobId ? (
+            <EmptyState
+              title="Select a job"
+              body="Pick a saved job to enable follow ups."
+              className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-6 shadow-none text-slate-400"
+            />
+          ) : null}
         </section>
 
-        <div style={{ marginTop: 12, color: "#cbd5e1", fontSize: 13 }}>
-          Need STAR stories? <Link href="/interview-toolkit/star-stories" style={{ color: "#c084fc" }}>Manage your STAR stories</Link>.
+        <div className="text-xs text-slate-400">
+          Need STAR stories?{" "}
+          <Link href="/interview-toolkit/star-stories" className="text-sky-300 underline">
+            Manage your STAR stories
+          </Link>
+          .
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

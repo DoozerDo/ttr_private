@@ -1,7 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetchJson, downloadBlob } from '../lib/api';
+import { Alert } from '@/components/Alert';
+import { EmptyState } from '@/components/EmptyState';
+import { FormButton } from '@/components/FormButton';
+import { PageHeader } from '@/components/PageHeader';
+import { PageShell } from '@/components/PageShell';
+import { TextInput } from '@/components/TextInput';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -373,390 +379,358 @@ export default function ApplicationsPage() {
   const formModeLabel = editingId ? 'Update Application' : 'Create Application';
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Applications</h1>
-          <p className="text-sm text-gray-600">Track, update, and export your applications.</p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void loadList()}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
-            disabled={loading || busy}
-          >
-            Refresh
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void exportApplications()}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
-            disabled={loading || busy}
-          >
-            Export
-          </button>
-
-          <button
-            type="button"
-            onClick={() => clearForm()}
-            className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
-            disabled={busy}
-          >
-            New
-          </button>
-        </div>
-      </div>
-
-      {(error || notice) && (
-        <div className="mt-4 space-y-2">
-          {error && (
-            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {error}
+    <PageShell>
+      <div className="space-y-8">
+        <PageHeader
+          title="Applications"
+          description="Track, update, and export your applications."
+          rightSlot={
+            <div className="flex flex-wrap gap-2">
+              <FormButton variant="ghost" onClick={() => void loadList()} disabled={loading || busy}>
+                Refresh
+              </FormButton>
+              <FormButton variant="ghost" onClick={() => void exportApplications()} disabled={loading || busy}>
+                Export
+              </FormButton>
+              <FormButton variant="secondary" onClick={() => clearForm()} disabled={busy}>
+                New
+              </FormButton>
             </div>
-          )}
-          {notice && (
-            <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
-              {notice}
+          }
+        />
+
+        {(error || notice) && (
+          <div className="space-y-3">
+            {error ? <Alert intent="error" title="Error">{error}</Alert> : null}
+            {notice ? <Alert intent="success">{notice}</Alert> : null}
+          </div>
+        )}
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/40">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-100">Pipeline</h2>
+              <p className="text-xs text-slate-400">
+                Applications grouped by stage. Use the dropdown to move items between stages.
+              </p>
             </div>
-          )}
-        </div>
-      )}
-
-      <div className="mt-6 rounded border p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Pipeline</h2>
-            <p className="text-xs text-gray-600">
-              Applications grouped by stage. Use the dropdown to move items between stages.
-            </p>
-          </div>
-          <div className="text-xs text-gray-600">
-            Showing <span className="font-mono">{filtered.length}</span> of{' '}
-            <span className="font-mono">{items.length}</span> records
-          </div>
-        </div>
-
-        <div className="mt-4 overflow-x-auto pb-2">
-          <div className="flex min-w-[920px] gap-4">
-            {applicationsByStage.map((bucket) => (
-              <div
-                key={bucket.value}
-                className="flex w-64 flex-shrink-0 flex-col rounded border bg-white shadow-sm"
-              >
-                <div className="flex items-center justify-between border-b px-3 py-2">
-                  <div className="text-sm font-semibold">{bucket.label}</div>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium">
-                    {bucket.applications.length}
-                  </span>
-                </div>
-
-                <div className="flex-1 space-y-3 p-3">
-                  {bucket.applications.length === 0 ? (
-                    <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">
-                      {loading ? 'Loading...' : 'No applications in this stage'}
-                    </div>
-                  ) : (
-                    bucket.applications.map((app) => {
-                      const appStage = stageFromApplication(app);
-                      return (
-                        <div
-                          key={app.id}
-                          className="rounded border bg-gray-50 p-3 text-sm shadow-sm"
-                        >
-                          <div className="font-semibold leading-tight">
-                            {safeString(app.title || app.roleTitle) || 'Untitled role'}
-                          </div>
-                          <div className="text-xs text-gray-600">
-                            {safeString(app.company) || 'Unknown company'}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
-                            <span>Applied</span>
-                            <span className="font-mono">
-                              {formatDateDisplay(safeString(app.appliedDate)) || '—'}
-                            </span>
-                          </div>
-                          <div className="mt-3">
-                            <label className="text-[11px] font-medium text-gray-700">Stage</label>
-                            <select
-                              className="mt-1 w-full rounded border px-2 py-1 text-sm"
-                              value={appStage}
-                              onChange={(e) =>
-                                void updateApplicationStage(
-                                  app.id,
-                                  normalizeStage(e.target.value, appStage),
-                                )
-                              }
-                              disabled={stageUpdatingId === app.id || busy}
-                            >
-                              {STAGE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              type="button"
-                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
-                              onClick={() => void loadDetail(app.id)}
-                              disabled={busy}
-                            >
-                              Load in form
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded border px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-60"
-                              onClick={() => void deleteApplication(app.id)}
-                              disabled={busy}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <div className="rounded border p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">List</h2>
-                <p className="text-xs text-gray-600">
-                  Use Edit to load a record into the form.
-                </p>
-              </div>
-              <div className="w-full sm:w-[320px]">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  placeholder="Filter by company, role, stage, link, or id"
-                />
-              </div>
-            </div>
-
-            <div className="mt-4 overflow-auto rounded border">
-              <table className="w-full border-collapse text-sm">
-                <thead className="bg-gray-50 text-left">
-                  <tr>
-                    <th className="whitespace-nowrap px-3 py-2">id</th>
-                    <th className="whitespace-nowrap px-3 py-2">company</th>
-                    <th className="whitespace-nowrap px-3 py-2">title</th>
-                    <th className="whitespace-nowrap px-3 py-2">stage</th>
-                    <th className="whitespace-nowrap px-3 py-2">createdAt</th>
-                    <th className="whitespace-nowrap px-3 py-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
-                        {loading ? 'Loading...' : 'No applications found.'}
-                      </td>
-                    </tr>
-                  )}
-
-                  {filtered.map((a) => (
-                    <tr key={a.id} className="border-t">
-                      <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs">
-                        {a.id}
-                      </td>
-                      <td className="px-3 py-2">{safeString(a.company)}</td>
-                      <td className="px-3 py-2">{safeString(a.title || a.roleTitle)}</td>
-                      <td className="px-3 py-2">{stageLabel(stageFromApplication(a))}</td>
-                      <td className="px-3 py-2">{safeString(a.createdAt || '')}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
-                            onClick={() => void loadDetail(a.id)}
-                            disabled={busy}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded border px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-60"
-                            onClick={() => void deleteApplication(a.id)}
-                            disabled={busy}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="text-xs text-slate-400">
+              Showing <span className="font-mono">{filtered.length}</span> of{' '}
+              <span className="font-mono">{items.length}</span> records
             </div>
           </div>
 
-          <div className="mt-6 rounded border p-4">
-            <h2 className="text-lg font-semibold">Record detail</h2>
-            <p className="mt-1 text-xs text-gray-600">Select a row and click Edit.</p>
-
-            <pre className="mt-3 max-h-[260px] overflow-auto rounded bg-gray-50 p-3 text-xs">
-              {detail ? JSON.stringify(detail, null, 2) : '{}'}
-            </pre>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2">
-          <div className="rounded border p-4">
-            <h2 className="text-lg font-semibold">{formModeLabel}</h2>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Company</label>
-                <input
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="Company"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Role Title</label>
-                <input
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Role title"
-                  disabled={busy}
-                />
-                <div className="mt-1 text-xs text-gray-500">Required.</div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Stage</label>
-                <select
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={stage}
-                  onChange={(e) => setStage(normalizeStage(e.target.value, stage))}
-                  disabled={busy}
+          <div className="overflow-x-auto">
+            <div className="flex min-w-[920px] gap-4">
+              {applicationsByStage.map((bucket) => (
+                <div
+                  key={bucket.value}
+                  className="flex w-64 flex-shrink-0 flex-col gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-3 shadow"
                 >
-                  {STAGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-100">{bucket.label}</div>
+                    <span className="rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-300">
+                      {bucket.applications.length}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 space-y-3">
+                    {bucket.applications.length === 0 ? (
+                      <EmptyState
+                        title={loading ? 'Loading...' : 'Empty stage'}
+                        body={
+                          loading ? 'Fetching pipeline...' : 'No applications in this stage yet.'
+                        }
+                        className="max-w-full border-dashed border-white/20 bg-transparent p-3 text-xs text-slate-400 shadow-none"
+                      />
+                    ) : (
+                      bucket.applications.map((app) => {
+                        const appStage = stageFromApplication(app);
+                        return (
+                          <div key={app.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm shadow">
+                            <div className="font-semibold text-slate-900">
+                              {safeString(app.title || app.roleTitle) || 'Untitled role'}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {safeString(app.company) || 'Unknown company'}
+                            </div>
+                            <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                              <span>Applied</span>
+                              <span className="font-mono">
+                                {formatDateDisplay(safeString(app.appliedDate)) || '?'}
+                              </span>
+                            </div>
+                            <div className="mt-3">
+                              <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">
+                                Stage
+                              </label>
+                              <select
+                                className="mt-1 w-full rounded-2xl border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
+                                value={appStage}
+                                onChange={(e) =>
+                                  void updateApplicationStage(
+                                    app.id,
+                                    normalizeStage(e.target.value, appStage),
+                                  )
+                                }
+                                disabled={stageUpdatingId === app.id || busy}
+                              >
+                                {STAGE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <FormButton
+                                variant="ghost"
+                                className="px-2 py-1 text-[11px]"
+                                onClick={() => void loadDetail(app.id)}
+                                disabled={busy}
+                              >
+                                Load in form
+                              </FormButton>
+                              <FormButton
+                                variant="ghost"
+                                className="px-2 py-1 text-[11px]"
+                                onClick={() => void deleteApplication(app.id)}
+                                disabled={busy}
+                              >
+                                Delete
+                              </FormButton>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-5">
+          <div className="space-y-6 lg:col-span-3">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-100">List</h2>
+                  <p className="text-xs text-slate-400">Use Edit to load a record into the form.</p>
+                </div>
+                <div className="w-full max-w-xs">
+                  <TextInput
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Filter by company, role, stage, link, or id"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Link</label>
-                <input
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  placeholder="Job link"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Applied Date</label>
-                <input
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={appliedDate}
-                  onChange={(e) => setAppliedDate(e.target.value)}
-                  placeholder="2025-12-27 or ISO timestamp"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Notes</label>
-                <textarea
-                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Notes"
-                  rows={3}
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Extra JSON (object)
-                </label>
-                <textarea
-                  className="mt-1 w-full rounded border px-3 py-2 font-mono text-xs"
-                  value={extraJsonText}
-                  onChange={(e) => setExtraJsonText(e.target.value)}
-                  rows={6}
-                  disabled={busy}
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                {!editingId ? (
-                  <button
-                    type="button"
-                    onClick={() => void createApplication()}
-                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
-                    disabled={busy}
-                  >
-                    Create
-                  </button>
+              <div className="overflow-auto rounded-2xl border border-white/10 bg-slate-900/50">
+                {filtered.length === 0 ? (
+                  <EmptyState
+                    title={loading ? 'Loading applications' : 'No applications found'}
+                    body={
+                      loading
+                        ? 'Fetching records...'
+                        : 'Create a record to have it appear in this list.'
+                    }
+                    cta={
+                      !loading ? (
+                        <FormButton variant="secondary" onClick={() => clearForm()}>
+                          Add application
+                        </FormButton>
+                      ) : undefined
+                    }
+                    className="max-w-full border border-white/20 bg-transparent px-4 py-8 shadow-none text-slate-400"
+                  />
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => void updateApplication()}
-                    className="rounded bg-black px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-60"
-                    disabled={busy}
-                  >
-                    Save
-                  </button>
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
+                      <tr>
+                        <th className="whitespace-nowrap px-3 py-2">id</th>
+                        <th className="whitespace-nowrap px-3 py-2">company</th>
+                        <th className="whitespace-nowrap px-3 py-2">title</th>
+                        <th className="whitespace-nowrap px-3 py-2">stage</th>
+                        <th className="whitespace-nowrap px-3 py-2">createdAt</th>
+                        <th className="whitespace-nowrap px-3 py-2">actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((application) => (
+                        <tr key={application.id} className="border-t border-white/10">
+                          <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs text-slate-400">
+                            {application.id}
+                          </td>
+                          <td className="px-3 py-2 text-slate-100">{safeString(application.company)}</td>
+                          <td className="px-3 py-2 text-slate-100">
+                            {safeString(application.title || application.roleTitle)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-100">
+                            {stageLabel(stageFromApplication(application))}
+                          </td>
+                          <td className="px-3 py-2 text-slate-100">{safeString(application.createdAt || '')}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-2">
+                              <FormButton
+                                variant="ghost"
+                                className="px-2 py-1 text-xs"
+                                onClick={() => void loadDetail(application.id)}
+                                disabled={busy}
+                              >
+                                Edit
+                              </FormButton>
+                              <FormButton
+                                variant="ghost"
+                                className="px-2 py-1 text-xs"
+                                onClick={() => void deleteApplication(application.id)}
+                                disabled={busy}
+                              >
+                                Delete
+                              </FormButton>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
-
-                <button
-                  type="button"
-                  onClick={() => clearForm()}
-                  className="rounded border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"
-                  disabled={busy}
-                >
-                  Clear
-                </button>
               </div>
-            </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <h2 className="text-lg font-semibold text-slate-100">Record detail</h2>
+              <p className="text-xs text-slate-400">Select a row and click Edit.</p>
+              <pre className="mt-3 max-h-[260px] overflow-auto rounded-2xl border border-white/10 bg-slate-900/40 p-3 text-xs text-slate-200">
+                {detail ? JSON.stringify(detail, null, 2) : '{}'}
+              </pre>
+            </section>
           </div>
 
-          <div className="mt-6 rounded border p-4">
-            <h2 className="text-lg font-semibold">Status</h2>
-            <div className="mt-2 text-sm text-gray-700">
-              <div>
-                Records: <span className="font-mono">{items.length}</span>
+          <div className="space-y-6 lg:col-span-2">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <h2 className="text-lg font-semibold text-slate-100">{formModeLabel}</h2>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Company</label>
+                  <TextInput
+                    value={company}
+                    onChange={(event) => setCompany(event.target.value)}
+                    placeholder="Company"
+                    disabled={busy}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Role Title
+                  </label>
+                  <TextInput
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Role title"
+                    disabled={busy}
+                  />
+                  <p className="text-[11px] text-slate-400">Required.</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Stage</label>
+                  <select
+                    value={stage}
+                    onChange={(event) => setStage(normalizeStage(event.target.value, stage))}
+                    disabled={busy}
+                    className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
+                  >
+                    {STAGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Link</label>
+                  <TextInput
+                    value={link}
+                    onChange={(event) => setLink(event.target.value)}
+                    placeholder="Job link"
+                    disabled={busy}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Applied Date</label>
+                  <TextInput
+                    value={appliedDate}
+                    onChange={(event) => setAppliedDate(event.target.value)}
+                    placeholder="2025-12-27 or ISO timestamp"
+                    disabled={busy}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Notes</label>
+                  <textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Notes"
+                    rows={3}
+                    disabled={busy}
+                    className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-4 py-2 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Extra JSON (object)
+                  </label>
+                  <textarea
+                    value={extraJsonText}
+                    onChange={(event) => setExtraJsonText(event.target.value)}
+                    rows={6}
+                    disabled={busy}
+                    className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-4 py-2 text-xs font-mono text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <FormButton
+                    onClick={() => void (editingId ? updateApplication() : createApplication())}
+                    disabled={busy}
+                  >
+                    {editingId ? 'Save' : 'Create'}
+                  </FormButton>
+                  <FormButton variant="secondary" onClick={() => clearForm()} disabled={busy}>
+                    Clear
+                  </FormButton>
+                </div>
               </div>
-              <div className="mt-2">
-                Filtered: <span className="font-mono">{filtered.length}</span>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <h2 className="text-lg font-semibold text-slate-100">Status</h2>
+              <div className="mt-2 space-y-2 text-sm text-slate-300">
+                <div>
+                  Records: <span className="font-mono">{items.length}</span>
+                </div>
+                <div>
+                  Filtered: <span className="font-mono">{filtered.length}</span>
+                </div>
+                <div>
+                  Mode: <span className="font-mono">{editingId ? 'edit' : 'create'}</span>
+                </div>
               </div>
-              <div className="mt-2">
-                Mode: <span className="font-mono">{editingId ? 'edit' : 'create'}</span>
-              </div>
-            </div>
-            <div className="mt-3 text-xs text-gray-600">
-              If you are not logged in, API calls will redirect to login.
-            </div>
+              <p className="mt-3 text-xs text-slate-400">
+                If you are not logged in, API calls will redirect to login.
+              </p>
+            </section>
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
