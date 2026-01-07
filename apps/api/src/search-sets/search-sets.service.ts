@@ -14,8 +14,8 @@ type ParsedSearchSetFromUrl = {
   urlBacked: boolean;
   parseWarning: string | null;
   titlePatterns?: string[];
-  seniority?: SearchSetSeniority;
-  workMode?: SearchSetWorkMode;
+  seniority?: SearchSetSeniority[];
+  workMode?: SearchSetWorkMode[];
 };
 
 @Injectable()
@@ -31,6 +31,27 @@ export class SearchSetsService {
         ?.map((value) => value.trim())
         .filter((value) => value.length > 0)
         .filter((value, index, arr) => arr.indexOf(value) === index) ?? []
+    );
+  }
+
+  private sanitizeEnumList<T extends string>(values?: T[] | null) {
+    return (
+      values
+        ?.map((value) => value?.trim())
+        .filter((value): value is T => Boolean(value))
+        .filter((value, index, arr) => arr.indexOf(value) === index) ?? []
+    );
+  }
+
+  private normalizeSeniorities(values?: SearchSetSeniority[] | null) {
+    return this.sanitizeEnumList(values).filter(
+      (value) => value !== SearchSetSeniority.ANY,
+    );
+  }
+
+  private normalizeWorkModes(values?: SearchSetWorkMode[] | null) {
+    return this.sanitizeEnumList(values).filter(
+      (value) => value !== SearchSetWorkMode.ANY,
     );
   }
 
@@ -179,14 +200,21 @@ export class SearchSetsService {
       )} from URL.`;
     }
 
+    const seniorityValues = seniority ? this.normalizeSeniorities([seniority]) : [];
+    const workModeValues = workMode ? this.normalizeWorkModes([workMode]) : [];
+
     return {
       ...baseResult,
       sourceUrl: parsedUrl.toString(),
       titlePatterns,
-      seniority: seniority ?? undefined,
-      workMode: workMode ?? undefined,
+      seniority: seniorityValues.length ? seniorityValues : undefined,
+      workMode: workModeValues.length ? workModeValues : undefined,
       parseWarning,
     };
+  }
+
+  parseSearchSetUrl(rawUrl?: string | null) {
+    return this.parseJobBoardUrl(rawUrl);
   }
 
   private normalizeSourceUrl(
@@ -208,10 +236,12 @@ export class SearchSetsService {
       titlePatterns: this.sanitizeList(
         dto.titlePatterns ?? parsedFromUrl?.titlePatterns,
       ),
-      seniority:
-        dto.seniority ?? parsedFromUrl?.seniority ?? SearchSetSeniority.ANY,
+      seniority: this.normalizeSeniorities(
+        dto.seniority ?? parsedFromUrl?.seniority,
+      ),
       industry: this.sanitizeList(dto.industry),
-      workMode: dto.workMode ?? parsedFromUrl?.workMode ?? SearchSetWorkMode.ANY,
+      workMode: this.normalizeWorkModes(dto.workMode ?? parsedFromUrl?.workMode),
+      location: dto.location?.trim() ?? null,
       sourceUrl,
       urlBacked: parsedFromUrl?.urlBacked ?? false,
       parseWarning: parsedFromUrl?.parseWarning ?? null,
@@ -252,8 +282,8 @@ export class SearchSetsService {
     }
 
     if (dto.seniority !== undefined) {
-      searchSet.seniority = dto.seniority;
-    } else if (parsedFromUrl?.seniority !== undefined) {
+      searchSet.seniority = this.normalizeSeniorities(dto.seniority);
+    } else if (parsedFromUrl?.seniority?.length) {
       searchSet.seniority = parsedFromUrl.seniority;
     }
 
@@ -262,9 +292,13 @@ export class SearchSetsService {
     }
 
     if (dto.workMode !== undefined) {
-      searchSet.workMode = dto.workMode;
-    } else if (parsedFromUrl?.workMode !== undefined) {
+      searchSet.workMode = this.normalizeWorkModes(dto.workMode);
+    } else if (parsedFromUrl?.workMode?.length) {
       searchSet.workMode = parsedFromUrl.workMode;
+    }
+
+    if (dto.location !== undefined) {
+      searchSet.location = dto.location?.trim() || null;
     }
 
     if (dto.sourceUrl !== undefined) {

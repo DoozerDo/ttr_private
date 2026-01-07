@@ -96,7 +96,7 @@ export class SearchSetsController {
   @Post(':id/run')
   async runSearchSet(
     @Param('id') id: string,
-    @Body() body: { limit?: number },
+    @Body() body: { limit?: number; baselineVersionId?: string },
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
@@ -105,8 +105,39 @@ export class SearchSetsController {
       throw new BadRequestException('Invalid user context');
     }
 
+    const baselineVersionId = body?.baselineVersionId?.trim();
+    if (!baselineVersionId) {
+      throw new BadRequestException(
+        'baselineVersionId is required to run a search set',
+      );
+    }
+
     const limit = typeof body?.limit === 'number' ? body.limit : undefined;
 
-    return this.searchSetsRunnerService.runSearchSet(id, userId, limit);
+    return this.searchSetsRunnerService.runSearchSet(
+      id,
+      userId,
+      baselineVersionId,
+      limit,
+    );
+  }
+
+  @Post('parse-url')
+  async parseSearchSetUrl(
+    @Body() body: { url?: string },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const rawUrl = body?.url?.trim();
+    if (!rawUrl) {
+      throw new BadRequestException('url is required');
+    }
+
+    return this.searchSetsService.parseSearchSetUrl(rawUrl);
   }
 }

@@ -11,9 +11,10 @@ describe('SearchSetsService', () => {
     id: 'set-1',
     userId: 'user-1',
     titlePatterns: ['Engineer'],
-    seniority: SearchSetSeniority.ANY,
+    seniority: [],
     industry: [],
-    workMode: SearchSetWorkMode.ANY,
+    workMode: [],
+    location: null,
     sourceUrl: null,
     urlBacked: false,
     parseWarning: null,
@@ -53,8 +54,9 @@ describe('SearchSetsService', () => {
         titlePatterns: ['Senior Engineer'],
         industry: ['fintech'],
         sourceUrl: 'https://example.com',
-        seniority: SearchSetSeniority.ANY,
-        workMode: SearchSetWorkMode.ANY,
+        seniority: [],
+        workMode: [],
+        location: null,
         urlBacked: false,
         parseWarning: null,
         isActive: true,
@@ -74,8 +76,8 @@ describe('SearchSetsService', () => {
 
     expect(result.urlBacked).toBe(true);
     expect(result.titlePatterns).toEqual(['Product Manager']);
-    expect(result.seniority).toBe(SearchSetSeniority.SENIOR);
-    expect(result.workMode).toBe(SearchSetWorkMode.REMOTE);
+    expect(result.seniority).toEqual([SearchSetSeniority.SENIOR]);
+    expect(result.workMode).toEqual([SearchSetWorkMode.REMOTE]);
     expect(result.parseWarning).toBeNull();
   });
 
@@ -135,13 +137,15 @@ describe('SearchSetsService', () => {
     const result = await service.updateSearchSet('set-1', 'user-1', {
       titlePatterns: ['Manager'],
       industry: ['security'],
-      workMode: SearchSetWorkMode.REMOTE,
+      workMode: [SearchSetWorkMode.REMOTE],
+      location: 'Remote',
       isActive: false,
     });
 
     expect(result.titlePatterns).toEqual(['Manager']);
     expect(result.industry).toEqual(['security']);
-    expect(result.workMode).toBe(SearchSetWorkMode.REMOTE);
+    expect(result.workMode).toEqual([SearchSetWorkMode.REMOTE]);
+    expect(result.location).toBe('Remote');
     expect(result.isActive).toBe(false);
   });
 

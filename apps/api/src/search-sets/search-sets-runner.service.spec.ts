@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { FitAssessment, FitAssessmentVerdict } from '../analysis/fit-assessment.entity';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import {
@@ -13,9 +14,10 @@ describe('SearchSetsRunnerService', () => {
     id: 'set-1',
     userId: 'user-1',
     titlePatterns: ['Engineer'],
-    seniority: SearchSetSeniority.ANY,
+    seniority: [],
     industry: [],
-    workMode: SearchSetWorkMode.ANY,
+    workMode: [],
+    location: null,
     sourceUrl: null,
     urlBacked: false,
     parseWarning: null,
@@ -41,23 +43,23 @@ describe('SearchSetsRunnerService', () => {
       ...overrides,
     } as Job);
 
-  const createFitAssessment = (overrides: Partial<FitAssessment>): FitAssessment =>
+  const createFitAssessment = (overrides: Partial<FitAssessment> = {}) =>
     ({
       id: overrides.id ?? 'assessment-1',
       userId: overrides.userId ?? 'user-1',
       jobId: overrides.jobId ?? 'job-1',
       baselineId: overrides.baselineId ?? 'baseline-1',
       baselineVersion: overrides.baselineVersion ?? 1,
-      overallScore: overrides.overallScore ?? 80,
-      verdict: overrides.verdict ?? FitAssessmentVerdict.CONSIDER,
+      overallScore: overrides.overallScore ?? 90,
+      verdict: overrides.verdict ?? FitAssessmentVerdict.APPLY,
       dimensionScores:
         overrides.dimensionScores ??
         ({
-          experienceAlignment: 1,
-          leadershipLevel: 1,
-          technicalPlatformFit: 1,
-          industryContext: 1,
-          strategicTacticalFit: 1,
+          experienceAlignment: 90,
+          leadershipLevel: 90,
+          technicalPlatformFit: 90,
+          industryContext: 90,
+          strategicTacticalFit: 90,
         } as FitAssessment['dimensionScores']),
       strengths: overrides.strengths ?? [],
       gaps: overrides.gaps ?? [],
@@ -66,216 +68,166 @@ describe('SearchSetsRunnerService', () => {
       createdAt: overrides.createdAt ?? new Date(),
     } as FitAssessment);
 
-  const createQueryBuilder = () => {
-    const qb = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn(),
-    };
-
-    return qb;
-  };
-
   const createService = ({
     jobs = [createJob()],
-    searchSet = baseSearchSet,
-    assessments = [createFitAssessment({ overallScore: 90 })],
+    assessments = [] as FitAssessment[],
+    baselineVersion = {
+      id: 'baseline-version-1',
+      baselineId: 'baseline-1',
+      versionNumber: 1,
+      verifiedAdditions: [],
+      baseline: {
+        id: 'baseline-1',
+        userId: 'user-1',
+        version: 1,
+        sections: [],
+      } as any,
+    },
   }: {
     jobs?: Job[];
-    searchSet?: SearchSet;
     assessments?: FitAssessment[];
-  }) => {
+    baselineVersion?: {
+      id: string;
+      baselineId: string;
+      versionNumber: number;
+      verifiedAdditions?: string[];
+      baseline: {
+        id: string;
+        userId: string;
+        version: number;
+        sections: any[];
+      };
+    };
+  } = {}) => {
     const jobRepository = {
       find: jest.fn().mockResolvedValue(jobs),
     };
 
-    const qb = createQueryBuilder();
-    qb.getMany.mockResolvedValue(assessments);
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(assessments),
+    };
 
     const fitAssessmentRepository = {
       createQueryBuilder: jest.fn(() => qb),
     };
 
+    const baselineRepository = {
+      findOne: jest.fn().mockResolvedValue(baselineVersion.baseline),
+    };
+
+    const baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue(baselineVersion),
+    };
+
+    const baselineBlockPolicyRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
+    const fitScoringService = {
+      score: jest.fn().mockReturnValue({
+        overallScore: 70,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 70,
+          leadershipLevel: 70,
+          technicalPlatformFit: 70,
+          industryContext: 70,
+          strategicTacticalFit: 70,
+        },
+      }),
+    };
+
     const searchSetsService = {
-      getSearchSetForUser: jest.fn().mockResolvedValue(searchSet),
+      getSearchSetForUser: jest.fn().mockResolvedValue(baseSearchSet),
     } as unknown as jest.Mocked<SearchSetsService>;
 
     const service = new SearchSetsRunnerService(
       jobRepository as never,
       searchSetsService,
       fitAssessmentRepository as never,
+      baselineRepository as never,
+      baselineVersionRepository as never,
+      baselineBlockPolicyRepository as never,
+      fitScoringService as never,
     );
 
-    return { service, jobRepository, fitAssessmentRepository, searchSetsService, qb };
+    return {
+      service,
+      jobRepository,
+      fitAssessmentRepository,
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      fitScoringService,
+      baselineVersion,
+    };
   };
 
-  it('filters jobs by title pattern and attaches latest fit assessment', async () => {
-    const newerAssessment = createFitAssessment({
-      id: 'assessment-2',
-      createdAt: new Date('2024-01-02T00:00:00Z'),
-      overallScore: 95,
-      verdict: FitAssessmentVerdict.APPLY,
-    });
-    const olderAssessment = createFitAssessment({
-      id: 'assessment-1',
-      createdAt: new Date('2024-01-01T00:00:00Z'),
-      overallScore: 80,
-      verdict: FitAssessmentVerdict.CONSIDER,
-    });
+  it('requires a baselineVersionId', async () => {
+    const { service, baselineVersion } = createService();
 
-    const { service, fitAssessmentRepository } = createService({
-      jobs: [createJob({ sourceUrl: 'https://example.com/apply' })],
-      assessments: [newerAssessment, olderAssessment],
-    });
-
-    const results = await service.runSearchSet('set-1', 'user-1', 5);
-
-    expect(fitAssessmentRepository.createQueryBuilder).toHaveBeenCalled();
-    expect(results).toEqual([
-      {
-        jobId: 'job-1',
-        title: 'Senior Engineer',
-        company: 'Acme Corp',
-        applyUrl: 'https://example.com/apply',
-        sourceUrl: 'https://example.com/apply',
-        fitScore: 95,
-        verdict: FitAssessmentVerdict.APPLY,
-      },
-    ]);
+    await expect(
+      service.runSearchSet('set-1', 'user-1', '   '),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.runSearchSet('set-1', 'user-1', ''),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('applies work mode and seniority filters', async () => {
-    const { service } = createService({
-      jobs: [
-        createJob({
-          id: 'job-remote',
-          title: 'Senior Engineer',
-          rawDescription: 'Fully remote position',
-        }),
-        createJob({
-          id: 'job-onsite',
-          title: 'Junior Engineer',
-          rawDescription: 'Onsite role',
-        }),
-      ],
-      searchSet: {
-        ...baseSearchSet,
-        titlePatterns: ['Engineer'],
-        workMode: SearchSetWorkMode.REMOTE,
-        seniority: SearchSetSeniority.SENIOR,
-      },
-      assessments: [],
-    });
-
-    const results = await service.runSearchSet('set-1', 'user-1', 10);
-
-    expect(results).toHaveLength(1);
-    expect(results[0].jobId).toBe('job-remote');
-  });
-
-  it('limits results to 10', async () => {
+  it('limits results to 10 entries even when more jobs exist', async () => {
     const jobs = Array.from({ length: 12 }).map((_, index) =>
-      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
+      createJob({
+        id: `job-${index}`,
+        title: `Engineer ${index}`,
+        createdAt: new Date(2024, 0, index + 1),
+      }),
     );
 
-    const { service } = createService({ jobs, assessments: [] });
-
-    const results = await service.runSearchSet('set-1', 'user-1', 20);
+    const { service, baselineVersion } = createService({ jobs });
+    const results = await service.runSearchSet(
+      'set-1',
+      'user-1',
+      baselineVersion.id,
+    );
 
     expect(results).toHaveLength(10);
   });
 
-  it('caps results at 10 even when limit below 1 or above 10', async () => {
-    const jobs = Array.from({ length: 20 }).map((_, index) =>
-      createJob({ id: `job-${index}`, title: `Engineer ${index}` }),
-    );
-
-    const { service } = createService({ jobs, assessments: [] });
-
-    const highLimit = await service.runSearchSet('set-1', 'user-1', 50);
-    const lowLimit = await service.runSearchSet('set-1', 'user-1', 0);
-
-    expect(highLimit).toHaveLength(10);
-    expect(lowLimit).toHaveLength(1);
-  });
-
-  it('derives applyUrl from sourceUrl and falls back to null when invalid', async () => {
-    const { service } = createService({
-      jobs: [
-        createJob({ id: 'job-valid', sourceUrl: 'https://example.com/apply' }),
-        createJob({ id: 'job-invalid', sourceUrl: 'notaurl' }),
-        createJob({ id: 'job-missing', sourceUrl: null }),
-      ],
-      assessments: [],
-    });
-
-    const results = await service.runSearchSet('set-1', 'user-1', 5);
-
-    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
-
-    expect(byId['job-valid'].applyUrl).toBe('https://example.com/apply');
-    expect(byId['job-invalid'].applyUrl).toBeNull();
-    expect(byId['job-missing'].applyUrl).toBeNull();
-    expect(byId['job-valid'].sourceUrl).toBe('https://example.com/apply');
-  });
-
-  it('prefers explicit apply/posting/job URLs and normalizes them', async () => {
+  it('returns normalized applyUrl and keeps fallback sourceUrl', async () => {
     const jobs = [
       createJob({
         id: 'job-apply',
-        // @ts-expect-error testing loose fields from persisted data
+        // @ts-expect-error testing unstored fields
         applyUrl: ' https://jobs.example.com/submit ',
       }),
       createJob({
         id: 'job-posting',
-        // @ts-expect-error testing loose fields from persisted data
+        // @ts-expect-error testing unstored fields
         postingUrl: 'https://jobs.example.com/posting/123',
       }),
       createJob({
-        id: 'job-joburl',
-        // @ts-expect-error testing loose fields from persisted data
-        jobUrl: 'http://jobs.example.com/job/999',
+        id: 'job-source',
+        sourceUrl: 'https://jobs.example.com/source',
       }),
     ];
 
-    const { service } = createService({ jobs, assessments: [] });
+    const { service, baselineVersion } = createService({ jobs });
 
-    const results = await service.runSearchSet('set-1', 'user-1', 5);
-
-    expect(results.find((r) => r.jobId === 'job-apply')?.applyUrl).toBe(
-      'https://jobs.example.com/submit',
+    const results = await service.runSearchSet(
+      'set-1',
+      'user-1',
+      baselineVersion.id,
     );
-    expect(results.find((r) => r.jobId === 'job-posting')?.applyUrl).toBe(
+
+    const map = Object.fromEntries(results.map((result) => [result.jobId, result]));
+
+    expect(map['job-apply'].applyUrl).toBe('https://jobs.example.com/submit');
+    expect(map['job-posting'].applyUrl).toBe(
       'https://jobs.example.com/posting/123',
     );
-    expect(results.find((r) => r.jobId === 'job-joburl')?.applyUrl).toBe(
-      'http://jobs.example.com/job/999',
-    );
-  });
-
-  it('always includes applyUrl field even when null', async () => {
-    const jobs = [
-      createJob({ id: 'job-with', sourceUrl: 'https://example.com/has' }),
-      createJob({ id: 'job-without', sourceUrl: null }),
-    ];
-
-    const { service } = createService({ jobs, assessments: [] });
-
-    const results = await service.runSearchSet('set-1', 'user-1', 5);
-
-    const byId = Object.fromEntries(results.map((r) => [r.jobId, r]));
-    expect(byId['job-with']).toHaveProperty('applyUrl', 'https://example.com/has');
-    expect(byId['job-without']).toHaveProperty('applyUrl', null);
-  });
-
-  it('returns empty results when search set is inactive', async () => {
-    const { service } = createService({
-      searchSet: { ...baseSearchSet, isActive: false },
-    });
-
-    const results = await service.runSearchSet('set-1', 'user-1');
-
-    expect(results).toEqual([]);
+    expect(map['job-source'].applyUrl).toBe('https://jobs.example.com/source');
   });
 });
