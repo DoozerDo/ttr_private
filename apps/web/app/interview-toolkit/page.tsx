@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/compliance/parseComplianceError";
 import type { StudyPacket, FollowUpPayload } from "../../lib/interviewToolkit";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
+import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 interface JobDto {
   id: string;
@@ -36,6 +38,9 @@ export default function InterviewToolkitPage() {
   const [followUpComplianceError, setFollowUpComplianceError] =
     useState<ParsedComplianceError | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [followUpTierGate, setFollowUpTierGate] = useState<TierGateError | null>(null);
+  const [storyRefreshKey, setStoryRefreshKey] = useState(0);
 
   useEffect(() => {
     const loadJobs = async () => {
@@ -66,6 +71,13 @@ export default function InterviewToolkitPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => setStoryRefreshKey((prev) => prev + 1);
+    window.addEventListener("starStories.updated", handler);
+    return () => window.removeEventListener("starStories.updated", handler);
+  }, []);
+
+  useEffect(() => {
     if (!selectedJobId) {
       setPacket(null);
       return;
@@ -90,7 +102,7 @@ export default function InterviewToolkitPage() {
     };
 
     void loadPacket();
-  }, [selectedJobId]);
+  }, [selectedJobId, storyRefreshKey]);
 
   const handleGenerateFollowUp = async () => {
     if (!selectedJobId) return;
@@ -98,6 +110,8 @@ export default function InterviewToolkitPage() {
     setFollowUpError(null);
     setCopied(false);
     setFollowUpComplianceError(null);
+    setFollowUpTierGate(null);
+    setCopyError(null);
     try {
       const res = await fetch(`/api/interview-toolkit/${selectedJobId}/follow-up`, {
         method: "POST",
@@ -114,28 +128,50 @@ export default function InterviewToolkitPage() {
           return;
         }
 
+        const tierGate = parseTierGateError({ status: res.status, payload });
+        if (tierGate) {
+          setFollowUpTierGate(tierGate);
+          setFollowUpState("error");
+          return;
+        }
+
         const message = formatErrorMessage(payload, "Unable to generate follow up");
         throw new Error(message);
       }
       const data = (await res.json()) as FollowUpPayload;
       setFollowUpComplianceError(null);
+      setFollowUpTierGate(null);
+      setFollowUpError(null);
       setFollowUp(data);
       setFollowUpState("idle");
     } catch (error) {
       setFollowUpError(error instanceof Error ? error.message : "Unable to generate follow up");
       setFollowUpState("error");
+      setFollowUpTierGate(null);
       setFollowUp(null);
     }
   };
 
   const handleCopy = async () => {
-    if (!followUp?.content || !navigator?.clipboard) return;
+    setCopyError(null);
+    if (!followUp?.content) {
+      setCopyError("No follow up draft to copy yet.");
+      return;
+    }
+
+    if (!navigator?.clipboard) {
+      setCopyError("Clipboard is not available in this browser.");
+      return;
+    }
+
     try {
       await navigator.clipboard.writeText(followUp.content);
       setCopied(true);
+      setCopyError(null);
       setTimeout(() => setCopied(false), 1200);
     } catch {
       setCopied(false);
+      setCopyError("Unable to copy to clipboard; please copy manually.");
     }
   };
 
@@ -341,6 +377,12 @@ export default function InterviewToolkitPage() {
               {followUpError && <div style={ttrComponents.dangerBox}>{followUpError}</div>}
             </div>
 
+            {followUpTierGate ? (
+              <div style={{ marginTop: 10 }}>
+                <TierGateNotice error={followUpTierGate} />
+              </div>
+            ) : null}
+
             {followUpComplianceError ? (
               <div style={{ marginTop: 10 }}>
                 <ComplianceViolationPanel error={followUpComplianceError} />
@@ -349,16 +391,19 @@ export default function InterviewToolkitPage() {
 
             {followUp && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={ttrTypography.h4}>Draft</div>
-                  <button
-                    onClick={handleCopy}
-                    style={{ ...ttrComponents.secondaryButton, padding: "8px 12px" }}
-                    disabled={!followUp.content}
-                  >
-                    {copied ? "Copied" : "Copy"}
-                  </button>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={ttrTypography.h4}>Draft</div>
+                <button
+                  onClick={handleCopy}
+                  style={{ ...ttrComponents.secondaryButton, padding: "8px 12px" }}
+                  disabled={!followUp.content}
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              {copyError ? (
+                <div style={{ ...ttrComponents.dangerBox, marginTop: 6 }}>{copyError}</div>
+              ) : null}
                 <div
                   style={{
                     border: "1px solid rgba(255,255,255,0.1)",
@@ -383,7 +428,7 @@ export default function InterviewToolkitPage() {
         </section>
 
         <div style={{ marginTop: 12, color: "#cbd5e1", fontSize: 13 }}>
-          Need to add STAR stories? <Link href="/cover-letters" style={{ color: "#c084fc" }}>Use your library</Link>.
+          Need STAR stories? <Link href="/interview-toolkit/star-stories" style={{ color: "#c084fc" }}>Manage your STAR stories</Link>.
         </div>
       </div>
     </div>
