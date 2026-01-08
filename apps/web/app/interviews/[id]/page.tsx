@@ -247,6 +247,8 @@ export default function InterviewSessionPage() {
     if (id && hash) return `${id} (${hash})`;
     return id ?? hash ?? null;
   }, [promotionResult?.baselineVersionHash, promotionResult?.baselineVersionId, session?.promotedBaselineVersionId]);
+  const baselineAvailable = Boolean(session?.baselineId && session?.baselineVersionId);
+  const baselineMissingForSession = Boolean(session) && !baselineAvailable;
 
   const expandedFitDetails = useMemo(() => {
     const assessment = session?.expandedFitAssessment;
@@ -366,6 +368,15 @@ const trimmedResponses = useMemo(
   };
 
   const handleRejectAll = async () => {
+    const confirmed =
+      typeof window !== "undefined"
+        ? window.confirm(
+            "Rejecting all additions will discard the progress you made in this interview. Continue?",
+          )
+        : true;
+    if (!confirmed) {
+      return;
+    }
     setAcceptedAdditionIds([]);
     await saveAcceptedAdditions([]);
     setReviewMessage("All additions rejected. Interview completed.");
@@ -396,6 +407,21 @@ const handleRecomputeExpandedFit = async () => {
 
     if (acceptedAdditionIds.length === 0) {
       setPromotionError("Select at least one addition to promote.");
+      return;
+    }
+
+    if (!baselineAvailable) {
+      setPromotionError("A linked baseline version is required before promoting additions.");
+      return;
+    }
+
+    const confirmed =
+      typeof window !== "undefined"
+        ? window.confirm(
+            "Promoting accepted additions creates a new baseline version and overwrites the existing content. Continue?",
+          )
+        : true;
+    if (!confirmed) {
       return;
     }
 
@@ -456,7 +482,7 @@ const handleRecomputeExpandedFit = async () => {
   const allQuestionsAnswered = questions.length > 0 && answeredCount >= questions.length;
   const interviewComplete = backendIndicatesCompletion || allQuestionsAnswered;
   const expandedFitComputed = Boolean(expandedFitDetails);
-  const canPromote = expandedFitComputed && acceptedAdditionIds.length > 0;
+  const canPromote = baselineAvailable && expandedFitComputed && acceptedAdditionIds.length > 0;
   const analyzeBaselineVersionId =
     promotionResult?.baselineVersionId ??
     session?.promotedBaselineVersionId ??
@@ -483,6 +509,15 @@ const handleRecomputeExpandedFit = async () => {
           title="Fit Review"
           description="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
         />
+        {baselineMissingForSession ? (
+          <Alert intent="warning">
+            This interview requires a linked baseline version. Upload or review your baseline in the{" "}
+            <Link href="/baseline" className="text-sky-300 underline">
+              baseline library
+            </Link>{" "}
+            before continuing.
+          </Alert>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[1.45fr_1fr]">
           <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">

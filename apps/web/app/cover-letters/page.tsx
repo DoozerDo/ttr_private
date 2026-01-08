@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { Alert } from "@/components/Alert";
 import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
@@ -394,10 +395,23 @@ export default function CoverLettersPage() {
               setBaselineId,
               baselineState !== "idle",
             )}
+            {baselineState === "idle" && !baselineId ? (
+              <Alert intent="warning">
+                Select a baseline or visit the{" "}
+                <Link href="/baseline" className="text-sky-300 underline">
+                  baseline library
+                </Link>{" "}
+                before generating a cover letter.
+              </Alert>
+            ) : null}
             {baselineState === "error" && baselineError ? <div style={ttrComponents.dangerBox}>{baselineError}</div> : null}
             {baselineState === "idle" && baselines.length === 0 ? (
               <div style={{ ...ttrComponents.successBox, borderColor: "rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.08)", color: "rgba(251,191,36,0.95)" }}>
-                No baselines available. Upload a baseline to start generating cover letters.
+                No baselines available. Upload a baseline via the{" "}
+                <Link href="/baseline" className="text-sky-300 underline">
+                  baseline library
+                </Link>{" "}
+                to start generating cover letters.
               </div>
             ) : null}
 

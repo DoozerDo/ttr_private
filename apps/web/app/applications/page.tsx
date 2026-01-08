@@ -330,6 +330,13 @@ export default function ApplicationsPage() {
   }
 
   async function deleteApplication(id: string) {
+    const confirmed =
+      typeof window !== "undefined"
+        ? window.confirm("Deleting this application cannot be undone. Continue?")
+        : true;
+    if (!confirmed) {
+      return;
+    }
     setBusy(true);
     setError('');
     setNotice('');

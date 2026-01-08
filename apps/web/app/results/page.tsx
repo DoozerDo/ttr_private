@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
@@ -33,9 +35,19 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(false);
   const [loadingLatest, setLoadingLatest] = useState(false);
   const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
-  const [complianceError, setComplianceError] =
-    useState<ParsedComplianceError | null>(null);
+  const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
+  const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
+
+  const setManualBaselineId = (value: string) => {
+    setBaselineId(value);
+    setAnalysisSource("manual");
+  };
+
+  const setManualJobId = (value: string) => {
+    setJobId(value);
+    setAnalysisSource("manual");
+  };
 
   const latestEndpoint = useMemo(() => {
     if (!jobId) return null;
@@ -49,29 +61,56 @@ export default function ResultsPage() {
       return;
     }
 
+    const hasManualSelection = baselineId.trim().length > 0 || jobId.trim().length > 0;
+    const shouldConfirm = analysisSource === "manual" && hasManualSelection;
+
+    if (shouldConfirm) {
+      const proceed =
+        typeof window !== "undefined"
+          ? window.confirm(
+              "Loading the latest analysis will replace the baseline and job IDs you currently have selected. Continue?",
+            )
+          : true;
+      if (!proceed) return;
+    }
+
     setLoadingLatest(true);
     setError(null);
     setLatest(null);
+    setComplianceError(null);
+    setTierGateError(null);
 
     try {
       if (!latestEndpoint) throw new Error("Job ID is required.");
 
-      const res = await fetch(
-        `/api/analysis/job/${encodeURIComponent(jobId)}/latest`,
-        { cache: "no-store" },
-      );
+      const res = await fetch(`/api/analysis/job/${encodeURIComponent(jobId)}/latest`, {
+        cache: "no-store",
+      });
+
+      const payload = await readResponsePayload(res.clone());
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text);
+        const tierGate = parseTierGateError({ status: res.status, payload });
+        if (tierGate) {
+          setTierGateError(tierGate);
+          return;
+        }
+
+        const compliance = parseComplianceError({ status: res.status, payload });
+        if (compliance) {
+          setComplianceError(compliance);
+          return;
+        }
+
+        const message = formatErrorMessage(payload, "Unable to load latest analysis.");
+        throw new Error(message);
       }
 
       const data: LatestAnalysis = await res.json();
       setLatest(data);
-
-      if (data?.baselineId) {
-        setBaselineId(data.baselineId);
-      }
+      setBaselineId(data.baselineId ?? "");
+      setJobId(data.jobId ?? "");
+      setAnalysisSource("latest");
     } catch (e: any) {
       setError(e?.message || "Failed to load analysis");
     } finally {
@@ -211,7 +250,7 @@ export default function ResultsPage() {
     const params = new URLSearchParams(window.location.search);
     const job = params.get("jobId");
     if (job) {
-      setJobId(job);
+      setManualJobId(job);
     }
   }, []);
 
@@ -232,7 +271,11 @@ export default function ResultsPage() {
 
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
-        {error ? <Alert intent="error" title="Uh oh">{error}</Alert> : null}
+        {error ? (
+          <Alert intent="error" title="Uh oh">
+            {error}
+          </Alert>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-3">
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -242,22 +285,58 @@ export default function ResultsPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Baseline</label>
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Baseline
+                </label>
                 <TextInput
                   value={baselineId}
-                  onChange={(event) => setBaselineId(event.target.value)}
+                  onChange={(event) => setManualBaselineId(event.target.value)}
                   placeholder="Baseline ID"
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Job</label>
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Job
+                </label>
                 <TextInput
                   value={jobId}
-                  onChange={(event) => setJobId(event.target.value)}
+                  onChange={(event) => setManualJobId(event.target.value)}
                   placeholder="Job ID"
                 />
               </div>
             </div>
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
+              {analysisSource === "latest" ? (
+                <>
+                  <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                    Latest analysis
+                  </strong>
+                  <p className="mt-1">
+                    Loaded from job {latest?.jobId ?? "unknown"} and baseline{" "}
+                    {latest?.baselineId ?? "unknown"}. Modify the IDs above to target a different analysis.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                    Manual selection
+                  </strong>
+                  <p className="mt-1">
+                    Edit the baseline/job IDs to reuse a specific analysis. Loading the latest will
+                    overwrite the values you entered.
+                  </p>
+                </>
+              )}
+            </div>
+            {!baselineId ? (
+              <Alert intent="warning">
+                Enter a baseline ID or visit the{" "}
+                <Link href="/baseline" className="text-sky-300 underline">
+                  baseline library
+                </Link>{" "}
+                to add one before generating resumes.
+              </Alert>
+            ) : null}
             <div className="flex flex-wrap items-center gap-3">
               <FormButton
                 variant="secondary"
@@ -273,12 +352,14 @@ export default function ResultsPage() {
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Latest analysis</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Latest analysis
+                </p>
                 <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
               </div>
               <div className="text-xs text-slate-400">
-                <div>Job: {latest?.jobId ?? 'n/a'}</div>
-                <div>Fit Score: {latest?.overallScore ?? 'n/a'}</div>
+                <div>Job: {latest?.jobId ?? "n/a"}</div>
+                <div>Fit Score: {latest?.overallScore ?? "n/a"}</div>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -286,7 +367,8 @@ export default function ResultsPage() {
                 variant="ghost"
                 onClick={() => {
                   if (latest?.jobId) {
-                    window.location.href = '/fit-review?jobId=' + encodeURIComponent(latest.jobId);
+                    window.location.href =
+                      "/fit-review?jobId=" + encodeURIComponent(latest.jobId);
                   }
                 }}
                 disabled={!latest?.jobId}
@@ -304,7 +386,11 @@ export default function ResultsPage() {
                 title="No analysis yet"
                 body="Load the latest analysis to inspect the JSON payload."
                 cta={
-                  <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
+                  <FormButton
+                    variant="ghost"
+                    onClick={() => void loadLatest()}
+                    disabled={!jobId || loading || loadingLatest}
+                  >
                     {loadingLatest ? "Loading latest..." : "Load analysis"}
                   </FormButton>
                 }
@@ -315,43 +401,40 @@ export default function ResultsPage() {
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Generate resume</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Generate resume
+              </p>
               <h2 className="text-lg font-semibold text-slate-100">Output</h2>
             </div>
             <div className="flex flex-wrap gap-3">
-              <FormButton
-                onClick={() => generateResume(false)}
-                disabled={!baselineId || !jobId || loading}
-              >
-                {loading ? 'Generating...' : 'Generate resume'}
+              <FormButton onClick={() => void generateResume(false)} disabled={!baselineId || !jobId || loading}>
+                {loading ? "Generating..." : "Generate resume"}
               </FormButton>
               <FormButton
                 variant="secondary"
-                onClick={() => generateResume(true)}
+                onClick={() => void generateResume(true)}
                 disabled={!baselineId || !jobId || !oneTapEligible || loading}
                 title={
-                  oneTapEligible
-                    ? 'Generate immediately with compliance checks'
-                    : 'Requires fit score of at least 92'
+                  oneTapEligible ? "Generate immediately with compliance checks" : "Requires fit score of at least 92"
                 }
               >
-                {loading ? 'Checking...' : 'One tap generate (>=92 fit score)'}
+                {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
               </FormButton>
             </div>
             <div className="flex flex-wrap gap-3">
               <FormButton
                 variant="secondary"
-                onClick={() => exportResume('docx')}
+                onClick={() => void exportResume("docx")}
                 disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
               >
-                {exporting === 'docx' ? 'Downloading...' : 'Download DOCX'}
+                {exporting === "docx" ? "Downloading..." : "Download DOCX"}
               </FormButton>
               <FormButton
                 variant="secondary"
-                onClick={() => exportResume('pdf')}
+                onClick={() => void exportResume("pdf")}
                 disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
               >
-                {exporting === 'pdf' ? 'Downloading...' : 'Download PDF'}
+                {exporting === "pdf" ? "Downloading..." : "Download PDF"}
               </FormButton>
             </div>
             {resumeResponse ? (
@@ -363,7 +446,10 @@ export default function ResultsPage() {
                 title="No resume yet"
                 body="Generate or export a resume to view the payload."
                 cta={
-                  <FormButton onClick={() => generateResume(false)} disabled={!baselineId || !jobId || loading}>
+                  <FormButton
+                    onClick={() => void generateResume(false)}
+                    disabled={!baselineId || !jobId || loading}
+                  >
                     Generate now
                   </FormButton>
                 }

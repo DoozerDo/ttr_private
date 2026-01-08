@@ -209,7 +209,6 @@ export default function InterviewToolkitPage() {
       setTimeout(() => setCopied(false), 1200);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to copy to clipboard.";
-      console.error("Clipboard copy failed", error);
       setCopyError(message);
     }
   };
