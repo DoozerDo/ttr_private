@@ -126,6 +126,8 @@ function describeAdditionSource(addition: RecommendedAddition): string {
   return labels.slice(0, 2).join(" | ");
 }
 
+const COMPLETION_STATUS_VALUES = ["complete", "completed", "done", "closed", "finished"];
+
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -279,7 +281,7 @@ export default function InterviewSessionPage() {
     });
   };
 
-  const trimmedResponses = useMemo(
+const trimmedResponses = useMemo(
     () => answers.map((answer) => (answer ?? "").trim()),
     [answers],
   );
@@ -369,7 +371,7 @@ export default function InterviewSessionPage() {
     setReviewMessage("All additions rejected. Interview completed.");
   };
 
-  const handleRecomputeExpandedFit = async () => {
+const handleRecomputeExpandedFit = async () => {
     if (!sessionId) return;
 
     setExpandedComputing(true);
@@ -447,6 +449,31 @@ export default function InterviewSessionPage() {
       { accepted: 0, rejected: 0, deferred: 0 },
     );
   }, [recommendedAdditions]);
+
+  const backendIndicatesCompletion =
+    typeof session?.status === "string" &&
+    COMPLETION_STATUS_VALUES.includes(session.status.toLowerCase());
+  const allQuestionsAnswered = questions.length > 0 && answeredCount >= questions.length;
+  const interviewComplete = backendIndicatesCompletion || allQuestionsAnswered;
+  const expandedFitComputed = Boolean(expandedFitDetails);
+  const canPromote = expandedFitComputed && acceptedAdditionIds.length > 0;
+  const analyzeBaselineVersionId =
+    promotionResult?.baselineVersionId ??
+    session?.promotedBaselineVersionId ??
+    session?.baselineVersionId ??
+    null;
+  const analyzeUrl = analyzeBaselineVersionId
+    ? `/analyze?baselineVersionId=${encodeURIComponent(analyzeBaselineVersionId)}`
+    : "/analyze";
+  const fitReviewUrl = session?.jobId
+    ? `/fit-review?jobId=${encodeURIComponent(session.jobId)}`
+    : "/fit-review";
+  const completionReason = backendIndicatesCompletion
+    ? "Backend marked this interview as complete."
+    : allQuestionsAnswered
+      ? "All questions now have recorded responses."
+      : "Use the actions below to move forward.";
+
 
   return (
     <PageShell>
@@ -761,14 +788,6 @@ export default function InterviewSessionPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="flex flex-wrap gap-3">
-                      <FormButton onClick={handlePromoteAcceptedAdditions} disabled={promotionSaving || acceptedAdditionIds.length === 0}>
-                        {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
-                      </FormButton>
-                      <FormButton variant="secondary" onClick={handleRejectAll} disabled={acceptedSaving}>
-                        Reject all and finish
-                      </FormButton>
-                    </div>
                     {acceptedSaving ? <p className="text-xs text-slate-400">Saving accepted additions...</p> : null}
                     {acceptedError ? <Alert intent="error">{acceptedError}</Alert> : null}
                     {expandedComputeError ? <Alert intent="error">{expandedComputeError}</Alert> : null}
@@ -808,11 +827,52 @@ export default function InterviewSessionPage() {
                     ) : null}
                   </div>
                 )}
+                {interviewComplete ? (
+                  <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+                    <Alert intent="success">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-slate-100">Interview complete</p>
+                        <p className="text-xs text-slate-300">{completionReason}</p>
+                      </div>
+                    </Alert>
+                    <div className="text-xs text-slate-400">
+                      {acceptedAdditionIds.length === 0 ? (
+                        <p>No accepted additions yet; accept recommendations to unlock promotion.</p>
+                      ) : null}
+                      {!expandedFitComputed ? (
+                        <p>Recompute the expanded fit score before promoting additions.</p>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <FormButton
+                        onClick={handlePromoteAcceptedAdditions}
+                        disabled={promotionSaving || !canPromote}
+                      >
+                        {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
+                      </FormButton>
+                      <FormButton
+                        variant="secondary"
+                        onClick={handleRejectAll}
+                        disabled={acceptedSaving || promotionSaving}
+                      >
+                        Reject all and finish
+                      </FormButton>
+                      <Link
+                        href={analyzeUrl}
+                        className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200"
+                      >
+                        Analyze with baseline
+                      </Link>
+                      <FormButton variant="ghost" onClick={() => router.push(fitReviewUrl)}>
+                        Return to Fit Review
+                      </FormButton>
+                    </div>
+                  </section>
+                ) : null}
               </div>
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <FormButton variant="secondary" onClick={() => router.push("/fit-review")}>Back to fit review</FormButton>
               <Link
                 href="/results"
                 className="inline-flex items-center justify-center rounded-full border border-white/20 bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2 text-xs font-semibold text-slate-900"
@@ -826,4 +886,3 @@ export default function InterviewSessionPage() {
     </PageShell>
   );
 }
-

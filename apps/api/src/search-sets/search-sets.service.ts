@@ -314,6 +314,14 @@ export class SearchSetsService {
     return this.searchSetRepository.save(searchSet);
   }
 
+  async recordRunMetadata(searchSet: SearchSet, baselineVersionId: string, resultCount: number) {
+    searchSet.lastRunAt = new Date();
+    searchSet.lastRunBaselineVersionId = baselineVersionId;
+    searchSet.lastRunResultCount = resultCount;
+
+    await this.searchSetRepository.save(searchSet);
+  }
+
   async deleteSearchSet(id: string, userId: string) {
     const searchSet = await this.getSearchSetForUser(id, userId);
 

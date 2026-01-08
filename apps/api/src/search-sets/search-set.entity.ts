@@ -57,6 +57,15 @@ export class SearchSet {
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  lastRunAt!: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  lastRunBaselineVersionId!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  lastRunResultCount!: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 

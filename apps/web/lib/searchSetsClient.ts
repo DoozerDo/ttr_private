@@ -13,6 +13,9 @@ export type SearchSetDto = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  lastRunAt?: string | null;
+  lastRunBaselineVersionId?: string | null;
+  lastRunResultCount?: number | null;
 };
 
 export type SearchSetRunResult = {

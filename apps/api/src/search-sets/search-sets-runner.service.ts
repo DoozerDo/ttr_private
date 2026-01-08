@@ -99,6 +99,7 @@ export class SearchSetsRunnerService {
     const matchedJobs = jobs.filter((job) => this.matchesSearchSet(job, searchSet));
 
     if (!matchedJobs.length) {
+      await this.recordRunSafely(searchSet, normalizedBaselineVersionId, 0);
       return [];
     }
 
@@ -151,7 +152,7 @@ export class SearchSetsRunnerService {
       })
       .slice(0, limitCount);
 
-    return sorted.map((entry) => ({
+    const results = sorted.map((entry) => ({
       jobId: entry.job.id,
       title: entry.job.title,
       company: entry.job.company,
@@ -161,6 +162,10 @@ export class SearchSetsRunnerService {
       verdict: entry.verdict ?? null,
       dimensionScores: entry.dimensionScores ?? null,
     }));
+
+    await this.recordRunSafely(searchSet, normalizedBaselineVersionId, results.length);
+
+    return results;
   }
 
   private computeResultLimit(requested: number | undefined, available: number) {
@@ -489,5 +494,21 @@ export class SearchSetsRunnerService {
     }
 
     return null;
+  }
+
+  private async recordRunSafely(
+    searchSet: SearchSet,
+    baselineVersionId: string,
+    resultCount: number,
+  ) {
+    try {
+      await this.searchSetsService.recordRunMetadata(
+        searchSet,
+        baselineVersionId,
+        resultCount,
+      );
+    } catch {
+      // Persisting run metadata should not block delivering results.
+    }
   }
 }

@@ -133,8 +133,39 @@ export default function SearchSetRunPage() {
     return baselineOptions.find((option) => option.value === selectedBaselineVersionId)?.label ?? null;
   }, [baselineOptions, selectedBaselineVersionId]);
 
+  const getBaselineLabel = useCallback(
+    (versionId?: string | null) => {
+      if (!versionId) return null;
+      const match = baselineOptions.find((option) => option.value === versionId);
+      if (match) return match.label;
+      return versionId.length > 8
+        ? `Baseline ${versionId.slice(0, 8)}`
+        : `Baseline ${versionId}`;
+    },
+    [baselineOptions],
+  );
+
+  const lastRunInfo =
+    searchSet && searchSet.lastRunAt
+      ? {
+          at: searchSet.lastRunAt,
+          baselineVersionId: searchSet.lastRunBaselineVersionId ?? null,
+          resultCount:
+            typeof searchSet.lastRunResultCount === "number" ? searchSet.lastRunResultCount : null,
+        }
+      : null;
+
+  const lastRunBaselineLabel = getBaselineLabel(lastRunInfo?.baselineVersionId);
+  const resultsAreStale =
+    runExecuted &&
+    !!lastRunInfo?.baselineVersionId &&
+    !!selectedBaselineVersionId &&
+    lastRunInfo.baselineVersionId !== selectedBaselineVersionId;
+  const staleBaselineLabel = lastRunBaselineLabel ?? "the previously run baseline version";
+
   const handleRun = useCallback(async () => {
     if (!searchSetId || !selectedBaselineVersionId) return;
+    const baselineVersionId = selectedBaselineVersionId;
 
     setRunning(true);
     setRunError(null);
@@ -143,11 +174,24 @@ export default function SearchSetRunPage() {
     setRunMessage(null);
 
     try {
-      const results = await runSearchSet(searchSetId, selectedBaselineVersionId, RESULT_LIMIT);
-      setRunResults(Array.isArray(results) ? results : []);
+      const results = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
+      const normalizedResults = Array.isArray(results) ? results : [];
+      setRunResults(normalizedResults);
       setRunExecuted(true);
-      const count = Array.isArray(results) ? results.length : 0;
-      setRunMessage(count ? `Found ${count} matching roles.` : "No matches found.");
+      const count = normalizedResults.length;
+      setRunMessage(
+        count ? `Run complete — Found ${count} matching roles.` : "Run complete — No matches found.",
+      );
+      setSearchSet((prev) =>
+        prev
+          ? {
+              ...prev,
+              lastRunAt: new Date().toISOString(),
+              lastRunBaselineVersionId: baselineVersionId,
+              lastRunResultCount: count,
+            }
+          : prev,
+      );
     } catch (error) {
       const apiError = error as SearchSetApiError;
       if (apiError.validationErrors?.length) {
@@ -314,6 +358,27 @@ export default function SearchSetRunPage() {
                 ) : null}
 
                 {runMessage ? <Alert intent="success">{runMessage}</Alert> : null}
+
+                {lastRunInfo ? (
+                  <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-semibold uppercase tracking-[0.3em]">Last run</span>
+                      <span>{formatDate(lastRunInfo.at)}</span>
+                    </div>
+                    <p className="text-sm text-white">
+                      {lastRunBaselineLabel ?? "Baseline version unknown"}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {typeof lastRunInfo.resultCount === "number"
+                        ? `${lastRunInfo.resultCount} results returned`
+                        : "Results count unavailable"}
+                    </p>
+                  </div>
+                ) : searchSet ? (
+                  <p className="text-xs text-slate-400">
+                    Run this set once to capture timestamp, baseline, and results metadata.
+                  </p>
+                ) : null}
               </div>
             )}
           </section>
@@ -331,6 +396,13 @@ export default function SearchSetRunPage() {
                 : "Run the set to view matches"}
             </span>
           </div>
+
+          {resultsAreStale ? (
+            <Alert intent="warning">
+              The current matches were generated for {staleBaselineLabel}. Select that baseline value again or re-run
+              the set to refresh them.
+            </Alert>
+          ) : null}
 
           {!runExecuted ? (
             <EmptyState

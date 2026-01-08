@@ -32,6 +32,22 @@ function TierGateNotice({ error }: { error: TierGateError }) {
   );
 }
 
+function describeComplianceSummary(error: ParsedComplianceError) {
+  const violations = error.violations
+    .map((violation) => violation.message || violation.code)
+    .filter(Boolean)
+    .join("; ");
+
+  const extras = [
+    error.auditId ? `Audit ${error.auditId}` : null,
+    error.baselineVersionHash ? `Baseline ${error.baselineVersionHash}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return [violations || "Compliance validation failed.", extras].filter(Boolean).join(" · ");
+}
+
 export default function InterviewToolkitPage() {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [jobState, setJobState] = useState<"idle" | "loading" | "error">("loading");
@@ -198,6 +214,12 @@ export default function InterviewToolkitPage() {
     }
   };
 
+  const followUpFailureMessage =
+    followUpState === "error"
+      ? followUpTierGate?.message ??
+        (followUpComplianceError ? describeComplianceSummary(followUpComplianceError) : followUpError)
+      : null;
+
   return (
     <PageShell>
       <div className="space-y-6 pb-10">
@@ -239,6 +261,27 @@ export default function InterviewToolkitPage() {
         {jobs.length === 0 && jobState !== "loading" ? (
           <Alert intent="warning">Save a job to unlock the Interview Toolkit.</Alert>
         ) : null}
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">How to use this</p>
+            <h2 className="text-lg font-semibold text-slate-100">Interview coaching guide</h2>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Morning Of</p>
+              <p>Purpose: Use this checklist to refresh the job highlights, lock in logistics, and center your opener before the call.</p>
+            </div>
+            <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Study packet</p>
+              <p>Purpose: Keep the role-specific context, STAR story prompts, and likely questions handy so your prep stays focused.</p>
+            </div>
+            <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Follow up generator</p>
+              <p>Purpose: Turn your interview notes into compliant, job-centered follow-up copy you can copy and send quickly.</p>
+            </div>
+          </div>
+        </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
@@ -383,11 +426,13 @@ export default function InterviewToolkitPage() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <FormButton onClick={handleGenerateFollowUp} disabled={!selectedJobId || followUpState === "loading"}>
-              {followUpState === "loading" ? "Generating..." : "Generate follow up"}
-            </FormButton>
-            {followUpError ? <Alert intent="error">{followUpError}</Alert> : null}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton onClick={handleGenerateFollowUp} disabled={!selectedJobId || followUpState === "loading"}>
+                {followUpState === "loading" ? "Generating..." : "Generate follow up"}
+              </FormButton>
+            </div>
+            {followUpFailureMessage ? <Alert intent="error">{followUpFailureMessage}</Alert> : null}
           </div>
 
           {followUpTierGate ? <TierGateNotice error={followUpTierGate} /> : null}
@@ -401,6 +446,7 @@ export default function InterviewToolkitPage() {
                   {copied ? "Copied" : "Copy"}
                 </FormButton>
               </div>
+              {copied ? <Alert intent="success">Follow up copied to clipboard.</Alert> : null}
               {copyError ? <Alert intent="error">{copyError}</Alert> : null}
               <div className="rounded-2xl border border-white/10 bg-slate-950 p-4 text-sm text-slate-100 whitespace-pre-wrap">
                 {followUp.content}
@@ -421,6 +467,29 @@ export default function InterviewToolkitPage() {
               className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : null}
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              Recommended resources
+            </p>
+            <h2 className="text-lg font-semibold text-slate-100">Resources</h2>
+          </div>
+          <EmptyState
+            title="No resources available yet"
+            body={
+              <>
+                <p>We haven't collected any resources for this job yet.</p>
+                <p>Check back once your team adds curated links, readings, or templates.</p>
+              </>
+            }
+            cta={
+              <Link href="/interview-toolkit/resources" className="text-sky-300 underline">
+                Add resources later
+              </Link>
+            }
+          />
         </section>
 
         <div className="text-xs text-slate-400">
