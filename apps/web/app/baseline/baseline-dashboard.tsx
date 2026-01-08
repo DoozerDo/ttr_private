@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, FormEvent } from "react";
 import { useMemo, useState } from "react";
+import { Alert } from "@/components/Alert";
 import { BaselineDto } from "../../lib/baselines";
 import { formatDateTime } from "../../lib/format-date";
 import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
@@ -282,6 +283,12 @@ export function BaselineDashboard({
             Refresh
           </button>
         </div>
+
+        {initialFetchError ? (
+          <Alert intent="error" title="Unable to load baselines">
+            <p className="text-sm text-current">{initialFetchError}</p>
+          </Alert>
+        ) : null}
 
         <div style={dividerStyle} />
 

@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { HTMLAttributes, ReactNode } from "react";
 
 type AlertIntent = "info" | "success" | "warning" | "error";
 
@@ -6,8 +6,7 @@ type AlertProps = {
   title?: string;
   children: ReactNode;
   intent?: AlertIntent;
-  className?: string;
-};
+} & HTMLAttributes<HTMLDivElement>;
 
 const INTENT_CLASSES: Record<AlertIntent, string> = {
   info: "border border-slate-600 bg-slate-900 text-slate-100",
@@ -23,11 +22,12 @@ const INTENT_LABELS: Record<AlertIntent, string> = {
   error: "Error",
 };
 
-export function Alert({ title, children, intent = "info", className }: AlertProps) {
+export function Alert({ title, children, intent = "info", className, ...rest }: AlertProps) {
   return (
     <div
       role="status"
       className={`rounded-2xl px-4 py-3 text-sm ${INTENT_CLASSES[intent]} ${className ?? ""}`}
+      {...rest}
     >
       <div className="flex items-start gap-3">
         <span className="text-xs font-semibold uppercase tracking-[0.3em] text-current">

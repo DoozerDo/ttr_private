@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import Link from "next/link";
 
+import { Alert } from "@/components/Alert";
 import type { JobDto } from "../../../lib/jobs";
 import { InstrumentPanelShell } from "../../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "../../ui/ttrStyles";
@@ -34,6 +35,8 @@ export default function JobIngestionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
 
   const sortedJobs = useMemo(
     () =>
@@ -54,17 +57,29 @@ export default function JobIngestionPage() {
     let cancelled = false;
 
     const loadJobs = async () => {
+      setJobsLoading(true);
+      setJobsError(null);
+
       try {
         const response = await fetch("/api/jobs", { cache: "no-store" });
         if (!response.ok) {
-          return;
+          const message = (await response.text()) || "Unable to load job descriptions.";
+          throw new Error(message);
         }
 
         const data = (await response.json()) as JobDto[];
-        if (!cancelled) setJobs(data);
-      } catch {
-        if (!cancelled) setJobs([]);
-      }
+        if (!cancelled) {
+          setJobs(data);
+        }
+    } catch (loadError) {
+      if (cancelled) return;
+      setJobs([]);
+      const message =
+        loadError instanceof Error ? loadError.message : "Unable to load job descriptions right now.";
+      setJobsError(message);
+    } finally {
+      if (!cancelled) setJobsLoading(false);
+    }
     };
 
     loadJobs();
@@ -437,7 +452,15 @@ export default function JobIngestionPage() {
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {sortedJobs.length === 0 ? (
+          {jobsLoading ? (
+            <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
+              Loading saved job descriptions...
+            </p>
+          ) : jobsError ? (
+            <Alert intent="error" title="Unable to load jobs" data-testid="job-list-error">
+              <p className="text-sm text-current">{jobsError}</p>
+            </Alert>
+          ) : sortedJobs.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.7)" }}>
               No job descriptions saved yet.
             </p>
