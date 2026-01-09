@@ -3,6 +3,8 @@ import { test, vi } from "vitest";
 
 import AnalyzePage from "@/app/analyze/page";
 import CoverLettersPage from "@/app/cover-letters/page";
+import InterviewToolkitPage from "@/app/interview-toolkit/page";
+import InterviewToolkitResourcesPage from "@/app/interview-toolkit/resources/page";
 import JobIngestionPage from "@/app/jobs/new/page";
 import { BaselineDashboard } from "@/app/baseline/baseline-dashboard";
 import FitReviewClient from "@/app/fit-review/FitReviewClient";
@@ -120,4 +122,18 @@ test("cover letters shows history failures instead of blank panels", async () =>
 
   const historyAlerts = await screen.findAllByText("History failure");
   expect(historyAlerts.length).toBeGreaterThan(0);
+});
+
+test("interview toolkit resources route renders seeded content", async () => {
+  render(<InterviewToolkitResourcesPage />);
+
+  const seededTitle = await screen.findByText("Cracking the PM Interview (Article)");
+  expect(seededTitle).toBeInTheDocument();
+});
+
+test("interview toolkit page renders the resources section", async () => {
+  render(<InterviewToolkitPage />);
+
+  const seededTitle = await screen.findByText("Cracking the PM Interview (Article)");
+  expect(seededTitle).toBeInTheDocument();
 });
