@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/compliance/parseComplianceError";
 import type { FollowUpPayload, StudyPacket } from "../../lib/interviewToolkit";
 import { getInterviewResourcesForJob } from "@/lib/interviewToolkit/resources";
+import { ResourcesList } from "@/app/interview-toolkit/_components/ResourcesList";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 interface JobDto {
@@ -69,7 +71,7 @@ export default function InterviewToolkitPage() {
   const [copyError, setCopyError] = useState<string | null>(null);
 
   const [storyRefreshKey, setStoryRefreshKey] = useState(0);
-  const resources = useMemo(() => getInterviewResourcesForJob(selectedJobId || undefined), [selectedJobId]);
+  const resources = useMemo(() => getInterviewResourcesForJob(selectedJobId || null), [selectedJobId]);
 
   useEffect(() => {
     const loadJobs = async () => {
@@ -479,10 +481,25 @@ export default function InterviewToolkitPage() {
           <p className="text-sm text-slate-300">
             Curated articles, videos, and tools that reinforce your prep for the selected opportunity.
           </p>
-          <ResourcesList resources={resources} />
+          {resources.length > 0 ? (
+            <ResourcesList resources={resources} />
+          ) : (
+            <EmptyState
+              title="No study packet"
+              body="Select a job to build its study packet."
+              className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-6 shadow-none text-slate-400"
+            />
+          )}
           <div className="text-xs text-slate-400">
             Need additional references?{" "}
-            <Link href="/interview-toolkit/resources" className="text-sky-300 underline">
+            <Link
+              href={
+                selectedJobId
+                  ? `/interview-toolkit/resources?jobId=${encodeURIComponent(selectedJobId)}`
+                  : "/interview-toolkit/resources"
+              }
+              className="text-sky-300 underline"
+            >
               Add resources later
             </Link>
             .
