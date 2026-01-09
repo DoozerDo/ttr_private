@@ -1,34 +1,42 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-/**
- * Next.js 16 App Router typing expects context.params to be a Promise.
- * This file is a compile safe replacement. Keep or re insert your existing logic
- * inside the handler bodies as needed.
- */
+import {
+  getApiBaseUrl,
+  relayApiResponse,
+  requireAdminOrBypass,
+} from "../../helpers";
+
+export const runtime = "nodejs";
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
   const { id } = await context.params;
+  const guard = requireAdminOrBypass(req);
 
-  // If your previous implementation used:
-  //   export async function PATCH(req, { params }) { ... }
-  // move the logic here and use `id` from above.
+  if ("error" in guard) {
+    return guard.error;
+  }
 
-  // Placeholder response so the route compiles.
-  // Replace with your real behavior.
-  return NextResponse.json(
-    { ok: false, message: "PATCH handler not implemented", id },
-    { status: 501 }
-  );
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) {
+    return NextResponse.json(
+      { error: "API base URL is not configured" },
+      { status: 500 },
+    );
+  }
+
+  const body = await req.json();
+
+  const response = await fetch(`${baseUrl}/admin/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  return relayApiResponse(response);
 }
-
-/**
- * If you also have GET, DELETE, etc in your real file, use this pattern:
- *
- * export async function GET(req: NextRequest, context: RouteContext) {
- *   const { id } = await context.params;
- *   ...
- * }
- */

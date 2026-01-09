@@ -2,6 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import type { CSSProperties } from "react";
 
 import { AuthStatus } from "./components/auth-status";
 import { LastAnalysisCard } from "./components/last-analysis-card";
@@ -30,17 +31,17 @@ export default async function Home() {
     SubscriptionTier.FREE;
   const planLabel = tierLabels[tier];
 
-  const pageShellStyle: React.CSSProperties = ttrLayout.shell;
-  const pageContainerStyle: React.CSSProperties = {
+  const pageShellStyle: CSSProperties = ttrLayout.shell;
+  const pageContainerStyle: CSSProperties = {
     ...ttrLayout.container,
     maxWidth: 1120,
   };
 
-  const headerCardStyle: React.CSSProperties = ttrComponents.headerCard;
+  const headerCardStyle: CSSProperties = ttrComponents.headerCard;
 
-  const basePanelStyle: React.CSSProperties = ttrComponents.basePanel;
+  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
 
-  const topNavPill: React.CSSProperties = {
+  const topNavPill: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -56,7 +57,7 @@ export default async function Home() {
     whiteSpace: "nowrap",
   };
 
-  const topNavPrimary: React.CSSProperties = {
+  const topNavPrimary: CSSProperties = {
     ...topNavPill,
     border: "none",
     background: "linear-gradient(120deg, #fbbf24, #f97316)",
@@ -64,7 +65,10 @@ export default async function Home() {
     boxShadow: "0 15px 25px rgba(249,115,22,0.25)",
   };
 
-  const sectionKicker: React.CSSProperties = ttrTypography.kicker;
+  const showAdminLink =
+    process.env.NODE_ENV !== "production" || process.env.ADMIN_BYPASS === "true";
+
+  const sectionKicker: CSSProperties = ttrTypography.kicker;
 
   return (
     <main style={pageShellStyle}>
@@ -104,6 +108,11 @@ export default async function Home() {
             <Link href="/pricing" style={topNavPill}>
               Plan
             </Link>
+            {showAdminLink ? (
+              <Link href="/admin/users" style={topNavPill}>
+                Admin users
+              </Link>
+            ) : null}
           </div>
           <div
             style={{
