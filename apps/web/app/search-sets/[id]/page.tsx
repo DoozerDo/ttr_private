@@ -34,6 +34,52 @@ const KNOWN_RESULT_KEYS = new Set([
   "dimensionScores",
 ]);
 
+type StoredSearchSetRun = {
+  baselineVersionId: string;
+  runAt: string;
+  results: SearchSetRunResult[];
+};
+
+const SEARCH_SET_RUN_RESULTS_STORAGE_KEY = "target-this-role.search-set-run-results";
+
+function readStoredSearchSetRuns(): Record<string, StoredSearchSetRun> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(SEARCH_SET_RUN_RESULTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, StoredSearchSetRun>;
+  } catch {
+    return {};
+  }
+}
+
+function loadStoredRunResults(searchSetId: string): StoredSearchSetRun | null {
+  const stored = readStoredSearchSetRuns();
+  const entry = stored[searchSetId];
+  if (!entry) return null;
+  if (
+    typeof entry.baselineVersionId !== "string" ||
+    typeof entry.runAt !== "string" ||
+    !Array.isArray(entry.results)
+  ) {
+    return null;
+  }
+  return entry;
+}
+
+function persistStoredRunResults(searchSetId: string, entry: StoredSearchSetRun) {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = readStoredSearchSetRuns();
+    stored[searchSetId] = entry;
+    localStorage.setItem(SEARCH_SET_RUN_RESULTS_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // Swallow storage errors to avoid blocking the UI.
+  }
+}
+
 type BaselineVersionOption = {
   label: string;
   value: string;
@@ -112,6 +158,22 @@ export default function SearchSetRunPage() {
       .finally(() => setBaselinesLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!searchSetId || !searchSet) return;
+
+    const stored = loadStoredRunResults(searchSetId);
+    if (
+      !stored ||
+      stored.baselineVersionId !== searchSet.lastRunBaselineVersionId ||
+      stored.runAt !== searchSet.lastRunAt
+    ) {
+      return;
+    }
+
+    setRunResults(stored.results);
+    setRunExecuted(true);
+  }, [searchSetId, searchSet]);
+
   const baselineOptions = useMemo<BaselineVersionOption[]>(() => {
     return baselines.flatMap((baseline) =>
       (baseline.versions ?? []).map((version) => ({
@@ -176,17 +238,23 @@ export default function SearchSetRunPage() {
     try {
       const results = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
       const normalizedResults = Array.isArray(results) ? results : [];
+      const runTimestamp = new Date().toISOString();
       setRunResults(normalizedResults);
       setRunExecuted(true);
       const count = normalizedResults.length;
       setRunMessage(
         count ? `Run complete — Found ${count} matching roles.` : "Run complete — No matches found.",
       );
+      persistStoredRunResults(searchSetId, {
+        baselineVersionId,
+        runAt: runTimestamp,
+        results: normalizedResults,
+      });
       setSearchSet((prev) =>
         prev
           ? {
               ...prev,
-              lastRunAt: new Date().toISOString(),
+              lastRunAt: runTimestamp,
               lastRunBaselineVersionId: baselineVersionId,
               lastRunResultCount: count,
             }

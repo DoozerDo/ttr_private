@@ -9,6 +9,7 @@ import { PageShell } from '@/components/PageShell';
 import { TextInput } from '@/components/TextInput';
 import { TierGateNotice } from '@/components/TierGateNotice';
 import { parseTierGateError, type TierGateError } from '@/lib/tiers';
+import type { SearchSetDto } from '@/lib/searchSetsClient';
 
 type SearchSetPayload = {
   sourceUrl: string;
@@ -17,6 +18,38 @@ type SearchSetPayload = {
   workMode?: string;
   parseWarning?: string;
 };
+
+const SENIORITY_LABELS: Record<string, string> = {
+  ENTRY: 'Entry',
+  MID: 'Mid',
+  SENIOR: 'Senior',
+  LEAD: 'Lead',
+  EXECUTIVE: 'Executive',
+  ANY: 'Any',
+};
+
+function formatSeniorityLabel(value: string): string {
+  if (!value) return '';
+  const normalized = value.toUpperCase();
+  return SENIORITY_LABELS[normalized] ?? value;
+}
+
+function splitTitlePatterns(patterns?: string[]) {
+  const normalized = (patterns ?? [])
+    .map((pattern) => pattern?.trim() ?? '')
+    .filter(Boolean);
+
+  const exclusions = normalized
+    .filter((entry) => entry.startsWith('-') || entry.startsWith('!'))
+    .map((entry) => entry.slice(1).trim())
+    .filter(Boolean);
+
+  const keywords = normalized.filter(
+    (entry) => !entry.startsWith('-') && !entry.startsWith('!'),
+  );
+
+  return { keywords, exclusions };
+}
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '');
@@ -45,7 +78,7 @@ function tryParseJson(value: string): unknown | undefined {
   }
 }
 
-async function createSearchSet(payload: SearchSetPayload): Promise<{ id: string }> {
+async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto> {
   const envBase =
     (process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined) ??
     (process.env.API_BASE_URL as string | undefined);
@@ -80,7 +113,7 @@ async function createSearchSet(payload: SearchSetPayload): Promise<{ id: string 
     throw new Error('Unexpected response from createSearchSet.');
   }
 
-  return { id: (data as any).id };
+  return data as SearchSetDto;
 }
 
 export default function SearchSetsPage() {
@@ -91,6 +124,7 @@ export default function SearchSetsPage() {
   const [seniority, setSeniority] = useState<string>('');
   const [workMode, setWorkMode] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
+  const [pendingSearchSet, setPendingSearchSet] = useState<SearchSetDto | null>(null);
   const [error, setError] = useState<string | undefined>();
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
 
@@ -103,6 +137,28 @@ export default function SearchSetsPage() {
       .filter(Boolean);
   }, [titlePatternsInput]);
 
+  const summaryData = useMemo(() => {
+    if (!pendingSearchSet) return null;
+
+    const { keywords, exclusions } = splitTitlePatterns(pendingSearchSet.titlePatterns);
+    const seniorityValues = (pendingSearchSet.seniority ?? [])
+      .map(formatSeniorityLabel)
+      .filter(Boolean);
+    const seniorityOrRole =
+      seniorityValues.length > 0
+        ? { label: 'Seniority', value: seniorityValues.join(', ') }
+        : keywords.length
+          ? { label: 'Role hints', value: keywords.join(', ') }
+          : null;
+
+    return {
+      keywords,
+      exclusions,
+      location: pendingSearchSet.location,
+      seniorityOrRole,
+    };
+  }, [pendingSearchSet]);
+
   const onSubmit = useCallback(async () => {
     setError(undefined);
     setTierGateError(null);
@@ -112,6 +168,7 @@ export default function SearchSetsPage() {
       return;
     }
 
+    setPendingSearchSet(null);
     setSubmitting(true);
     try {
       const payload: SearchSetPayload = {
@@ -124,7 +181,7 @@ export default function SearchSetsPage() {
       };
 
       const result = await createSearchSet(payload);
-      router.push(`/search-sets/${result.id}`);
+      setPendingSearchSet(result);
     } catch (e) {
       const tierGate = (e as any).tierGate as TierGateError | undefined;
       if (tierGate) {
@@ -137,6 +194,13 @@ export default function SearchSetsPage() {
     }
   }, [parsed.url, parsed.warning, titlePatterns, seniority, workMode, router]);
 
+  const handleContinue = useCallback(() => {
+    if (!pendingSearchSet) return;
+    const { id } = pendingSearchSet;
+    setPendingSearchSet(null);
+    router.push(`/search-sets/${id}`);
+  }, [pendingSearchSet, router]);
+
   return (
     <PageShell>
       <div className="space-y-6 py-6">
@@ -148,6 +212,59 @@ export default function SearchSetsPage() {
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
         {error ? <Alert intent="error" title="Unable to create search set">{error}</Alert> : null}
 
+        {summaryData ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                Parsed filters
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Review before results</h2>
+            </div>
+
+            <div className="space-y-3 text-sm text-slate-200">
+              <div className="flex flex-wrap gap-3">
+                <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Keywords
+                </span>
+                <span className="text-slate-100">
+                  {summaryData.keywords.length ? summaryData.keywords.join(', ') : 'None recorded'}
+                </span>
+              </div>
+
+              {summaryData.location ? (
+                <div className="flex flex-wrap gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Location
+                  </span>
+                  <span className="text-slate-100">{summaryData.location}</span>
+                </div>
+              ) : null}
+
+              {summaryData.seniorityOrRole ? (
+                <div className="flex flex-wrap gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    {summaryData.seniorityOrRole.label}
+                  </span>
+                  <span className="text-slate-100">{summaryData.seniorityOrRole.value}</span>
+                </div>
+              ) : null}
+
+              {summaryData.exclusions.length ? (
+                <div className="flex flex-wrap gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Inferred exclusions
+                  </span>
+                  <span className="text-slate-100">{summaryData.exclusions.join(', ')}</span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end">
+              <FormButton onClick={handleContinue}>Continue to results</FormButton>
+            </div>
+          </section>
+        ) : null}
+
         <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
           <div className="space-y-4">
             <div className="space-y-1">
@@ -156,7 +273,10 @@ export default function SearchSetsPage() {
                 type="url"
                 placeholder="https://..."
                 value={sourceUrl}
-                onChange={(event) => setSourceUrl(event.target.value)}
+                onChange={(event) => {
+                  setPendingSearchSet(null);
+                  setSourceUrl(event.target.value);
+                }}
               />
               {parsed.warning ? (
                 <Alert intent="warning">{parsed.warning}</Alert>
@@ -168,7 +288,10 @@ export default function SearchSetsPage() {
               <TextInput
                 placeholder="Director Support, Support Operations..."
                 value={titlePatternsInput}
-                onChange={(event) => setTitlePatternsInput(event.target.value)}
+                onChange={(event) => {
+                  setPendingSearchSet(null);
+                  setTitlePatternsInput(event.target.value);
+                }}
               />
               <p className="text-[11px] text-slate-400">Comma separated.</p>
             </div>
@@ -177,7 +300,10 @@ export default function SearchSetsPage() {
               <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Seniority</label>
               <select
                 value={seniority}
-                onChange={(event) => setSeniority(event.target.value)}
+                onChange={(event) => {
+                  setPendingSearchSet(null);
+                  setSeniority(event.target.value);
+                }}
                 className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
               >
                 <option value="">Select seniority</option>
@@ -195,7 +321,10 @@ export default function SearchSetsPage() {
               <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Work mode</label>
               <select
                 value={workMode}
-                onChange={(event) => setWorkMode(event.target.value)}
+                onChange={(event) => {
+                  setPendingSearchSet(null);
+                  setWorkMode(event.target.value);
+                }}
                 className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
               >
                 <option value="">Select work mode</option>
