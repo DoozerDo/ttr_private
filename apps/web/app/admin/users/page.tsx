@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { apiFetchJson } from "@/lib/api";
+import { ApiResponseError, apiFetchJson } from "../../lib/api";
 import { Alert } from "@/components/Alert";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -48,6 +48,16 @@ function accountTypeLabel(value: AccountType): string {
   return value === "paid" ? "Paid" : "Free";
 }
 
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiResponseError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -66,7 +76,7 @@ export default function AdminUsersPage() {
       setUsers(data);
       setDrafts(Object.fromEntries(data.map((user) => [user.id, user.accountType])));
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "Failed to load users");
+      setError(resolveErrorMessage(fetchError, "Failed to load users"));
     } finally {
       setLoading(false);
     }
@@ -86,17 +96,40 @@ export default function AdminUsersPage() {
     setError("");
     setNotice("");
 
+    // Optional improvement: optimistic UI update
+    setUsers((prev) =>
+      prev.map((user) => (user.id === userId ? { ...user, accountType: next } : user)),
+    );
+
     try {
-      const updatedUser = await apiFetchJson<AdminUserRow>(`/api/admin/users/${userId}`, {
+      // Some backends return a partial user; merge instead of replace.
+      const updated = await apiFetchJson<Partial<AdminUserRow>>(`/api/admin/users/${userId}`, {
         method: "PATCH",
         body: JSON.stringify({ accountType: next }),
       });
 
-      setUsers((prev) => prev.map((user) => (user.id === userId ? updatedUser : user)));
-      setDrafts((prev) => ({ ...prev, [userId]: updatedUser.accountType }));
-      setNotice(`${email} is now ${accountTypeLabel(updatedUser.accountType)}.`);
+      setUsers((prev) =>
+        prev.map((user) =>
+          user.id === userId
+            ? {
+                ...user,
+                ...updated,
+                accountType: (updated.accountType ?? next) as AccountType,
+              }
+            : user,
+        ),
+      );
+
+      setDrafts((prev) => ({
+        ...prev,
+        [userId]: (updated.accountType ?? next) as AccountType,
+      }));
+
+      setNotice(`${email} is now ${accountTypeLabel((updated.accountType ?? next) as AccountType)}.`);
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Failed to update account type");
+      // Revert to server state by reloading if update failed.
+      setError(resolveErrorMessage(updateError, "Failed to update account type"));
+      void loadUsers();
     } finally {
       setUpdatingId(null);
       setConfirmState(null);
@@ -121,7 +154,10 @@ export default function AdminUsersPage() {
     setDrafts((prev) => ({ ...prev, [userId]: value }));
   }
 
-  const navItems = [{ label: "Users", href: "/admin/users", active: true, description: "Account types" }];
+  const navItems = useMemo(
+    () => [{ label: "Users", href: "/admin/users", active: true, description: "Account types" }],
+    [],
+  );
 
   return (
     <PageShell className="space-y-6" navItems={navItems}>
@@ -225,9 +261,9 @@ export default function AdminUsersPage() {
         title="Confirm tier change"
         description={
           confirmState
-            ? `Change ${confirmState.email} from ${accountTypeLabel(
-                confirmState.current,
-              )} to ${accountTypeLabel(confirmState.next)}?`
+            ? `Change ${confirmState.email} from ${accountTypeLabel(confirmState.current)} to ${accountTypeLabel(
+                confirmState.next,
+              )}?`
             : undefined
         }
         onConfirm={() => void applyChange()}
@@ -239,3 +275,4 @@ export default function AdminUsersPage() {
     </PageShell>
   );
 }
+

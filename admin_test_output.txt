@@ -1,0 +1,50 @@
+﻿=== health ===
+
+=== admin users verbose ===
+curl.exe : * Host localhost:3001 was resolved.
+At line:1 char:1
++ curl.exe -v -H "x-dev-user-id: 7d2ae897-53ba-4973-98ef-97bbf2a3135f"  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (* Host localhost:3001 was resolved.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:3001...
+* Established connection to localhost (::1 port 3001) from ::1 port 62109 
+* using HTTP/1.x
+> GET /admin/users HTTP/1.1
+
+> Host: localhost:3001
+
+> User-Agent: curl/8.16.0
+
+> Accept: */*
+
+> x-dev-user-id: 7d2ae897-53ba-4973-98ef-97bbf2a3135f
+
+> 
+
+* Request completely sent off
+* Empty reply from server
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+* shutting down connection #0
+curl: (52) Empty reply from server
+
+=== api logs tail 200 ===
+
+added 786 packages, and audited 787 packages in 21s
+
+155 packages are looking for funding
+  run `npm fund` for details
+
+2 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.

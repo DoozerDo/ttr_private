@@ -25,11 +25,6 @@ services:
     environment:
       NODE_ENV: development
       TYPEORM_SYNCHRONIZE: "true"
-
-    # DEV-ONLY service:
-    # - mounts local source for live reload
-    # - installs node_modules for Linux on container startup
-    # Do NOT copy this pattern to production.
     command: sh -c "npm ci && npm run start:dev"
     volumes:
       - ../../apps/api:/usr/src/app

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { test, vi } from "vitest";
 
 import AnalyzePage from "@/app/analyze/page";
+import AdminUsersPage from "@/app/admin/users/page";
 import BaselineDetailPage from "@/app/baseline/[id]/page";
 import { BaselineDashboard } from "@/app/baseline/baseline-dashboard";
 import CoverLettersPage from "@/app/cover-letters/page";
@@ -17,6 +18,7 @@ function createJsonResponse(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers({ "content-type": "application/json" }),
     json: () => Promise.resolve(body),
     text: () =>
       Promise.resolve(
@@ -238,6 +240,60 @@ test("cover letters shows history failures instead of blank panels", async () =>
 
   const historyAlerts = await screen.findAllByText("History failure");
   expect(historyAlerts.length).toBeGreaterThan(0);
+});
+
+test("admin users page renders", async () => {
+  const users = [
+    {
+      id: "user-1",
+      email: "user@example.com",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      accountType: "free",
+    },
+  ];
+
+  const fetchMock = vi.fn((input: RequestInfo) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/admin/users")) {
+      return Promise.resolve(createJsonResponse(users));
+    }
+    return Promise.resolve(createJsonResponse([]));
+  });
+
+  globalThis.fetch = fetchMock as typeof globalThis.fetch;
+  render(<AdminUsersPage />);
+
+  await screen.findByRole("heading", { name: /Admin users/i });
+  await screen.findByText("user@example.com");
+});
+
+test("tier change confirmation appears", async () => {
+  const users = [
+    {
+      id: "user-1",
+      email: "user@example.com",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      accountType: "free",
+    },
+  ];
+
+  const fetchMock = vi.fn((input: RequestInfo) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/admin/users")) {
+      return Promise.resolve(createJsonResponse(users));
+    }
+    return Promise.resolve(createJsonResponse([]));
+  });
+
+  globalThis.fetch = fetchMock as typeof globalThis.fetch;
+  render(<AdminUsersPage />);
+
+  const accountTypeSelect = await screen.findByDisplayValue("Free");
+  fireEvent.change(accountTypeSelect, { target: { value: "paid" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+  await screen.findByRole("dialog");
+  await screen.findByText("Change user@example.com from Free to Paid?");
 });
 
 test("interview toolkit resources route renders seeded content", async () => {

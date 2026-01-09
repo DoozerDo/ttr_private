@@ -1,66 +1,84 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { AdminUser } from './admin-user.entity';
-import { AccountType } from '../users/account-type.enum';
 import { User } from '../users/user.entity';
-
-export type AdminUserSummary = {
-  id: string;
-  email: string;
-  createdAt: Date;
-  accountType: AccountType;
-};
+import { AccountType } from '../users/account-type.enum';
 
 @Injectable()
 export class AdminUsersService {
+  private readonly logger = new Logger(AdminUsersService.name);
+
   constructor(
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
     @InjectRepository(AdminUser)
-    private readonly adminUsersRepository: Repository<AdminUser>,
+    private readonly adminRepo: Repository<AdminUser>,
+
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
   ) {}
 
-  async listUsers(): Promise<AdminUserSummary[]> {
-    return this.usersRepository.find({
-      select: ['id', 'email', 'createdAt', 'accountType'],
-      order: { createdAt: 'DESC' },
-    });
+  /**
+   * Used by AdminBypassGuard
+   */
+  async isAdmin(userId: string): Promise<boolean> {
+    try {
+      const count = await this.adminRepo.count({
+        where: { userId },
+      });
+      return count > 0;
+    } catch (err) {
+      this.logger.warn(
+        `isAdmin failed for userId=${userId}. Defaulting to false.`,
+      );
+      return false;
+    }
   }
 
+  /**
+   * GET /admin/users
+   */
+  async listUsers() {
+    try {
+      return await this.userRepo.find({
+        select: [
+          'id',
+          'email',
+          'accountType',
+          'createdAt',
+          'updatedAt',
+        ],
+        order: {
+          createdAt: 'DESC',
+        },
+      });
+    } catch (err) {
+      this.logger.error('listUsers failed', err as any);
+      throw err;
+    }
+  }
+
+  /**
+   * PATCH /admin/users/:id
+   */
   async updateUserAccountType(
     userId: string,
     accountType: AccountType,
-  ): Promise<AdminUserSummary> {
-    const user = await this.usersRepository.findOne({
+  ) {
+    const user = await this.userRepo.findOne({
       where: { id: userId },
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new Error(`User not found: ${userId}`);
     }
 
     user.accountType = accountType;
-    const updated = await this.usersRepository.save(user);
+    await this.userRepo.save(user);
 
     return {
-      id: updated.id,
-      email: updated.email,
-      createdAt: updated.createdAt,
-      accountType: updated.accountType,
+      id: user.id,
+      accountType: user.accountType,
     };
-  }
-
-  async isAdmin(userId: string): Promise<boolean> {
-    if (!userId) {
-      return false;
-    }
-
-    const count = await this.adminUsersRepository.count({
-      where: { userId },
-    });
-
-    return count > 0;
   }
 }
