@@ -1,11 +1,10 @@
-"use client";
+ "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
-import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
@@ -16,6 +15,7 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import type { FollowUpPayload, StudyPacket } from "../../lib/interviewToolkit";
+import { getInterviewResourcesForJob } from "@/lib/interviewToolkit/resources";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 interface JobDto {
@@ -69,6 +69,7 @@ export default function InterviewToolkitPage() {
   const [copyError, setCopyError] = useState<string | null>(null);
 
   const [storyRefreshKey, setStoryRefreshKey] = useState(0);
+  const resources = useMemo(() => getInterviewResourcesForJob(selectedJobId || undefined), [selectedJobId]);
 
   useEffect(() => {
     const loadJobs = async () => {
@@ -475,20 +476,17 @@ export default function InterviewToolkitPage() {
             </p>
             <h2 className="text-lg font-semibold text-slate-100">Resources</h2>
           </div>
-          <EmptyState
-            title="No resources available yet"
-            body={
-              <>
-                <p>We haven't collected any resources for this job yet.</p>
-                <p>Check back once your team adds curated links, readings, or templates.</p>
-              </>
-            }
-            cta={
-              <Link href="/interview-toolkit/resources" className="text-sky-300 underline">
-                Add resources later
-              </Link>
-            }
-          />
+          <p className="text-sm text-slate-300">
+            Curated articles, videos, and tools that reinforce your prep for the selected opportunity.
+          </p>
+          <ResourcesList resources={resources} />
+          <div className="text-xs text-slate-400">
+            Need additional references?{" "}
+            <Link href="/interview-toolkit/resources" className="text-sky-300 underline">
+              Add resources later
+            </Link>
+            .
+          </div>
         </section>
 
         <div className="text-xs text-slate-400">
