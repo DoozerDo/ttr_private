@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { AccountType } from './account-type.enum';
 
 export type CalibrationWeights = {
   dimensionA: number;
@@ -49,6 +50,13 @@ export class User {
     default: SubscriptionTier.FREE,
   })
   subscriptionTier!: SubscriptionTier;
+
+  @Column({
+    type: 'enum',
+    enum: AccountType,
+    default: AccountType.FREE,
+  })
+  accountType!: AccountType;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

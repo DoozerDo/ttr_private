@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { User } from './user.entity';
+import { AccountType } from './account-type.enum';
 
 @Injectable()
 export class UsersService {
@@ -20,6 +21,7 @@ export class UsersService {
       calibrationWeights: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
     });
     return this.usersRepository.save(user);
   }

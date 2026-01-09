@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AdminUsersModule } from './admin-users/admin-users.module';
 import { AuthModule } from './auth/auth.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { ApplicationsModule } from './applications/applications.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
         autoLoadEntities: true,
       }),
     }),
+    AdminUsersModule,
     UsersModule,
     AuthModule,
     AnalysisModule,
