@@ -2,6 +2,9 @@ import Link from "next/link";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
+import { Alert } from "@/components/Alert";
+import { EmptyState } from "@/components/EmptyState";
+import { RetryButton } from "@/components/RetryButton";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 import {
@@ -36,7 +39,13 @@ async function buildInternalFetchOptions(): Promise<RequestInit> {
   };
 }
 
-async function fetchBaseline(id: string): Promise<BaselineDto | null> {
+type BaselineFetchResult = {
+  baseline: BaselineDto | null;
+  error: string | null;
+  notFound: boolean;
+};
+
+async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
   try {
     const response = await fetch(
       await buildInternalApiUrl(`/api/baselines/${id}`),
@@ -47,14 +56,23 @@ async function fetchBaseline(id: string): Promise<BaselineDto | null> {
       redirect("/auth/login");
     }
 
-    if (!response.ok) {
-      return null;
+    if (response.status === 404) {
+      return { baseline: null, error: null, notFound: true };
     }
 
-    return (await response.json()) as BaselineDto;
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      const message = errorText || "Unable to load baseline.";
+      return { baseline: null, error: message, notFound: false };
+    }
+
+    const data = (await response.json()) as BaselineDto;
+    return { baseline: data, error: null, notFound: false };
   } catch (error) {
     console.error("Failed to fetch baseline", error);
-    return null;
+    const message =
+      error instanceof Error ? error.message : "Unable to load baseline.";
+    return { baseline: null, error: message, notFound: false };
   }
 }
 
@@ -167,24 +185,27 @@ export default async function BaselineDetailPage({
     notFound();
   }
 
-  const baseline = await fetchBaseline(resolvedParams.id);
-  const versions = await fetchBaselineVersions(resolvedParams.id);
+  const baselineResult = await fetchBaseline(resolvedParams.id);
 
-  if (!baseline) {
+  if (baselineResult.notFound) {
     notFound();
   }
+
+  const baseline = baselineResult.baseline;
+  const baselineFetchError = baselineResult.error;
+  const versions = baseline ? await fetchBaselineVersions(resolvedParams.id) : null;
 
   const sortedVersions =
     versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
   const latestVersionId = sortedVersions[0]?.id ?? "";
 
-  const groupedSections = organizeSections(baseline.sections ?? []);
-  const hasRenderableSections = Object.values(groupedSections).some(
-    (sections) => sections.length > 0,
-  );
+  const groupedSections = baseline ? organizeSections(baseline.sections ?? []) : {};
+  const hasRenderableSections = baseline
+    ? Object.values(groupedSections).some((sections) => sections.length > 0)
+    : false;
 
   const fallbackContent =
-    !hasRenderableSections && baseline.sections?.[0]?.content
+    baseline && !hasRenderableSections && baseline.sections?.[0]?.content
       ? baseline.sections[0].content
       : null;
 
@@ -197,11 +218,13 @@ export default async function BaselineDetailPage({
               Baseline details
             </p>
             <h1 className="text-3xl font-bold text-gray-900">
-              {baseline.originalFilename}
+              {baseline?.originalFilename ?? "Baseline details"}
             </h1>
-            <p className="text-sm text-gray-700">
-              Uploaded {formatDateTime(baseline.createdAt)}
-            </p>
+            {baseline ? (
+              <p className="text-sm text-gray-700">
+                Uploaded {formatDateTime(baseline.createdAt)}
+              </p>
+            ) : null}
           </div>
           <Link
             href="/baseline"
@@ -211,53 +234,79 @@ export default async function BaselineDetailPage({
           </Link>
         </div>
 
-        <BaselinePolicyEditor
-          baselineId={baseline.id}
-          versions={sortedVersions}
-          initialVersionId={latestVersionId}
-        />
+        {baselineFetchError ? (
+          <div className="space-y-3">
+            <Alert intent="error" title="Unable to load baseline">
+              <p>{baselineFetchError}</p>
+              <p className="text-xs text-gray-600">
+                Check your connection or try again, then reload this page.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-2">
+                <RetryButton label="Retry baseline" />
+              </div>
+            </Alert>
+          </div>
+        ) : null}
 
-        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
-          {sortedVersions && sortedVersions.length > 0 ? (
-            <ul className="space-y-2">
-              {sortedVersions.map((version) => (
-                <li
-                  key={version.id}
-                  className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
-                >
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <span className="font-semibold">Version {version.versionNumber}</span>
-                    <span className="text-xs text-gray-600">
-                      {formatDateTime(version.createdAt)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-700">Version hash: {version.fileHash}</div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-gray-700">No version history available.</p>
-          )}
-        </section>
+        {baseline ? (
+          <>
+            <BaselinePolicyEditor
+              baselineId={baseline.id}
+              versions={sortedVersions}
+              initialVersionId={latestVersionId}
+            />
 
-        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
-          {!hasRenderableSections && !fallbackContent ? (
-            <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
-          ) : (
-            <div className="space-y-6">
-              {hasRenderableSections && renderContentSections(groupedSections)}
-              {!hasRenderableSections && fallbackContent ? (
-                <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
-                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
-                    {fallbackContent}
-                  </pre>
-                </article>
-              ) : null}
-            </div>
-          )}
-        </section>
+            <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-semibold text-gray-900">Version history</h2>
+              {sortedVersions && sortedVersions.length > 0 ? (
+                <ul className="space-y-2">
+                  {sortedVersions.map((version) => (
+                    <li
+                      key={version.id}
+                      className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
+                    >
+                      <div className="flex flex-wrap justify-between gap-2">
+                        <span className="font-semibold">Version {version.versionNumber}</span>
+                        <span className="text-xs text-gray-600">
+                          {formatDateTime(version.createdAt)}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-700">Version hash: {version.fileHash}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-700">No version history available.</p>
+              )}
+            </section>
+
+            <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-semibold text-gray-900">Parsed sections</h2>
+              {!hasRenderableSections && !fallbackContent ? (
+                <p className="text-sm text-gray-700">No sections parsed for this baseline yet.</p>
+              ) : (
+                <div className="space-y-6">
+                  {hasRenderableSections && renderContentSections(groupedSections)}
+                  {!hasRenderableSections && fallbackContent ? (
+                    <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
+                      <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
+                        {fallbackContent}
+                      </pre>
+                    </article>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          </>
+        ) : (
+          <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <EmptyState
+              title="Baseline unavailable"
+              body="We couldn't load this baseline. Retry or return to the baseline library."
+              cta={<RetryButton label="Retry baseline" />}
+            />
+          </section>
+        )}
       </div>
     </main>
   );

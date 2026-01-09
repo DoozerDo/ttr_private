@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { afterEach, vi } from "vitest";
 
 import "@testing-library/jest-dom";
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 // Keep a stable URLSearchParams-like shape.
 // The key fix is: `get` must accept an optional key so it matches both:
@@ -17,6 +18,9 @@ const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
 
 const mockRouterPush = vi.fn();
 const mockPathname = vi.fn(() => "/");
+export const mockUseParams = vi.fn(() => ({}));
+export const mockNotFound = vi.fn();
+export const mockRedirect = vi.fn();
 
 const matchMediaMock = (_query: string): MediaQueryList =>
   ({
@@ -38,6 +42,22 @@ if (typeof globalThis !== "undefined" && !globalThis.matchMedia) {
   (globalThis as typeof window).matchMedia = matchMediaMock;
 }
 
+const mockHeaderGet = vi.fn((_name: string) => null);
+const mockHeaders = { get: mockHeaderGet };
+const mockCookieStore = {
+  get: (name: string) => {
+    if (name === AUTH_COOKIE_NAME) {
+      return { value: "test-token" };
+    }
+    return undefined;
+  },
+};
+
+vi.mock("next/headers", () => ({
+  headers: () => Promise.resolve(mockHeaders),
+  cookies: () => Promise.resolve(mockCookieStore),
+}));
+
 vi.mock("next/link", () => ({
   __esModule: true,
   default: ({ children, ...rest }: { children?: ReactNode }) => (
@@ -51,6 +71,9 @@ vi.mock("next/navigation", () => ({
   }),
   useSearchParams: () => mockSearchParams(),
   usePathname: () => mockPathname(),
+  useParams: () => mockUseParams(),
+  notFound: mockNotFound,
+  redirect: mockRedirect,
 }));
 
 function createResponse(
@@ -129,4 +152,11 @@ afterEach(() => {
   mockPathname.mockReturnValue("/");
   resetSearchParams();
   setDefaultFetch();
+  mockUseParams.mockReturnValue({});
+  mockUseParams.mockClear();
+  mockNotFound.mockClear();
+  mockRedirect.mockClear();
+  if (typeof localStorage !== "undefined") {
+    localStorage.clear();
+  }
 });

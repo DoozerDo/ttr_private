@@ -2,14 +2,16 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { test, vi } from "vitest";
 
 import AnalyzePage from "@/app/analyze/page";
+import BaselineDetailPage from "@/app/baseline/[id]/page";
+import { BaselineDashboard } from "@/app/baseline/baseline-dashboard";
 import CoverLettersPage from "@/app/cover-letters/page";
+import FitReviewClient from "@/app/fit-review/FitReviewClient";
 import InterviewToolkitPage from "@/app/interview-toolkit/page";
 import InterviewToolkitResourcesPage from "@/app/interview-toolkit/resources/page";
 import JobIngestionPage from "@/app/jobs/new/page";
-import { BaselineDashboard } from "@/app/baseline/baseline-dashboard";
-import FitReviewClient from "@/app/fit-review/FitReviewClient";
+import SearchSetRunPage from "@/app/search-sets/[id]/page";
 import SearchSetsPage from "@/app/search-sets/page";
-import { overrideSearchParams } from "../setup";
+import { mockNotFound, mockUseParams, overrideSearchParams } from "../setup";
 
 function createJsonResponse(body: unknown, status = 200) {
   return {
@@ -22,6 +24,8 @@ function createJsonResponse(body: unknown, status = 200) {
       ),
   };
 }
+
+const SEARCH_SET_RUN_RESULTS_STORAGE_KEY = "target-this-role.search-set-run-results";
 
 test("job ingestion surfaces job list failures instead of blank panels", async () => {
   const fetchMock = vi.fn((input: RequestInfo) => {
@@ -94,6 +98,118 @@ test("search sets surfaces request failures", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Create Search Set" }));
 
   await screen.findByText("Search set service down");
+});
+
+test("search set run page rehydrates stored results", async () => {
+  mockUseParams.mockReturnValue({ id: "search-set-1" });
+
+  const storedRunAt = "2026-01-01T00:00:00.000Z";
+  const storedEntry = {
+    baselineVersionId: "baseline-version-1",
+    runAt: storedRunAt,
+    results: [
+      {
+        jobId: "job-001",
+        title: "Product Manager",
+        company: "TargetThisRole",
+        applyUrl: "https://jobs.example.com/1",
+        sourceUrl: "https://jobs.example.com/1",
+        fitScore: 97.4,
+        verdict: "Strong fit",
+      },
+    ],
+  };
+
+  localStorage.setItem(
+    SEARCH_SET_RUN_RESULTS_STORAGE_KEY,
+    JSON.stringify({ "search-set-1": storedEntry }),
+  );
+
+  const fetchMock = vi.fn((input: RequestInfo) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+
+    if (url.includes("/api/search-sets/") && !url.includes("/run")) {
+      return Promise.resolve(
+        createJsonResponse({
+          id: "search-set-1",
+          titlePatterns: [],
+          seniority: [],
+          industry: [],
+          workMode: [],
+          location: "Remote",
+          sourceUrl: "https://jobs.example.com",
+          parseWarning: null,
+          urlBacked: true,
+          isActive: true,
+          createdAt: storedRunAt,
+          updatedAt: storedRunAt,
+          lastRunAt: storedRunAt,
+          lastRunBaselineVersionId: storedEntry.baselineVersionId,
+          lastRunResultCount: storedEntry.results.length,
+        }),
+      );
+    }
+
+    if (url.includes("/api/baselines")) {
+      return Promise.resolve(
+        createJsonResponse([
+          {
+            id: "baseline-1",
+            userId: "user-1",
+            version: 1,
+            originalFilename: "baseline.pdf",
+            mimeType: "application/pdf",
+            storagePath: "/baselines/baseline-1.pdf",
+            hash: null,
+            createdAt: storedRunAt,
+            updatedAt: storedRunAt,
+            sections: [],
+            versions: [
+              {
+                id: storedEntry.baselineVersionId,
+                baselineId: "baseline-1",
+                versionNumber: 1,
+                fileHash: "abcdef",
+                storagePath: "/baselines/baseline-1/v1",
+                createdAt: storedRunAt,
+              },
+            ],
+          },
+        ]),
+      );
+    }
+
+    return Promise.resolve(createJsonResponse([]));
+  });
+
+  globalThis.fetch = fetchMock as typeof globalThis.fetch;
+  render(<SearchSetRunPage />);
+
+  await screen.findByText("Product Manager");
+});
+
+test("baseline detail surfaces backend fetch errors instead of silent 404", async () => {
+  const fetchMock = vi.fn((input: RequestInfo) => {
+    const url = typeof input === "string" ? input : input?.url ?? "";
+    if (url.includes("/api/baselines/error-baseline")) {
+      return Promise.resolve({
+        ok: false,
+        status: 502,
+        json: () => Promise.resolve(null),
+        text: () => Promise.resolve("Baseline service failure"),
+      });
+    }
+    return Promise.resolve(createJsonResponse([]));
+  });
+
+  globalThis.fetch = fetchMock as typeof globalThis.fetch;
+  const element = await BaselineDetailPage({
+    params: Promise.resolve({ id: "error-baseline" }),
+  });
+  render(element);
+
+  await screen.findByText("Baseline service failure");
+  expect(mockNotFound).not.toHaveBeenCalled();
 });
 
 test("baseline dashboard surfaces the initial fetch error", () => {
