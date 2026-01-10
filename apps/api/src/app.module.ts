@@ -12,6 +12,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
 import { CoverLettersModule } from './cover-letters/cover-letters.module';
+import { RealityCheckModule } from './reality-check/reality-check.module';
 import { ResumeModule } from './resume/resume.module';
 import { SearchSetsModule } from './search-sets/search-sets.module';
 import { StarStoriesModule } from './star-stories/star-stories.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     AnalysisModule,
+    RealityCheckModule,
     ApplicationsModule,
     BaselineModule,
     ComplianceModule,
