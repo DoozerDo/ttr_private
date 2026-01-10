@@ -22,16 +22,19 @@ import {
 } from '../compliance/compliance.types';
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
-import { Job } from '../jobs/job.entity';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
-import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
+import { FitAssessment, FitAssessmentVerdict, FitDimensionScores } from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
 import {
   DimensionWeightOverrides,
   FitScoringService,
+  KeyTermStats,
 } from './fit-scoring.service';
+
+import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -58,9 +61,13 @@ type FitScoreJobInput = {
   };
 };
 
+export type DebugSource = 'header' | 'query' | 'body' | 'none';
+
 export type FitScoreRequest = {
   job?: FitScoreJobInput;
   baseline_version_id?: string;
+  debug?: boolean;
+  debugSource?: DebugSource;
   selected_block_ids?: string[];
 };
 
@@ -89,6 +96,52 @@ type FitScoreResponse = {
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
   summary?: string;
+  debug?: FitScoreDebugPayload;
+};
+
+type FitScoreDebugPayload = {
+  request: {
+    debugEnabled: boolean;
+    debugSource: DebugSource;
+    baselineVersionId: string | null;
+    jobId: string | null;
+  };
+  baseline: {
+    baselineId: string;
+    baselineVersionId: string;
+    baselineVersionNumber: number | null;
+    baselineContentHash: string | null;
+    baselineExtractedTextChars: number;
+    baselineExtractedTextWords: number;
+    baselineSectionsCharCounts: Array<{
+      type: string | null;
+      charCount: number;
+    }>;
+  };
+  job: {
+    jobId: string | null;
+    jobSource: 'url' | 'paste' | 'unknown';
+    rawTextChars: number;
+    rawTextWords: number;
+    normalizedTextChars: number;
+    normalizedTextWords: number;
+    chosenTextSourceForScoring: 'normalized' | 'raw' | 'unknown';
+    chosenTextChars: number;
+    chosenTextWords: number;
+    chosenTextHash: string;
+  };
+  scoring: {
+    overallScoreBeforeAnyCapsOrGates: number;
+    overallScoreAfterCapsOrGates: number;
+    dimensionScores: FitDimensionScores;
+    verdict: FitAssessmentVerdict;
+    weights?: Record<keyof FitDimensionScores, number>;
+    normalizedWeightTotal?: number;
+    gatesApplied?: string[];
+    penaltiesApplied?: string[];
+    keyTerms?: KeyTermStats;
+    summaryBasis: string;
+  };
 };
 
 @Injectable()
@@ -443,11 +496,22 @@ export class AnalysisService {
           content: section.content,
         })) ?? [];
 
+    const baselineTextForDebug = includedSections.map((section) => section.content).join('\n');
+    const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
+    const baselineExtractedTextWords = countWords(baselineTextForDebug);
+    const baselineSectionsCharCounts = includedSections.map((section) => ({
+      type: section.type ?? null,
+      charCount: getCharCount(section.content ?? ''),
+    }));
+    const baselineContentHash =
+      baselineVersion.hash ?? baseline.hash ?? sha256(baselineTextForDebug);
+
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
 
     const jobInput = payload.job ?? {};
     const jobId = jobInput.id?.trim();
+    const allowDebug = Boolean(payload.debug && process.env.NODE_ENV !== 'production');
 
     let job: Job | null = null;
     let jobPayload: {
@@ -491,6 +555,41 @@ export class AnalysisService {
           };
     }
 
+    const normalizedSegments = [
+      ...jobPayload.normalizedResponsibilities,
+      ...jobPayload.normalizedRequirements,
+    ].filter(Boolean);
+    const normalizedText = normalizedSegments.join('\n');
+    const normalizedTextChars = getCharCount(normalizedText);
+    const normalizedTextWords = countWords(normalizedText);
+
+    const rawText = jobPayload.rawDescription ?? '';
+    const rawTextChars = getCharCount(rawText);
+    const rawTextWords = countWords(rawText);
+
+    const hasNormalizedText = normalizedSegments.length > 0;
+    const chosenTextSourceForScoring = hasNormalizedText
+      ? 'normalized'
+      : rawText
+      ? 'raw'
+      : 'unknown';
+    const chosenText = hasNormalizedText ? normalizedText : rawText;
+    const chosenTextChars = getCharCount(chosenText);
+    const chosenTextWords = countWords(chosenText);
+    const chosenTextHash = sha256(chosenText);
+
+    const jobSource =
+      job?.jdIngestionMethod === JobIngestionMethod.URL ||
+      Boolean(jobPayload.sourceUrl)
+        ? 'url'
+        : job?.jdIngestionMethod === JobIngestionMethod.PASTE
+        ? 'paste'
+        : rawText
+        ? 'paste'
+        : 'unknown';
+
+    const jobIdValue = job?.id ?? jobId ?? null;
+
     const hashableJob = (job ?? {
       rawDescription: jobPayload.rawDescription,
       normalizedResponsibilities: jobPayload.normalizedResponsibilities,
@@ -511,7 +610,53 @@ export class AnalysisService {
         },
       },
       dimensionWeights,
+      { debug: allowDebug },
     );
+
+    const debugPayload: FitScoreDebugPayload | undefined = allowDebug
+      ? {
+          request: {
+            debugEnabled: allowDebug,
+            debugSource: payload.debugSource ?? 'none',
+            baselineVersionId: baselineVersion.id,
+            jobId: jobIdValue,
+          },
+          baseline: {
+            baselineId: baseline.id,
+            baselineVersionId: baselineVersion.id,
+            baselineVersionNumber: baselineVersion.versionNumber ?? baseline.version ?? null,
+            baselineContentHash,
+            baselineExtractedTextChars,
+            baselineExtractedTextWords,
+            baselineSectionsCharCounts,
+          },
+          job: {
+            jobId: jobIdValue,
+            jobSource,
+            rawTextChars,
+            rawTextWords,
+            normalizedTextChars,
+            normalizedTextWords,
+            chosenTextSourceForScoring,
+            chosenTextChars,
+            chosenTextWords,
+            chosenTextHash,
+          },
+          scoring: {
+            overallScoreBeforeAnyCapsOrGates:
+              scoring.debugInfo?.rawScore ?? scoring.overallScore,
+            overallScoreAfterCapsOrGates: scoring.overallScore,
+            dimensionScores: scoring.dimensionScores,
+            verdict: scoring.verdict,
+            weights: scoring.debugInfo?.dimensionWeights,
+            normalizedWeightTotal: scoring.debugInfo?.normalizedWeightTotal,
+            gatesApplied: scoring.debugInfo?.gatesApplied,
+            penaltiesApplied: scoring.debugInfo?.penalties,
+            keyTerms: scoring.debugInfo?.keyTerms,
+            summaryBasis: scoring.debugInfo?.summaryBasis ?? 'keyword_frequency_overlap',
+          },
+        }
+      : undefined;
 
     let savedAssessment: FitAssessment | null = null;
 
@@ -582,6 +727,7 @@ export class AnalysisService {
       dimensionScores: scoring.dimensionScores,
       complianceFlags: scoring.complianceFlags,
       summary: scoring.summary,
+      ...(debugPayload ? { debug: debugPayload } : {}),
     };
   }
 

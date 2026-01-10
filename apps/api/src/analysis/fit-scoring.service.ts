@@ -19,6 +19,32 @@ export type FitScoringInput = {
 
 export type DimensionWeightOverrides = Partial<Record<keyof FitDimensionScores, number>>;
 
+export type FitScoringOptions = {
+  debug?: boolean;
+};
+
+export type KeyTermStats = {
+  jobKeyTermsCount: number;
+  baselineKeyTermsCount: number;
+  matchedKeyTermsCount: number;
+};
+
+export type FitScoringDebugInfo = {
+  dimensionWeights: Record<keyof FitDimensionScores, number>;
+  normalizedWeightTotal: number;
+  penalties: string[];
+  positiveContributors: string[];
+  negativeContributors: string[];
+  textLengths: {
+    jobText: number;
+    baselineText: number;
+  };
+  rawScore?: number;
+  gatesApplied?: string[];
+  summaryBasis?: string;
+  keyTerms?: KeyTermStats;
+};
+
 export type FitScoringResult = {
   overallScore: number;
   verdict: FitAssessmentVerdict;
@@ -32,6 +58,7 @@ export type FitScoringResult = {
   delta: number;
   expandedDimensionScores: FitDimensionScores | null;
   appliedAdditions: string[];
+  debugInfo?: FitScoringDebugInfo;
 };
 
 const STOPWORDS = new Set([
@@ -299,6 +326,41 @@ const buildTermSet = (texts: string[]) => {
   return new Set([...tokens, ...bigrams]);
 };
 
+const buildTermSetFromTexts = (texts: string[]) => {
+  const termSet = new Set<string>();
+  for (const text of texts) {
+    for (const token of tokenize(text)) {
+      termSet.add(token);
+    }
+  }
+  return termSet;
+};
+
+const buildKeyTermStats = (
+  responsibilitiesText: string,
+  requirementsText: string,
+  fallbackText: string,
+  baselineText: string,
+): KeyTermStats => {
+  const sources = [responsibilitiesText, requirementsText]
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  let jobTerms = buildTermSetFromTexts(sources);
+  if (!jobTerms.size) {
+    jobTerms = buildTermSetFromTexts([fallbackText]);
+  }
+
+  const baselineTerms = buildTermSetFromTexts([baselineText]);
+  const matchedKeyTermsCount = [...jobTerms].filter((term) => baselineTerms.has(term)).length;
+
+  return {
+    jobKeyTermsCount: jobTerms.size,
+    baselineKeyTermsCount: baselineTerms.size,
+    matchedKeyTermsCount,
+  };
+};
+
 const extractTechTerms = (texts: string[]) => {
   const normalizedText = texts.map((text) => normalizeText(text)).join(' ');
   const found = new Set<string>();
@@ -496,6 +558,7 @@ export class FitScoringService {
   score(
     input: FitScoringInput,
     dimensionWeights?: DimensionWeightOverrides | null,
+    options?: FitScoringOptions,
   ): FitScoringResult {
     const jobText = [
       input.job.title ?? '',
@@ -511,6 +574,9 @@ export class FitScoringService {
     const baselineExperienceText =
       buildSectionText(input.baseline.sections, ['EXPERIENCE', 'PROJECT', 'SUMMARY']) ||
       baselineText;
+    const jobTextLength = jobText.trim().length;
+    const baselineTextLength = baselineText.trim().length;
+    const shouldEmitDebug = Boolean(options?.debug && process.env.NODE_ENV !== 'production');
 
     const responsibilitiesText = input.job.normalizedResponsibilities.join('\n');
     const requirementsText = input.job.normalizedRequirements.join('\n');
@@ -540,7 +606,9 @@ export class FitScoringService {
       industryContext: dimensionWeights?.industryContext ?? 1,
     };
 
-    const weightedDefaults = (Object.keys(defaultWeights) as Array<keyof FitDimensionScores>)
+    const dimensionKeys = Object.keys(defaultWeights) as Array<keyof FitDimensionScores>;
+
+    const weightedDefaults = dimensionKeys
       .map((key) => ({
         key,
         weight: defaultWeights[key] * appliedWeights[key],
@@ -557,17 +625,25 @@ export class FitScoringService {
     const normalizedTotal =
       weightedDefaults.total > 0
         ? weightedDefaults.total
-        : (Object.values(defaultWeights).reduce((sum, value) => sum + value, 0));
+        : dimensionKeys.reduce((sum, key) => sum + defaultWeights[key], 0);
 
-    const overallScore = clampScore(
-      (dimensionScores.experienceAlignment * weightedDefaults.values.experienceAlignment +
-        dimensionScores.technicalPlatformFit * weightedDefaults.values.technicalPlatformFit +
-        dimensionScores.leadershipLevel * weightedDefaults.values.leadershipLevel +
-        dimensionScores.strategicTacticalFit * weightedDefaults.values.strategicTacticalFit +
-        dimensionScores.industryContext * weightedDefaults.values.industryContext) /
-        normalizedTotal,
+    const weightedSum = dimensionKeys.reduce(
+      (sum, key) => sum + dimensionScores[key] * (weightedDefaults.values[key] ?? 0),
+      0,
     );
 
+    const aggregatedScore =
+      normalizedTotal === 0 ? 0 : weightedSum / normalizedTotal;
+
+    const gatesApplied: string[] = [];
+    if (aggregatedScore > 100) gatesApplied.push('clamp_above_100');
+    if (aggregatedScore < 0) gatesApplied.push('clamp_below_0');
+
+    const overallScore = clampScore(aggregatedScore);
+
+    const keyTermStats = shouldEmitDebug
+      ? buildKeyTermStats(responsibilitiesText, requirementsText, jobText, baselineText)
+      : undefined;
     const { strengths, gaps } = buildStrengthsAndGaps(
       requirementsText,
       responsibilitiesText,
@@ -580,6 +656,24 @@ export class FitScoringService {
       baselineText,
       input.job.sourceUrl,
     );
+
+    const debugInfo = shouldEmitDebug
+      ? {
+          dimensionWeights: weightedDefaults.values,
+          normalizedWeightTotal: normalizedTotal,
+          penalties: complianceFlags,
+          positiveContributors: strengths,
+          negativeContributors: gaps,
+          textLengths: {
+            jobText: jobTextLength,
+            baselineText: baselineTextLength,
+          },
+          rawScore: aggregatedScore,
+          gatesApplied,
+          summaryBasis: 'keyword_frequency_overlap',
+          keyTerms: keyTermStats,
+        }
+      : undefined;
 
     const additions = (input.verifiedAdditions ?? [])
       .map((entry) => entry?.trim())
@@ -634,6 +728,7 @@ export class FitScoringService {
       delta,
       expandedDimensionScores,
       appliedAdditions: additions,
+      debugInfo,
     };
   }
 

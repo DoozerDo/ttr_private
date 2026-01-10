@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
-import type { FitScoreRequest } from './analysis.service';
+import type { FitScoreRequest, DebugSource } from './analysis.service';
 import { AnalysisService } from './analysis.service';
 
 @Controller('fit-scores')
@@ -27,6 +27,37 @@ export class FitScoresController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.scoreCompatibility(userId, body);
+    const headerDebug = isHeaderDebugEnabled(request);
+    const queryDebug = isQueryDebugEnabled(request);
+    const bodyDebug = Boolean(body?.debug);
+    const debugEnabled = headerDebug || queryDebug || bodyDebug;
+    const debugSource: DebugSource = determineDebugSource(headerDebug, queryDebug, bodyDebug);
+
+    const payloadWithDebug = {
+      ...body,
+      debug: debugEnabled,
+      debugSource,
+    };
+
+    return this.analysisService.scoreCompatibility(userId, payloadWithDebug);
   }
 }
+
+const isHeaderDebugEnabled = (req: Request) => {
+  return String(req.headers['x-ttr-debug'] ?? '').trim() === '1';
+};
+
+const isQueryDebugEnabled = (req: Request) => {
+  return String(req.query?.debug ?? '').trim() === '1';
+};
+
+const determineDebugSource = (
+  headerDebug: boolean,
+  queryDebug: boolean,
+  bodyDebug: boolean,
+): DebugSource => {
+  if (headerDebug) return 'header';
+  if (queryDebug) return 'query';
+  if (bodyDebug) return 'body';
+  return 'none';
+};
