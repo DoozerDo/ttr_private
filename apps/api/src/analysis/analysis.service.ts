@@ -31,7 +31,6 @@ import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessm
 import {
   DimensionWeightOverrides,
   FitScoringService,
-  KeyTermStats,
 } from './fit-scoring.service';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
@@ -74,7 +73,7 @@ export type FitScoreRequest = {
 type FitScoreResponse = {
   fit_score: number;
   overall_score: number;
-  verdict: 'apply' | 'consider' | 'skip';
+  verdict: 'strong_apply' | 'apply' | 'consider' | 'skip';
   breakdown: {
     experience_alignment: number;
     leadership_level: number;
@@ -139,7 +138,6 @@ type FitScoreDebugPayload = {
     normalizedWeightTotal?: number;
     gatesApplied?: string[];
     penaltiesApplied?: string[];
-    keyTerms?: KeyTermStats;
     summaryBasis: string;
   };
 };
@@ -601,7 +599,7 @@ export class AnalysisService {
 
     const inputsHash = this.buildInputsHash(hashableJob, baseline, dimensionWeights);
 
-    const scoring = this.fitScoringService.score(
+    const scoring = await this.fitScoringService.score(
       {
         job: jobPayload,
         baseline: {
@@ -613,6 +611,11 @@ export class AnalysisService {
       { debug: allowDebug },
     );
 
+    const scoringDebug = scoring.debug;
+    const normalizedWeightTotal =
+      scoringDebug && Object.keys(scoringDebug.weights ?? {}).length
+        ? Object.values(scoringDebug.weights ?? {}).reduce((sum, value) => sum + value, 0)
+        : undefined;
     const debugPayload: FitScoreDebugPayload | undefined = allowDebug
       ? {
           request: {
@@ -643,17 +646,17 @@ export class AnalysisService {
             chosenTextHash,
           },
           scoring: {
-            overallScoreBeforeAnyCapsOrGates:
-              scoring.debugInfo?.rawScore ?? scoring.overallScore,
+            overallScoreBeforeAnyCapsOrGates: scoringDebug?.rawScore ?? scoring.overallScore,
             overallScoreAfterCapsOrGates: scoring.overallScore,
             dimensionScores: scoring.dimensionScores,
-            verdict: scoring.verdict,
-            weights: scoring.debugInfo?.dimensionWeights,
-            normalizedWeightTotal: scoring.debugInfo?.normalizedWeightTotal,
-            gatesApplied: scoring.debugInfo?.gatesApplied,
-            penaltiesApplied: scoring.debugInfo?.penalties,
-            keyTerms: scoring.debugInfo?.keyTerms,
-            summaryBasis: scoring.debugInfo?.summaryBasis ?? 'keyword_frequency_overlap',
+            verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
+            weights: scoringDebug?.weights,
+            normalizedWeightTotal,
+            gatesApplied: scoring.leadershipOverrideApplied ? ['leadership_override'] : undefined,
+            penaltiesApplied: scoring.missingRequiredToolsPenalty
+              ? ['missing_required_tools']
+              : undefined,
+            summaryBasis: 'semantic_tool_weighted_fit',
           },
         }
       : undefined;
@@ -667,7 +670,7 @@ export class AnalysisService {
         baselineId: baseline.id,
         baselineVersion: baselineVersion.versionNumber ?? baseline.version ?? null,
         overallScore: scoring.overallScore,
-        verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
+        verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
         dimensionScores: scoring.dimensionScores,
         strengths: scoring.strengths,
         gaps: scoring.gaps,
@@ -708,10 +711,7 @@ export class AnalysisService {
     return {
       fit_score: scoring.overallScore,
       overall_score: scoring.overallScore,
-      verdict: (scoring.verdict ?? FitAssessmentVerdict.CONSIDER).toLowerCase() as
-        | 'apply'
-        | 'consider'
-        | 'skip',
+      verdict: scoring.verdict ?? 'consider',
       breakdown,
       strengths: scoring.strengths,
       gaps: scoring.gaps,
@@ -893,7 +893,7 @@ export class AnalysisService {
       };
     }
 
-    const scoring = this.fitScoringService.score(
+    const scoring = await this.fitScoringService.score(
       {
         job: {
           rawDescription: job.rawDescription,
@@ -939,7 +939,7 @@ export class AnalysisService {
       baselineId: baseline.id,
       baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
       overallScore: scoring.overallScore,
-      verdict: scoring.verdict ?? FitAssessmentVerdict.CONSIDER,
+      verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
       dimensionScores: scoring.dimensionScores,
       strengths: scoring.strengths,
       gaps: scoring.gaps,
@@ -1035,7 +1035,7 @@ export class AnalysisService {
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
 
-    const scoring = this.fitScoringService.score(
+    const scoring = await this.fitScoringService.score(
       {
         job: {
           rawDescription: job.rawDescription,

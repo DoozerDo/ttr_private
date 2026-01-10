@@ -309,7 +309,7 @@ export class SearchSetsRunnerService {
       baselineContext.baseline.version ??
       null;
 
-    const result = this.fitScoringService.score({
+    const result = await this.fitScoringService.score({
       job: {
         title: job.title,
         company: job.company,
@@ -327,7 +327,7 @@ export class SearchSetsRunnerService {
 
     return {
       overallScore: result.overallScore,
-      verdict: result.verdict,
+      verdict: result.persistenceVerdict,
       dimensionScores: result.dimensionScores ?? null,
     };
   }
