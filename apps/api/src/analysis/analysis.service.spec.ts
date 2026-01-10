@@ -209,6 +209,18 @@ describe('AnalysisService - fit scores contract', () => {
       }),
     );
     expect(result.strengths).toBeDefined();
+    expect(result.scoring_v2).toEqual(
+      expect.objectContaining({
+        score: expect.any(Number),
+        components: expect.objectContaining({
+          scope: expect.any(Number),
+          leadership: expect.any(Number),
+        }),
+        adjustments: expect.objectContaining({
+          selfSimilarityApplied: expect.any(Boolean),
+        }),
+      }),
+    );
   });
 
   it('creates a compliance audit for fit score requests', async () => {

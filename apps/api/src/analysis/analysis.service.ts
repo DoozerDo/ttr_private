@@ -25,13 +25,18 @@ import { RecommendedAddition } from '../interviews/interview-types';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
-import { FitAssessment, FitAssessmentVerdict, FitDimensionScores } from './fit-assessment.entity';
+import {
+  FitAssessment,
+  FitAssessmentVerdict,
+  FitDimensionScores,
+} from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
 import {
   DimensionWeightOverrides,
   FitScoringService,
 } from './fit-scoring.service';
+import { scoreCxFitV2 } from './cx-fit-scoring-v2';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 
@@ -96,6 +101,9 @@ type FitScoreResponse = {
   complianceFlags?: FitAssessment['complianceFlags'];
   summary?: string;
   debug?: FitScoreDebugPayload;
+
+  // Added to match runtime return payload.
+  scoring_v2?: unknown;
 };
 
 type FitScoreDebugPayload = {
@@ -268,7 +276,9 @@ export class AnalysisService {
     }));
   }
 
-  private normalizeAdditions(additions?: (string | RecommendedAddition)[] | null) {
+  private normalizeAdditions(
+    additions?: (string | RecommendedAddition)[] | null,
+  ) {
     if (!additions?.length) return [];
     return additions
       .map((entry) => (typeof entry === 'string' ? entry : entry?.text)?.trim())
@@ -364,7 +374,9 @@ export class AnalysisService {
     const parsed = job.parsed_jd ?? {};
     const responsibilities = parsed.responsibilities ?? [];
     const requirements = parsed.requirements ?? [];
-    const synthesizedRaw = [...responsibilities, ...requirements].join('\n').trim();
+    const synthesizedRaw = [...responsibilities, ...requirements]
+      .join('\n')
+      .trim();
 
     return {
       title: null,
@@ -611,6 +623,11 @@ export class AnalysisService {
       { debug: allowDebug },
     );
 
+    const scoringV2 = scoreCxFitV2({
+      job: jobPayload,
+      baselineSections: includedSections,
+    });
+
     const scoringDebug = scoring.debug;
     const normalizedWeightTotal =
       scoringDebug && Object.keys(scoringDebug.weights ?? {}).length
@@ -722,7 +739,8 @@ export class AnalysisService {
       baselineId: savedAssessment?.baselineId,
       baselineVersion: savedAssessment?.baselineVersion,
       createdAt: savedAssessment?.createdAt,
-      score: scoring.overallScore,
+      scoring_v2: scoringV2,
+      score: scoringV2.score,
       overallScore: scoring.overallScore,
       dimensionScores: scoring.dimensionScores,
       complianceFlags: scoring.complianceFlags,
@@ -995,8 +1013,8 @@ export class AnalysisService {
     if (!baseline.sections?.length) {
       baseline.sections = await this.baselineSectionRepository.find({
         where: { baselineId: baseline.id },
-        order: { order: 'ASC' },
-      });
+        order: { order: 'ASC' } },
+      );
     }
 
     const job = await this.jobRepository.findOne({
@@ -1136,7 +1154,10 @@ export class AnalysisService {
 
     const baselineVersionRecord = assessment.baselineVersion
       ? await this.baselineVersionRepository.findOne({
-          where: { baselineId: assessment.baselineId, versionNumber: assessment.baselineVersion },
+          where: {
+            baselineId: assessment.baselineId,
+            versionNumber: assessment.baselineVersion,
+          },
           order: { createdAt: 'DESC' },
         })
       : null;

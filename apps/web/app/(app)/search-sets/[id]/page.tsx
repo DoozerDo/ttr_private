@@ -17,7 +17,7 @@ import {
   runSearchSet,
   type SearchSetApiError,
   type SearchSetDto,
-  type SearchSetRunResult,
+  type SearchSetResultItem,
 } from "@/lib/searchSetsClient";
 import type { TierGateError } from "@/lib/tiers";
 
@@ -37,7 +37,7 @@ const KNOWN_RESULT_KEYS = new Set([
 type StoredSearchSetRun = {
   baselineVersionId: string;
   runAt: string;
-  results: SearchSetRunResult[];
+  results: SearchSetResultItem[];
 };
 
 const SEARCH_SET_RUN_RESULTS_STORAGE_KEY = "target-this-role.search-set-run-results";
@@ -91,6 +91,10 @@ function formatDate(value?: string | null): string {
   return new Date(value).toLocaleString();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
+}
+
 function normalizeExplanationValue(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value === "number" || typeof value === "boolean") return `${value}`;
@@ -120,7 +124,7 @@ export default function SearchSetRunPage() {
 
   const [selectedBaselineVersionId, setSelectedBaselineVersionId] = useState("");
   const [running, setRunning] = useState(false);
-  const [runResults, setRunResults] = useState<SearchSetRunResult[]>([]);
+  const [runResults, setRunResults] = useState<SearchSetResultItem[]>([]);
   const [runExecuted, setRunExecuted] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -235,13 +239,13 @@ export default function SearchSetRunPage() {
     setTierGateError(null);
     setRunMessage(null);
 
-    try {
-      const results = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
-      const normalizedResults = Array.isArray(results) ? results : [];
-      const runTimestamp = new Date().toISOString();
-      setRunResults(normalizedResults);
-      setRunExecuted(true);
-      const count = normalizedResults.length;
+      try {
+        const response = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
+        const normalizedResults = response.results ?? [];
+        const runTimestamp = new Date().toISOString();
+        setRunResults(normalizedResults);
+        setRunExecuted(true);
+        const count = normalizedResults.length;
       setRunMessage(
         count ? `Run complete — Found ${count} matching roles.` : "Run complete — No matches found.",
       );
@@ -275,15 +279,16 @@ export default function SearchSetRunPage() {
   }, [searchSetId, selectedBaselineVersionId]);
 
   const explanationEntries = useMemo(() => {
-    return runResults.map((result) =>
-      Object.entries(result)
+    return runResults.map((result) => {
+      const raw = result.raw ?? {};
+      return Object.entries(raw)
         .filter(([key, value]) => !KNOWN_RESULT_KEYS.has(key) && normalizeExplanationValue(value) !== null)
         .map(([key, value]) => ({
           key,
           label: humanizeKey(key),
           value: normalizeExplanationValue(value) as string,
-        })),
-    );
+        }));
+    });
   }, [runResults]);
 
   const overviewRows = useMemo(() => {
@@ -495,11 +500,14 @@ export default function SearchSetRunPage() {
             />
           ) : (
             <div className="space-y-4">
-              {runResults.map((result, index) => (
-                <article
-                  key={(result.jobId ?? index) + "-" + index}
-                  className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/60 p-5 shadow"
-                >
+              {runResults.map((result, index) => {
+                const raw = result.raw ?? {};
+                const dimensionScores = raw.dimensionScores;
+                return (
+                  <article
+                    key={(result.jobId ?? index) + "-" + index}
+                    className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/60 p-5 shadow"
+                  >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-1">
                       <p className="text-lg font-semibold text-white">{result.title ?? "Untitled role"}</p>
@@ -540,9 +548,9 @@ export default function SearchSetRunPage() {
                     ) : null}
                   </div>
 
-                  {result.dimensionScores ? (
+                  {isRecord(dimensionScores) ? (
                     <div className="flex flex-wrap gap-2 text-xs">
-                      {Object.entries(result.dimensionScores)
+                      {Object.entries(dimensionScores)
                         .filter(([, value]) => typeof value === "number")
                         .map(([dimension, value]) => (
                           <span
@@ -565,7 +573,8 @@ export default function SearchSetRunPage() {
                     </div>
                   ) : null}
                 </article>
-              ))}
+              );
+            })}
             </div>
           )}
         </section>

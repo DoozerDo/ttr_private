@@ -43,7 +43,7 @@ export type SearchSetDto = {
   lastRunResultCount?: number | null;
 };
 
-export type SearchSetRunResult = {
+export type SearchSetResultItem = {
   jobId?: string | null;
   title?: string | null;
   company?: string | null;
@@ -52,11 +52,14 @@ export type SearchSetRunResult = {
   fitScore?: number | null;
 
   applyUrl?: string | null;
-  jobUrl?: string | null;
-
   sourceUrl?: string | null;
 
-  [key: string]: unknown;
+  raw?: Record<string, unknown>;
+};
+
+export type SearchSetRunResult = {
+  results?: SearchSetResultItem[];
+  raw?: unknown;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -179,31 +182,44 @@ function normalizeSearchSetDto(value: unknown): SearchSetDto {
   };
 }
 
-function normalizeRunResultItem(value: unknown): SearchSetRunResult {
-  if (!isObject(value)) return {};
+function normalizeSearchSetResultItem(value: unknown): SearchSetResultItem {
+  const entry = isObject(value) ? value : undefined;
 
-  const title = asNullableString(value.title);
-  const company = asNullableString(value.company);
-  const jobId = asNullableString(value.jobId);
+  const jobId = asNullableString(entry?.jobId);
+  const title = asNullableString(entry?.title);
+  const company = asNullableString(entry?.company);
 
-  const verdict = asNullableString((value as any).verdict);
-  const fitScore = asNullableNumber((value as any).fitScore);
+  const verdict = asNullableString(entry?.verdict);
+  const fitScore = asNullableNumber(entry?.fitScore);
 
-  const applyUrl = asNullableString((value as any).applyUrl);
-  const jobUrl = asNullableString((value as any).jobUrl);
-  const sourceUrl = asNullableString((value as any).sourceUrl);
+  const applyUrl = asNullableString(entry?.applyUrl);
+  const sourceUrl = asNullableString(entry?.sourceUrl);
 
   return {
-    ...value,
+    jobId: jobId ?? null,
     title: title ?? null,
     company: company ?? null,
-    jobId: jobId ?? null,
     verdict: verdict ?? null,
     fitScore: fitScore ?? null,
     applyUrl: applyUrl ?? null,
-    jobUrl: jobUrl ?? null,
     sourceUrl: sourceUrl ?? null,
+    raw: entry,
   };
+}
+
+export function normalizeSearchSetRunResult(value: unknown): SearchSetResultItem[] {
+  if (Array.isArray(value)) {
+    return value.map(normalizeSearchSetResultItem);
+  }
+
+  if (isObject(value)) {
+    const nestedResults = value.results;
+    if (Array.isArray(nestedResults)) {
+      return nestedResults.map(normalizeSearchSetResultItem);
+    }
+  }
+
+  return [];
 }
 
 export async function getSearchSet(id: string) {
@@ -215,7 +231,7 @@ export async function runSearchSet(
   id: string,
   baselineVersionId?: string | null,
   limit?: number
-): Promise<SearchSetRunResult[]> {
+): Promise<SearchSetRunResult> {
   const params = new URLSearchParams();
 
   if (baselineVersionId) {
@@ -231,14 +247,8 @@ export async function runSearchSet(
     : `/api/search-sets/${id}/run`;
 
   const raw = await api<unknown>(url, { method: "POST" });
-
-  if (Array.isArray(raw)) {
-    return raw.map(normalizeRunResultItem);
-  }
-
-  if (isObject(raw) && Array.isArray((raw as any).results)) {
-    return ((raw as any).results as unknown[]).map(normalizeRunResultItem);
-  }
-
-  return [];
+  return {
+    raw,
+    results: normalizeSearchSetRunResult(raw),
+  };
 }

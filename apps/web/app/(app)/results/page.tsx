@@ -21,6 +21,7 @@ import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
 type LatestAnalysis = {
   baselineId: string;
+  baselineVersionId?: string | null;
   jobId: string;
   overallScore?: number;
   note?: string;
@@ -38,15 +39,30 @@ export default function ResultsPage() {
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeTierGateError, setResumeTierGateError] = useState<TierGateError | null>(null);
+  const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(null);
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
     setAnalysisSource("manual");
+    setResumeError(null);
+    setResumeTierGateError(null);
+    setResumeComplianceError(null);
   };
 
   const setManualJobId = (value: string) => {
     setJobId(value);
     setAnalysisSource("manual");
+    setResumeError(null);
+    setResumeTierGateError(null);
+    setResumeComplianceError(null);
+  };
+
+  const getResumePayload = () => {
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+    return { jobId: jobIdValue, baselineVersionId: baselineVersionIdValue };
   };
 
   const latestEndpoint = useMemo(() => {
@@ -79,6 +95,9 @@ export default function ResultsPage() {
     setLatest(null);
     setComplianceError(null);
     setTierGateError(null);
+    setResumeError(null);
+    setResumeTierGateError(null);
+    setResumeComplianceError(null);
 
     try {
       if (!latestEndpoint) throw new Error("Job ID is required.");
@@ -119,16 +138,17 @@ export default function ResultsPage() {
   }
 
   async function generateResume(oneTap = false) {
-    if (!baselineId || !jobId) {
-      setError("Baseline and Job are required to generate a resume.");
+    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
+    if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
+      setResumeError("Load the latest analysis before exporting a resume.");
       return;
     }
 
     setLoading(true);
-    setError(null);
+    setResumeError(null);
+    setResumeTierGateError(null);
+    setResumeComplianceError(null);
     setResumeResponse(null);
-    setComplianceError(null);
-    setTierGateError(null);
 
     try {
       const res = await fetch("/api/resume", {
@@ -138,7 +158,8 @@ export default function ResultsPage() {
         },
         body: JSON.stringify({
           baselineId,
-          jobId,
+          baselineVersionId: resumeBaselineVersionId,
+          jobId: resumeJobId,
           oneTap,
         }),
       });
@@ -148,14 +169,14 @@ export default function ResultsPage() {
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          setTierGateError(tierGate);
+          setResumeTierGateError(tierGate);
           return;
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
 
         if (compliance) {
-          setComplianceError(compliance);
+          setResumeComplianceError(compliance);
           return;
         }
 
@@ -180,22 +201,23 @@ export default function ResultsPage() {
         window.URL.revokeObjectURL(url);
       }
     } catch (e: any) {
-      setError(e?.message || "Resume generation failed");
+      setResumeError(e?.message || "Resume generation failed");
     } finally {
       setLoading(false);
     }
   }
 
   async function exportResume(format: "docx" | "pdf") {
-    if (!baselineId || !jobId) {
-      setError("Baseline and Job are required to generate a resume.");
+    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
+    if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
+      setResumeError("Load the latest analysis before generating a resume.");
       return;
     }
 
     setExporting(format);
-    setError(null);
-    setComplianceError(null);
-    setTierGateError(null);
+    setResumeError(null);
+    setResumeTierGateError(null);
+    setResumeComplianceError(null);
 
     try {
       const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
@@ -205,7 +227,8 @@ export default function ResultsPage() {
         },
         body: JSON.stringify({
           baselineId,
-          jobId,
+          baselineVersionId: resumeBaselineVersionId,
+          jobId: resumeJobId,
           oneTap: true,
         }),
       });
@@ -215,14 +238,14 @@ export default function ResultsPage() {
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          setTierGateError(tierGate);
+          setResumeTierGateError(tierGate);
           return;
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
 
         if (compliance) {
-          setComplianceError(compliance);
+          setResumeComplianceError(compliance);
           return;
         }
 
@@ -240,7 +263,7 @@ export default function ResultsPage() {
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e?.message || "Resume export failed");
+      setResumeError(e?.message || "Resume export failed");
     } finally {
       setExporting(null);
     }
@@ -253,6 +276,11 @@ export default function ResultsPage() {
       setManualJobId(job);
     }
   }, []);
+
+  const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
+  const readyForResume =
+    analysisSource === "latest" &&
+    Boolean(resumeJobId && resumeBaselineVersionId && !loading && !loadingLatest);
 
   const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
   const latestStatusMessage = loadingLatest
@@ -292,7 +320,13 @@ export default function ResultsPage() {
                   value={baselineId}
                   onChange={(event) => setManualBaselineId(event.target.value)}
                   placeholder="Baseline ID"
+                  readOnly={analysisSource === "latest"}
                 />
+                {analysisSource === "latest" ? (
+                  <p className="text-[11px] text-slate-400">
+                    Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis, so this field cannot be edited while it is selected.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
@@ -312,8 +346,7 @@ export default function ResultsPage() {
                     Latest analysis
                   </strong>
                   <p className="mt-1">
-                    Loaded from job {latest?.jobId ?? "unknown"} and baseline{" "}
-                    {latest?.baselineId ?? "unknown"}. Modify the IDs above to target a different analysis.
+                    Loaded from job {latest?.jobId ?? "unknown"} and baseline {latest?.baselineId ?? "unknown"}. Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis. Modify the job above and load the latest analysis again to target a different baseline.
                   </p>
                 </>
               ) : (
@@ -407,15 +440,19 @@ export default function ResultsPage() {
               <h2 className="text-lg font-semibold text-slate-100">Output</h2>
             </div>
             <div className="flex flex-wrap gap-3">
-              <FormButton onClick={() => void generateResume(false)} disabled={!baselineId || !jobId || loading}>
+              <FormButton onClick={() => void generateResume(false)} disabled={!readyForResume || loading}>
                 {loading ? "Generating..." : "Generate resume"}
               </FormButton>
               <FormButton
                 variant="secondary"
                 onClick={() => void generateResume(true)}
-                disabled={!baselineId || !jobId || !oneTapEligible || loading}
+                disabled={!readyForResume || !oneTapEligible || loading}
                 title={
-                  oneTapEligible ? "Generate immediately with compliance checks" : "Requires fit score of at least 92"
+                  readyForResume
+                    ? oneTapEligible
+                      ? "Generate immediately with compliance checks"
+                      : "Requires fit score of at least 92"
+                    : "Load the latest analysis before using one tap generate"
                 }
               >
                 {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
@@ -425,18 +462,28 @@ export default function ResultsPage() {
               <FormButton
                 variant="secondary"
                 onClick={() => void exportResume("docx")}
-                disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+                disabled={!readyForResume || !oneTapEligible || !!exporting}
               >
                 {exporting === "docx" ? "Downloading..." : "Download DOCX"}
               </FormButton>
               <FormButton
                 variant="secondary"
                 onClick={() => void exportResume("pdf")}
-                disabled={!baselineId || !jobId || !oneTapEligible || !!exporting}
+                disabled={!readyForResume || !oneTapEligible || !!exporting}
               >
                 {exporting === "pdf" ? "Downloading..." : "Download PDF"}
               </FormButton>
             </div>
+            <p className="text-[11px] text-slate-400">
+              One tap generation is only enabled when the fit score is at least 92 and the latest analysis is ready. Manual generation remains available otherwise.
+            </p>
+            {resumeTierGateError ? <TierGateNotice error={resumeTierGateError} /> : null}
+            {resumeComplianceError ? <ComplianceViolationPanel error={resumeComplianceError} /> : null}
+            {resumeError ? (
+              <Alert intent="error" title="Unable to generate resume">
+                {resumeError}
+              </Alert>
+            ) : null}
             {resumeResponse ? (
               <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
                 {JSON.stringify(resumeResponse, null, 2)}
