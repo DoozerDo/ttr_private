@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
@@ -18,6 +19,11 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
+import {
+  RealityCheckDto,
+  RealityCheckOutcome,
+  getRealityCheck,
+} from "@/lib/realityCheck";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -42,6 +48,13 @@ export default function ResultsPage() {
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeTierGateError, setResumeTierGateError] = useState<TierGateError | null>(null);
   const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(null);
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [skipNote, setSkipNote] = useState<string | null>(null);
+  const [realityCheck, setRealityCheck] = useState<RealityCheckDto | null>(null);
+  const [realityCheckError, setRealityCheckError] = useState<string | null>(null);
+  const [realityCheckLoading, setRealityCheckLoading] = useState(false);
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
@@ -277,6 +290,60 @@ export default function ResultsPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const storedNote = window.sessionStorage.getItem("ttr:realityCheckSkipNote");
+    if (storedNote) {
+      setSkipNote(storedNote);
+      window.sessionStorage.removeItem("ttr:realityCheckSkipNote");
+      return;
+    }
+
+    if (searchParams.get("realityCheckSkipped")) {
+      setSkipNote(
+        "You skipped the Reality Check update flow. Consider reviewing suggested updates later.",
+      );
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!jobId || !baselineId) {
+      setRealityCheck(null);
+      setRealityCheckError(null);
+      setRealityCheckLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRealityCheck = async () => {
+      setRealityCheckLoading(true);
+      setRealityCheckError(null);
+      try {
+        const existing = await getRealityCheck(jobId, baselineId);
+        if (!cancelled) {
+          setRealityCheck(existing);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "Unable to load Reality Check";
+          setRealityCheckError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setRealityCheckLoading(false);
+        }
+      }
+    };
+
+    loadRealityCheck();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, baselineId]);
+
   const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
   const readyForResume =
     analysisSource === "latest" &&
@@ -289,6 +356,28 @@ export default function ResultsPage() {
       ? `Calling: ${latestEndpoint}`
       : "Ready to load data";
 
+  const encoding = (value: string) => encodeURIComponent(value);
+  const runRealityCheckPath =
+    jobId && baselineId
+      ? `/results/${encoding(jobId)}/reality-check?baselineId=${encoding(baselineId)}`
+      : "/results";
+  const suggestedSectionsParam = encodeURIComponent(
+    (realityCheck?.suggestedBaselineSections ?? []).join(","),
+  );
+  const baselineUpdatePath = baselineId
+    ? `/baseline/${baselineId}?jobId=${encoding(jobId)}&suggestedSections=${suggestedSectionsParam}`
+    : "/baseline";
+  const fitReviewPath = jobId ? `/fit-review?jobId=${encoding(jobId)}` : "/fit-review";
+  const analysisScore = latest?.overallScore ?? 100;
+  const analysisIndicatesGap = analysisScore < 85;
+  const showRealityCheckCard =
+    !baselineId ||
+    (baselineId &&
+      jobId &&
+      (analysisIndicatesGap ||
+        !realityCheck ||
+        realityCheck.outcome !== RealityCheckOutcome.VALID));
+
   return (
     <PageShell>
       <div className="space-y-6">
@@ -296,6 +385,94 @@ export default function ResultsPage() {
           title="Results"
           description="Generate resumes, review the latest analysis, and export artifacts for any job."
         />
+
+        {skipNote ? (
+          <Alert intent="info">
+            <p>{skipNote}</p>
+          </Alert>
+        ) : null}
+
+        {showRealityCheckCard ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Reality Check
+                </p>
+                <h2 className="text-lg font-semibold text-slate-100">Baseline health</h2>
+              </div>
+              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                {realityCheckLoading
+                  ? "Checking…"
+                  : realityCheck
+                    ? realityCheck.outcome.replace("_", " ")
+                    : "Not run"}
+              </span>
+            </div>
+            <div className="text-sm text-slate-300 space-y-2">
+              {!baselineId ? (
+                <p>
+                  Upload a baseline so Reality Check can verify its freshness before you generate
+                  outputs.
+                </p>
+              ) : realityCheck ? (
+                realityCheck.outcome === RealityCheckOutcome.UPDATE_RECOMMENDED ? (
+                  <p>
+                    Reality Check flagged sections that may be outdated. Review the suggested updates
+                    before generating outputs.
+                  </p>
+                ) : (
+                  <p>
+                    This role appears mismatched against your current baseline. View the Fit Review to
+                    understand the gap before proceeding.
+                  </p>
+                )
+              ) : analysisIndicatesGap ? (
+                <p>
+                  Latest analysis score ({analysisScore}) indicates potential gaps. Run Reality Check
+                  to confirm whether your baseline still reflects reality.
+                </p>
+              ) : (
+                <p>
+                  Reality Check has not been run for the current baseline and job. Run it now to make
+                  sure your baseline is still accurate.
+                </p>
+              )}
+            </div>
+            {realityCheckError ? (
+              <Alert intent="error" title="Reality Check">
+                <p>{realityCheckError}</p>
+              </Alert>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              {!baselineId ? (
+                <FormButton onClick={() => router.push("/baseline")}>Go to Baselines</FormButton>
+              ) : realityCheck ? (
+                realityCheck.outcome === RealityCheckOutcome.UPDATE_RECOMMENDED ? (
+                  <>
+                    <FormButton onClick={() => router.push(baselineUpdatePath)}>
+                      Review suggested baseline updates
+                    </FormButton>
+                    <FormButton variant="secondary" onClick={() => router.push(runRealityCheckPath)}>
+                      Rerun Reality Check
+                    </FormButton>
+                  </>
+                ) : (
+                  <>
+                    <FormButton onClick={() => router.push(fitReviewPath)}>View Fit Review</FormButton>
+                    <FormButton variant="secondary" onClick={() => router.push("/applications")}>
+                      Back to Job Tracker
+                    </FormButton>
+                  </>
+                )
+              ) : (
+                <FormButton onClick={() => router.push(runRealityCheckPath)}>
+                  Run Reality Check
+                </FormButton>
+              )}
+            </div>
+          </section>
+        ) : null}
 
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}

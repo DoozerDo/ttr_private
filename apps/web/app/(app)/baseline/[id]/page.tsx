@@ -133,6 +133,8 @@ const friendlyTitles: Record<string, string> = {
   RAW: "Raw",
 };
 
+type GroupedSections = Record<string, BaselineSectionDto[]>;
+
 const displayOrder = [
   "SUMMARY",
   "EXPERIENCE",
@@ -143,7 +145,7 @@ const displayOrder = [
   "RAW",
 ];
 
-function organizeSections(sections: BaselineSectionDto[]) {
+function organizeSections(sections: BaselineSectionDto[]): GroupedSections {
   const sorted = [...sections].sort((a, b) => a.order - b.order);
   const grouped: Record<string, BaselineSectionDto[]> = {};
 
@@ -195,8 +197,10 @@ function renderContentSections(
 
 export default async function BaselineDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: { suggestedSections?: string };
 }) {
   const resolvedParams = await params;
   const cookieStore = await cookies();
@@ -226,11 +230,29 @@ export default async function BaselineDetailPage({
     versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
   const latestVersionId = sortedVersions[0]?.id ?? "";
 
-  const groupedSections = baseline
+  const groupedSections: GroupedSections = baseline
     ? organizeSections(baseline.sections ?? [])
     : {};
+  const suggestedSectionsRaw = searchParams?.suggestedSections ?? "";
+  const filterSet = new Set(
+    suggestedSectionsRaw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const filteredEntries = Object.entries(groupedSections)
+    .map(([key, sections]) => [
+      key,
+      sections.filter((section) => matchesSuggestedSection(section, filterSet)),
+    ] as const)
+    .filter(([, sections]) => sections.length > 0);
+  const filteredGroupedSections = Object.fromEntries(filteredEntries);
+  const hasActiveFilter = filterSet.size > 0;
+  const displayedGroupedSections: GroupedSections = hasActiveFilter
+    ? filteredGroupedSections
+    : groupedSections;
   const hasRenderableSections = baseline
-    ? Object.values(groupedSections).some((sections) => sections.length > 0)
+    ? Object.values(displayedGroupedSections).some((sections) => sections.length > 0)
     : false;
 
   const fallbackContent =
@@ -321,14 +343,20 @@ export default async function BaselineDetailPage({
               <h2 className="text-xl font-semibold text-gray-900">
                 Parsed sections
               </h2>
+              {hasActiveFilter ? (
+                <p className="text-sm text-gray-600">
+                  Filtering to suggested areas: {suggestedSectionsRaw || "selected sections"}.
+                  <Link href={`/baseline/${resolvedParams.id}`}>Clear filter</Link>
+                </p>
+              ) : null}
               {!hasRenderableSections && !fallbackContent ? (
                 <p className="text-sm text-gray-700">
-                  No sections parsed for this baseline yet.
+                  {hasActiveFilter ? "No sections match the suggested areas." : "No sections parsed for this baseline yet."}
                 </p>
               ) : (
                 <div className="space-y-6">
                   {hasRenderableSections &&
-                    renderContentSections(groupedSections)}
+                    renderContentSections(displayedGroupedSections)}
                   {!hasRenderableSections && fallbackContent ? (
                     <article className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900">
                       <pre className="whitespace-pre-wrap break-words text-sm text-gray-900">
@@ -352,4 +380,26 @@ export default async function BaselineDetailPage({
       </div>
     </main>
   );
+}
+
+
+function matchesSuggestedSection(
+  section: BaselineSectionDto,
+  filterSet: Set<string>,
+): boolean {
+  const typeKey = (section.sectionType ?? "").toLowerCase();
+  if (typeKey && filterSet.has(typeKey)) {
+    return true;
+  }
+
+  if (filterSet.has("leadership") && typeKey === "experience") {
+    return true;
+  }
+
+  const title = (section.title ?? "").toLowerCase();
+  if (title && filterSet.has(title)) {
+    return true;
+  }
+
+  return false;
 }

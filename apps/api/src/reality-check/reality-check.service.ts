@@ -70,19 +70,11 @@ export class RealityCheckService {
       throw new BadRequestException('Answers are required');
     }
 
-    const baseline = await this.loadBaselineForUser(userId, baselineId);
-    if (!baseline) {
-      throw new BadRequestException({
-        error: {
-          code: 'BASELINE_REQUIRED',
-          message: 'Baseline is required for Reality Check',
-        },
-      });
-    }
-
-    const job = await this.ensureJobForUser(userId, jobId);
-
-    const context = this.buildContext(job, baseline);
+    const { job, baseline, context } = await this.buildRealityCheckContext(
+      userId,
+      jobId,
+      baselineId,
+    );
     const questions = this.generateQuestions(context);
     const validatedAnswers = this.validateAnswers(questions, answers);
     const outcomeState = this.computeOutcome(context, questions, validatedAnswers);
@@ -116,6 +108,39 @@ export class RealityCheckService {
       relations: ['sections'],
       order: { sections: { order: 'ASC' } },
     });
+  }
+
+  private throwBaselineRequired(): never {
+    throw new BadRequestException({
+      error: {
+        code: 'BASELINE_REQUIRED',
+        message: 'Baseline is required for Reality Check',
+      },
+    });
+  }
+
+  private async ensureBaselineForRealityCheck(userId: string, baselineId: string) {
+    const baseline = await this.loadBaselineForUser(userId, baselineId);
+    if (!baseline) {
+      this.throwBaselineRequired();
+    }
+    return baseline;
+  }
+
+  private async buildRealityCheckContext(
+    userId: string,
+    jobId: string,
+    baselineId: string,
+  ) {
+    const baseline = await this.ensureBaselineForRealityCheck(userId, baselineId);
+    const job = await this.ensureJobForUser(userId, jobId);
+    const context = this.buildContext(job, baseline);
+    return { baseline, job, context };
+  }
+
+  async prepareQuestionSet(userId: string, jobId: string, baselineId: string) {
+    const { context } = await this.buildRealityCheckContext(userId, jobId, baselineId);
+    return { questions: this.generateQuestions(context) };
   }
 
   private buildContext(job: Job, baseline: Baseline): RealityCheckContext {

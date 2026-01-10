@@ -604,32 +604,6 @@ export default function AnalyzePage() {
               {loading ? "Analyzing…" : "Analyze role fit"}
             </button>
 
-            <div
-              style={{
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.04)",
-                padding: "10px 12px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "rgba(241,245,249,0.92)" }}>
-                  Want to tune what matters
-                </div>
-                <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                  Use Calibrate to preview signal weighting before we wire it into scoring.
-                </div>
-              </div>
-
-              <Link href="/calibrate" style={ttrComponents.quietButton}>
-                Open Calibrate
-              </Link>
-            </div>
           </div>
         </section>
 

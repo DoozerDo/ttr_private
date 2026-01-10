@@ -11,6 +11,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { CreateRealityCheckDto } from './dto/create-reality-check.dto';
+import { GenerateRealityCheckDto } from './dto/generate-reality-check.dto';
 import { RealityCheckService } from './reality-check.service';
 
 @Controller('reality-check')
@@ -65,5 +66,26 @@ export class RealityCheckController {
     const answers = body.answers ?? [];
 
     return this.realityCheckService.createRealityCheck(userId, jobId, baselineId, answers);
+  }
+
+  @Post('questions')
+  async generateRealityCheckQuestions(
+    @Body() body: GenerateRealityCheckDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const jobId = body.jobId?.trim();
+    const baselineId = body.baselineId?.trim();
+
+    if (!jobId || !baselineId) {
+      throw new BadRequestException('jobId and baselineId are required');
+    }
+
+    return this.realityCheckService.prepareQuestionSet(userId, jobId, baselineId);
   }
 }
