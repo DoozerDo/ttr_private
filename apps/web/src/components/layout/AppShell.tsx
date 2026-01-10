@@ -1,0 +1,290 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+
+import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
+
+const isDev = process.env.NODE_ENV === "development";
+
+const getStoredContext = () => {
+  if (typeof window === "undefined") {
+    return { hasBaseline: false, hasJob: false };
+  }
+
+  try {
+    const payload = sessionStorage.getItem("ttr:lastAnalysis");
+    if (!payload) {
+      return { hasBaseline: false, hasJob: false };
+    }
+
+    const parsed = JSON.parse(payload) as { result?: { baselineId?: string; jobId?: string } };
+    return {
+      hasBaseline: Boolean(parsed?.result?.baselineId),
+      hasJob: Boolean(parsed?.result?.jobId),
+    };
+  } catch (error) {
+    console.error("Unable to read stored session", error);
+    return { hasBaseline: false, hasJob: false };
+  }
+};
+
+const getDisabledReason = (route: RouteConfig, hasBaseline: boolean, hasJob: boolean) => {
+  if (route.requiresBaseline && !hasBaseline) {
+    return "Upload a baseline to unlock this area";
+  }
+  if (route.requiresJob && !hasJob) {
+    return "Add a job to proceed";
+  }
+  return null;
+};
+
+type AppShellProps = {
+  children: ReactNode;
+  userEmail?: string | null;
+};
+
+export function AppShell({ children, userEmail }: AppShellProps) {
+  const pathname = usePathname() ?? "/";
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [hasBaseline, setHasBaseline] = useState(false);
+  const [hasJob, setHasJob] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const lastPath = useRef(pathname);
+
+  useEffect(() => {
+    const update = () => {
+      const { hasBaseline, hasJob } = getStoredContext();
+      setHasBaseline(hasBaseline);
+      setHasJob(hasJob);
+    };
+
+    update();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "ttr:lastAnalysis") {
+        update();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDev) return;
+    if (lastPath.current !== pathname) {
+      console.info("Navigation:", pathname);
+      lastPath.current = pathname;
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!isDev || typeof window === "undefined") return;
+
+    const originalFetch = window.fetch;
+
+    window.fetch = async (...args) => {
+      try {
+        const response = await originalFetch(...args);
+        if (!response.ok) {
+          console.warn("Fetch failed", {
+            url: args[0],
+            status: response.status,
+            route: window.location.pathname,
+          });
+        }
+        return response;
+      } catch (error) {
+        console.error("Fetch error", error);
+        throw error;
+      }
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as { error?: string })?.error ?? "Logout failed");
+      }
+
+      router.push("/auth/login");
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : "Logout failed");
+    } finally {
+      setLoggingOut(false);
+      setMenuOpen(false);
+    }
+  };
+
+  const navRoutes = sidebarRoutes;
+
+  const activeRouteIds = useMemo(() => {
+    const normalized = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    return new Set(
+      navRoutes
+        .filter((route) => {
+          if (route.href === "/") {
+            return normalized === "/";
+          }
+          return normalized === route.href || normalized.startsWith(`${route.href}/`);
+        })
+        .map((route) => route.id),
+    );
+  }, [navRoutes, pathname]);
+
+  return (
+    <div className="flex min-h-screen bg-slate-950 text-slate-50">
+      <aside className="flex w-64 flex-shrink-0 flex-col border-r border-white/10 bg-slate-950/70 px-4 py-6">
+        <div className="text-xs font-semibold uppercase tracking-[0.45em] text-slate-400">
+          Target This Role
+        </div>
+        <nav className="mt-6 flex flex-col gap-2">
+          {navRoutes.map((route) => {
+            const isActive = activeRouteIds.has(route.id);
+            const disabledReason = getDisabledReason(route, hasBaseline, hasJob);
+            const baseClasses =
+              "flex flex-col rounded-2xl border px-3 py-2 text-left text-sm font-semibold transition";
+            const enabledClasses =
+              "border-white/10 bg-transparent text-slate-100 hover:bg-slate-900/40";
+            const activeClasses =
+              "border-amber-400/60 bg-amber-400/20 text-amber-200 shadow-sm";
+            const disabledClasses =
+              "border-dashed border-white/20 bg-slate-900/30 text-slate-500 opacity-70 cursor-not-allowed";
+
+            if (disabledReason) {
+              return (
+                <div
+                  key={route.id}
+                  className={`${baseClasses} ${disabledClasses}`}
+                  title={disabledReason}
+                  aria-disabled="true"
+                >
+                  <span>{route.label}</span>
+                  <span className="text-[11px] font-medium text-slate-400">
+                    {disabledReason}
+                  </span>
+                </div>
+              );
+            }
+
+            return (
+              <Link
+                key={route.id}
+                href={route.href}
+                className={`${baseClasses} ${isActive ? activeClasses : enabledClasses}`}
+                aria-current={isActive ? "page" : undefined}
+              >
+                {route.label}
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="flex min-h-screen flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-slate-400">Session console</span>
+            {isDev ? (
+              <span className="text-[11px] uppercase tracking-[0.4em] text-amber-300">
+                Dev route: {pathname}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-4">
+            {isDev ? (
+              <span className="text-[11px] uppercase tracking-[0.4em] text-slate-400">
+                Dev health
+              </span>
+            ) : null}
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-full border border-white/20 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100 shadow-sm transition hover:border-white/40"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <span>{userEmail ?? "Account"}</span>
+                <span aria-hidden="true" className="text-xs">
+                  ?
+                </span>
+              </button>
+
+              {menuOpen ? (
+                <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-xl">
+                  <Link
+                    href={settingsRoute.href}
+                    className="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800/60"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {settingsRoute.label}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className="mt-1 w-full rounded-lg border border-transparent bg-amber-400/20 px-3 py-2 text-left text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loggingOut ? "Logging out" : "Logout"}
+                  </button>
+                  {logoutError ? (
+                    <p className="mt-2 text-xs text-red-400">{logoutError}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export type AppShellBoundaryProps = AppShellProps;
+
+export function AppShellBoundary({ children, userEmail }: AppShellBoundaryProps) {
+  const pathname = usePathname();
+  const isAuthPath = pathname?.startsWith("/auth");
+
+  if (isAuthPath) {
+    return <>{children}</>;
+  }
+
+  return <AppShell userEmail={userEmail}>{children}</AppShell>;
+}

@@ -1,9 +1,12 @@
-const dateTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "short",
-  timeStyle: "medium",
-  timeZone: "UTC",
-});
+export function formatDateTime(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
 
-export function formatDateTime(dateInput: string | number | Date) {
-  return dateTimeFormatter.format(new Date(dateInput));
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

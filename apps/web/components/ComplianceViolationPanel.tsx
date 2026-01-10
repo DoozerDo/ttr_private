@@ -1,5 +1,6 @@
 import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
-import { ttrComponents, ttrTypography } from "@/app/ui/ttrStyles";
+import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
+
 
 type ComplianceViolationPanelProps = {
   error: ParsedComplianceError;

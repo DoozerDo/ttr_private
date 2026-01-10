@@ -1,142 +1,244 @@
-import { parseTierGateError, type TierGateError } from "@/lib/tiers";
+// apps/web/lib/searchSetsClient.ts
+
+export type SearchSetApiError = {
+  message: string;
+  status?: number;
+
+  validationErrors?: string[];
+
+  tierGate?: {
+    message: string;
+    requiredTier?: any;
+    currentTier?: any;
+    reason?: string;
+  } | null;
+};
+
+export type SearchSetRunInfo = {
+  baselineVersionId?: string | null;
+  executedAt?: string | null;
+  jobCount?: number | null;
+  resultsCount?: number | null;
+};
 
 export type SearchSetDto = {
   id: string;
-  titlePatterns: string[];
-  seniority: string[];
-  industry: string[];
-  workMode: string[];
-  location: string | null;
-  sourceUrl: string | null;
-  parseWarning: string | null;
-  urlBacked: boolean;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastRunAt?: string | null;
+
+  sourceUrl?: string;
+  titlePatterns?: string[];
+  seniority?: string[];
+  workMode?: string;
+  location?: string;
+
+  parseWarning?: string | null;
+
+  createdAt?: string;
+  updatedAt?: string;
+
+  lastRun?: SearchSetRunInfo | null;
+
   lastRunBaselineVersionId?: string | null;
+  lastRunAt?: string | null;
+  lastRunJobCount?: number | null;
   lastRunResultCount?: number | null;
 };
 
 export type SearchSetRunResult = {
-  jobId: string;
-  title: string | null;
-  company: string | null;
-  applyUrl: string | null;
-  sourceUrl: string | null;
-  fitScore: number | null;
-  verdict: string | null;
-  dimensionScores?: Record<string, number | null> | null;
+  jobId?: string | null;
+  title?: string | null;
+  company?: string | null;
+
+  verdict?: string | null;
+  fitScore?: number | null;
+
+  applyUrl?: string | null;
+  jobUrl?: string | null;
+
+  sourceUrl?: string | null;
+
   [key: string]: unknown;
 };
 
-export interface SearchSetApiError extends Error {
-  tierGate?: TierGateError | null;
-  validationErrors?: string[];
-  payload?: unknown;
+function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
 }
 
-function buildSearchSetUrl(id: string, suffix?: string) {
-  const encoded = encodeURIComponent(id);
-  return suffix ? `/api/search-sets/${encoded}${suffix}` : `/api/search-sets/${encoded}`;
+function asNullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") return value;
+  return undefined;
 }
 
-async function parseResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return null;
+function asNullableNumber(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
+}
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.filter((v) => typeof v === "string") as string[];
+  return out.length ? out : [];
+}
+
+function normalizeTierGate(value: unknown): SearchSetApiError["tierGate"] | undefined {
+  if (!isObject(value)) return undefined;
+
+  const requiredTierRaw = typeof value.requiredTier === "string" ? value.requiredTier : undefined;
+  const currentTierRaw = typeof value.currentTier === "string" ? value.currentTier : undefined;
+  const reason = typeof value.reason === "string" ? value.reason : undefined;
+
+  const message =
+    typeof value.message === "string" && value.message.trim()
+      ? value.message
+      : requiredTierRaw
+      ? `This action requires ${requiredTierRaw}.`
+      : "This action is not available for your current tier.";
+
+  return {
+    message,
+    requiredTier: requiredTierRaw as any,
+    currentTier: currentTierRaw as any,
+    reason,
+  };
+}
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { credentials: "include", ...init });
+
+  if (res.status === 401) {
+    throw new Error("unauthorized");
   }
-}
 
-function formatError(payload: unknown, fallback: string): string {
-  if (typeof payload === "string" && payload.trim()) {
-    return payload;
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+
+    const validationErrors = Array.isArray((data as any)?.validationErrors)
+      ? ((data as any).validationErrors.filter((v: any) => typeof v === "string") as string[])
+      : undefined;
+
+    const tierGate = normalizeTierGate((data as any)?.tierGate);
+
+    const message =
+      (data as any)?.message ||
+      (data as any)?.error ||
+      tierGate?.message ||
+      "Request failed";
+
+    const err: SearchSetApiError = {
+      message,
+      status: res.status,
+      validationErrors,
+      tierGate: tierGate ?? undefined,
+    };
+
+    throw err;
   }
 
-  if (payload && typeof payload === "object") {
-    const candidate = payload as Record<string, unknown>;
-    const value =
-      (typeof candidate.error === "string" ? candidate.error : null) ??
-      (typeof candidate.message === "string" ? candidate.message : null) ??
-      (typeof candidate.detail === "string" ? candidate.detail : null);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return fallback;
+  return (await res.json()) as T;
 }
 
-function readValidationErrors(payload: unknown): string[] {
-  if (!payload || typeof payload !== "object") return [];
-  const candidate = payload as Record<string, unknown>;
+function normalizeSearchSetDto(value: unknown): SearchSetDto {
+  if (!isObject(value) || typeof value.id !== "string" || !value.id.trim()) {
+    throw { message: "Unexpected response from getSearchSet." } as SearchSetApiError;
+  }
 
-  const raw = Array.isArray(candidate.validationErrors)
-    ? candidate.validationErrors
-    : Array.isArray(candidate.errors)
-      ? candidate.errors
-      : typeof candidate.detail === "string"
-        ? [candidate.detail]
-        : undefined;
+  const lastRunRaw = isObject(value.lastRun) ? value.lastRun : null;
 
-  if (!raw) return [];
-
-  const entries: string[] = [];
-
-  raw.forEach((entry) => {
-    if (typeof entry === "string") {
-      entries.push(entry);
-    } else if (entry && typeof entry === "object") {
-      const detail = (entry as { message?: string }).message;
-      if (typeof detail === "string") {
-        entries.push(detail);
+  const lastRun: SearchSetRunInfo | null = lastRunRaw
+    ? {
+        baselineVersionId: asNullableString(lastRunRaw.baselineVersionId),
+        executedAt: asNullableString(lastRunRaw.executedAt),
+        jobCount: asNullableNumber(lastRunRaw.jobCount),
+        resultsCount: asNullableNumber(lastRunRaw.resultsCount),
       }
-    }
-  });
+    : null;
 
-  return entries.filter(Boolean);
+  const parseWarning = asNullableString((value as any).parseWarning);
+
+  return {
+    id: value.id,
+
+    sourceUrl: typeof value.sourceUrl === "string" ? value.sourceUrl : undefined,
+    titlePatterns: asStringArray(value.titlePatterns),
+    seniority: asStringArray(value.seniority),
+    workMode: typeof value.workMode === "string" ? value.workMode : undefined,
+    location: typeof value.location === "string" ? value.location : undefined,
+
+    parseWarning: parseWarning ?? null,
+
+    createdAt: typeof value.createdAt === "string" ? value.createdAt : undefined,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : undefined,
+
+    lastRun,
+
+    lastRunBaselineVersionId: lastRun?.baselineVersionId ?? null,
+    lastRunAt: lastRun?.executedAt ?? null,
+    lastRunJobCount: typeof lastRun?.jobCount === "number" ? lastRun.jobCount : null,
+    lastRunResultCount: typeof lastRun?.resultsCount === "number" ? lastRun.resultsCount : null,
+  };
 }
 
-function createApiError(message: string, status: number, payload: unknown): SearchSetApiError {
-  const error = new Error(message) as SearchSetApiError;
-  error.tierGate = parseTierGateError({ status, payload });
-  error.validationErrors = readValidationErrors(payload);
-  error.payload = payload;
-  return error;
+function normalizeRunResultItem(value: unknown): SearchSetRunResult {
+  if (!isObject(value)) return {};
+
+  const title = asNullableString(value.title);
+  const company = asNullableString(value.company);
+  const jobId = asNullableString(value.jobId);
+
+  const verdict = asNullableString((value as any).verdict);
+  const fitScore = asNullableNumber((value as any).fitScore);
+
+  const applyUrl = asNullableString((value as any).applyUrl);
+  const jobUrl = asNullableString((value as any).jobUrl);
+  const sourceUrl = asNullableString((value as any).sourceUrl);
+
+  return {
+    ...value,
+    title: title ?? null,
+    company: company ?? null,
+    jobId: jobId ?? null,
+    verdict: verdict ?? null,
+    fitScore: fitScore ?? null,
+    applyUrl: applyUrl ?? null,
+    jobUrl: jobUrl ?? null,
+    sourceUrl: sourceUrl ?? null,
+  };
 }
 
-async function fetchSearchSet<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
-  const payload = await parseResponseBody(response);
-
-  if (!response.ok) {
-    const message = formatError(payload, response.statusText || "Search Set API error");
-    throw createApiError(message, response.status, payload);
-  }
-
-  return payload as T;
-}
-
-export async function getSearchSet(id: string): Promise<SearchSetDto> {
-  return fetchSearchSet<SearchSetDto>(buildSearchSetUrl(id), { cache: "no-store" });
+export async function getSearchSet(id: string) {
+  const raw = await api<unknown>(`/api/search-sets/${id}`, { cache: "no-store" });
+  return normalizeSearchSetDto(raw);
 }
 
 export async function runSearchSet(
   id: string,
-  baselineVersionId: string,
-  limit = 10,
+  baselineVersionId?: string | null,
+  limit?: number
 ): Promise<SearchSetRunResult[]> {
-  return fetchSearchSet<SearchSetRunResult[]>(
-    buildSearchSetUrl(id, "/run"),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ baselineVersionId, limit }),
-    },
-  );
+  const params = new URLSearchParams();
+
+  if (baselineVersionId) {
+    params.set("baselineVersionId", baselineVersionId);
+  }
+
+  if (typeof limit === "number" && Number.isFinite(limit)) {
+    params.set("limit", String(limit));
+  }
+
+  const url = params.toString()
+    ? `/api/search-sets/${id}/run?${params.toString()}`
+    : `/api/search-sets/${id}/run`;
+
+  const raw = await api<unknown>(url, { method: "POST" });
+
+  if (Array.isArray(raw)) {
+    return raw.map(normalizeRunResultItem);
+  }
+
+  if (isObject(raw) && Array.isArray((raw as any).results)) {
+    return ((raw as any).results as unknown[]).map(normalizeRunResultItem);
+  }
+
+  return [];
 }
