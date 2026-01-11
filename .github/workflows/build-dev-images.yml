@@ -3,7 +3,7 @@ name: Build and push dev images
 on:
   push:
     branches:
-      - do-Setup
+      - do-setup
 
 permissions:
   contents: read
