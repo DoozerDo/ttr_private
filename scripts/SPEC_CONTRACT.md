@@ -37,7 +37,7 @@ All endpoints require authenticated requests scoped to the resource owner. Times
     "industry_context": 0,
     "strategic_vs_tactical": 0
   },
-  "compliance_flags": [{"code": "scope_inflation|missing_baseline_hash|unknown_company", "message": "..."}],
+  "compliance_flags": [{"code": "scope_inflation|missing_baseline_hash", "message": "..."}],
   "audit_id": "..."
 }
 ```

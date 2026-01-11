@@ -30,6 +30,18 @@ export class BaselineVersion {
   @Column({ type: 'varchar', length: 255, nullable: true })
   fileHash!: string | null;
 
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  allowedCompanies!: string[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  allowedRoles!: string[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  allowedTechnologies!: string[];
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  allowedMetricTokens!: string[];
+
   get hash(): string | null {
     return this.fileHash;
   }

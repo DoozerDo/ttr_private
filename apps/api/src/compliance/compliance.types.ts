@@ -12,7 +12,6 @@ export enum ComplianceFlagCode {
   SCOPE_INFLATION = 'scope_inflation',
   MISSING_BASELINE_HASH = 'missing_baseline_hash',
   MISSING_BASELINE_VERSION = 'missing_baseline_version',
-  UNKNOWN_COMPANY = 'unknown_company',
   INVENTED_COMPANY = 'invented_company',
   INVENTED_ROLE = 'invented_role',
   INVENTED_METRIC = 'invented_metric',
@@ -29,6 +28,7 @@ export type ComplianceFlag = {
   code: ComplianceFlagCode;
   severity: ComplianceFlagSeverity;
   message: string;
+  confidence?: number;
   evidence?: Array<{ baseline: string; generated: string }>;
 };
 

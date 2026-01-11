@@ -4,15 +4,21 @@ import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
-import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagSeverity,
+  ComplianceTextSection,
+} from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   BaselineIncludePolicy,
   BaselineSection,
+  BaselineSectionType,
 } from './baseline-section.entity';
 import { Baseline } from './baseline.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersion } from './baseline-version.entity';
+import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
 
 type PolicyState = {
   baselineSectionId: string;
@@ -131,6 +137,14 @@ export class BaselineVersionService {
       order: { order: 'ASC' },
     });
 
+    const additionSections: ComplianceTextSection[] = additions.map((content, index) => ({
+      title: `Addition ${index + 1}`,
+      content,
+      sectionType: BaselineSectionType.OTHER,
+    }));
+    const snapshotSections = [...sections, ...additionSections];
+    const allowlistSnapshot = buildBaselineAllowlistSnapshot(snapshotSections);
+
     const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(sections);
 
     const generatedSections = additions.map((content, index) => ({
@@ -191,6 +205,10 @@ export class BaselineVersionService {
         verifiedAdditions: additions,
         additionDiff: diffPayload,
         promotedFromInterviewId: interview?.id ?? null,
+        allowedCompanies: allowlistSnapshot.allowedCompanies,
+        allowedRoles: allowlistSnapshot.allowedRoles,
+        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
       });
 
       const savedVersion = await manager.save(newVersion);
