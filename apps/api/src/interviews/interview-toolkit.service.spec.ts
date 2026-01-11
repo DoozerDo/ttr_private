@@ -140,7 +140,7 @@ describe('InterviewToolkitService', () => {
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
       hash: 'hash-1',
-      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
+      baseline: { id: 'baseline-1', userId: 'user-1', sections: [] } as Baseline,
     });
 
     const result = await service.generateFollowUp('user-1', 'job-2', 'bv-1', 'roadmap planning');
@@ -169,7 +169,7 @@ describe('InterviewToolkitService', () => {
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
       hash: 'hash-1',
-      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
+      baseline: { id: 'baseline-1', userId: 'user-1', sections: [] } as Baseline,
     });
 
     await expect(service.generateFollowUp('user-1', 'job-2', '')).rejects.toBeInstanceOf(

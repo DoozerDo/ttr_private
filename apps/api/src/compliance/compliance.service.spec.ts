@@ -93,4 +93,131 @@ describe('ComplianceService', () => {
       }),
     );
   });
+
+  describe('invented company and role detection', () => {
+    const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
+    const jobWithTitle = { ...job, title: 'Product Manager' };
+
+    it('blocks invented company references not in the baseline', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-company',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-company',
+        baselineSections: [
+          { title: 'Experience', content: 'Delivered impact at Example Co.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Enabled growth at Horizon Labs.' },
+        ],
+      });
+
+      expect(result.blocked).toBe(true);
+      expect(result.complianceFlags.map((flag) => flag.code)).toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
+    it('blocks invented role references not seen in baseline or job', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-role',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-role',
+        baselineSections: [
+          { title: 'Experience', content: 'Served as Software Engineer managing releases.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Discussed the Chief Innovation Strategist role.' },
+        ],
+      });
+
+      expect(result.blocked).toBe(true);
+      expect(result.complianceFlags.map((flag) => flag.code)).toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
+    it('allows allowlisted role phrases such as hiring manager', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-allowlist',
+        baselineVersion: baselineVersionWithHash,
+        job: jobWithTitle,
+        outputHash: 'out-allowlist',
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content: 'Thank you to the hiring manager and interview panel for their time.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
+    it('allows references to the job role when the job title matches', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.FOLLOW_UP_GENERATION,
+        actorId: 'user-job-role',
+        baselineVersion: baselineVersionWithHash,
+        job: jobWithTitle,
+        outputHash: 'out-job-role',
+        generatedSections: [
+          {
+            title: 'Follow Up',
+            content: 'I appreciated discussing the Product Manager role.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
+    it('allows baseline company references to persist', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: 'user-baseline',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-baseline-company',
+        baselineSections: [
+          { title: 'Experience', content: 'Led a team at Example Co.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Led a team at Example Co.' },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
+    it('allows baseline role references to persist', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: 'user-baseline-role',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-baseline-role',
+        baselineSections: [
+          { title: 'Experience', content: 'Served as Principal Designer.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Solidified experience as Principal Designer role.' },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+  });
 });

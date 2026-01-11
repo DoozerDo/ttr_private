@@ -30,3 +30,9 @@ export type ComplianceFlag = {
   message: string;
   evidence?: Array<{ baseline: string; generated: string }>;
 };
+
+export type ComplianceTextSection = {
+  title?: string | null;
+  content?: string | null;
+  sectionType?: string | null;
+};

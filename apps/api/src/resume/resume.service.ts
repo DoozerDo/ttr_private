@@ -177,6 +177,10 @@ export class ResumeService {
       source: 'baseline',
     }));
 
+    const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(
+      baseline.sections ?? [],
+    );
+
     const job = jobId
       ? await this.jobsRepository.findOne({
           where: { id: jobId, userId },
@@ -216,6 +220,8 @@ export class ResumeService {
         outputHash,
         scopeInflationDetected: false,
         extraFlags: [...writingFlags, ...scopeFlags],
+        baselineSections: normalizedBaselineSections,
+        generatedSections: normalizedSections,
       });
 
     if (blocked) {
@@ -286,6 +292,8 @@ export class ResumeService {
       outputHash: createHash('sha256')
         .update(`${format}:${text}`)
         .digest('hex'),
+      baselineSections: generation.sections,
+      generatedSections: generation.sections,
     });
 
     if (blocked) {

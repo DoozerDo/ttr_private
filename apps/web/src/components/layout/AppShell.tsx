@@ -179,33 +179,24 @@ export function AppShell({ children, userEmail }: AppShellProps) {
               "border-white/10 bg-transparent text-slate-100 hover:bg-slate-900/40";
             const activeClasses =
               "border-amber-400/60 bg-amber-400/20 text-amber-200 shadow-sm";
-            const disabledClasses =
-              "border-dashed border-white/20 bg-slate-900/30 text-slate-500 opacity-70 cursor-not-allowed";
-
-            if (disabledReason) {
-              return (
-                <div
-                  key={route.id}
-                  className={`${baseClasses} ${disabledClasses}`}
-                  title={disabledReason}
-                  aria-disabled="true"
-                >
-                  <span>{route.label}</span>
-                  <span className="text-[11px] font-medium text-slate-400">
-                    {disabledReason}
-                  </span>
-                </div>
-              );
-            }
+            const disabledLabelClasses =
+              "text-[11px] font-medium text-slate-400 leading-tight";
 
             return (
               <Link
                 key={route.id}
                 href={route.href}
-                className={`${baseClasses} ${isActive ? activeClasses : enabledClasses}`}
+                className={`${baseClasses} ${
+                  isActive ? activeClasses : enabledClasses
+                } ${disabledReason ? "cursor-pointer" : ""}`}
                 aria-current={isActive ? "page" : undefined}
+                title={disabledReason ?? undefined}
+                aria-disabled={disabledReason ? "true" : undefined}
               >
-                {route.label}
+                <span>{route.label}</span>
+                {disabledReason ? (
+                  <span className={disabledLabelClasses}>{disabledReason}</span>
+                ) : null}
               </Link>
             );
           })}

@@ -116,7 +116,7 @@ export class InterviewToolkitService {
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
       where: { id: baselineVersionId.trim() },
-      relations: ['baseline'],
+      relations: ['baseline', 'baseline.sections'],
     });
 
     if (!baselineVersion || !baselineVersion.baseline) {
@@ -141,9 +141,10 @@ export class InterviewToolkitService {
       .join(' ');
 
     const content = `${paragraphs} Thank you for your time.`.trim();
+    const normalizedContent = this.complianceService.normalizeText(content);
 
     const writingFlags = this.complianceService.enforceResumeWritingRules({
-      rawContent: content,
+      rawContent: normalizedContent,
     });
 
     const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
@@ -151,7 +152,11 @@ export class InterviewToolkitService {
       actorId: userId,
       baselineVersion,
       job,
-      outputHash: createHash('sha256').update(content).digest('hex'),
+      outputHash: createHash('sha256').update(normalizedContent).digest('hex'),
+      baselineSections: this.complianceService.normalizeSectionsForOutput(
+        baselineVersion.baseline?.sections ?? [],
+      ),
+      generatedSections: [{ title: 'Follow Up', content: normalizedContent }],
       extraFlags: writingFlags,
     });
 
@@ -163,7 +168,11 @@ export class InterviewToolkitService {
       throw new BadRequestException(message || 'Follow up could not be generated due to compliance.');
     }
 
-    return { job: { id: job.id, title: job.title, company: job.company }, content, complianceFlags };
+    return {
+      job: { id: job.id, title: job.title, company: job.company },
+      content: normalizedContent,
+      complianceFlags,
+    };
   }
 
   private matchesAnyGap(story: StarStory, gaps: string[]): boolean {

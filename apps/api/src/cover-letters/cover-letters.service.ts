@@ -174,12 +174,14 @@ export class CoverLettersService {
         actorId: userId,
         baselineVersion,
         job,
-        outputHash: createHash('sha256')
-          .update(normalizedContent)
-          .digest('hex'),
-        extraFlags: [...writingFlags, ...scopeFlags],
-        scopeInflationDetected: false,
-      });
+      outputHash: createHash('sha256')
+        .update(normalizedContent)
+        .digest('hex'),
+      baselineSections: complianceBaselineSections,
+      generatedSections: [{ title: 'Cover Letter', content: normalizedContent }],
+      extraFlags: [...writingFlags, ...scopeFlags],
+      scopeInflationDetected: false,
+    });
 
     if (blocked) {
       throw new UnprocessableEntityException({

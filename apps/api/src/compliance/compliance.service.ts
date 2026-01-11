@@ -8,9 +8,11 @@ import {
   ComplianceFlagCode,
   ComplianceFlag,
   ComplianceFlagSeverity,
+  ComplianceTextSection,
 } from './compliance.types';
 import { ComplianceAudit } from './compliance-audit.entity';
 import { ScopeInflationDetector } from './scope-inflation-detector';
+import { detectInventedCompany, detectInventedRole } from './detectors';
 
 export type ValidateAndAuditRequest = {
   action: ComplianceAction;
@@ -18,6 +20,8 @@ export type ValidateAndAuditRequest = {
 
   baselineVersion?: BaselineVersion | null;
   job?: Job | null;
+  baselineSections?: ComplianceTextSection[] | null;
+  generatedSections?: ComplianceTextSection[] | null;
 
   outputHash: string;
 
@@ -116,12 +120,16 @@ export class ComplianceService {
   }
 
   public enforceTechnologyConsistency(payload: {
-    baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
+    baselineSections?: ComplianceTextSection[] | null;
+    generatedSections?: ComplianceTextSection[] | null;
     jobText?: string | null;
     [key: string]: unknown;
   }): ComplianceFlag[] {
-    void payload;
-    return [];
+    return this.collectInventedFlags({
+      baselineSections: payload.baselineSections,
+      generatedSections: payload.generatedSections,
+      job: null,
+    });
   }
 
   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
@@ -203,6 +211,13 @@ export class ComplianceService {
       );
     }
 
+    const inventedFlags = this.collectInventedFlags({
+      baselineSections: payload.baselineSections,
+      generatedSections: payload.generatedSections,
+      job: payload.job,
+    });
+    flags.push(...inventedFlags);
+
     const blocked = flags.some(
       (f) =>
         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
@@ -235,6 +250,25 @@ export class ComplianceService {
         createdAt: savedAudit.createdAt.toISOString(),
       },
     };
+  }
+
+  private collectInventedFlags(payload: {
+    baselineSections?: ComplianceTextSection[] | null;
+    generatedSections?: ComplianceTextSection[] | null;
+    job?: Job | null;
+  }): ComplianceFlag[] {
+    return [
+      ...detectInventedCompany({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+      }),
+      ...detectInventedRole({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+      }),
+    ];
   }
 
   private flag(code: string, message: string, severity: ComplianceFlagSeverity): ComplianceFlag {

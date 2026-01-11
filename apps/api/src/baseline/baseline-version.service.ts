@@ -131,8 +131,10 @@ export class BaselineVersionService {
       order: { order: 'ASC' },
     });
 
+    const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(sections);
+
     const technologyFlags = this.complianceService.enforceTechnologyConsistency({
-      baselineSections: sections,
+      baselineSections: normalizedBaselineSections,
       generatedSections: additions.map((content, index) => ({
         title: `Addition ${index + 1}`,
         content,

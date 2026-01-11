@@ -61,6 +61,12 @@ const baseRoutes: RouteConfig[] = [
     requiresBaseline: true,
   },
   {
+    id: "jobs",
+    label: "Jobs",
+    href: "/jobs",
+    requiresAuth: true,
+  },
+  {
     id: "jobTracker",
     label: "Job Tracker",
     href: "/applications",
