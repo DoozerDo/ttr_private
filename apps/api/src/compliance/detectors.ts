@@ -4,6 +4,7 @@ import {
   ComplianceFlagSeverity,
   ComplianceTextSection,
 } from './compliance.types';
+import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
@@ -16,12 +17,52 @@ const COMPANY_CONTEXT_PATTERN =
 const COMPANY_SUFFIX_PATTERN =
   /\b([A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+)*\s+(?:Inc|Corp|LLC|LTD|Group|Labs|Technologies|Systems|Solutions|Studios|Partners|Agency|Works|Collective|Consulting|Ventures))\b/g;
 const COMPANY_UPPERCASE_PATTERN = /\b(?:at|with|for|from)\s+([A-Z]{2,})\b/g;
+const COMPANY_SUFFIXES = [
+  'inc',
+  'corporation',
+  'corp',
+  'llc',
+  'ltd',
+  'limited',
+  'co',
+  'company',
+  'group',
+  'partners',
+  'ventures',
+  'studios',
+  'technologies',
+  'systems',
+  'solutions',
+  'labs',
+  'collective',
+  'consulting',
+];
+const MONTHS = new Set([
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+]);
+const BASELINE_ROLE_SECTION_TYPES = new Set<string>([
+  BaselineSectionType.EXPERIENCE,
+  BaselineSectionType.SUMMARY,
+]);
+const EXPERIENCE_HEADER_DELIMITERS = /[-@|\/]+/;
 
 const ROLE_CONTEXT_PATTERN =
-  /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+)*)/gi;
+  /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4})/gi;
 const ROLE_TRAILING_PATTERN =
-  /([A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+)*)\s+(?:role|title|position)\b/gi;
-const ROLE_GENERAL_PATTERN = /[A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+){0,3}/g;
+  /([A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4})\s+(?:role|title|position)\b/gi;
+const ROLE_GENERAL_PATTERN =
+  /\b[A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4}\b/gi;
 
 const COMPANY_ALLOWLIST = new Set([
   'team',
@@ -33,6 +74,20 @@ const COMPANY_ALLOWLIST = new Set([
   'recruiter',
   'hiring manager',
   'panel',
+  'experience',
+  'work experience',
+  'professional experience',
+  'summary',
+  'professional summary',
+  'project',
+  'projects',
+  'skills',
+  'education',
+  'background',
+  'role',
+  'position',
+  'responsibility',
+  'responsibilities',
 ]);
 const LOCATION_ALLOWLIST = new Set([
   'new york',
@@ -50,6 +105,7 @@ const LOCATION_ALLOWLIST = new Set([
   'asia',
   'london',
   'chicago',
+  'hybrid',
 ]);
 const ROLE_ALLOWLIST = new Set([
   'hiring manager',
@@ -103,17 +159,159 @@ const ROLE_KEYWORD_PATTERN = new RegExp(
   'i',
 );
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const METRIC_CONTEXT_KEYWORDS = [
+  'reduce',
+  'reduced',
+  'reducing',
+  'increase',
+  'increased',
+  'increasing',
+  'improve',
+  'improved',
+  'improving',
+  'grow',
+  'grew',
+  'growing',
+  'save',
+  'saved',
+  'saving',
+  'decrease',
+  'decreased',
+  'decreasing',
+  'delivered',
+  'achieved',
+  'sla',
+  'csat',
+  'nps',
+  'aht',
+  'backlog',
+  'tickets',
+  'volume',
+  'time',
+  'revenue',
+  'churn',
+];
+const METRIC_CONTEXT_PATTERNS = METRIC_CONTEXT_KEYWORDS.map(
+  (keyword) => new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'i'),
+);
+const METRIC_CONTEXT_WINDOW = 40;
+const METRIC_VALUE_PATTERN =
+  /\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:percent(?:age)?|%))?\b/gi;
+const METRIC_IGNORE_CONTEXT_PATTERNS = [
+  /\b24\s*\/\s*7\b/i,
+  /\btier\s+[123]\b/i,
+  /\bsoc\s*2\b/i,
+  /\biso\s*27001\b/i,
+  /\bhipaa\b/i,
+];
+const METRIC_PHONE_PATTERN = /\b(?:\d{3}[-.\s]?){2}\d{4}\b/;
+const METRIC_EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+const METRIC_DATE_PATTERNS = [
+  /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/,
+  /\b\d{4}-\d{2}-\d{2}\b/,
+];
+const METRIC_YEAR_PATTERN = /^(?:19|20)\d{2}$/;
+
+const SPELLED_NUMBER_WORDS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+  hundred: 100,
+};
+const SPELLED_ONES_PATTERN = 'one|two|three|four|five|six|seven|eight|nine';
+const SPELLED_NUMBER_PATTERN = new RegExp(
+  `\\b(?:${Object.keys(SPELLED_NUMBER_WORDS).join('|')})(?:[ -](?:${SPELLED_ONES_PATTERN}))?\\b`,
+  'gi',
+);
+const METRIC_PERCENT_SUFFIX_PATTERN = /^\s*(?:percent(?:age)?|%)\b/i;
+
 function normalizeCandidate(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeTokenForComparison(value: string): string {
-  return normalizeCandidate(value).toLowerCase();
+  const normalized = normalizeCandidate(value);
+  if (!normalized) return '';
+  const cleaned = normalized
+    .replace(/[^0-9a-zA-Z&'\s]/g, ' ')
+    .replace(/'/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  return cleaned;
+}
+
+function stripCompanySuffixes(value: string): string {
+  let stripped = value.trim();
+  if (!stripped) return '';
+
+  let removed = true;
+  while (removed) {
+    removed = false;
+    for (const suffix of COMPANY_SUFFIXES) {
+      const pattern = new RegExp(`\\b${suffix}\\b$`, 'i');
+      if (pattern.test(stripped)) {
+        stripped = stripped.replace(pattern, '').trim();
+        removed = true;
+      }
+    }
+  }
+
+  return stripped;
+}
+
+function normalizeCompanyTokenForComparison(value: string): string {
+  const normalized = normalizeTokenForComparison(value);
+  if (!normalized) return '';
+  return stripCompanySuffixes(normalized);
+}
+
+function addCandidate(
+  map: Map<string, string>,
+  candidate: string,
+  normalizer: (value: string) => string,
+): void {
+  const normalized = normalizer(candidate);
+  if (!normalized || map.has(normalized)) {
+    return;
+  }
+  map.set(normalized, normalizeCandidate(candidate));
 }
 
 function collectCandidates(
   sections: ComplianceTextSection[] | null | undefined,
   extractor: (text: string) => string[],
+  normalizer: (value: string) => string = normalizeTokenForComparison,
 ): Map<string, string> {
   const candidates = new Map<string, string>();
 
@@ -122,13 +320,321 @@ function collectCandidates(
     if (!text) continue;
 
     for (const candidate of extractor(text)) {
-      const normalized = normalizeTokenForComparison(candidate);
-      if (!normalized || candidates.has(normalized)) continue;
-      candidates.set(normalized, normalizeCandidate(candidate));
+      addCandidate(candidates, candidate, normalizer);
     }
   }
 
   return candidates;
+}
+
+function looksLikeCompanyName(value: string): boolean {
+  const normalized = normalizeTokenForComparison(value);
+  if (!normalized) return false;
+  if (COMPANY_ALLOWLIST.has(normalized)) return false;
+  if (LOCATION_ALLOWLIST.has(normalized)) return false;
+  if (MONTHS.has(normalized)) return false;
+  return normalized.length >= 3;
+}
+
+function splitCompanyTitleParts(title: string): string[] {
+  return title
+    .split(EXPERIENCE_HEADER_DELIMITERS)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function extractCompanyFromHeaderLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  const fieldMatch = /\b(?:company|employer|organization)\s*[:\-–]\s*(.+)$/i.exec(trimmed);
+  if (fieldMatch) {
+    const candidate = fieldMatch[1].trim();
+    if (looksLikeCompanyName(candidate)) {
+      return candidate;
+    }
+  }
+
+  const roleFirstMatch = /^(.+?)\s+(?:at|@)\s+(.+)$/i.exec(trimmed);
+  if (roleFirstMatch) {
+    const candidate = roleFirstMatch[2].trim();
+    if (looksLikeCompanyName(candidate)) {
+      return candidate;
+    }
+  }
+
+  const companySeparatorMatch = /^(.+?)\s+[-–—@|\/]+\s+(.+)$/i.exec(trimmed);
+  if (companySeparatorMatch) {
+    const [, firstPart, secondPart] = companySeparatorMatch;
+    if (looksLikeCompanyName(firstPart)) {
+      return firstPart.trim();
+    }
+
+    if (looksLikeCompanyName(secondPart)) {
+      return secondPart.trim();
+    }
+  }
+
+  const atStartMatch = /^\bat\s+(.+)$/i.exec(trimmed);
+  if (atStartMatch) {
+    const candidate = atStartMatch[1].trim();
+    if (looksLikeCompanyName(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (looksLikeCompanyName(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+function extractStructuredCompanyCandidatesFromSections(
+  sections: ComplianceTextSection[] | null | undefined,
+): string[] {
+  const candidates = new Set<string>();
+
+  for (const section of sections ?? []) {
+    if (section.title) {
+      for (const part of splitCompanyTitleParts(section.title)) {
+        if (looksLikeCompanyName(part)) {
+          candidates.add(part);
+        }
+      }
+    }
+
+    const firstLine = section.content?.split('\n')[0]?.trim();
+    if (firstLine) {
+      const candidate = extractCompanyFromHeaderLine(firstLine);
+      if (candidate) {
+        candidates.add(candidate);
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+function extractExperienceHeaderCompanyCandidates(
+  sections: ComplianceTextSection[] | null | undefined,
+): string[] {
+  const candidates = new Set<string>();
+
+  for (const section of sections ?? []) {
+    const titleText = section.title ?? '';
+    const isExperienceSection =
+      section.sectionType === BaselineSectionType.EXPERIENCE ||
+      (!section.sectionType && /experience/i.test(titleText));
+    if (!isExperienceSection) continue;
+
+    const headerLines: string[] = [];
+    if (section.title) {
+      headerLines.push(section.title);
+    }
+
+    if (section.content) {
+      headerLines.push(
+        ...section.content
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(0, 2),
+      );
+    }
+
+    for (const line of headerLines) {
+      const candidate = extractCompanyFromHeaderLine(line);
+      if (candidate) {
+        candidates.add(candidate);
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+function extractBaselineCompanyTokens(
+  sections: ComplianceTextSection[] | null | undefined,
+): string[] {
+  const structured = extractStructuredCompanyCandidatesFromSections(sections);
+  if (structured.length) {
+    return structured;
+  }
+
+  return extractExperienceHeaderCompanyCandidates(sections);
+}
+
+function shouldUseForRoleDetection(sectionType?: string | null): boolean {
+  if (!sectionType) return true;
+  return BASELINE_ROLE_SECTION_TYPES.has(sectionType);
+}
+
+type MetricCandidate = {
+  normalized: string;
+  original: string;
+  context: string;
+};
+
+function normalizeMetricToken(value: string): string {
+  let normalized = String(value ?? '')
+    .replace(/,/g, '')
+    .replace(/\+/g, '')
+    .trim();
+
+  normalized = normalized.replace(/\s*percent(?:age)?\b/gi, '%');
+  normalized = normalized.replace(/\s*%/g, '%');
+  normalized = normalized.replace(/\s+/g, ' ').trim().toLowerCase();
+
+  if (!normalized || normalized === '%') {
+    return '';
+  }
+
+  return normalized;
+}
+
+function parseSpelledNumber(value: string): number | null {
+  const normalized = value.toLowerCase().replace(/-/g, ' ').trim();
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  if (!parts.length || parts.length > 2) return null;
+
+  if (parts.length === 1) {
+    if (parts[0] === 'hundred') return 100;
+
+    return SPELLED_NUMBER_WORDS[parts[0]] ?? null;
+  }
+
+  const [first, second] = parts;
+  if (second === 'hundred') {
+    return 100;
+  }
+
+  const firstValue = SPELLED_NUMBER_WORDS[first];
+  const secondValue = SPELLED_NUMBER_WORDS[second];
+
+  if (
+    typeof firstValue === 'number' &&
+    typeof secondValue === 'number' &&
+    firstValue >= 20 &&
+    secondValue > 0 &&
+    secondValue < 10
+  ) {
+    return firstValue + secondValue;
+  }
+
+  return null;
+}
+
+function collectMetricCandidatesFromSections(
+  sections: ComplianceTextSection[] | null | undefined,
+): MetricCandidate[] {
+  const candidates: MetricCandidate[] = [];
+
+  for (const section of sections ?? []) {
+    const text = [section.title, section.content].filter(Boolean).join(' ');
+    if (!text) continue;
+
+    METRIC_VALUE_PATTERN.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = METRIC_VALUE_PATTERN.exec(text))) {
+      const original = match[0];
+      const normalized = normalizeMetricToken(original);
+      if (!normalized) continue;
+
+      const contextStart = Math.max(0, match.index - METRIC_CONTEXT_WINDOW);
+      const contextEnd = Math.min(text.length, match.index + original.length + METRIC_CONTEXT_WINDOW);
+      const context = text.slice(contextStart, contextEnd).toLowerCase();
+
+      candidates.push({
+        normalized,
+        original: normalizeCandidate(original),
+        context,
+      });
+    }
+
+    SPELLED_NUMBER_PATTERN.lastIndex = 0;
+    let spelledMatch: RegExpExecArray | null;
+    while ((spelledMatch = SPELLED_NUMBER_PATTERN.exec(text))) {
+      const numberValue = parseSpelledNumber(spelledMatch[0]);
+      if (numberValue === null) continue;
+
+      const suffixSlice = text.slice(
+        spelledMatch.index + spelledMatch[0].length,
+        spelledMatch.index + spelledMatch[0].length + 15,
+      );
+      const percentMatch = suffixSlice.match(METRIC_PERCENT_SUFFIX_PATTERN);
+      const normalizedValue = normalizeMetricToken(
+        `${numberValue}${percentMatch ? '%' : ''}`,
+      );
+
+      if (!normalizedValue) continue;
+
+      const contextStart = Math.max(
+        0,
+        spelledMatch.index - METRIC_CONTEXT_WINDOW,
+      );
+      const context = text
+        .slice(
+          contextStart,
+          Math.min(text.length, spelledMatch.index + spelledMatch[0].length + METRIC_CONTEXT_WINDOW),
+        )
+        .toLowerCase();
+
+      candidates.push({
+        normalized: normalizedValue,
+        original: normalizeCandidate(
+        normalizedValue.endsWith('%')
+          ? `${spelledMatch[0]} ${percentMatch?.[0] ?? ''}`.trim()
+          : spelledMatch[0],
+        ),
+        context,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function hasMetricContext(context: string): boolean {
+  return METRIC_CONTEXT_PATTERNS.some((pattern) => pattern.test(context));
+}
+
+function isIgnoredMetricCandidate(candidate: MetricCandidate): boolean {
+  if (METRIC_YEAR_PATTERN.test(candidate.normalized)) return true;
+  if (METRIC_DATE_PATTERNS.some((pattern) => pattern.test(candidate.context))) return true;
+  if (METRIC_IGNORE_CONTEXT_PATTERNS.some((pattern) => pattern.test(candidate.context))) return true;
+  if (METRIC_PHONE_PATTERN.test(candidate.context)) return true;
+  if (METRIC_EMAIL_PATTERN.test(candidate.context)) return true;
+  return false;
+}
+
+export function detectInventedMetric(payload: DetectorPayload): ComplianceFlag[] {
+  const generatedCandidates = collectMetricCandidatesFromSections(payload.generatedSections);
+  if (!generatedCandidates.length) return [];
+
+  const baselineSet = new Set<string>(
+    collectMetricCandidatesFromSections(payload.baselineSections).map((candidate) => candidate.normalized),
+  );
+
+  const flagged = new Set<string>();
+  const flags: ComplianceFlag[] = [];
+
+  for (const candidate of generatedCandidates) {
+    if (baselineSet.has(candidate.normalized)) continue;
+    if (flagged.has(candidate.normalized)) continue;
+    if (!hasMetricContext(candidate.context)) continue;
+    if (isIgnoredMetricCandidate(candidate)) continue;
+
+    flagged.add(candidate.normalized);
+    flags.push({
+      code: ComplianceFlagCode.INVENTED_METRIC,
+      severity: ComplianceFlagSeverity.BLOCK,
+      message: `Detected invented metric "${candidate.original}". Only mention measurable outcomes you can trace back to your verified baseline or scoped job context.`,
+    });
+  }
+
+  return flags;
 }
 
 function extractCompanyCandidatesFromText(text: string): string[] {
@@ -181,12 +687,13 @@ function containsRoleKeyword(value: string): boolean {
 function isCompanyAllowlisted(normalized: string, original: string): boolean {
   if (COMPANY_ALLOWLIST.has(normalized)) return true;
   if (LOCATION_ALLOWLIST.has(normalized)) return true;
+  if (MONTHS.has(normalized)) return true;
   if (/\b(?:com|org|net|io|co|us|uk|edu|gov)\b/i.test(original)) return true;
   if (original.includes('@') || original.includes('.')) return true;
   return false;
 }
 
-function isRoleAllowlisted(normalized: string): boolean {
+function isRoleAllowlisted(normalized: string, _original?: string): boolean {
   return ROLE_ALLOWLIST.has(normalized);
 }
 
@@ -198,18 +705,44 @@ function detectInventedEntity(options: {
   allowlist: (normalized: string, original: string) => boolean;
   code: ComplianceFlagCode;
   message: (token: string) => string;
+  normalizer?: (value: string) => string;
+  baselineTokenExtractor?: (sections: ComplianceTextSection[] | null | undefined) => string[];
 }): ComplianceFlag[] {
-  const generated = collectCandidates(options.generatedSections, options.candidateExtractor);
+  const normalizer = options.normalizer ?? normalizeTokenForComparison;
+
+  const generated = collectCandidates(
+    options.generatedSections,
+    options.candidateExtractor,
+    normalizer,
+  );
   if (!generated.size) return [];
 
-  const allowedNormalized = new Set<string>(
-    options.allowedJobValues.filter(Boolean).map(normalizeTokenForComparison),
-  );
+  const baselineCandidates = new Map<string, string>();
+  if (options.baselineTokenExtractor) {
+    for (const candidate of options.baselineTokenExtractor(options.baselineSections)) {
+      addCandidate(baselineCandidates, candidate, normalizer);
+    }
+  }
 
-  const baselineCandidates = collectCandidates(
+  const baselineFromText = collectCandidates(
     options.baselineSections,
     options.candidateExtractor,
+    normalizer,
   );
+  for (const [normalized, original] of baselineFromText.entries()) {
+    if (!baselineCandidates.has(normalized)) {
+      baselineCandidates.set(normalized, original);
+    }
+  }
+
+  const allowedNormalized = new Set<string>();
+  for (const value of options.allowedJobValues.filter(Boolean)) {
+    const normalized = normalizer(value);
+    if (normalized) {
+      allowedNormalized.add(normalized);
+    }
+  }
+
   for (const token of baselineCandidates.keys()) {
     allowedNormalized.add(token);
   }
@@ -240,16 +773,22 @@ export function detectInventedCompany(payload: DetectorPayload): ComplianceFlag[
     code: ComplianceFlagCode.INVENTED_COMPANY,
     message: (token) =>
       `Detected invented company reference "${token}". Only mention companies from your verified baseline or the job context.`,
+    normalizer: normalizeCompanyTokenForComparison,
+    baselineTokenExtractor: extractBaselineCompanyTokens,
   });
 }
 
 export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
+  const baselineSectionsForRoles = (payload.baselineSections ?? []).filter((section) =>
+    shouldUseForRoleDetection(section.sectionType),
+  );
+
   return detectInventedEntity({
-    baselineSections: payload.baselineSections,
+    baselineSections: baselineSectionsForRoles,
     generatedSections: payload.generatedSections,
     allowedJobValues: payload.job?.title ? [payload.job.title] : [],
     candidateExtractor: extractRoleCandidatesFromText,
-    allowlist: (normalized) => isRoleAllowlisted(normalized),
+    allowlist: isRoleAllowlisted,
     code: ComplianceFlagCode.INVENTED_ROLE,
     message: (token) =>
       `Detected invented role or title "${token}". Describe roles you have actually held or the job you are applying to.`,

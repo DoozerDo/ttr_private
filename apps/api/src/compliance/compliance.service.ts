@@ -12,7 +12,11 @@ import {
 } from './compliance.types';
 import { ComplianceAudit } from './compliance-audit.entity';
 import { ScopeInflationDetector } from './scope-inflation-detector';
-import { detectInventedCompany, detectInventedRole } from './detectors';
+import {
+  detectInventedCompany,
+  detectInventedMetric,
+  detectInventedRole,
+} from './detectors';
 
 export type ValidateAndAuditRequest = {
   action: ComplianceAction;
@@ -264,6 +268,11 @@ export class ComplianceService {
         job: payload.job,
       }),
       ...detectInventedRole({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+      }),
+      ...detectInventedMetric({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,

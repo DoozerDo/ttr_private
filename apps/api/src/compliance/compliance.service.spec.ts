@@ -1,5 +1,6 @@
 import { ComplianceService } from './compliance.service';
 import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
+import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
 const buildAuditRepo = () => {
   const create = jest.fn((payload) => payload);
@@ -219,5 +220,186 @@ describe('ComplianceService', () => {
         ComplianceFlagCode.INVENTED_ROLE,
       );
     });
+
+    it('treats punctuation, suffix, and mixed-case variants of baseline companies as the same', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: 'user-company-variants',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-company-variants',
+        baselineSections: [
+          {
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: 'Guided strategy at Example, Inc.',
+          },
+        ],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Shared wins at example inc llc.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
+    it('recognizes seniority modifiers in baseline summaries so case-insensitive matches are allowed', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-seniority',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-seniority',
+        baselineSections: [
+          {
+            sectionType: BaselineSectionType.SUMMARY,
+            title: 'Summary',
+            content: 'Senior Product Manager driving clarity for product launches.',
+          },
+        ],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'I served as a senior product manager coordinating global launches.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+  });
+
+  describe('invented metric detection', () => {
+    type MetricScenario = {
+      name: string;
+      generated: string;
+      baselineSections?: Array<{
+        sectionType: BaselineSectionType;
+        title?: string;
+        content: string;
+      }>;
+      expectBlock: boolean;
+    };
+
+    const metricScenarios: MetricScenario[] = [
+      {
+        name: 'blocks new backlog metric without baseline',
+        generated:
+          'Reduced backlog by 30 percent in a single quarter.',
+        expectBlock: true,
+      },
+      {
+        name: 'blocks SLA uptime claim missing baseline',
+        generated:
+          'Delivered SLA of 99.9% uptime for 30 days.',
+        expectBlock: true,
+      },
+      {
+        name: 'blocks CSAT improvement outside baseline',
+        generated: 'Increased CSAT to 80% across the team.',
+        expectBlock: true,
+      },
+      {
+        name: 'blocks revenue claim outside baseline',
+        generated: 'Achieved revenue of 450000 last quarter.',
+        expectBlock: true,
+      },
+      {
+        name: 'allows existing CSAT from baseline',
+        generated: 'Improved CSAT to 80% across the team.',
+        baselineSections: [
+          {
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: 'Improved CSAT to 80% across the team.',
+          },
+        ],
+        expectBlock: false,
+      },
+      {
+        name: 'allows ISO 27001 certification mention',
+        generated: 'Achieved ISO 27001 certification and documentation.',
+        expectBlock: false,
+      },
+      {
+        name: 'allows 24/7 support mention',
+        generated: 'Delivered 24/7 response for critical incidents.',
+        expectBlock: false,
+      },
+      {
+        name: 'allows year reference even with backlog context',
+        generated: 'Delivered backlog improvements in 2023.',
+        expectBlock: false,
+      },
+      {
+        name: 'allows tier reference despite tickets context',
+        generated:
+          'Improved Tier 1 ticket response with dedicated coverage.',
+        expectBlock: false,
+      },
+      {
+        name: 'allows phone number mention near metric words',
+        generated:
+          'Delivered ticket follow-up and recorded 555-123-4567 for the support team.',
+        expectBlock: false,
+      },
+      {
+        name: 'blocks spelled-out backlog metric without baseline',
+        generated: 'Reduced backlog by ten percent after launching the intake review.',
+        expectBlock: true,
+      },
+      {
+        name: 'allows spelled number outside metric context',
+        generated: 'Collaborated with a team of ten engineers.',
+        expectBlock: false,
+      },
+      {
+        name: 'allows spelled metric already in baseline',
+        generated: 'Improved SLA to ten percent for the operational team.',
+        baselineSections: [
+          {
+            sectionType: BaselineSectionType.EXPERIENCE,
+            title: 'Experience',
+            content: 'Improved SLA to ten percent for the operational team.',
+          },
+        ],
+        expectBlock: false,
+      },
+    ];
+
+    for (const scenario of metricScenarios) {
+      it(`${scenario.name}`, async () => {
+        const result = await service.validateAndAudit({
+          action: ComplianceAction.RESUME_GENERATION,
+          actorId: `user-metric-${scenario.name.replace(/\s+/g, '-')}`,
+          baselineVersion: baselineVersionWithHash,
+          outputHash: `out-metric-${scenario.name.replace(/\s+/g, '-')}`,
+          baselineSections: scenario.baselineSections,
+          generatedSections: [
+            {
+              title: 'Experience',
+              content: scenario.generated,
+            },
+          ],
+        });
+
+        const codes = result.complianceFlags.map((flag) => flag.code);
+
+        if (scenario.expectBlock) {
+          expect(result.blocked).toBe(true);
+          expect(codes).toContain(ComplianceFlagCode.INVENTED_METRIC);
+        } else {
+          expect(result.blocked).toBe(false);
+          expect(codes).not.toContain(ComplianceFlagCode.INVENTED_METRIC);
+        }
+      });
+    }
   });
 });
