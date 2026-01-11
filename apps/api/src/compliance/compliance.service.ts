@@ -16,7 +16,14 @@ import {
   detectInventedCompany,
   detectInventedMetric,
   detectInventedRole,
+  detectFictionalTechnology,
 } from './detectors';
+import { resolveCompliancePolicy } from './compliance.policy';
+import { buildBaselineAllowlistSnapshot } from './baseline-allowlist';
+import {
+  BaselineAllowlistSnapshot,
+  EMPTY_BASELINE_ALLOWLIST,
+} from './baseline-allowlist.types';
 
 export type ValidateAndAuditRequest = {
   action: ComplianceAction;
@@ -26,6 +33,7 @@ export type ValidateAndAuditRequest = {
   job?: Job | null;
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;
+  baselineAllowlist?: BaselineAllowlistSnapshot | null;
 
   outputHash: string;
 
@@ -107,6 +115,7 @@ export class ComplianceService {
           ComplianceFlagCode.STYLIZED_PUNCTUATION,
           'Content contains stylized dash punctuation. Use standard hyphens instead.',
           ComplianceFlagSeverity.BLOCK,
+          0.82,
         ),
       );
     }
@@ -137,7 +146,38 @@ export class ComplianceService {
   }
 
   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
-    const flags: ComplianceFlag[] = [];
+    const rawFlags: ComplianceFlag[] = [];
+    const baselineVersion = payload.baselineVersion;
+
+    const needsFallback =
+      !(baselineVersion?.allowedCompanies?.length) ||
+      !(baselineVersion?.allowedRoles?.length) ||
+      !(baselineVersion?.allowedTechnologies?.length) ||
+      !(baselineVersion?.allowedMetricTokens?.length);
+
+    const fallbackSnapshot =
+      needsFallback && payload.baselineSections?.length
+        ? buildBaselineAllowlistSnapshot(payload.baselineSections)
+        : EMPTY_BASELINE_ALLOWLIST;
+
+    const baselineAllowlist: BaselineAllowlistSnapshot = {
+      allowedCompanies:
+        baselineVersion?.allowedCompanies?.length
+          ? baselineVersion.allowedCompanies
+          : fallbackSnapshot.allowedCompanies,
+      allowedRoles:
+        baselineVersion?.allowedRoles?.length
+          ? baselineVersion.allowedRoles
+          : fallbackSnapshot.allowedRoles,
+      allowedTechnologies:
+        baselineVersion?.allowedTechnologies?.length
+          ? baselineVersion.allowedTechnologies
+          : fallbackSnapshot.allowedTechnologies,
+      allowedMetricTokens:
+        baselineVersion?.allowedMetricTokens?.length
+          ? baselineVersion.allowedMetricTokens
+          : fallbackSnapshot.allowedMetricTokens,
+    };
 
     const actorId = String(payload.actorId ?? '').trim();
     const outputHash = String(payload.outputHash ?? '').trim();
@@ -149,13 +189,13 @@ export class ComplianceService {
     const jobId = (payload.job as any)?.id ?? null;
 
     if (!actorId) {
-      flags.push(
+      rawFlags.push(
         this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
       );
     }
 
     if (!outputHash) {
-      flags.push(
+      rawFlags.push(
         this.flag(
           'missing_output_hash',
           'Output hash is required.',
@@ -173,7 +213,7 @@ export class ComplianceService {
 
     if (baselineRequiredActions.includes(payload.action)) {
       if (!baselineVersionId) {
-        flags.push(
+        rawFlags.push(
           this.flag(
             ComplianceFlagCode.MISSING_BASELINE_VERSION,
             'baselineVersionId is required.',
@@ -183,7 +223,7 @@ export class ComplianceService {
       }
 
       if (!baselineVersionHash) {
-        flags.push(
+        rawFlags.push(
           this.flag(
             ComplianceFlagCode.MISSING_BASELINE_HASH,
             'Baseline version hash is required.',
@@ -196,7 +236,7 @@ export class ComplianceService {
     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
       for (const f of payload.extraFlags) {
         if (!f || typeof f.code !== 'string' || !f.code.trim()) continue;
-        flags.push({
+        rawFlags.push({
           code: f.code as any,
           message: f.message,
           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
@@ -206,7 +246,7 @@ export class ComplianceService {
     }
 
     if (payload.scopeInflationDetected === true) {
-      flags.push(
+      rawFlags.push(
         this.flag(
           ComplianceFlagCode.SCOPE_INFLATION,
           'Potential scope inflation detected.',
@@ -219,10 +259,15 @@ export class ComplianceService {
       baselineSections: payload.baselineSections,
       generatedSections: payload.generatedSections,
       job: payload.job,
+      baselineAllowlist,
     });
-    flags.push(...inventedFlags);
+    rawFlags.push(...inventedFlags);
 
-    const blocked = flags.some(
+    const finalFlags = rawFlags.map((flag) =>
+      this.applyPolicy(payload.action, flag),
+    );
+
+    const blocked = finalFlags.some(
       (f) =>
         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
     );
@@ -234,7 +279,7 @@ export class ComplianceService {
       baselineVersionHash,
       jobId: jobId ?? null,
       outputHash,
-      complianceFlags: flags,
+      complianceFlags: finalFlags,
       passFail: !blocked,
     });
 
@@ -242,7 +287,7 @@ export class ComplianceService {
 
     return {
       blocked,
-      complianceFlags: flags,
+      complianceFlags: finalFlags,
       audit: {
         id: savedAudit.id,
         outputHash: savedAudit.outputHash ?? '',
@@ -260,27 +305,68 @@ export class ComplianceService {
     baselineSections?: ComplianceTextSection[] | null;
     generatedSections?: ComplianceTextSection[] | null;
     job?: Job | null;
+    baselineAllowlist?: BaselineAllowlistSnapshot | null;
   }): ComplianceFlag[] {
     return [
       ...detectInventedCompany({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,
+        baselineAllowlist: payload.baselineAllowlist,
       }),
       ...detectInventedRole({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,
+        baselineAllowlist: payload.baselineAllowlist,
       }),
       ...detectInventedMetric({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,
+        baselineAllowlist: payload.baselineAllowlist,
+      }),
+      ...detectFictionalTechnology({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+        baselineAllowlist: payload.baselineAllowlist,
       }),
     ];
   }
 
-  private flag(code: string, message: string, severity: ComplianceFlagSeverity): ComplianceFlag {
-    return { code: code as any, message, severity };
+  private applyPolicy(action: ComplianceAction, flag: ComplianceFlag): ComplianceFlag {
+    const policy = resolveCompliancePolicy(action, flag.code);
+    const baseSeverity = flag.severity ?? ComplianceFlagSeverity.BLOCK;
+    if (!policy) {
+      return { ...flag, severity: baseSeverity };
+    }
+
+    let finalSeverity = policy.severity;
+
+    if (
+      typeof policy.blockConfidenceThreshold === 'number' &&
+      typeof flag.confidence === 'number'
+    ) {
+      finalSeverity =
+        flag.confidence >= policy.blockConfidenceThreshold
+          ? ComplianceFlagSeverity.BLOCK
+          : policy.severity;
+    }
+
+    return { ...flag, severity: finalSeverity };
+  }
+
+  private flag(
+    code: string,
+    message: string,
+    severity: ComplianceFlagSeverity,
+    confidence?: number,
+  ): ComplianceFlag {
+    const flag: ComplianceFlag = { code: code as any, message, severity };
+    if (confidence !== undefined) {
+      flag.confidence = confidence;
+    }
+    return flag;
   }
 }

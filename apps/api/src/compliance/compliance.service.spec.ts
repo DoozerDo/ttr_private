@@ -95,6 +95,62 @@ describe('ComplianceService', () => {
     );
   });
 
+  describe('policy map enforcement', () => {
+    it('downgrades technology flags below block threshold', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-policy',
+        baselineVersion: { id: 'bv-1', hash: 'hash-1' },
+        job: { id: 'job-1' },
+        outputHash: 'out-policy',
+        baselineSections: [],
+        generatedSections: [],
+        extraFlags: [
+          {
+            code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+            severity: ComplianceFlagSeverity.BLOCK,
+            message: 'Suspect technology',
+            confidence: 0.6,
+          },
+        ],
+      });
+
+      const techFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      );
+      expect(techFlag).toBeDefined();
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
+      expect(result.blocked).toBe(false);
+    });
+
+    it('blocks technology flags that meet the confidence threshold', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-policy-block',
+        baselineVersion: { id: 'bv-1', hash: 'hash-1' },
+        job: { id: 'job-1' },
+        outputHash: 'out-policy-block',
+        baselineSections: [],
+        generatedSections: [],
+        extraFlags: [
+          {
+            code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+            severity: ComplianceFlagSeverity.WARN,
+            message: 'Suspect technology',
+            confidence: 0.92,
+          },
+        ],
+      });
+
+      const techFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      );
+      expect(techFlag).toBeDefined();
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.BLOCK);
+      expect(result.blocked).toBe(true);
+    });
+  });
+
   describe('invented company and role detection', () => {
     const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
     const jobWithTitle = { ...job, title: 'Product Manager' };
@@ -401,5 +457,54 @@ describe('ComplianceService', () => {
         }
       });
     }
+  });
+
+  describe('fictional technology detection', () => {
+    it('blocks generated technology tokens not present in the baseline', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-tech',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-tech-1',
+        baselineSections: [
+          { title: 'Experience', content: 'Managed PostgreSQL and AWS migrations.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Built the ImaginaryDB control plane.' },
+        ],
+      });
+
+      const flags = result.complianceFlags.map((flag) => flag.code);
+      const message = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      )?.message;
+
+      expect(result.blocked).toBe(true);
+      expect(flags).toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+      expect(message).toContain('ImaginaryDB');
+    });
+
+    it('allows reuse of baseline technology tokens', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-tech-baseline',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-tech-2',
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Led ImaginaryDB automation for multiple releases.',
+          },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Scaled ImaginaryDB automation globally.' },
+        ],
+      });
+
+      const flags = result.complianceFlags.map((flag) => flag.code);
+
+      expect(result.blocked).toBe(false);
+      expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+    });
   });
 });

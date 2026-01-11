@@ -19,6 +19,7 @@ import { Baseline } from './baseline.entity';
 import { BaselineParserService, ParsedSection } from './baseline-parser.service';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
+import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
 
 export type FileMetadata = {
   originalname: string;
@@ -267,6 +268,7 @@ export class BaselineService {
         (savedBaseline.sections ?? []) as PolicySectionInput[],
       );
       const versionHash = this.buildVersionHash(fileHash, policyState);
+      const allowlistSnapshot = buildBaselineAllowlistSnapshot(savedBaseline.sections ?? []);
 
       const versionRecord = manager.create(BaselineVersion, {
         baselineId: savedBaseline.id,
@@ -276,6 +278,10 @@ export class BaselineService {
         verifiedAdditions: [],
         additionDiff: null,
         promotedFromInterviewId: null,
+        allowedCompanies: allowlistSnapshot.allowedCompanies,
+        allowedRoles: allowlistSnapshot.allowedRoles,
+        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
       });
 
       const savedVersion = await manager.save(versionRecord);
@@ -396,6 +402,7 @@ export class BaselineService {
         policyState,
         latestVersion?.verifiedAdditions ?? [],
       );
+      const allowlistSnapshot = buildBaselineAllowlistSnapshot(baseline.sections ?? []);
 
       const versionRecord = manager.create(BaselineVersion, {
         baselineId: baseline.id,
@@ -405,6 +412,10 @@ export class BaselineService {
         verifiedAdditions: [],
         additionDiff: null,
         promotedFromInterviewId: null,
+        allowedCompanies: allowlistSnapshot.allowedCompanies,
+        allowedRoles: allowlistSnapshot.allowedRoles,
+        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
       });
 
       const savedVersion = await manager.save(versionRecord);

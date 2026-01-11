@@ -196,6 +196,7 @@ export class ScopeInflationDetector {
     );
 
     const severity = hasBlocking ? ComplianceFlagSeverity.BLOCK : ComplianceFlagSeverity.WARN;
+    const confidence = hasBlocking ? 0.92 : 0.45;
 
     const evidence = violations.map((violation) => ({
       baseline: violation.baseline,
@@ -210,6 +211,7 @@ export class ScopeInflationDetector {
           ? 'Potential scope inflation exceeds baseline scope.'
           : 'Potential scope inflation cues need review against baseline.',
         evidence,
+        confidence,
       },
     ];
   }

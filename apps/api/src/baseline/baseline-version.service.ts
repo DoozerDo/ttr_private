@@ -4,15 +4,21 @@ import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
-import { ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagSeverity,
+  ComplianceTextSection,
+} from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   BaselineIncludePolicy,
   BaselineSection,
+  BaselineSectionType,
 } from './baseline-section.entity';
 import { Baseline } from './baseline.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersion } from './baseline-version.entity';
+import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
 
 type PolicyState = {
   baselineSectionId: string;
@@ -131,23 +137,20 @@ export class BaselineVersionService {
       order: { order: 'ASC' },
     });
 
+    const additionSections: ComplianceTextSection[] = additions.map((content, index) => ({
+      title: `Addition ${index + 1}`,
+      content,
+      sectionType: BaselineSectionType.OTHER,
+    }));
+    const snapshotSections = [...sections, ...additionSections];
+    const allowlistSnapshot = buildBaselineAllowlistSnapshot(snapshotSections);
+
     const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(sections);
 
-    const technologyFlags = this.complianceService.enforceTechnologyConsistency({
-      baselineSections: normalizedBaselineSections,
-      generatedSections: additions.map((content, index) => ({
-        title: `Addition ${index + 1}`,
-        content,
-      })),
-    });
-
-    const blockingTechnologyFlag = technologyFlags.find(
-      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-    );
-
-    if (blockingTechnologyFlag) {
-      throw new BadRequestException(blockingTechnologyFlag.message);
-    }
+    const generatedSections = additions.map((content, index) => ({
+      title: `Addition ${index + 1}`,
+      content,
+    }));
 
     const existingPolicies = latestVersion
       ? await this.baselineBlockPolicyRepository.find({
@@ -174,6 +177,25 @@ export class BaselineVersionService {
       interviewId: interview?.id ?? null,
     };
 
+    const complianceResult = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.BASELINE_PROMOTION,
+      actorId: userId,
+      baselineVersion: latestVersion ?? null,
+      baselineSections: normalizedBaselineSections,
+      generatedSections,
+      outputHash: versionHash,
+    });
+
+    if (complianceResult.blocked) {
+      const blockingFlag = complianceResult.complianceFlags.find(
+        (flag) =>
+          (flag.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+      );
+      throw new BadRequestException(
+        blockingFlag?.message ?? 'Promotion blocked due to compliance policy violations.',
+      );
+    }
+
     return this.baselineRepository.manager.transaction(async (manager) => {
       const newVersion = manager.create(BaselineVersion, {
         baselineId,
@@ -183,6 +205,10 @@ export class BaselineVersionService {
         verifiedAdditions: additions,
         additionDiff: diffPayload,
         promotedFromInterviewId: interview?.id ?? null,
+        allowedCompanies: allowlistSnapshot.allowedCompanies,
+        allowedRoles: allowlistSnapshot.allowedRoles,
+        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
       });
 
       const savedVersion = await manager.save(newVersion);

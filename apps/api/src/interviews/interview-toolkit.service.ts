@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
@@ -27,6 +32,12 @@ export type StudyPacket = {
   questions: ReturnType<InterviewQuestionGeneratorService['generateQuestions']>;
 };
 
+type FollowUpComplianceFlag = {
+  code: string;
+  message: string;
+  severity: string;
+};
+
 @Injectable()
 export class InterviewToolkitService {
   constructor(
@@ -43,11 +54,11 @@ export class InterviewToolkitService {
   ) {}
 
   private async requireJob(jobId: string, userId: string) {
-    const job = await this.jobRepository.findOne({ where: { id: jobId, userId } });
+    const normalized = jobId?.trim();
+    if (!normalized) throw new BadRequestException('jobId is required');
 
-    if (!job) {
-      throw new NotFoundException('Job not found');
-    }
+    const job = await this.jobRepository.findOne({ where: { id: normalized, userId } });
+    if (!job) throw new NotFoundException('Job not found');
 
     return job;
   }
@@ -56,7 +67,7 @@ export class InterviewToolkitService {
     const job = await this.requireJob(jobId, userId);
 
     const assessment = await this.fitAssessmentRepository.findOne({
-      where: { userId, jobId },
+      where: { userId, jobId: job.id },
       order: { createdAt: 'DESC' },
     });
 
@@ -83,9 +94,7 @@ export class InterviewToolkitService {
       ? stories.filter((story) => this.matchesAnyGap(story, normalizedGaps))
       : [];
 
-    const recommendedStories = storyMatches.length
-      ? storyMatches.slice(0, 5)
-      : stories.slice(0, 5);
+    const recommendedStories = storyMatches.length ? storyMatches.slice(0, 5) : stories.slice(0, 5);
 
     const gapsForQuestions = normalizedGaps.length
       ? normalizedGaps.map((gap, index) => this.gapFromText(gap, index))
@@ -107,15 +116,22 @@ export class InterviewToolkitService {
     jobId: string,
     baselineVersionId?: string | null,
     notes?: string,
-  ) {
+  ): Promise<{
+    job: { id: string; title: string | null; company: string | null };
+    content: string;
+    complianceFlags: FollowUpComplianceFlag[];
+    auditId: string;
+    baselineVersionHash: string | null;
+  }> {
     const job = await this.requireJob(jobId, userId);
 
-    if (!baselineVersionId?.trim()) {
+    const normalizedBaselineVersionId = baselineVersionId?.trim();
+    if (!normalizedBaselineVersionId) {
       throw new BadRequestException('baselineVersionId is required');
     }
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { id: baselineVersionId.trim() },
+      where: { id: normalizedBaselineVersionId },
       relations: ['baseline', 'baseline.sections'],
     });
 
@@ -127,27 +143,30 @@ export class InterviewToolkitService {
       throw new NotFoundException('Baseline version not found');
     }
 
-    if (!baselineVersion.hash) {
+    const baselineHash: string | null =
+      (baselineVersion as unknown as { fileHash?: string | null }).fileHash ?? null;
+
+    if (!baselineHash) {
       throw new BadRequestException('Baseline version hash missing');
     }
 
     const header = job.company ? `Hi ${job.company} team,` : 'Hi there,';
-    const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : undefined;
-    const notesLine = notes?.trim() ? `I appreciated discussing ${notes.trim()}.` : undefined;
-    const close = 'Please let me know if any additional context would be helpful.';
+    const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : null;
+    const notesLine = notes?.trim() ? `I appreciated discussing ${notes.trim()}.` : null;
+    const close = 'Please let me know if any additional context would be helpful. Thank you for your time.';
 
-    const paragraphs = [header, roleLine, notesLine, 'I remain excited about the opportunity to contribute.', close]
-      .filter(Boolean)
-      .join(' ');
+    const content = [header, roleLine, notesLine, 'I remain excited about the opportunity to contribute.', close]
+      .filter((p): p is string => Boolean(p))
+      .join(' ')
+      .trim();
 
-    const content = `${paragraphs} Thank you for your time.`.trim();
     const normalizedContent = this.complianceService.normalizeText(content);
 
     const writingFlags = this.complianceService.enforceResumeWritingRules({
       rawContent: normalizedContent,
     });
 
-    const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
+    const { blocked, complianceFlags, audit } = await this.complianceService.validateAndAudit({
       action: ComplianceAction.FOLLOW_UP_GENERATION,
       actorId: userId,
       baselineVersion,
@@ -161,22 +180,56 @@ export class InterviewToolkitService {
     });
 
     if (blocked) {
-      const message = complianceFlags
-        .map((flag) => flag.message)
-        .filter(Boolean)
-        .join('; ');
-      throw new BadRequestException(message || 'Follow up could not be generated due to compliance.');
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            compliance_flags: complianceFlags,
+            audit_id: audit.id,
+            baseline_version_hash: audit.baselineVersionHash,
+          },
+        },
+      });
     }
 
     return {
       job: { id: job.id, title: job.title, company: job.company },
       content: normalizedContent,
-      complianceFlags,
+      complianceFlags: this.normalizeComplianceFlags(complianceFlags),
+      auditId: audit.id,
+      baselineVersionHash: audit.baselineVersionHash,
     };
   }
 
+  private normalizeComplianceFlags(input: unknown): FollowUpComplianceFlag[] {
+    if (!Array.isArray(input)) return [];
+
+    const normalized: FollowUpComplianceFlag[] = [];
+
+    for (const entry of input) {
+      if (!entry || typeof entry !== 'object') continue;
+
+      const record = entry as Record<string, unknown>;
+
+      const codeRaw = record.code;
+      const messageRaw = record.message;
+      const severityRaw = record.severity;
+
+      const code = typeof codeRaw === 'string' && codeRaw.trim() ? codeRaw.trim() : 'UNKNOWN';
+      const message =
+        typeof messageRaw === 'string' && messageRaw.trim() ? messageRaw.trim() : 'Compliance notice';
+      const severity =
+        typeof severityRaw === 'string' && severityRaw.trim() ? severityRaw.trim() : 'warn';
+
+      normalized.push({ code, message, severity });
+    }
+
+    return normalized;
+  }
+
   private matchesAnyGap(story: StarStory, gaps: string[]): boolean {
-    const haystack = `${story.title} ${story.competencies?.join(' ') ?? ''}`.toLowerCase();
+    const haystack = `${story.title} ${(story.competencies ?? []).join(' ')}`.toLowerCase();
     return gaps.some((gap) => haystack.includes((gap ?? '').toLowerCase()));
   }
 
@@ -192,7 +245,7 @@ export class InterviewToolkitService {
   }
 
   private defaultGapsFromJob(job: Job): InterviewGap[] {
-    const snippets = (job.normalizedResponsibilities ?? []).slice(0, 3);
+    const snippets: string[] = (job.normalizedResponsibilities ?? []).slice(0, 3);
 
     if (snippets.length === 0 && job.rawDescription) {
       const lines = job.rawDescription.split(/\n+/).filter(Boolean);

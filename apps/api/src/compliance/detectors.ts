@@ -4,12 +4,14 @@ import {
   ComplianceFlagSeverity,
   ComplianceTextSection,
 } from './compliance.types';
+import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;
   job?: { title?: string | null; company?: string | null } | null;
+  baselineAllowlist?: BaselineAllowlistSnapshot | null;
 };
 
 const COMPANY_CONTEXT_PATTERN =
@@ -254,11 +256,11 @@ const SPELLED_NUMBER_PATTERN = new RegExp(
 );
 const METRIC_PERCENT_SUFFIX_PATTERN = /^\s*(?:percent(?:age)?|%)\b/i;
 
-function normalizeCandidate(value: string): string {
+export function normalizeCandidate(value: string): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function normalizeTokenForComparison(value: string): string {
+export function normalizeTokenForComparison(value: string): string {
   const normalized = normalizeCandidate(value);
   if (!normalized) return '';
   const cleaned = normalized
@@ -290,13 +292,13 @@ function stripCompanySuffixes(value: string): string {
   return stripped;
 }
 
-function normalizeCompanyTokenForComparison(value: string): string {
+export function normalizeCompanyTokenForComparison(value: string): string {
   const normalized = normalizeTokenForComparison(value);
   if (!normalized) return '';
   return stripCompanySuffixes(normalized);
 }
 
-function addCandidate(
+export function addCandidate(
   map: Map<string, string>,
   candidate: string,
   normalizer: (value: string) => string,
@@ -308,7 +310,7 @@ function addCandidate(
   map.set(normalized, normalizeCandidate(candidate));
 }
 
-function collectCandidates(
+export function collectCandidates(
   sections: ComplianceTextSection[] | null | undefined,
   extractor: (text: string) => string[],
   normalizer: (value: string) => string = normalizeTokenForComparison,
@@ -454,7 +456,7 @@ function extractExperienceHeaderCompanyCandidates(
   return [...candidates];
 }
 
-function extractBaselineCompanyTokens(
+export function extractBaselineCompanyTokens(
   sections: ComplianceTextSection[] | null | undefined,
 ): string[] {
   const structured = extractStructuredCompanyCandidatesFromSections(sections);
@@ -465,7 +467,7 @@ function extractBaselineCompanyTokens(
   return extractExperienceHeaderCompanyCandidates(sections);
 }
 
-function shouldUseForRoleDetection(sectionType?: string | null): boolean {
+export function shouldUseForRoleDetection(sectionType?: string | null): boolean {
   if (!sectionType) return true;
   return BASELINE_ROLE_SECTION_TYPES.has(sectionType);
 }
@@ -525,7 +527,7 @@ function parseSpelledNumber(value: string): number | null {
   return null;
 }
 
-function collectMetricCandidatesFromSections(
+export function collectMetricCandidatesFromSections(
   sections: ComplianceTextSection[] | null | undefined,
 ): MetricCandidate[] {
   const candidates: MetricCandidate[] = [];
@@ -613,9 +615,13 @@ export function detectInventedMetric(payload: DetectorPayload): ComplianceFlag[]
   const generatedCandidates = collectMetricCandidatesFromSections(payload.generatedSections);
   if (!generatedCandidates.length) return [];
 
-  const baselineSet = new Set<string>(
-    collectMetricCandidatesFromSections(payload.baselineSections).map((candidate) => candidate.normalized),
-  );
+  const baselineSet = payload.baselineAllowlist?.allowedMetricTokens?.length
+    ? new Set(payload.baselineAllowlist.allowedMetricTokens)
+    : new Set<string>(
+        collectMetricCandidatesFromSections(payload.baselineSections).map(
+          (candidate) => candidate.normalized,
+        ),
+      );
 
   const flagged = new Set<string>();
   const flags: ComplianceFlag[] = [];
@@ -631,13 +637,14 @@ export function detectInventedMetric(payload: DetectorPayload): ComplianceFlag[]
       code: ComplianceFlagCode.INVENTED_METRIC,
       severity: ComplianceFlagSeverity.BLOCK,
       message: `Detected invented metric "${candidate.original}". Only mention measurable outcomes you can trace back to your verified baseline or scoped job context.`,
+      confidence: 0.96,
     });
   }
 
   return flags;
 }
 
-function extractCompanyCandidatesFromText(text: string): string[] {
+export function extractCompanyCandidatesFromText(text: string): string[] {
   const matches = new Set<string>();
   let match: RegExpExecArray | null;
 
@@ -655,7 +662,7 @@ function extractCompanyCandidatesFromText(text: string): string[] {
   return [...matches];
 }
 
-function extractRoleCandidatesFromText(text: string): string[] {
+export function extractRoleCandidatesFromText(text: string): string[] {
   const matches = new Set<string>();
   let match: RegExpExecArray | null;
 
@@ -707,6 +714,9 @@ function detectInventedEntity(options: {
   message: (token: string) => string;
   normalizer?: (value: string) => string;
   baselineTokenExtractor?: (sections: ComplianceTextSection[] | null | undefined) => string[];
+  baselineAllowlist?: string[];
+  confidence?: number;
+  confidenceFactory?: (token: string) => number;
 }): ComplianceFlag[] {
   const normalizer = options.normalizer ?? normalizeTokenForComparison;
 
@@ -717,34 +727,44 @@ function detectInventedEntity(options: {
   );
   if (!generated.size) return [];
 
-  const baselineCandidates = new Map<string, string>();
-  if (options.baselineTokenExtractor) {
-    for (const candidate of options.baselineTokenExtractor(options.baselineSections)) {
-      addCandidate(baselineCandidates, candidate, normalizer);
-    }
-  }
-
-  const baselineFromText = collectCandidates(
-    options.baselineSections,
-    options.candidateExtractor,
-    normalizer,
-  );
-  for (const [normalized, original] of baselineFromText.entries()) {
-    if (!baselineCandidates.has(normalized)) {
-      baselineCandidates.set(normalized, original);
-    }
-  }
-
   const allowedNormalized = new Set<string>();
+  const precomputed = options.baselineAllowlist ?? [];
+
+  if (precomputed.length) {
+    for (const token of precomputed) {
+      if (token) {
+        allowedNormalized.add(token);
+      }
+    }
+  } else {
+    const baselineCandidates = new Map<string, string>();
+    if (options.baselineTokenExtractor) {
+      for (const candidate of options.baselineTokenExtractor(options.baselineSections)) {
+        addCandidate(baselineCandidates, candidate, normalizer);
+      }
+    }
+
+    const baselineFromText = collectCandidates(
+      options.baselineSections,
+      options.candidateExtractor,
+      normalizer,
+    );
+    for (const [normalized, original] of baselineFromText.entries()) {
+      if (!baselineCandidates.has(normalized)) {
+        baselineCandidates.set(normalized, original);
+      }
+    }
+
+    for (const token of baselineCandidates.keys()) {
+      allowedNormalized.add(token);
+    }
+  }
+
   for (const value of options.allowedJobValues.filter(Boolean)) {
     const normalized = normalizer(value);
     if (normalized) {
       allowedNormalized.add(normalized);
     }
-  }
-
-  for (const token of baselineCandidates.keys()) {
-    allowedNormalized.add(token);
   }
 
   const flags: ComplianceFlag[] = [];
@@ -753,10 +773,18 @@ function detectInventedEntity(options: {
     if (allowedNormalized.has(normalized)) continue;
     if (options.allowlist(normalized, original)) continue;
 
+    const confidence =
+      typeof options.confidence === 'number'
+        ? options.confidence
+        : options.confidenceFactory
+        ? options.confidenceFactory(original)
+        : 0.92;
+
     flags.push({
       code: options.code,
       severity: ComplianceFlagSeverity.BLOCK,
       message: options.message(original),
+      confidence,
     });
   }
 
@@ -775,6 +803,8 @@ export function detectInventedCompany(payload: DetectorPayload): ComplianceFlag[
       `Detected invented company reference "${token}". Only mention companies from your verified baseline or the job context.`,
     normalizer: normalizeCompanyTokenForComparison,
     baselineTokenExtractor: extractBaselineCompanyTokens,
+    baselineAllowlist: payload.baselineAllowlist?.allowedCompanies ?? [],
+    confidence: 0.95,
   });
 }
 
@@ -792,5 +822,82 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
     code: ComplianceFlagCode.INVENTED_ROLE,
     message: (token) =>
       `Detected invented role or title "${token}". Describe roles you have actually held or the job you are applying to.`,
+    baselineAllowlist: payload.baselineAllowlist?.allowedRoles ?? [],
+    confidence: 0.95,
   });
+}
+
+const TECHNOLOGY_TOKEN_PATTERN = /\b[A-Za-z0-9][-A-Za-z0-9.\+#_]{1,}\b/g;
+
+function isTechnologyTokenCandidate(value: string): boolean {
+  const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
+  if (cleaned.length < 3) return false;
+
+  if (/[.#\+#-]/.test(value)) return true;
+  if (/\d/.test(cleaned)) return true;
+
+  const remainder = cleaned.slice(1);
+  if (!/[A-Z]/.test(remainder)) return false;
+  if (!/[a-z]/.test(cleaned)) return false;
+
+  return true;
+}
+
+export function collectTechnologyTokensFromSections(
+  sections: ComplianceTextSection[] | null | undefined,
+): Map<string, string> {
+  const tokens = new Map<string, string>();
+
+  for (const section of sections ?? []) {
+    const text = [section.title, section.content].filter(Boolean).join(' ');
+    if (!text) continue;
+
+    TECHNOLOGY_TOKEN_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = TECHNOLOGY_TOKEN_PATTERN.exec(text))) {
+      const candidate = normalizeCandidate(match[0]);
+      if (!candidate || !isTechnologyTokenCandidate(candidate)) continue;
+      addCandidate(tokens, candidate, normalizeTokenForComparison);
+    }
+  }
+
+  return tokens;
+}
+
+export function computeTechnologyConfidence(token: string): number {
+  const normalized = normalizeCandidate(token ?? '');
+  if (!normalized) return 0.5;
+
+  let score = 0.4;
+  score += Math.min(0.35, normalized.length / 20);
+  if (/[A-Z]/.test(normalized)) score += 0.2;
+  if (/[0-9]/.test(normalized)) score += 0.1;
+  if (/[\.+#_]/.test(normalized)) score += 0.1;
+  if (/\./.test(normalized)) score += 0.05;
+  return Math.min(0.98, score);
+}
+
+export function detectFictionalTechnology(payload: DetectorPayload): ComplianceFlag[] {
+  const generatedTokens = collectTechnologyTokensFromSections(payload.generatedSections);
+  if (!generatedTokens.size) return [];
+
+  const baselineTokenSet = payload.baselineAllowlist?.allowedTechnologies?.length
+    ? new Set(payload.baselineAllowlist.allowedTechnologies)
+    : new Set(collectTechnologyTokensFromSections(payload.baselineSections).keys());
+  const flags: ComplianceFlag[] = [];
+
+  for (const [normalized, original] of generatedTokens.entries()) {
+    if (baselineTokenSet.has(normalized)) continue;
+    const tokenForConfidence = original ?? normalized;
+    const confidence = computeTechnologyConfidence(tokenForConfidence);
+
+    flags.push({
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      severity: ComplianceFlagSeverity.BLOCK,
+      message: `Technology "${original}" not found in baseline.`,
+      confidence,
+    });
+  }
+
+  return flags;
 }

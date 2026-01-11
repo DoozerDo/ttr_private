@@ -168,27 +168,31 @@ export class CoverLettersService {
       generatedSections: [{ title: 'Cover Letter', content: generation.content }],
     });
 
-    const { complianceFlags, blocked } =
+    const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({
         action: ComplianceAction.COVER_LETTER_GENERATION,
         actorId: userId,
         baselineVersion,
         job,
-      outputHash: createHash('sha256')
-        .update(normalizedContent)
-        .digest('hex'),
-      baselineSections: complianceBaselineSections,
-      generatedSections: [{ title: 'Cover Letter', content: normalizedContent }],
-      extraFlags: [...writingFlags, ...scopeFlags],
-      scopeInflationDetected: false,
-    });
+        outputHash: createHash('sha256')
+          .update(normalizedContent)
+          .digest('hex'),
+        baselineSections: complianceBaselineSections,
+        generatedSections: [{ title: 'Cover Letter', content: normalizedContent }],
+        extraFlags: [...writingFlags, ...scopeFlags],
+        scopeInflationDetected: false,
+      });
 
     if (blocked) {
       throw new UnprocessableEntityException({
         error: {
-          code: 'unprocessable',
+          code: 'COMPLIANCE_VIOLATION',
           message: 'Compliance validation failed.',
-          details: { compliance_flags: complianceFlags },
+          details: {
+            compliance_flags: complianceFlags,
+            audit_id: audit.id,
+            baseline_version_hash: audit.baselineVersionHash,
+          },
         },
       });
     }
@@ -204,7 +208,14 @@ export class CoverLettersService {
       generationInputsHash,
     });
 
-    return this.coverLetterRepository.save(coverLetter);
+    const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
+
+    return {
+      ...savedCoverLetter,
+      compliance_flags: complianceFlags,
+      audit_id: audit.id,
+      baseline_version_hash: audit.baselineVersionHash,
+    };
   }
 
   async listCoverLetters(userId: string) {
