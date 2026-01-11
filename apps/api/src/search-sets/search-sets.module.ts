@@ -6,10 +6,14 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Job } from '../jobs/job.entity';
+import { JobsModule } from '../jobs/jobs.module';
 import { SearchSet } from './search-set.entity';
+import { SearchSetRun } from './search-set-run.entity';
+import { SearchSetRunsService } from './search-set-runs.service';
 import { SearchSetsController } from './search-sets.controller';
 import { SearchSetsRunnerService } from './search-sets-runner.service';
 import { SearchSetsService } from './search-sets.service';
+import { JobSourcesModule } from '../job-sources/job-source.module';
 
 @Module({
   imports: [
@@ -20,12 +24,16 @@ import { SearchSetsService } from './search-sets.service';
       Baseline,
       BaselineVersion,
       BaselineBlockPolicy,
+      SearchSetRun,
     ]),
+    JobsModule,
+    JobSourcesModule,
   ],
   controllers: [SearchSetsController],
   providers: [
     SearchSetsService,
     SearchSetsRunnerService,
+    SearchSetRunsService,
     FitScoringService,
   ],
 })

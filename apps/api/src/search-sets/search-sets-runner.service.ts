@@ -15,7 +15,16 @@ import {
   BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { Job } from '../jobs/job.entity';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import { JobsService } from '../jobs/jobs.service';
+import { JobSourceRegistry } from '../job-sources/job-source-registry.service';
+import { JobSourceInput, ParsedJob } from '../job-sources/job-source.types';
+import { createHash } from 'node:crypto';
+import {
+  SearchSetRunResultSummary,
+  SearchSetRunSourceSnapshot,
+} from './search-set-run.entity';
+import { SearchSetRunRecordInput, SearchSetRunsService } from './search-set-runs.service';
 import {
   SearchSet,
   SearchSetSeniority,
@@ -32,6 +41,18 @@ type SearchSetRunResult = {
   fitScore: number | null;
   verdict: FitAssessment['verdict'] | null;
   dimensionScores: FitAssessment['dimensionScores'] | null;
+};
+
+type SearchSetRunMetadata = {
+  usedProviderDiscovery: boolean;
+  providerId: string | null;
+  sourceSnapshot: SearchSetRunSourceSnapshot | null;
+  runInputHash: string | null;
+};
+
+type SearchSetRunResponse = {
+  results: SearchSetRunResult[];
+  metadata: SearchSetRunMetadata;
 };
 
 type BaselineContext = {
@@ -52,7 +73,9 @@ export class SearchSetsRunnerService {
   constructor(
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
+    private readonly jobsService: JobsService,
     private readonly searchSetsService: SearchSetsService,
+    private readonly jobSourceRegistry: JobSourceRegistry,
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     @InjectRepository(Baseline)
@@ -62,14 +85,17 @@ export class SearchSetsRunnerService {
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     private readonly fitScoringService: FitScoringService,
+    private readonly searchSetRunsService: SearchSetRunsService,
   ) {}
+
+  private readonly detailFetchDelayMs = 250;
 
   async runSearchSet(
     searchSetId: string,
     userId: string,
     baselineVersionId: string,
     limit?: number,
-  ): Promise<SearchSetRunResult[]> {
+  ): Promise<SearchSetRunResponse> {
     const normalizedBaselineVersionId = baselineVersionId?.trim();
     if (!normalizedBaselineVersionId) {
       throw new BadRequestException(
@@ -83,7 +109,15 @@ export class SearchSetsRunnerService {
     );
 
     if (!searchSet.isActive) {
-      return [];
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: false,
+          providerId: null,
+          sourceSnapshot: null,
+          runInputHash: null,
+        },
+      };
     }
 
     const baselineContext = await this.loadBaselineForVersion(
@@ -91,6 +125,32 @@ export class SearchSetsRunnerService {
       normalizedBaselineVersionId,
     );
 
+    if (searchSet.sourceType && searchSet.sourceUrl) {
+      return this.runProviderSearchSet(
+        searchSet,
+        userId,
+        normalizedBaselineVersionId,
+        baselineContext,
+        limit,
+      );
+    }
+
+    return this.runLegacySearchSet(
+      searchSet,
+      userId,
+      normalizedBaselineVersionId,
+      baselineContext,
+      limit,
+    );
+  }
+
+  private async runLegacySearchSet(
+    searchSet: SearchSet,
+    userId: string,
+    baselineVersionId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<SearchSetRunResponse> {
     const jobs = await this.jobRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
@@ -99,19 +159,179 @@ export class SearchSetsRunnerService {
     const matchedJobs = jobs.filter((job) => this.matchesSearchSet(job, searchSet));
 
     if (!matchedJobs.length) {
-      await this.recordRunSafely(searchSet, normalizedBaselineVersionId, 0);
-      return [];
+      await this.recordRunSafely(searchSet, baselineVersionId, 0, {
+        searchSetId: searchSet.id,
+        baselineVersionId,
+        sourceSnapshot: null,
+        runInputHash: null,
+        usedProviderDiscovery: false,
+        topResults: [],
+      });
+
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: false,
+          providerId: null,
+          sourceSnapshot: null,
+          runInputHash: null,
+        },
+      };
+    }
+
+    const { results, ranked } = await this.scoreJobsWithBaseline(
+      matchedJobs,
+      userId,
+      baselineContext,
+      limit,
+    );
+
+    const topResults = this.summarizeTopResults(ranked);
+
+    await this.recordRunSafely(searchSet, baselineVersionId, results.length, {
+      searchSetId: searchSet.id,
+      baselineVersionId,
+      sourceSnapshot: null,
+      runInputHash: null,
+      usedProviderDiscovery: false,
+      topResults,
+    });
+
+    return {
+      results,
+      metadata: {
+        usedProviderDiscovery: false,
+        providerId: null,
+        sourceSnapshot: null,
+        runInputHash: null,
+      },
+    };
+  }
+
+  private async runProviderSearchSet(
+    searchSet: SearchSet,
+    userId: string,
+    baselineVersionId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<SearchSetRunResponse> {
+    const providerInput: JobSourceInput = {
+      sourceType: searchSet.sourceType!,
+      sourceUrl: searchSet.sourceUrl!,
+      options: searchSet.sourceOptions ?? null,
+    };
+
+    const provider = this.jobSourceRegistry.findProvider(providerInput);
+    if (!provider) {
+      throw new BadRequestException('No provider available for this source type.');
+    }
+
+    const listings = await provider.fetchListings(providerInput);
+    const maxListings = this.computeMaxListings(searchSet);
+    const slicedListings = listings.slice(0, maxListings);
+    const fetchedAt = new Date().toISOString();
+    const sourceSnapshot: SearchSetRunSourceSnapshot = {
+      sourceUrl: searchSet.sourceUrl ?? null,
+      providerId: provider.id,
+      listingCount: listings.length,
+      fetchedAt,
+    };
+
+    const discoveredJobs: Job[] = [];
+    const seenJobIds = new Set<string>();
+
+    for (const listing of slicedListings) {
+      try {
+        const detail = await provider.fetchJobDetail(listing);
+        const parsed = provider.parseJob(detail);
+        const job = await this.ingestOrReuseJob(userId, provider.id, parsed);
+        if (!job) continue;
+        if (!this.matchesSearchSet(job, searchSet)) continue;
+        if (seenJobIds.has(job.id)) continue;
+        seenJobIds.add(job.id);
+        discoveredJobs.push(job);
+      } catch {
+        // skip failing listings without breaking the run
+      } finally {
+        await this.delay(this.detailFetchDelayMs);
+      }
+    }
+
+    const runInputHash = this.computeRunInputHash(
+      baselineVersionId,
+      sourceSnapshot,
+      searchSet.sourceOptions,
+    );
+
+    if (!discoveredJobs.length) {
+      await this.recordRunSafely(searchSet, baselineVersionId, 0, {
+        searchSetId: searchSet.id,
+        baselineVersionId,
+        sourceSnapshot,
+        runInputHash,
+        usedProviderDiscovery: true,
+        topResults: [],
+      });
+
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: true,
+          providerId: provider.id,
+          sourceSnapshot,
+          runInputHash,
+        },
+      };
+    }
+
+    const { results, ranked } = await this.scoreJobsWithBaseline(
+      discoveredJobs,
+      userId,
+      baselineContext,
+      limit,
+    );
+
+    const topResults = this.summarizeTopResults(ranked);
+
+    await this.recordRunSafely(searchSet, baselineVersionId, results.length, {
+      searchSetId: searchSet.id,
+      baselineVersionId,
+      sourceSnapshot,
+      runInputHash,
+      usedProviderDiscovery: true,
+      topResults,
+    });
+
+    return {
+      results,
+      metadata: {
+        usedProviderDiscovery: true,
+        providerId: provider.id,
+        sourceSnapshot,
+        runInputHash,
+      },
+    };
+  }
+
+  private async scoreJobsWithBaseline(
+    jobs: Job[],
+    userId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<{ results: SearchSetRunResult[]; ranked: ScoredJob[] }> {
+    if (!jobs.length) {
+      return { results: [], ranked: [] };
     }
 
     const latestAssessments = await this.loadLatestAssessments(
-      matchedJobs.map((job) => job.id),
+      jobs.map((job) => job.id),
       userId,
       baselineContext.baseline.id,
       baselineContext.baselineVersion.versionNumber ?? null,
     );
 
     const scoredJobs = await Promise.all(
-      matchedJobs.map(async (job) => {
+      jobs.map(async (job) => {
         const assessment = latestAssessments.get(job.id);
         if (assessment) {
           return {
@@ -129,12 +349,13 @@ export class SearchSetsRunnerService {
       }),
     );
 
-    const limitCount = this.computeResultLimit(limit, matchedJobs.length);
+    const limitCount = this.computeResultLimit(limit, jobs.length);
 
     const sorted = scoredJobs
       .map((entry) => ({
         ...entry,
-        sortScore: typeof entry.overallScore === 'number' ? entry.overallScore : -1,
+        sortScore:
+          typeof entry.overallScore === 'number' ? entry.overallScore : -1,
       }))
       .sort((a, b) => {
         if (b.sortScore !== a.sortScore) {
@@ -163,9 +384,168 @@ export class SearchSetsRunnerService {
       dimensionScores: entry.dimensionScores ?? null,
     }));
 
-    await this.recordRunSafely(searchSet, normalizedBaselineVersionId, results.length);
+    return { results, ranked: sorted };
+  }
 
-    return results;
+  private summarizeTopResults(ranked: ScoredJob[]): SearchSetRunResultSummary[] {
+    return ranked.map((entry) => ({
+      jobId: entry.job.id,
+      fitScore: entry.overallScore ?? null,
+      verdict: entry.verdict ?? null,
+    }));
+  }
+
+  private computeMaxListings(searchSet: SearchSet): number {
+    const candidate = searchSet.sourceOptions?.maxListings;
+    const parsed =
+      typeof candidate === 'number'
+        ? candidate
+        : typeof candidate === 'string'
+        ? Number(candidate)
+        : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(Math.max(Math.floor(parsed), 1), 200);
+    }
+    return 50;
+  }
+
+  private computeRunInputHash(
+    baselineVersionId: string,
+    sourceSnapshot: SearchSetRunSourceSnapshot,
+    options?: Record<string, unknown> | null,
+  ): string {
+    const payload = this.normalizeForHash({
+      baselineVersionId,
+      sourceSnapshot,
+      sourceOptions: options ?? null,
+    });
+
+    return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private normalizeForHash(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeForHash(item));
+    }
+
+    if (value && typeof value === 'object') {
+      const sorted: Record<string, unknown> = {};
+      const entries = Object.entries(value as Record<string, unknown>).sort(
+        ([a], [b]) => a.localeCompare(b),
+      );
+      for (const [key, entryValue] of entries) {
+        sorted[key] = this.normalizeForHash(entryValue);
+      }
+      return sorted;
+    }
+
+    return value;
+  }
+
+  private async ingestOrReuseJob(
+    userId: string,
+    providerId: string,
+    parsed: ParsedJob,
+  ): Promise<Job | null> {
+    const canonicalUrl =
+      this.normalizeUrl(parsed.applyUrl ?? parsed.sourceUrl) ?? null;
+    const dedupeHash = this.computeDedupeHash(parsed);
+
+    const existing = await this.findDuplicateJob({
+      userId,
+      providerId,
+      externalId: parsed.externalId,
+      canonicalUrl,
+      dedupeHash,
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    try {
+      return await this.jobsService.createJob(userId, {
+        title: parsed.title,
+        company: parsed.company ?? null,
+        rawDescription: parsed.descriptionText,
+        sourceUrl: parsed.sourceUrl,
+        responsibilities: parsed.responsibilities,
+        requirements: parsed.requirements,
+        jdIngestionMethod: JobIngestionMethod.SOURCE_PROVIDER,
+        sourceProviderId: providerId,
+        sourceExternalId: parsed.externalId,
+        canonicalUrl,
+        dedupeHash,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private async findDuplicateJob(params: {
+    userId: string;
+    providerId: string;
+    externalId?: string;
+    canonicalUrl?: string | null;
+    dedupeHash?: string;
+  }): Promise<Job | null> {
+    if (params.externalId) {
+      const match = await this.jobRepository.findOne({
+        where: {
+          userId: params.userId,
+          jdIngestionMethod: JobIngestionMethod.SOURCE_PROVIDER,
+          sourceProviderId: params.providerId,
+          sourceExternalId: params.externalId,
+        },
+      });
+      if (match) return match;
+    }
+
+    if (params.canonicalUrl) {
+      const byUrl = await this.jobRepository.findOne({
+        where: { userId: params.userId, canonicalUrl: params.canonicalUrl },
+      });
+      if (byUrl) return byUrl;
+    }
+
+    if (params.dedupeHash) {
+      const byHash = await this.jobRepository.findOne({
+        where: { userId: params.userId, dedupeHash: params.dedupeHash },
+      });
+      if (byHash) return byHash;
+    }
+
+    return null;
+  }
+
+  private computeDedupeHash(parsed: ParsedJob) {
+    const payload = `${parsed.descriptionText ?? ''}|${parsed.title ?? ''}|${
+      parsed.company ?? ''
+    }`;
+    return createHash('sha256').update(payload).digest('hex');
+  }
+
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async recordRunSafely(
+    searchSet: SearchSet,
+    baselineVersionId: string,
+    resultCount: number,
+    runRecord: SearchSetRunRecordInput,
+  ) {
+    try {
+      await this.searchSetsService.recordRunMetadata(searchSet, baselineVersionId, resultCount);
+    } catch {
+      // Intentional swallow
+    }
+
+    try {
+      await this.searchSetRunsService.recordRun(runRecord);
+    } catch {
+      // Do not block results on record saving
+    }
   }
 
   private computeResultLimit(requested: number | undefined, available: number) {
@@ -494,21 +874,5 @@ export class SearchSetsRunnerService {
     }
 
     return null;
-  }
-
-  private async recordRunSafely(
-    searchSet: SearchSet,
-    baselineVersionId: string,
-    resultCount: number,
-  ) {
-    try {
-      await this.searchSetsService.recordRunMetadata(
-        searchSet,
-        baselineVersionId,
-        resultCount,
-      );
-    } catch {
-      // Persisting run metadata should not block delivering results.
-    }
   }
 }

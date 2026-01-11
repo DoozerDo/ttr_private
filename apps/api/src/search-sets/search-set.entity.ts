@@ -22,6 +22,12 @@ export enum SearchSetWorkMode {
   ANY = 'ANY',
 }
 
+export enum SearchSetSourceType {
+  GREENHOUSE = 'GREENHOUSE',
+  LEVER = 'LEVER',
+  ASHBY = 'ASHBY',
+}
+
 @Entity({ name: 'search_sets' })
 export class SearchSet {
   @PrimaryGeneratedColumn('uuid')
@@ -47,6 +53,16 @@ export class SearchSet {
 
   @Column({ type: 'varchar', length: 2048, nullable: true })
   sourceUrl!: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: SearchSetSourceType,
+    nullable: true,
+  })
+  sourceType!: SearchSetSourceType | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  sourceOptions!: Record<string, unknown> | null;
 
   @Column({ type: 'boolean', default: false })
   urlBacked!: boolean;

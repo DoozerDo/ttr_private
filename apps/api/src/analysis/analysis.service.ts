@@ -590,6 +590,7 @@ export class AnalysisService {
 
     const jobSource =
       job?.jdIngestionMethod === JobIngestionMethod.URL ||
+      job?.jdIngestionMethod === JobIngestionMethod.SOURCE_PROVIDER ||
       Boolean(jobPayload.sourceUrl)
         ? 'url'
         : job?.jdIngestionMethod === JobIngestionMethod.PASTE
