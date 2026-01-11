@@ -13,7 +13,7 @@ import { BaselineVersion } from './baseline-version.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { Interview } from '../interviews/interview.entity';
 import { ComplianceService } from '../compliance/compliance.service';
-import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
 
 describe('BaselineVersionService', () => {
   let service: BaselineVersionService;
@@ -104,7 +104,17 @@ describe('BaselineVersionService', () => {
         {
           provide: ComplianceService,
           useValue: {
-            enforceTechnologyConsistency: jest.fn().mockReturnValue([]),
+            validateAndAudit: jest.fn().mockResolvedValue({
+              blocked: false,
+              complianceFlags: [],
+              audit: {
+                id: 'audit-1',
+                baselineVersionId: baselineVersion.id,
+                outputHash: 'hash',
+                action: ComplianceAction.BASELINE_PROMOTION,
+                actorId: 'user-1',
+                baselineVersionHash: baseline.hash,
+            }),
           },
         },
       ],
@@ -124,6 +134,23 @@ describe('BaselineVersionService', () => {
     expect(result.diff).toEqual({ added: ['added context'], interviewId: null });
     expect(baselineVersion.fileHash).toBe('existing-hash');
     expect(baselineVersion.verifiedAdditions).toEqual([]);
+  });
+
+  it('audits compliance before writing baseline promotions', async () => {
+    await service.approveVerifiedAdditions('user-1', {
+      baselineId: 'baseline-1',
+      additions: ['compliance check'],
+    });
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: ComplianceAction.BASELINE_PROMOTION,
+        actorId: 'user-1',
+        generatedSections: expect.arrayContaining([
+          expect.objectContaining({ content: 'compliance check' }),
+        ]),
+      }),
+    );
   });
 
   it('generates deterministic hashes regardless of addition ordering', async () => {
@@ -152,19 +179,32 @@ describe('BaselineVersionService', () => {
   });
 
   it('rejects additions that introduce technologies outside the baseline vocabulary', async () => {
-    jest.spyOn(complianceService, 'enforceTechnologyConsistency').mockReturnValue([
-      {
-        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
-        severity: ComplianceFlagSeverity.BLOCK,
-        message: 'Technology "ImaginaryDB" not found in baseline.',
+    jest.spyOn(complianceService, 'validateAndAudit').mockResolvedValueOnce({
+      blocked: true,
+      complianceFlags: [
+        {
+          code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+          severity: ComplianceFlagSeverity.BLOCK,
+          message: 'Technology "ImaginaryDB" not found in baseline.',
+        },
+      ],
+      audit: {
+        id: 'audit-2',
+        baselineVersionId: baselineVersion.id,
+        outputHash: 'hash',
+        action: ComplianceAction.BASELINE_PROMOTION,
+        actorId: 'user-1',
+        baselineVersionHash: baseline.hash,
+        jobId: null,
+        createdAt: new Date().toISOString(),
       },
-    ]);
+    });
 
     await expect(
       service.approveVerifiedAdditions('user-1', {
         baselineId: 'baseline-1',
         additions: ['Built ImaginaryDB cluster'],
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow('Technology "ImaginaryDB" not found in baseline.');
   });
 });

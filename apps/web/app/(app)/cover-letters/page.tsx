@@ -4,7 +4,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  ComplianceFlag,
+  ComplianceFlagPanel,
+  ComplianceViolationPanel,
+} from "@/components/ComplianceViolationPanel";
 import { Alert } from "@/components/Alert";
 import { TierGateNotice } from "@/components/TierGateNotice";
 import {
@@ -32,6 +36,13 @@ type CoverLetterDto = {
   generatorType?: string;
   generatorVersion?: string;
   closingTemplateKey?: string;
+  compliance_flags?: Array<{
+    code?: string;
+    message?: string;
+    severity?: string;
+  }>;
+  audit_id?: string;
+  baseline_version_hash?: string | null;
 };
 
 type LoadState = "idle" | "loading" | "error";
@@ -57,6 +68,33 @@ function formatDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function normalizeComplianceWarnings(
+  flags: CoverLetterDto["compliance_flags"] | undefined,
+): ComplianceFlag[] {
+  const raw = Array.isArray(flags) ? flags : [];
+
+  const normalized: ComplianceFlag[] = [];
+  for (const f of raw) {
+    const severity = typeof f?.severity === "string" ? f.severity : "warn";
+    if (severity.toLowerCase() === "block") continue;
+
+    const code = typeof f?.code === "string" ? f.code : null;
+    const message = typeof f?.message === "string" ? f.message : null;
+
+    if (!message) continue;
+
+    // Construct a ComplianceFlag that satisfies the component type.
+    // We allow code to be null because ComplianceFlag.code supports it.
+    normalized.push({
+      code,
+      message,
+      severity,
+    });
+  }
+
+  return normalized;
 }
 
 export default function CoverLettersPage() {
@@ -87,6 +125,11 @@ export default function CoverLettersPage() {
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(
     null,
   );
+  const [coverLetterCompliance, setCoverLetterCompliance] = useState<{
+    flags: ComplianceFlag[];
+    auditId?: string;
+    baselineVersionHash?: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,8 +235,7 @@ export default function CoverLettersPage() {
         setHistoryState("idle");
         const latestTemplate = data[0]?.closingTemplateKey;
         setClosingTemplateKey(
-          (current) =>
-            current || latestTemplate || defaultClosingTemplateKey,
+          (current) => current || latestTemplate || defaultClosingTemplateKey,
         );
       } catch (error) {
         if (cancelled) return;
@@ -275,6 +317,7 @@ export default function CoverLettersPage() {
     setErrorMessage(null);
     setComplianceError(null);
     setTierGateError(null);
+    setCoverLetterCompliance(null);
 
     try {
       const response = await fetch("/api/cover-letters", {
@@ -321,8 +364,20 @@ export default function CoverLettersPage() {
       setStatusMessage("Cover letter generated successfully.");
       setClosingTemplateKey(data.closingTemplateKey || closingTemplateKey);
       setComplianceError(null);
+
+      const warningFlags = normalizeComplianceWarnings(data.compliance_flags);
+      setCoverLetterCompliance(
+        warningFlags.length
+          ? {
+              flags: warningFlags,
+              auditId: data.audit_id,
+              baselineVersionHash: data.baseline_version_hash ?? null,
+            }
+          : null,
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to generate.";
+      const message =
+        error instanceof Error ? error.message : "Unable to generate.";
       setErrorMessage(message);
       setStatusMessage(null);
     } finally {
@@ -440,7 +495,8 @@ export default function CoverLettersPage() {
             <span style={ttrTypography.subtleLabel}>Generator</span>
             <h2 style={ttrTypography.h2}>Create a cover letter</h2>
             <p style={ttrTypography.paragraph}>
-              Select a baseline and job to craft a tailored cover letter. Generated content is saved to your history for quick review.
+              Select a baseline and job to craft a tailored cover letter.
+              Generated content is saved to your history for quick review.
             </p>
           </div>
 
@@ -583,14 +639,22 @@ export default function CoverLettersPage() {
               >
                 {isGenerating ? "Generating..." : "Generate"}
               </button>
-              <span
-                style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}
-              >
+              <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
                 Uses your latest baseline version automatically.
               </span>
             </div>
 
             {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
+            {coverLetterCompliance ? (
+              <ComplianceFlagPanel
+                title="Compliance warnings"
+                description="Cover letter generated with compliance notices."
+                flags={coverLetterCompliance.flags}
+                auditId={coverLetterCompliance.auditId}
+                baselineVersionHash={coverLetterCompliance.baselineVersionHash}
+                intent="warning"
+              />
+            ) : null}
             {complianceError ? (
               <ComplianceViolationPanel error={complianceError} />
             ) : null}
@@ -653,7 +717,8 @@ export default function CoverLettersPage() {
           <span style={ttrTypography.subtleLabel}>Output</span>
           <h2 style={ttrTypography.h2}>Cover letter</h2>
           <p style={ttrTypography.paragraph}>
-            Review the generated cover letter. Click items in your history to swap between versions.
+            Review the generated cover letter. Click items in your history to
+            swap between versions.
           </p>
         </div>
 

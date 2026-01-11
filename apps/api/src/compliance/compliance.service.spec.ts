@@ -402,4 +402,53 @@ describe('ComplianceService', () => {
       });
     }
   });
+
+  describe('fictional technology detection', () => {
+    it('blocks generated technology tokens not present in the baseline', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-tech',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-tech-1',
+        baselineSections: [
+          { title: 'Experience', content: 'Managed PostgreSQL and AWS migrations.' },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Built the ImaginaryDB control plane.' },
+        ],
+      });
+
+      const flags = result.complianceFlags.map((flag) => flag.code);
+      const message = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      )?.message;
+
+      expect(result.blocked).toBe(true);
+      expect(flags).toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+      expect(message).toContain('ImaginaryDB');
+    });
+
+    it('allows reuse of baseline technology tokens', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-tech-baseline',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-tech-2',
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Led ImaginaryDB automation for multiple releases.',
+          },
+        ],
+        generatedSections: [
+          { title: 'Experience', content: 'Scaled ImaginaryDB automation globally.' },
+        ],
+      });
+
+      const flags = result.complianceFlags.map((flag) => flag.code);
+
+      expect(result.blocked).toBe(false);
+      expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+    });
+  });
 });

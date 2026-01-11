@@ -31,6 +31,8 @@ export type StarStory = {
 
 export type FollowUpPayload = {
   content: string;
-  complianceFlags?: Array<{ code?: string; message?: string }>;
+  complianceFlags?: Array<{ code?: string; message?: string; severity?: string }>;
   job: { id: string; title: string | null; company: string | null };
+  auditId?: string;
+  baselineVersionHash?: string | null;
 };

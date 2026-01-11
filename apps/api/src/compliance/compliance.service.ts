@@ -16,6 +16,7 @@ import {
   detectInventedCompany,
   detectInventedMetric,
   detectInventedRole,
+  detectFictionalTechnology,
 } from './detectors';
 
 export type ValidateAndAuditRequest = {
@@ -273,6 +274,11 @@ export class ComplianceService {
         job: payload.job,
       }),
       ...detectInventedMetric({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+      }),
+      ...detectFictionalTechnology({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,

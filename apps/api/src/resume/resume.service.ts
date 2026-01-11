@@ -227,9 +227,13 @@ export class ResumeService {
     if (blocked) {
       throw new UnprocessableEntityException({
         error: {
-          code: 'unprocessable',
+          code: 'COMPLIANCE_VIOLATION',
           message: 'Compliance validation failed.',
-          details: { compliance_flags: complianceFlags },
+          details: {
+            compliance_flags: complianceFlags,
+            audit_id: audit.id,
+            baseline_version_hash: audit.baselineVersionHash,
+          },
         },
       });
     }
@@ -242,6 +246,7 @@ export class ResumeService {
       sections: normalizedSections,
       compliance_flags: complianceFlags,
       audit_id: audit.id,
+      baseline_version_hash: audit.baselineVersionHash,
     };
   }
 
@@ -284,7 +289,7 @@ export class ResumeService {
         })
       : null;
 
-    const { complianceFlags, blocked } = await this.complianceService.validateAndAudit({
+    const { complianceFlags, blocked, audit } = await this.complianceService.validateAndAudit({
       action: ComplianceAction.RESUME_EXPORT,
       actorId: userId,
       baselineVersion,
@@ -299,9 +304,13 @@ export class ResumeService {
     if (blocked) {
       throw new UnprocessableEntityException({
         error: {
-          code: 'unprocessable',
+          code: 'COMPLIANCE_VIOLATION',
           message: 'Compliance validation failed.',
-          details: { compliance_flags: complianceFlags },
+          details: {
+            compliance_flags: complianceFlags,
+            audit_id: audit.id,
+            baseline_version_hash: audit.baselineVersionHash,
+          },
         },
       });
     }

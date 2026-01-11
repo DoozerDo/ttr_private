@@ -794,3 +794,60 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
       `Detected invented role or title "${token}". Describe roles you have actually held or the job you are applying to.`,
   });
 }
+
+const TECHNOLOGY_TOKEN_PATTERN = /\b[A-Za-z0-9][-A-Za-z0-9.\+#_]{1,}\b/g;
+
+function isTechnologyTokenCandidate(value: string): boolean {
+  const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
+  if (cleaned.length < 3) return false;
+
+  if (/[.#\+#-]/.test(value)) return true;
+  if (/\d/.test(cleaned)) return true;
+
+  const remainder = cleaned.slice(1);
+  if (!/[A-Z]/.test(remainder)) return false;
+  if (!/[a-z]/.test(cleaned)) return false;
+
+  return true;
+}
+
+function collectTechnologyTokensFromSections(
+  sections: ComplianceTextSection[] | null | undefined,
+): Map<string, string> {
+  const tokens = new Map<string, string>();
+
+  for (const section of sections ?? []) {
+    const text = [section.title, section.content].filter(Boolean).join(' ');
+    if (!text) continue;
+
+    TECHNOLOGY_TOKEN_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = TECHNOLOGY_TOKEN_PATTERN.exec(text))) {
+      const candidate = normalizeCandidate(match[0]);
+      if (!candidate || !isTechnologyTokenCandidate(candidate)) continue;
+      addCandidate(tokens, candidate, normalizeTokenForComparison);
+    }
+  }
+
+  return tokens;
+}
+
+export function detectFictionalTechnology(payload: DetectorPayload): ComplianceFlag[] {
+  const generatedTokens = collectTechnologyTokensFromSections(payload.generatedSections);
+  if (!generatedTokens.size) return [];
+
+  const baselineTokens = collectTechnologyTokensFromSections(payload.baselineSections);
+  const flags: ComplianceFlag[] = [];
+
+  for (const [normalized, original] of generatedTokens.entries()) {
+    if (baselineTokens.has(normalized)) continue;
+
+    flags.push({
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      severity: ComplianceFlagSeverity.BLOCK,
+      message: `Technology "${original}" not found in baseline.`,
+    });
+  }
+
+  return flags;
+}

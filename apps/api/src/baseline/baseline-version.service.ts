@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
-import { ComplianceFlagSeverity } from '../compliance/compliance.types';
+import { ComplianceAction, ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   BaselineIncludePolicy,
@@ -133,21 +133,10 @@ export class BaselineVersionService {
 
     const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(sections);
 
-    const technologyFlags = this.complianceService.enforceTechnologyConsistency({
-      baselineSections: normalizedBaselineSections,
-      generatedSections: additions.map((content, index) => ({
-        title: `Addition ${index + 1}`,
-        content,
-      })),
-    });
-
-    const blockingTechnologyFlag = technologyFlags.find(
-      (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-    );
-
-    if (blockingTechnologyFlag) {
-      throw new BadRequestException(blockingTechnologyFlag.message);
-    }
+    const generatedSections = additions.map((content, index) => ({
+      title: `Addition ${index + 1}`,
+      content,
+    }));
 
     const existingPolicies = latestVersion
       ? await this.baselineBlockPolicyRepository.find({
@@ -173,6 +162,25 @@ export class BaselineVersionService {
       added: additions,
       interviewId: interview?.id ?? null,
     };
+
+    const complianceResult = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.BASELINE_PROMOTION,
+      actorId: userId,
+      baselineVersion: latestVersion ?? null,
+      baselineSections: normalizedBaselineSections,
+      generatedSections,
+      outputHash: versionHash,
+    });
+
+    if (complianceResult.blocked) {
+      const blockingFlag = complianceResult.complianceFlags.find(
+        (flag) =>
+          (flag.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+      );
+      throw new BadRequestException(
+        blockingFlag?.message ?? 'Promotion blocked due to compliance policy violations.',
+      );
+    }
 
     return this.baselineRepository.manager.transaction(async (manager) => {
       const newVersion = manager.create(BaselineVersion, {

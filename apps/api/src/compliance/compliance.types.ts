@@ -3,6 +3,7 @@ export enum ComplianceAction {
   RESUME_GENERATION = 'resume_gen',
   COVER_LETTER_GENERATION = 'cover_letter_gen',
   FOLLOW_UP_GENERATION = 'follow_up_gen',
+  BASELINE_PROMOTION = 'baseline_promotion',
   APPLICATION_EXPORT = 'application_export',
   RESUME_EXPORT = 'resume_export',
 }

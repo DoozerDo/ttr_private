@@ -7,7 +7,11 @@ test("parses modern compliance payload with explicit violations", () => {
   const payload = {
     errorCode: "COMPLIANCE_VIOLATION",
     violations: [
-      { code: "scope_inflation", message: "Scope expanded beyond baseline." },
+      {
+        code: "scope_inflation",
+        message: "Scope expanded beyond baseline.",
+        severity: "BLOCK",
+      },
     ],
     auditId: "audit-123",
     baselineVersionHash: "hash-abc",
@@ -22,6 +26,7 @@ test("parses modern compliance payload with explicit violations", () => {
   assert.deepStrictEqual(result?.violations[0], {
     code: "scope_inflation",
     message: "Scope expanded beyond baseline.",
+    severity: "block",
   });
 });
 
@@ -39,4 +44,5 @@ test("detects legacy compliance_flags arrays without explicit code", () => {
 
   assert.strictEqual(result?.violations[0].code, "legacy_flag");
   assert.strictEqual(result?.violations[0].message, "Legacy flag triggered.");
+  assert.strictEqual(result?.violations[0].severity, null);
 });

@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
-import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  ComplianceFlagPanel,
+  ComplianceViolationPanel,
+} from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -48,6 +51,13 @@ export default function ResultsPage() {
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeTierGateError, setResumeTierGateError] = useState<TierGateError | null>(null);
   const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(null);
+  const resumeWarningFlags = (resumeResponse?.compliance_flags ?? []).filter(
+    (flag: { severity?: string | null }) =>
+      (flag?.severity ?? "warn").toLowerCase() !== "block",
+  );
+  const resumeAuditId = resumeResponse?.audit_id;
+  const resumeBaselineHash =
+    resumeResponse?.baseline_version_hash ?? resumeResponse?.baselineVersionHash ?? null;
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -662,9 +672,21 @@ export default function ResultsPage() {
               </Alert>
             ) : null}
             {resumeResponse ? (
-              <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
-                {JSON.stringify(resumeResponse, null, 2)}
-              </pre>
+              <>
+                {resumeWarningFlags.length ? (
+                  <ComplianceFlagPanel
+                    title="Compliance warnings"
+                    description="Resume generated with compliance notices."
+                    flags={resumeWarningFlags}
+                    auditId={resumeAuditId}
+                    baselineVersionHash={resumeBaselineHash}
+                    intent="warning"
+                  />
+                ) : null}
+                <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
+                  {JSON.stringify(resumeResponse, null, 2)}
+                </pre>
+              </>
             ) : (
               <EmptyState
                 title="No resume yet"

@@ -1,10 +1,14 @@
- "use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Alert } from "@/components/Alert";
-import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import {
+  ComplianceFlag,
+  ComplianceFlagPanel,
+  ComplianceViolationPanel,
+} from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -47,31 +51,80 @@ function describeComplianceSummary(error: ParsedComplianceError) {
     .filter(Boolean)
     .join(" · ");
 
-  return [violations || "Compliance validation failed.", extras].filter(Boolean).join(" · ");
+  return [violations || "Compliance validation failed.", extras]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function normalizeComplianceWarnings(
+  flags:
+    | Array<{ code?: string; message?: string; severity?: string }>
+    | undefined
+    | null,
+): ComplianceFlag[] {
+  const raw = Array.isArray(flags) ? flags : [];
+
+  const normalized: ComplianceFlag[] = [];
+  for (const f of raw) {
+    const severity = typeof f?.severity === "string" ? f.severity : "warn";
+    if (severity.toLowerCase() === "block") continue;
+
+    const message = typeof f?.message === "string" ? f.message : null;
+    if (!message) continue;
+
+    const code = typeof f?.code === "string" ? f.code : null;
+
+    normalized.push({
+      code,
+      message,
+      severity,
+    });
+  }
+
+  return normalized;
 }
 
 export default function InterviewToolkitPage() {
   const [jobs, setJobs] = useState<JobDto[]>([]);
-  const [jobState, setJobState] = useState<"idle" | "loading" | "error">("loading");
+  const [jobState, setJobState] = useState<"idle" | "loading" | "error">(
+    "loading",
+  );
   const [jobError, setJobError] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string>("");
 
   const [packet, setPacket] = useState<StudyPacket | null>(null);
-  const [packetState, setPacketState] = useState<"idle" | "loading" | "error">("idle");
+  const [packetState, setPacketState] = useState<"idle" | "loading" | "error">(
+    "idle",
+  );
   const [packetError, setPacketError] = useState<string | null>(null);
 
   const [followUpNotes, setFollowUpNotes] = useState<string>("");
   const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
-  const [followUpState, setFollowUpState] = useState<"idle" | "loading" | "error">("idle");
+  const [followUpState, setFollowUpState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
   const [followUpError, setFollowUpError] = useState<string | null>(null);
-  const [followUpComplianceError, setFollowUpComplianceError] = useState<ParsedComplianceError | null>(null);
-  const [followUpTierGate, setFollowUpTierGate] = useState<TierGateError | null>(null);
+  const [followUpComplianceError, setFollowUpComplianceError] =
+    useState<ParsedComplianceError | null>(null);
+  const [followUpTierGate, setFollowUpTierGate] = useState<TierGateError | null>(
+    null,
+  );
+
+  const followUpWarningFlags = useMemo(
+    () => normalizeComplianceWarnings(followUp?.complianceFlags),
+    [followUp?.complianceFlags],
+  );
+  const followUpAuditId = followUp?.auditId;
+  const followUpBaselineHash = followUp?.baselineVersionHash ?? null;
 
   const [copied, setCopied] = useState<boolean>(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
   const [storyRefreshKey, setStoryRefreshKey] = useState(0);
-  const resources = useMemo(() => getInterviewResourcesForJob(selectedJobId || null), [selectedJobId]);
+  const resources = useMemo(
+    () => getInterviewResourcesForJob(selectedJobId || null),
+    [selectedJobId],
+  );
 
   useEffect(() => {
     const loadJobs = async () => {
@@ -92,7 +145,9 @@ export default function InterviewToolkitPage() {
         }
         setJobState("idle");
       } catch (error) {
-        setJobError(error instanceof Error ? error.message : "Unable to load jobs");
+        setJobError(
+          error instanceof Error ? error.message : "Unable to load jobs",
+        );
         setJobs([]);
         setJobState("error");
       }
@@ -126,7 +181,9 @@ export default function InterviewToolkitPage() {
 
       try {
         const res = await fetch(
-          `/api/interview-toolkit/study-packet?jobId=${encodeURIComponent(selectedJobId)}`,
+          `/api/interview-toolkit/study-packet?jobId=${encodeURIComponent(
+            selectedJobId,
+          )}`,
           {
             cache: "no-store",
           },
@@ -141,7 +198,11 @@ export default function InterviewToolkitPage() {
         setPacketState("idle");
       } catch (error) {
         setPacket(null);
-        setPacketError(error instanceof Error ? error.message : "Unable to build study packet");
+        setPacketError(
+          error instanceof Error
+            ? error.message
+            : "Unable to build study packet",
+        );
         setPacketState("error");
       }
     };
@@ -187,7 +248,9 @@ export default function InterviewToolkitPage() {
         }
 
         const payload = await readResponsePayload(res);
-        setFollowUpError(formatErrorMessage(payload, "Unable to generate follow up."));
+        setFollowUpError(
+          formatErrorMessage(payload, "Unable to generate follow up."),
+        );
         setFollowUpState("error");
         return;
       }
@@ -196,7 +259,9 @@ export default function InterviewToolkitPage() {
       setFollowUp(data ?? null);
       setFollowUpState("idle");
     } catch (error) {
-      setFollowUpError(error instanceof Error ? error.message : "Unable to generate follow up.");
+      setFollowUpError(
+        error instanceof Error ? error.message : "Unable to generate follow up.",
+      );
       setFollowUpState("error");
     }
   };
@@ -211,7 +276,8 @@ export default function InterviewToolkitPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to copy to clipboard.";
+      const message =
+        error instanceof Error ? error.message : "Unable to copy to clipboard.";
       setCopyError(message);
     }
   };
@@ -219,7 +285,9 @@ export default function InterviewToolkitPage() {
   const followUpFailureMessage =
     followUpState === "error"
       ? followUpTierGate?.message ??
-        (followUpComplianceError ? describeComplianceSummary(followUpComplianceError) : followUpError)
+        (followUpComplianceError
+          ? describeComplianceSummary(followUpComplianceError)
+          : followUpError)
       : null;
 
   return (
@@ -250,7 +318,9 @@ export default function InterviewToolkitPage() {
                 >
                   {jobs.map((job) => (
                     <option key={job.id} value={job.id}>
-                      {([job.title, job.company].filter(Boolean).join(" at ") || job.id)}
+                      {([job.title, job.company]
+                        .filter(Boolean)
+                        .join(" at ") || job.id) as string}
                     </option>
                   ))}
                 </select>
@@ -261,26 +331,47 @@ export default function InterviewToolkitPage() {
 
         {jobError ? <Alert intent="error">{jobError}</Alert> : null}
         {jobs.length === 0 && jobState !== "loading" ? (
-          <Alert intent="warning">Save a job to unlock the Interview Toolkit.</Alert>
+          <Alert intent="warning">
+            Save a job to unlock the Interview Toolkit.
+          </Alert>
         ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">How to use this</p>
-            <h2 className="text-lg font-semibold text-slate-100">Interview coaching guide</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              How to use this
+            </p>
+            <h2 className="text-lg font-semibold text-slate-100">
+              Interview coaching guide
+            </h2>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Morning Of</p>
-              <p>Purpose: Use this checklist to refresh the job highlights, lock in logistics, and center your opener before the call.</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">
+                Morning Of
+              </p>
+              <p>
+                Purpose: Use this checklist to refresh the job highlights, lock
+                in logistics, and center your opener before the call.
+              </p>
             </div>
             <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Study packet</p>
-              <p>Purpose: Keep the role-specific context, STAR story prompts, and likely questions handy so your prep stays focused.</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">
+                Study packet
+              </p>
+              <p>
+                Purpose: Keep the role-specific context, STAR story prompts, and
+                likely questions handy so your prep stays focused.
+              </p>
             </div>
             <div className="space-y-2 rounded-2xl border border-white/5 bg-slate-900/40 p-4 text-sm text-slate-300">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Follow up generator</p>
-              <p>Purpose: Turn your interview notes into compliant, job-centered follow-up copy you can copy and send quickly.</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">
+                Follow up generator
+              </p>
+              <p>
+                Purpose: Turn your interview notes into compliant, job-centered
+                follow-up copy you can copy and send quickly.
+              </p>
             </div>
           </div>
         </section>
@@ -288,25 +379,46 @@ export default function InterviewToolkitPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Pre-interview</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Pre-interview
+              </p>
               <h2 className="text-lg font-semibold text-slate-100">Morning Of</h2>
             </div>
             <p className="text-sm text-slate-300">
-              Ground yourself before the call. These reminders stay tied to the selected job.
+              Ground yourself before the call. These reminders stay tied to the
+              selected job.
             </p>
             <ul className="space-y-2 pl-5 text-sm text-slate-300 list-disc">
-              <li>Re-read the job description and your baseline highlights mapped to this role.</li>
-              <li>Pick 2-3 STAR stories that fit the role's gaps and keep them handy.</li>
-              <li>Write down the company's product, user, and one recent headline to mention.</li>
-              <li>Have the interviewer names, dial-in details, and time zones confirmed.</li>
-              <li>Keep a one-line "why me for this role" ready as your opener.</li>
+              <li>
+                Re-read the job description and your baseline highlights mapped
+                to this role.
+              </li>
+              <li>
+                Pick 2-3 STAR stories that fit the role's gaps and keep them
+                handy.
+              </li>
+              <li>
+                Write down the company's product, user, and one recent headline
+                to mention.
+              </li>
+              <li>
+                Have the interviewer names, dial-in details, and time zones
+                confirmed.
+              </li>
+              <li>
+                Keep a one-line "why me for this role" ready as your opener.
+              </li>
             </ul>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Study packet</p>
-              <h2 className="text-lg font-semibold text-slate-100">Study Packet</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Study packet
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">
+                Study Packet
+              </h2>
             </div>
             {packetState === "loading" ? (
               <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
@@ -317,18 +429,25 @@ export default function InterviewToolkitPage() {
             ) : packet ? (
               <div className="space-y-5">
                 <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Job</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Job
+                  </p>
                   <p className="text-lg font-semibold text-slate-100">
-                    {([packet.job.title, packet.job.company].filter(Boolean).join(" at ") || packet.job.id)}
+                    {([packet.job.title, packet.job.company]
+                      .filter(Boolean)
+                      .join(" at ") || packet.job.id) as string}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {packet.fitSnapshot ? (
                     <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-slate-200">
-                      Fit score {packet.fitSnapshot.overallScore} · {packet.fitSnapshot.verdict}
+                      Fit score {packet.fitSnapshot.overallScore} ·{" "}
+                      {packet.fitSnapshot.verdict}
                     </span>
                   ) : (
-                    <Alert intent="warning">Run Analyze or Fit Review to see strengths and gaps.</Alert>
+                    <Alert intent="warning">
+                      Run Analyze or Fit Review to see strengths and gaps.
+                    </Alert>
                   )}
                   {packet.fitSnapshot && packet.fitSnapshot.strengths.length ? (
                     <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
@@ -343,7 +462,9 @@ export default function InterviewToolkitPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recommended STAR stories</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Recommended STAR stories
+                    </p>
                     {packet.recommendedStories.length === 0 ? (
                       <span className="text-xs text-slate-400">None saved</span>
                     ) : null}
@@ -354,7 +475,9 @@ export default function InterviewToolkitPage() {
                     <ul className="space-y-2 text-sm text-slate-200">
                       {packet.recommendedStories.map((story) => (
                         <li key={story.id} className="flex flex-col gap-1">
-                          <span className="font-semibold text-white">{story.title}</span>
+                          <span className="font-semibold text-white">
+                            {story.title}
+                          </span>
                           {story.competencies?.length ? (
                             <span className="text-xs text-slate-400">
                               {story.competencies.slice(0, 3).join(", ")}
@@ -368,19 +491,30 @@ export default function InterviewToolkitPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Likely questions</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Likely questions
+                    </p>
                     {packet.questions.length === 0 ? (
                       <span className="text-xs text-slate-400">None listed</span>
                     ) : null}
                   </div>
                   {packet.questions.length === 0 ? (
-                    <Alert intent="warning">No questions available for this job yet.</Alert>
+                    <Alert intent="warning">
+                      No questions available for this job yet.
+                    </Alert>
                   ) : (
                     <ul className="space-y-2 text-sm text-slate-200 pl-4 list-disc">
                       {packet.questions.map((question) => (
-                        <li key={(question.gapId ?? question.prompt) + "-" + question.prompt} className="space-y-1">
-                          <p className="font-semibold text-white">{question.prompt}</p>
-                          <p className="text-xs text-slate-400">{question.jdReference}</p>
+                        <li
+                          key={(question.gapId ?? question.prompt) + "-" + question.prompt}
+                          className="space-y-1"
+                        >
+                          <p className="font-semibold text-white">
+                            {question.prompt}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {question.jdReference}
+                          </p>
                         </li>
                       ))}
                     </ul>
@@ -388,10 +522,15 @@ export default function InterviewToolkitPage() {
                 </div>
                 {packet.recentStories.length > 0 ? (
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recent STAR stories</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Recent STAR stories
+                    </p>
                     <div className="flex flex-wrap gap-2 text-xs text-slate-200">
                       {packet.recentStories.map((story) => (
-                        <span key={story.id} className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                        <span
+                          key={story.id}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1"
+                        >
                           {story.title}
                         </span>
                       ))}
@@ -411,7 +550,9 @@ export default function InterviewToolkitPage() {
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Post-interview</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              Post-interview
+            </p>
             <h2 className="text-lg font-semibold text-slate-100">Follow Up</h2>
           </div>
 
@@ -430,34 +571,53 @@ export default function InterviewToolkitPage() {
 
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-              <FormButton onClick={handleGenerateFollowUp} disabled={!selectedJobId || followUpState === "loading"}>
-                {followUpState === "loading" ? "Generating..." : "Generate follow up"}
+              <FormButton
+                onClick={handleGenerateFollowUp}
+                disabled={!selectedJobId || followUpState === "loading"}
+              >
+                {followUpState === "loading"
+                  ? "Generating..."
+                  : "Generate follow up"}
               </FormButton>
             </div>
-            {followUpFailureMessage ? <Alert intent="error">{followUpFailureMessage}</Alert> : null}
+            {followUpFailureMessage ? (
+              <Alert intent="error">{followUpFailureMessage}</Alert>
+            ) : null}
           </div>
 
           {followUpTierGate ? <TierGateNotice error={followUpTierGate} /> : null}
-          {followUpComplianceError ? <ComplianceViolationPanel error={followUpComplianceError} /> : null}
+          {followUpComplianceError ? (
+            <ComplianceViolationPanel error={followUpComplianceError} />
+          ) : null}
 
           {followUp ? (
             <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-100">Draft</h3>
-                <FormButton variant="secondary" onClick={handleCopy} disabled={!followUp.content || copied}>
+                <FormButton
+                  variant="secondary"
+                  onClick={handleCopy}
+                  disabled={!followUp.content || copied}
+                >
                   {copied ? "Copied" : "Copy"}
                 </FormButton>
               </div>
-              {copied ? <Alert intent="success">Follow up copied to clipboard.</Alert> : null}
+              {copied ? (
+                <Alert intent="success">Follow up copied to clipboard.</Alert>
+              ) : null}
               {copyError ? <Alert intent="error">{copyError}</Alert> : null}
               <div className="rounded-2xl border border-white/10 bg-slate-950 p-4 text-sm text-slate-100 whitespace-pre-wrap">
                 {followUp.content}
               </div>
-              {followUp.complianceFlags?.length ? (
-                <Alert intent="warning">
-                  Compliance notices:{" "}
-                  {followUp.complianceFlags.map((flag) => flag.message || flag.code).join(", ")}
-                </Alert>
+              {followUpWarningFlags.length ? (
+                <ComplianceFlagPanel
+                  title="Compliance warnings"
+                  description="Follow up copy includes compliance notices."
+                  flags={followUpWarningFlags}
+                  auditId={followUpAuditId}
+                  baselineVersionHash={followUpBaselineHash}
+                  intent="warning"
+                />
               ) : null}
             </div>
           ) : null}
@@ -479,7 +639,8 @@ export default function InterviewToolkitPage() {
             <h2 className="text-lg font-semibold text-slate-100">Resources</h2>
           </div>
           <p className="text-sm text-slate-300">
-            Curated articles, videos, and tools that reinforce your prep for the selected opportunity.
+            Curated articles, videos, and tools that reinforce your prep for the
+            selected opportunity.
           </p>
           {resources.length > 0 ? (
             <ResourcesList resources={resources} />
@@ -495,7 +656,9 @@ export default function InterviewToolkitPage() {
             <Link
               href={
                 selectedJobId
-                  ? `/interview-toolkit/resources?jobId=${encodeURIComponent(selectedJobId)}`
+                  ? `/interview-toolkit/resources?jobId=${encodeURIComponent(
+                      selectedJobId,
+                    )}`
                   : "/interview-toolkit/resources"
               }
               className="text-sky-300 underline"
@@ -508,7 +671,10 @@ export default function InterviewToolkitPage() {
 
         <div className="text-xs text-slate-400">
           Need STAR stories?{" "}
-          <Link href="/interview-toolkit/star-stories" className="text-sky-300 underline">
+          <Link
+            href="/interview-toolkit/star-stories"
+            className="text-sky-300 underline"
+          >
             Manage your STAR stories
           </Link>
           .
