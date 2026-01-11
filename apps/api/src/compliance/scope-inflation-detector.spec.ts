@@ -52,7 +52,30 @@ describe('ScopeInflationDetector', () => {
             generated: expect.stringContaining('Directed a global organization'),
           }),
         ]),
+        confidence: expect.any(Number),
       }),
     ]);
+    expect(flags[0].confidence).toBeGreaterThan(0.8);
+  });
+
+  it('warns when only shared ownership cues are new to the generated text', () => {
+    const flags = detector.detect(
+      [],
+      [
+        {
+          title: 'Generated Resume',
+          content: 'Led a small team to document requirements.',
+        },
+      ],
+    );
+
+    expect(flags).toEqual([
+      expect.objectContaining({
+        code: ComplianceFlagCode.SCOPE_INFLATION,
+        severity: ComplianceFlagSeverity.WARN,
+        confidence: expect.any(Number),
+      }),
+    ]);
+    expect(flags[0].confidence).toBeLessThan(0.6);
   });
 });

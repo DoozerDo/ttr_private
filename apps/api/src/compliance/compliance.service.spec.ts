@@ -95,6 +95,62 @@ describe('ComplianceService', () => {
     );
   });
 
+  describe('policy map enforcement', () => {
+    it('downgrades technology flags below block threshold', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-policy',
+        baselineVersion: { id: 'bv-1', hash: 'hash-1' },
+        job: { id: 'job-1' },
+        outputHash: 'out-policy',
+        baselineSections: [],
+        generatedSections: [],
+        extraFlags: [
+          {
+            code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+            severity: ComplianceFlagSeverity.BLOCK,
+            message: 'Suspect technology',
+            confidence: 0.6,
+          },
+        ],
+      });
+
+      const techFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      );
+      expect(techFlag).toBeDefined();
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
+      expect(result.blocked).toBe(false);
+    });
+
+    it('blocks technology flags that meet the confidence threshold', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-policy-block',
+        baselineVersion: { id: 'bv-1', hash: 'hash-1' },
+        job: { id: 'job-1' },
+        outputHash: 'out-policy-block',
+        baselineSections: [],
+        generatedSections: [],
+        extraFlags: [
+          {
+            code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+            severity: ComplianceFlagSeverity.WARN,
+            message: 'Suspect technology',
+            confidence: 0.92,
+          },
+        ],
+      });
+
+      const techFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      );
+      expect(techFlag).toBeDefined();
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.BLOCK);
+      expect(result.blocked).toBe(true);
+    });
+  });
+
   describe('invented company and role detection', () => {
     const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
     const jobWithTitle = { ...job, title: 'Product Manager' };
