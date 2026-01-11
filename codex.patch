@@ -1,1685 +1,469 @@
-diff --git a/apps/api/src/compliance/compliance-audit.entity.ts b/apps/api/src/compliance/compliance-audit.entity.ts
-index 75be2776d3e8e550277af0777e5d98ad5fe533ac..7fa796c66ce282f7b2eba19ae72e1e063442455f 100644
---- a/apps/api/src/compliance/compliance-audit.entity.ts
-+++ b/apps/api/src/compliance/compliance-audit.entity.ts
-@@ -1,43 +1,46 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   PrimaryGeneratedColumn,
- } from 'typeorm';
- import {
-   ComplianceAction,
-   ComplianceFlag,
- } from './compliance.types';
- 
- @Entity({ name: 'compliance_audits' })
- export class ComplianceAudit {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Column({ type: 'varchar' })
-   actorId!: string;
- 
-   @Column({
-     type: 'enum',
-     enum: ComplianceAction,
-   })
-   action!: ComplianceAction;
- 
-+  @Column({ type: 'uuid', nullable: true })
-+  baselineVersionId!: string | null;
-+
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   baselineVersionHash!: string | null;
- 
--  @Column({ type: 'varchar', length: 255, nullable: true })
--  jobHash!: string | null;
-+  @Column({ type: 'uuid', nullable: true })
-+  jobId!: string | null;
- 
-   @Column({ type: 'varchar', length: 255, nullable: true })
-   outputHash!: string | null;
- 
-   @Column({ type: 'jsonb', default: () => '\'[]\'::jsonb' })
-   complianceFlags!: ComplianceFlag[];
- 
-   @Column({ type: 'boolean', default: false })
-   passFail!: boolean;
- 
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- }
-diff --git a/apps/api/src/compliance/compliance.controller.ts b/apps/api/src/compliance/compliance.controller.ts
-index fa960f390a0ca5cb0c72ded5dfd1cc51e7227ecb..4260ad5c7370767287e1349f5c40bef7e9054a7b 100644
---- a/apps/api/src/compliance/compliance.controller.ts
-+++ b/apps/api/src/compliance/compliance.controller.ts
-@@ -34,64 +34,66 @@ export class ComplianceController {
-     @Query('artifact_id') artifactId?: string,
-   ) {
-     const actorId = request.user?.id;
-     if (!actorId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     const where: Record<string, unknown> = { actorId };
-     if (action) where.action = action;
-     if (artifactId) where.outputHash = artifactId;
- 
-     const audits = await this.auditsRepository.find({
-       where,
-       order: { createdAt: 'DESC' },
-     });
- 
-     return audits;
-   }
- 
-   @Post()
-   async create(
-     @Req() request: Request & { user?: { id?: string } },
-     @Body()
-     body: {
-       action?: ComplianceAction;
-+      baseline_version_id?: string | null;
-       baseline_version_hash?: string | null;
--      job_hash?: string | null;
-+      job_id?: string | null;
-       output_hash?: string | null;
-       compliance_flags?: Array<{ code: ComplianceFlagCode; message?: string | null }>;
-     },
-   ) {
-     const actorId = request.user?.id;
-     if (!actorId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     if (!body.action) {
-       throw new BadRequestException('action is required');
-     }
- 
-     const complianceFlags =
-       body.compliance_flags?.map((flag) => ({
-         code: flag.code,
-         message: flag.message ?? flag.code,
-         severity: ComplianceFlagSeverity.BLOCK,
-       })) ?? [];
- 
-     const blocked = complianceFlags.some(
-       (flag) => flag.severity === ComplianceFlagSeverity.BLOCK,
-     );
- 
-     const audit = this.auditsRepository.create({
-       actorId,
-       action: body.action,
-+      baselineVersionId: body.baseline_version_id ?? null,
-       baselineVersionHash: body.baseline_version_hash ?? null,
--      jobHash: body.job_hash ?? null,
-+      jobId: body.job_id ?? null,
-       outputHash: body.output_hash ?? null,
-       complianceFlags,
-       passFail: !blocked,
-     });
- 
-     return this.auditsRepository.save(audit);
-   }
- }
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index 780d13a80216070ce9e7203c9269eec8dd7ebe85..725545bdbbe7dd09515a72edd16d1a6313bea1da 100644
---- a/apps/api/src/compliance/compliance.service.spec.ts
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -1,199 +1,96 @@
--import { createHash } from 'crypto';
- import { ComplianceService } from './compliance.service';
--import {
--  ComplianceAction,
--  ComplianceFlagCode,
--  ComplianceFlagSeverity,
--} from './compliance.types';
--import { BaselineSectionType } from '../baseline/baseline-section.entity';
-+import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
- 
- const buildAuditRepo = () => {
-   const create = jest.fn((payload) => payload);
--  const save = jest.fn(async (payload) => ({ id: 'audit-1', ...payload }));
-+  const save = jest.fn(async (payload) => ({
-+    id: 'audit-1',
-+    createdAt: new Date(),
-+    ...payload,
-+  }));
- 
-   return { create, save };
- };
- 
- describe('ComplianceService', () => {
-   const repoMock = buildAuditRepo();
-   const service = new ComplianceService(
-     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-     // @ts-ignore: manual repository injection
-     repoMock,
-   );
- 
-   beforeEach(() => {
-     jest.clearAllMocks();
-   });
- 
--  it('passes validation when baseline hash and job company are present', async () => {
--    const baselineVersion = { hash: 'baseline-hash' };
--    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
-+  it('flags stylized dash punctuation without mutating content', () => {
-+    const flags = service.enforceResumeWritingRules({
-+      rawContent: 'Delivered impact — and scale.',
-+    });
-+
-+    expect(flags).toEqual([
-+      expect.objectContaining({
-+        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
-+        severity: ComplianceFlagSeverity.BLOCK,
-+      }),
-+    ]);
-+  });
-+
-+  it('persists audit metadata with baseline version details', async () => {
-+    const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
-+    const job = { id: 'job-1' };
- 
-     const result = await service.validateAndAudit({
-       action: ComplianceAction.RESUME_GENERATION,
-       actorId: 'user-1',
-       baselineVersion,
-       job,
-       outputHash: 'out-123',
-     });
- 
--    expect(result.blocked).toBe(false);
--    expect(result.complianceFlags).toHaveLength(0);
-     expect(repoMock.save).toHaveBeenCalledWith(
-       expect.objectContaining({
-         actorId: 'user-1',
-         action: ComplianceAction.RESUME_GENERATION,
--        baselineVersionHash: 'baseline-hash',
--        jobHash: createHash('sha256').update('Job description').digest('hex'),
-+        baselineVersionId: 'bv-1',
-+        baselineVersionHash: 'hash-1',
-+        jobId: 'job-1',
-         outputHash: 'out-123',
-         passFail: true,
-       }),
-     );
--  });
--
--  it('fails validation when baseline hash is missing', async () => {
--    const job = { company: 'ExampleCo', rawDescription: 'Job description' };
--
--    const result = await service.validateAndAudit({
--      action: ComplianceAction.RESUME_GENERATION,
--      actorId: 'user-1',
--      baselineVersion: { hash: null },
--      job,
--    });
--
--    expect(result.blocked).toBe(true);
--    expect(result.complianceFlags).toEqual([
--      expect.objectContaining({ code: ComplianceFlagCode.MISSING_BASELINE_HASH }),
--    ]);
--    expect(repoMock.save).toHaveBeenCalledWith(
-+    expect(result.audit).toEqual(
-       expect.objectContaining({
--        passFail: false,
-+        id: 'audit-1',
-+        baselineVersionId: 'bv-1',
-+        baselineVersionHash: 'hash-1',
-+        jobId: 'job-1',
-       }),
-     );
-+    expect(result.blocked).toBe(false);
-   });
- 
--  it('returns multiple flags when more than one condition fails', async () => {
--    const job = { company: '', rawDescription: 'Job description' };
--
-+  it('blocks when baseline version context is missing for guarded actions', async () => {
-     const result = await service.validateAndAudit({
--      action: ComplianceAction.RESUME_GENERATION,
-+      action: ComplianceAction.COVER_LETTER_GENERATION,
-       actorId: 'user-2',
--      baselineVersion: { hash: null },
--      job,
-+      outputHash: 'out-999',
-     });
- 
-     const codes = result.complianceFlags.map((flag) => flag.code);
-     expect(codes).toEqual(
-       expect.arrayContaining([
-+        ComplianceFlagCode.MISSING_BASELINE_VERSION,
-         ComplianceFlagCode.MISSING_BASELINE_HASH,
--        ComplianceFlagCode.UNKNOWN_COMPANY,
-       ]),
-     );
-     expect(result.blocked).toBe(true);
--  });
--
--  it('blocks invented metrics when generated output includes numbers not in baseline', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [{ content: 'Improved uptime by 10%' }],
--      generatedSections: [{ content: 'Improved uptime by 25%' }],
--    });
--
--    expect(flags).toEqual([
--      expect.objectContaining({
--        code: ComplianceFlagCode.INVENTED_METRIC,
--        severity: ComplianceFlagSeverity.BLOCK,
--      }),
--    ]);
--  });
--
--  it('blocks stylized punctuation in generated output', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [{ content: 'Baseline text with 5 metrics and ExampleCo.' }],
--      generatedSections: [{ content: 'Result—delivered improvements at ExampleCo' }],
--    });
--
--    expect(flags).toEqual([
--      expect.objectContaining({
--        code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
--        severity: ComplianceFlagSeverity.BLOCK,
--      }),
--    ]);
--  });
--
--  it('normalizes stylized punctuation for downstream output', () => {
--    const normalized = service.normalizeSectionsForOutput([
--      { title: 'Impact—Summary', content: 'Led teams… increased revenue by 1,200%' },
--    ]);
--
--    expect(normalized[0]).toEqual(
--      expect.objectContaining({
--        title: 'Impact-Summary',
--        content: 'Led teams... increased revenue by 1,200%',
--      }),
--    );
--  });
--
--  it('blocks invented metrics with formatted numbers', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [{ content: 'Increased adoption to 1,200 users.' }],
--      generatedSections: [{ content: 'Increased adoption to 1,500 users.' }],
--    });
--
--    expect(flags).toEqual([
-+    expect(repoMock.save).toHaveBeenCalledWith(
-       expect.objectContaining({
--        code: ComplianceFlagCode.INVENTED_METRIC,
--        severity: ComplianceFlagSeverity.BLOCK,
-+        passFail: false,
-+        baselineVersionId: null,
-       }),
--    ]);
--  });
--
--  it('allows technologies present in baseline vocabulary', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [
--        {
--          title: 'Skills',
--          content: 'AWS, PostgreSQL, Terraform',
--          sectionType: BaselineSectionType.SKILLS,
--        },
--      ],
--      generatedSections: [{ content: 'Led AWS migration with PostgreSQL.' }],
--    });
--
--    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
--  });
--
--  it('blocks technologies not present in baseline', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [
--        {
--          title: 'Skills',
--          content: 'AWS, PostgreSQL',
--          sectionType: BaselineSectionType.SKILLS,
--        },
--      ],
--      generatedSections: [{ content: 'Implemented QuantumOS pipelines.' }],
--    });
--
--    expect(flags).toEqual(
--      expect.arrayContaining([
--        expect.objectContaining({ code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY, severity: ComplianceFlagSeverity.BLOCK }),
--      ]),
-     );
-   });
--
--  it('is conservative and avoids over-flagging generic terms', () => {
--    const flags = service.enforceResumeWritingRules({
--      baselineSections: [
--        {
--          title: 'Experience',
--          content: 'AWS migration and platform leadership.',
--          sectionType: BaselineSectionType.EXPERIENCE,
--        },
--      ],
--      generatedSections: [{ content: 'Collaborated with cross-functional teams to improve processes.' }],
--    });
--
--    expect(flags.find((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY)).toBeUndefined();
--  });
- });
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index 1b14e0a0220a8927e59086796a2ac627221cd8f5..bb12a1ad85be3c564386387cc76babb0712e7392 100644
---- a/apps/api/src/compliance/compliance.service.ts
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -1,203 +1,243 @@
- import { Injectable } from '@nestjs/common';
--import { createHash } from 'node:crypto';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { Repository } from 'typeorm';
- import type { BaselineVersion } from '../baseline/baseline-version.entity';
- import type { Job } from '../jobs/job.entity';
- import {
-   ComplianceAction,
-   ComplianceFlagCode,
-   ComplianceFlag,
-   ComplianceFlagSeverity,
- } from './compliance.types';
-+import { ComplianceAudit } from './compliance-audit.entity';
- import { ScopeInflationDetector } from './scope-inflation-detector';
- 
- export type ValidateAndAuditRequest = {
-   action: ComplianceAction;
-   actorId: string;
- 
-   baselineVersion?: BaselineVersion | null;
-   job?: Job | null;
- 
-   outputHash: string;
- 
-   extraFlags?: ComplianceFlag[] | undefined;
- 
-   scopeInflationDetected?: boolean;
-   techMismatchDetected?: boolean;
- 
-   [key: string]: unknown;
- };
- 
- export type ValidateAndAuditResult = {
-   blocked: boolean;
-   complianceFlags: ComplianceFlag[];
-   audit: {
-     id: string;
-+    baselineVersionId: string | null;
-     outputHash: string;
-     action: ComplianceAction;
-     actorId: string;
-     baselineVersionHash: string | null;
-     jobId: string | null;
-     createdAt: string;
-   };
- };
- 
- @Injectable()
- export class ComplianceService {
-   private readonly scopeInflationDetector = new ScopeInflationDetector();
- 
-+  constructor(
-+    @InjectRepository(ComplianceAudit)
-+    private readonly auditsRepository: Repository<ComplianceAudit>,
-+  ) {}
-+
-   public normalizeText(input: string): string {
-     return (input ?? '').replace(/\s+/g, ' ').trim();
-   }
- 
-   // Preserve section shape so downstream callers can still reference `title`, etc.
-   public normalizeSectionsForOutput<
-     T extends { content?: string | null; title?: string | null; [key: string]: any },
-   >(sections: T[]): T[] {
-     if (!Array.isArray(sections)) return [];
- 
-     return sections.map((s) => ({
-       ...s,
-       title: s?.title ?? null,
-       content: this.normalizeText(String(s?.content ?? '')),
-     }));
-   }
- 
-   public enforceResumeWritingRules(payload: {
-     normalizedContent?: string;
-     rawContent?: string;
-     [key: string]: unknown;
-   }): ComplianceFlag[] {
-     const content =
-       this.normalizeText(payload.normalizedContent ?? payload.rawContent ?? '');
- 
-     if (!content) return [];
- 
-     const flags: ComplianceFlag[] = [];
- 
-     if (content.includes('\u0000')) {
-       flags.push(
-         this.flag(
-           'invalid_null_bytes',
-           'Content contains invalid null bytes.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-+    const stylizedDashPattern = /[\u2012\u2013\u2014\u2015]/u; // figure dash, en dash, em dash, horizontal bar
-+    if (stylizedDashPattern.test(content)) {
-+      flags.push(
-+        this.flag(
-+          ComplianceFlagCode.STYLIZED_PUNCTUATION,
-+          'Content contains stylized dash punctuation. Use standard hyphens instead.',
-+          ComplianceFlagSeverity.BLOCK,
-+        ),
-+      );
-+    }
-+
-     return flags;
-   }
- 
-   public detectScopeInflation(payload: {
-     baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
-     generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
-   }): ComplianceFlag[] {
-     const baselineSections = payload.baselineSections ?? [];
-     const generatedSections = payload.generatedSections ?? [];
-     return this.scopeInflationDetector.detect(baselineSections, generatedSections);
-   }
- 
-   public enforceTechnologyConsistency(payload: {
-     baselineSections?: Array<{ content?: string | null; title?: string | null }> | null;
-     jobText?: string | null;
-     [key: string]: unknown;
-   }): ComplianceFlag[] {
-     void payload;
-     return [];
-   }
- 
-   async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
-     const flags: ComplianceFlag[] = [];
- 
-     const actorId = String(payload.actorId ?? '').trim();
-     const outputHash = String(payload.outputHash ?? '').trim();
-+    const baselineVersionId = (payload.baselineVersion as any)?.id ?? null;
-+    const baselineVersionHash =
-+      (payload.baselineVersion as any)?.hash ??
-+      (payload.baselineVersion as any)?.fileHash ??
-+      null;
-+    const jobId = (payload.job as any)?.id ?? null;
- 
-     if (!actorId) {
-       flags.push(
-         this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
-       );
-     }
- 
-     if (!outputHash) {
-       flags.push(
-         this.flag(
-           'missing_output_hash',
-           'Output hash is required.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-+    const baselineRequiredActions: ComplianceAction[] = [
-+      ComplianceAction.RESUME_GENERATION,
-+      ComplianceAction.COVER_LETTER_GENERATION,
-+      ComplianceAction.FOLLOW_UP_GENERATION,
-+      ComplianceAction.RESUME_EXPORT,
-+    ];
-+
-+    if (baselineRequiredActions.includes(payload.action)) {
-+      if (!baselineVersionId) {
-+        flags.push(
-+          this.flag(
-+            ComplianceFlagCode.MISSING_BASELINE_VERSION,
-+            'baselineVersionId is required.',
-+            ComplianceFlagSeverity.BLOCK,
-+          ),
-+        );
-+      }
-+
-+      if (!baselineVersionHash) {
-+        flags.push(
-+          this.flag(
-+            ComplianceFlagCode.MISSING_BASELINE_HASH,
-+            'Baseline version hash is required.',
-+            ComplianceFlagSeverity.BLOCK,
-+          ),
-+        );
-+      }
-+    }
-+
-     if (Array.isArray(payload.extraFlags) && payload.extraFlags.length) {
-       for (const f of payload.extraFlags) {
-         if (!f || typeof f.code !== 'string' || !f.code.trim()) continue;
-         flags.push({
-           code: f.code as any,
-           message: f.message,
-           severity: f.severity ?? ComplianceFlagSeverity.BLOCK,
-           evidence: f.evidence,
-         });
-       }
-     }
- 
-     if (payload.scopeInflationDetected === true) {
-       flags.push(
-         this.flag(
-           ComplianceFlagCode.SCOPE_INFLATION,
-           'Potential scope inflation detected.',
-           ComplianceFlagSeverity.BLOCK,
-         ),
-       );
-     }
- 
-     const blocked = flags.some(
-       (f) =>
-         (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
-     );
- 
--    const auditId = this.buildAuditId(payload);
--
--    const baselineVersionHash =
--      (payload.baselineVersion as any)?.hash ??
--      (payload.baselineVersion as any)?.fileHash ??
--      null;
-+    const audit = this.auditsRepository.create({
-+      actorId,
-+      action: payload.action,
-+      baselineVersionId,
-+      baselineVersionHash,
-+      jobId: jobId ?? null,
-+      outputHash,
-+      complianceFlags: flags,
-+      passFail: !blocked,
-+    });
- 
--    const jobId = (payload.job as any)?.id ?? null;
-+    const savedAudit = await this.auditsRepository.save(audit);
- 
-     return {
-       blocked,
-       complianceFlags: flags,
-       audit: {
--        id: auditId,
--        outputHash: outputHash || '',
--        action: payload.action,
--        actorId: actorId || '',
--        baselineVersionHash,
--        jobId,
--        createdAt: new Date().toISOString(),
-+        id: savedAudit.id,
-+        outputHash: savedAudit.outputHash ?? '',
-+        baselineVersionId: savedAudit.baselineVersionId,
-+        action: savedAudit.action,
-+        actorId: savedAudit.actorId,
-+        baselineVersionHash: savedAudit.baselineVersionHash,
-+        jobId: savedAudit.jobId,
-+        createdAt: savedAudit.createdAt.toISOString(),
-       },
-     };
-   }
- 
-   private flag(code: string, message: string, severity: ComplianceFlagSeverity): ComplianceFlag {
-     return { code: code as any, message, severity };
-   }
--
--  private buildAuditId(payload: ValidateAndAuditRequest): string {
--    const baselineHash =
--      (payload.baselineVersion as any)?.hash ??
--      (payload.baselineVersion as any)?.fileHash ??
--      null;
--
--    const jobId = (payload.job as any)?.id ?? null;
--
--    const fingerprint = {
--      action: payload.action,
--      actorId: String(payload.actorId ?? ''),
--      baselineHash,
--      jobId,
--      outputHash: String(payload.outputHash ?? ''),
--    };
--
--    return createHash('sha256').update(JSON.stringify(fingerprint)).digest('hex');
--  }
- }
-diff --git a/apps/api/src/compliance/compliance.types.ts b/apps/api/src/compliance/compliance.types.ts
-index d7b909962a46f2b172092ce39a2190146cba9300..ef3a26ec9ad24e358ed95fd14e5bc7e08e25de7d 100644
---- a/apps/api/src/compliance/compliance.types.ts
-+++ b/apps/api/src/compliance/compliance.types.ts
-@@ -1,30 +1,32 @@
- export enum ComplianceAction {
-   FIT_SCORE = 'fit_score',
-   RESUME_GENERATION = 'resume_gen',
-   COVER_LETTER_GENERATION = 'cover_letter_gen',
-+  FOLLOW_UP_GENERATION = 'follow_up_gen',
-   APPLICATION_EXPORT = 'application_export',
-   RESUME_EXPORT = 'resume_export',
- }
- 
- export enum ComplianceFlagCode {
-   SCOPE_INFLATION = 'scope_inflation',
-   MISSING_BASELINE_HASH = 'missing_baseline_hash',
-+  MISSING_BASELINE_VERSION = 'missing_baseline_version',
-   UNKNOWN_COMPANY = 'unknown_company',
-   INVENTED_COMPANY = 'invented_company',
-   INVENTED_ROLE = 'invented_role',
-   INVENTED_METRIC = 'invented_metric',
-   STYLIZED_PUNCTUATION = 'stylized_punctuation',
-   FICTIONAL_TECHNOLOGY = 'fictional_technology',
- }
- 
- export enum ComplianceFlagSeverity {
-   BLOCK = 'block',
-   WARN = 'warn',
- }
- 
- export type ComplianceFlag = {
-   code: ComplianceFlagCode;
-   severity: ComplianceFlagSeverity;
-   message: string;
-   evidence?: Array<{ baseline: string; generated: string }>;
- };
-diff --git a/apps/api/src/cover-letters/cover-letters.service.spec.ts b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-index bcd920773b8e3ad364b7804db4cfd8517c77347e..bb5c68ebd3a59da37ad58a523fde898f3ebaa6d6 100644
---- a/apps/api/src/cover-letters/cover-letters.service.spec.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.spec.ts
-@@ -1,26 +1,26 @@
--import { UnprocessableEntityException } from '@nestjs/common';
-+import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
- import { DataSource } from 'typeorm';
- import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
- import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
- import { CoverLettersService } from './cover-letters.service';
- 
- type MockRepository<T extends Record<string, any>> = {
-   findOne: jest.Mock;
-   find: jest.Mock;
-   create: jest.Mock;
-   save: jest.Mock;
-   remove: jest.Mock;
- };
- 
- function buildRepository<T extends Record<string, any>>(initial?: T): MockRepository<T> {
-   let saved = initial;
- 
-   return {
-     findOne: jest.fn(async () => saved ?? null),
-     find: jest.fn(async () => []),
-     create: jest.fn((payload: Partial<T>) => ({ ...payload } as T)),
-     save: jest.fn(async (payload: T) => {
-       saved = { ...payload, id: payload['id'] ?? 'saved-id', createdAt: new Date(), updatedAt: new Date() } as T;
-       return saved as T;
-     }),
-     remove: jest.fn(async (payload: T) => payload),
-@@ -76,84 +76,100 @@ describe('CoverLettersService', () => {
-         case 'CoverLetter':
-           return coverLetterRepository;
-         case 'Baseline':
-           return baselineRepository;
-         case 'BaselineVersion':
-           return baselineVersionRepository;
-         case 'BaselineBlockPolicy':
-           return baselineBlockPolicyRepository;
-         case 'Job':
-           return jobRepository;
-         default:
-           throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
-       }
-     }),
-   } as unknown as DataSource;
- 
-   beforeEach(() => {
-     jest.clearAllMocks();
-   });
- 
-   it('persists a chosen closing template and reuses it for the next generation', async () => {
-     const service = new CoverLettersService(dataSource, complianceService as any);
- 
-     await service.generateCoverLetter('user-1', {
-       baselineId: 'baseline-1',
-+      baselineVersionId: 'baseline-version-1',
-       jobId: 'job-1',
-       closingTemplateKey: 'collaborative',
-     });
- 
-     expect(coverLetterRepository.save).toHaveBeenCalledWith(
-       expect.objectContaining({ closingTemplateKey: 'collaborative' }),
-     );
- 
-     // Simulate subsequent call without providing a template key.
-     const second = await service.generateCoverLetter('user-1', {
-       baselineId: 'baseline-1',
-+      baselineVersionId: 'baseline-version-1',
-       jobId: 'job-1',
-     });
- 
-     expect(second.closingTemplateKey).toBe('collaborative');
-   });
- 
-   it('blocks invented metrics through compliance checks', async () => {
-     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
-       {
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Metric not found in baseline.',
-       },
-     ]);
- 
-     const service = new CoverLettersService(dataSource, complianceService as any);
- 
-     await expect(
-       service.generateCoverLetter('user-1', {
-         baselineId: 'baseline-1',
-+        baselineVersionId: 'baseline-version-1',
-         jobId: 'job-1',
-       }),
-     ).rejects.toThrow(UnprocessableEntityException);
- 
-     expect(complianceService.validateAndAudit).toHaveBeenCalled();
-   });
- 
-   it('blocks cover letter generation when scope inflation is detected', async () => {
-     complianceService.detectScopeInflation.mockReturnValueOnce([
-       {
-         code: ComplianceFlagCode.SCOPE_INFLATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Scope exceeds baseline.',
-       },
-     ]);
- 
-     const service = new CoverLettersService(dataSource, complianceService as any);
- 
-     await expect(
-       service.generateCoverLetter('user-1', {
-         baselineId: 'baseline-1',
-+        baselineVersionId: 'baseline-version-1',
-         jobId: 'job-1',
-       }),
-     ).rejects.toThrow(UnprocessableEntityException);
- 
-     expect(complianceService.validateAndAudit).toHaveBeenCalled();
-   });
-+
-+  it('rejects generation without a baseline version id', async () => {
-+    const service = new CoverLettersService(dataSource, complianceService as any);
-+
-+    await expect(
-+      service.generateCoverLetter('user-1', {
-+        baselineId: 'baseline-1',
-+        jobId: 'job-1',
-+        baselineVersionId: '',
-+      }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
- });
-diff --git a/apps/api/src/cover-letters/cover-letters.service.ts b/apps/api/src/cover-letters/cover-letters.service.ts
-index 5828b097b71846aaa0b31ed71843aef5eac0ce69..8b3b04b6d84558cc316865b5db31406560a26f76 100644
---- a/apps/api/src/cover-letters/cover-letters.service.ts
-+++ b/apps/api/src/cover-letters/cover-letters.service.ts
-@@ -38,80 +38,88 @@ export class CoverLettersService {
-   private readonly baselineVersionRepository: Repository<BaselineVersion>;
-   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
-   private readonly jobRepository: Repository<Job>;
-   private readonly generator: CoverLetterGenerator;
- 
-   constructor(
-     @InjectDataSource() private readonly dataSource: DataSource,
-     private readonly complianceService: ComplianceService,
-   ) {
-     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
-     this.baselineRepository = this.dataSource.getRepository(Baseline);
-     this.baselineVersionRepository =
-       this.dataSource.getRepository(BaselineVersion);
-     this.baselineBlockPolicyRepository = this.dataSource.getRepository(
-       BaselineBlockPolicy,
-     );
-     this.jobRepository = this.dataSource.getRepository(Job);
-     this.generator = new TemplateCoverLetterGenerator();
-   }
- 
-   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-+    if (!input.baselineVersionId?.trim()) {
-+      throw new BadRequestException('baselineVersionId is required');
-+    }
-+
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: input.baselineId, userId },
-       relations: ['sections'],
-       order: { sections: { order: 'ASC' } },
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     const job = await this.jobRepository.findOne({
-       where: { id: input.jobId, userId },
-     });
- 
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     const baselineVersion = await this.baselineVersionRepository.findOne({
--      where: { baselineId: baseline.id },
--      order: { versionNumber: 'DESC', createdAt: 'DESC' },
-+      where: { baselineId: baseline.id, id: input.baselineVersionId.trim() },
-     });
- 
--    const policies = baselineVersion
--      ? await this.baselineBlockPolicyRepository.find({
--          where: { baselineVersionId: baselineVersion.id },
--          relations: ['baselineSection'],
--          order: { order: 'ASC' },
--        })
--      : [];
-+    if (!baselineVersion) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+    if (!baselineVersion.hash) {
-+      throw new BadRequestException('Baseline version hash missing');
-+    }
-+
-+    const policies = await this.baselineBlockPolicyRepository.find({
-+      where: { baselineVersionId: baselineVersion.id },
-+      relations: ['baselineSection'],
-+      order: { order: 'ASC' },
-+    });
- 
-     const sections = this.applyPoliciesToSections(
-       baseline.sections ?? [],
-       policies,
-     );
- 
-     const closingTemplateKey = await this.resolveClosingTemplateKey(
-       userId,
-       input.closingTemplateKey,
-     );
-     const closingTemplate = resolveClosingTemplate(closingTemplateKey);
- 
-     const allowedSections = sections.filter(
-       (section) =>
-         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
-         BaselineIncludePolicy.NEVER,
-     );
- 
-     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
-     const jobContext = {
-       id: job.id,
-       title: this.cleanText(job.title),
-       company: this.cleanText(job.company),
-       responsibilities: this.sanitizeList(job.normalizedResponsibilities),
-       requirements: this.sanitizeList(job.normalizedRequirements),
-diff --git a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-index aa0d315d283f934e2738049eebeafedc2f557e6f..75b5045b6dc00fee61f79660ebba7b9c58498b14 100644
---- a/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-+++ b/apps/api/src/cover-letters/dto/generate-cover-letter.dto.ts
-@@ -1,11 +1,13 @@
- export class GenerateCoverLetterDto {
-   baselineId!: string;
- 
-+  baselineVersionId!: string;
-+
-   jobId!: string;
- 
-   closingTemplateKey?: string;
- 
-   maxWords?: number;
- 
-   tone?: string;
- }
-diff --git a/apps/api/src/interviews/interview-toolkit.controller.ts b/apps/api/src/interviews/interview-toolkit.controller.ts
-index 5b87a3e14ba43cd99c67ec08544868872b07a0a9..8254c36dfc385b0d81cc4a0d1da5c2b8b5de34ca 100644
---- a/apps/api/src/interviews/interview-toolkit.controller.ts
-+++ b/apps/api/src/interviews/interview-toolkit.controller.ts
-@@ -4,41 +4,46 @@ import type { Request } from 'express';
- import { InterviewToolkitService } from './interview-toolkit.service';
- 
- @UseGuards(AuthGuard('jwt'))
- @Controller('interview-toolkit')
- export class InterviewToolkitController {
-   constructor(private readonly interviewToolkitService: InterviewToolkitService) {}
- 
-   @Get(':jobId/study-packet')
-   async getStudyPacket(@Param('jobId') jobId: string, @Req() request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     if (!jobId?.trim()) {
-       throw new BadRequestException('jobId is required');
-     }
- 
-     return this.interviewToolkitService.buildStudyPacket(userId, jobId.trim());
-   }
- 
-   @Post(':jobId/follow-up')
-   async generateFollowUp(
-     @Param('jobId') jobId: string,
--    @Body() body: { notes?: string },
-+    @Body() body: { notes?: string; baselineVersionId?: string },
-     @Req() request: Request & { user?: { id?: string } },
-   ) {
-     const userId = request.user?.id;
- 
-     if (!userId) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     if (!jobId?.trim()) {
-       throw new BadRequestException('jobId is required');
-     }
- 
--    return this.interviewToolkitService.generateFollowUp(userId, jobId.trim(), body?.notes);
-+    return this.interviewToolkitService.generateFollowUp(
-+      userId,
-+      jobId.trim(),
-+      body?.baselineVersionId,
-+      body?.notes,
-+    );
-   }
- }
-diff --git a/apps/api/src/interviews/interview-toolkit.service.spec.ts b/apps/api/src/interviews/interview-toolkit.service.spec.ts
-index 84d7381b5353ee14114f046adaa7c452814d0897..f99d23bf2006d5a52d0ec49b9bd3dbbce84955ea 100644
---- a/apps/api/src/interviews/interview-toolkit.service.spec.ts
-+++ b/apps/api/src/interviews/interview-toolkit.service.spec.ts
-@@ -1,62 +1,69 @@
-+import { BadRequestException } from '@nestjs/common';
- import { Test } from '@nestjs/testing';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { Repository } from 'typeorm';
- import { ComplianceService } from '../compliance/compliance.service';
- import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { Job } from '../jobs/job.entity';
- import { StarStory } from '../star-stories/star-story.entity';
- import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import { InterviewToolkitService } from './interview-toolkit.service';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
-+import { Baseline } from '../baseline/baseline.entity';
- 
- const buildRepository = <T>(overrides: Partial<Repository<T>> = {}): Partial<Repository<T>> => ({
-   findOne: jest.fn(),
-   find: jest.fn(),
-   ...overrides,
- });
- 
- describe('InterviewToolkitService', () => {
-   let service: InterviewToolkitService;
-   let jobRepository: Partial<Repository<Job>>;
-   let fitAssessmentRepository: Partial<Repository<FitAssessment>>;
-   let starStoryRepository: Partial<Repository<StarStory>>;
-   let questionGenerator: Partial<InterviewQuestionGeneratorService>;
-+  let baselineVersionRepository: Partial<Repository<BaselineVersion>>;
- 
-   beforeEach(async () => {
-     jobRepository = buildRepository();
-     fitAssessmentRepository = buildRepository();
-     starStoryRepository = buildRepository();
-+    baselineVersionRepository = buildRepository();
-     questionGenerator = {
-       generateQuestions: jest.fn().mockReturnValue([{ gapId: 'gap-1', prompt: 'Q1', category: 'Context', jdReference: '' }]),
-     } as any;
- 
-     const moduleRef = await Test.createTestingModule({
-       providers: [
-         InterviewToolkitService,
-         { provide: getRepositoryToken(Job), useValue: jobRepository },
-         { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
-         { provide: getRepositoryToken(StarStory), useValue: starStoryRepository },
-+        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-+        { provide: getRepositoryToken(Baseline), useValue: buildRepository() },
-         { provide: InterviewQuestionGeneratorService, useValue: questionGenerator },
-         {
-           provide: ComplianceService,
-           useValue: {
-             validateAndAudit: jest.fn().mockResolvedValue({ blocked: false, complianceFlags: [] }),
-           },
-         },
-       ],
-     }).compile();
- 
-     service = moduleRef.get(InterviewToolkitService);
-   });
- 
-   it('builds a study packet from latest assessment and stories', async () => {
-     const job: Job = {
-       id: 'job-1',
-       userId: 'user-1',
-       title: 'Senior Engineer',
-       company: 'TestCo',
-       rawDescription: 'Line one',
-       sourceUrl: null,
-       normalizedResponsibilities: ['Lead systems', 'Coach team'],
-       normalizedRequirements: [],
-       jdIngestionMethod: 'PASTE' as any,
-       jdParsedAt: null,
-@@ -108,31 +115,65 @@ describe('InterviewToolkitService', () => {
- 
-     expect(packet.job).toEqual({ id: 'job-1', title: 'Senior Engineer', company: 'TestCo' });
-     expect(packet.fitSnapshot?.overallScore).toBe(92);
-     expect(packet.recommendedStories).toHaveLength(1);
-     expect(packet.questions).toHaveLength(1);
-   });
- 
-   it('generates follow up copy through compliance', async () => {
-     const job: Job = {
-       id: 'job-2',
-       userId: 'user-1',
-       title: 'PM',
-       company: 'Acme',
-       rawDescription: 'JD',
-       sourceUrl: null,
-       normalizedResponsibilities: [],
-       normalizedRequirements: [],
-       jdIngestionMethod: 'PASTE' as any,
-       jdParsedAt: null,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
- 
--    const result = await service.generateFollowUp('user-1', 'job-2', 'roadmap planning');
-+    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
-+      id: 'bv-1',
-+      hash: 'hash-1',
-+      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
-+    });
-+
-+    const result = await service.generateFollowUp('user-1', 'job-2', 'bv-1', 'roadmap planning');
- 
-     expect(result.content).toContain('roadmap planning');
-     expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
-   });
-+
-+  it('requires a baseline version id for follow ups', async () => {
-+    const job: Job = {
-+      id: 'job-2',
-+      userId: 'user-1',
-+      title: 'PM',
-+      company: 'Acme',
-+      rawDescription: 'JD',
-+      sourceUrl: null,
-+      normalizedResponsibilities: [],
-+      normalizedRequirements: [],
-+      jdIngestionMethod: 'PASTE' as any,
-+      jdParsedAt: null,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
-+    (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
-+      id: 'bv-1',
-+      hash: 'hash-1',
-+      baseline: { id: 'baseline-1', userId: 'user-1' } as Baseline,
-+    });
-+
-+    await expect(service.generateFollowUp('user-1', 'job-2', '')).rejects.toBeInstanceOf(
-+      BadRequestException,
-+    );
-+  });
- });
-diff --git a/apps/api/src/interviews/interview-toolkit.service.ts b/apps/api/src/interviews/interview-toolkit.service.ts
-index 345d15702dd14f9119567991d9e693b538b4af42..e385ed9add69810a7bcb569127df63b11f37b6bf 100644
---- a/apps/api/src/interviews/interview-toolkit.service.ts
-+++ b/apps/api/src/interviews/interview-toolkit.service.ts
-@@ -1,62 +1,65 @@
- import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash } from 'node:crypto';
- import { Repository } from 'typeorm';
- import { ComplianceService } from '../compliance/compliance.service';
- import { ComplianceAction } from '../compliance/compliance.types';
- import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { Job } from '../jobs/job.entity';
- import { StarStory } from '../star-stories/star-story.entity';
- import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
- import type { InterviewGap } from './interview-types';
-+import { BaselineVersion } from '../baseline/baseline-version.entity';
- 
- export type StudyPacket = {
-   job: Pick<Job, 'id' | 'title' | 'company'>;
-   fitSnapshot: {
-     assessmentId: string;
-     baselineId: string;
-     overallScore: number;
-     verdict: string;
-     strengths: string[];
-     gaps: string[];
-     createdAt: string;
-   } | null;
-   recommendedStories: StarStory[];
-   recentStories: StarStory[];
-   questions: ReturnType<InterviewQuestionGeneratorService['generateQuestions']>;
- };
- 
- @Injectable()
- export class InterviewToolkitService {
-   constructor(
-     @InjectRepository(Job)
-     private readonly jobRepository: Repository<Job>,
-     @InjectRepository(FitAssessment)
-     private readonly fitAssessmentRepository: Repository<FitAssessment>,
-     @InjectRepository(StarStory)
-     private readonly starStoryRepository: Repository<StarStory>,
-+    @InjectRepository(BaselineVersion)
-+    private readonly baselineVersionRepository: Repository<BaselineVersion>,
-     private readonly questionGenerator: InterviewQuestionGeneratorService,
-     private readonly complianceService: ComplianceService,
-   ) {}
- 
-   private async requireJob(jobId: string, userId: string) {
-     const job = await this.jobRepository.findOne({ where: { id: jobId, userId } });
- 
-     if (!job) {
-       throw new NotFoundException('Job not found');
-     }
- 
-     return job;
-   }
- 
-   async buildStudyPacket(userId: string, jobId: string): Promise<StudyPacket> {
-     const job = await this.requireJob(jobId, userId);
- 
-     const assessment = await this.fitAssessmentRepository.findOne({
-       where: { userId, jobId },
-       order: { createdAt: 'DESC' },
-     });
- 
-     const fitSnapshot = assessment
-       ? {
-           assessmentId: assessment.id,
-@@ -77,70 +80,101 @@ export class InterviewToolkitService {
- 
-     const normalizedGaps = fitSnapshot?.gaps ?? [];
-     const storyMatches = normalizedGaps.length
-       ? stories.filter((story) => this.matchesAnyGap(story, normalizedGaps))
-       : [];
- 
-     const recommendedStories = storyMatches.length
-       ? storyMatches.slice(0, 5)
-       : stories.slice(0, 5);
- 
-     const gapsForQuestions = normalizedGaps.length
-       ? normalizedGaps.map((gap, index) => this.gapFromText(gap, index))
-       : this.defaultGapsFromJob(job);
- 
-     const questions = this.questionGenerator.generateQuestions(gapsForQuestions);
- 
-     return {
-       job: { id: job.id, title: job.title, company: job.company },
-       fitSnapshot,
-       recommendedStories,
-       recentStories: stories.slice(0, 5),
-       questions,
-     };
-   }
- 
--  async generateFollowUp(userId: string, jobId: string, notes?: string) {
-+  async generateFollowUp(
-+    userId: string,
-+    jobId: string,
-+    baselineVersionId?: string | null,
-+    notes?: string,
-+  ) {
-     const job = await this.requireJob(jobId, userId);
- 
-+    if (!baselineVersionId?.trim()) {
-+      throw new BadRequestException('baselineVersionId is required');
-+    }
-+
-+    const baselineVersion = await this.baselineVersionRepository.findOne({
-+      where: { id: baselineVersionId.trim() },
-+      relations: ['baseline'],
-+    });
-+
-+    if (!baselineVersion || !baselineVersion.baseline) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    if (baselineVersion.baseline.userId !== userId) {
-+      throw new NotFoundException('Baseline version not found');
-+    }
-+
-+    if (!baselineVersion.hash) {
-+      throw new BadRequestException('Baseline version hash missing');
-+    }
-+
-     const header = job.company ? `Hi ${job.company} team,` : 'Hi there,';
-     const roleLine = job.title ? `Thank you for the chance to discuss the ${job.title} role.` : undefined;
-     const notesLine = notes?.trim() ? `I appreciated discussing ${notes.trim()}.` : undefined;
-     const close = 'Please let me know if any additional context would be helpful.';
- 
-     const paragraphs = [header, roleLine, notesLine, 'I remain excited about the opportunity to contribute.', close]
-       .filter(Boolean)
-       .join(' ');
- 
-     const content = `${paragraphs} Thank you for your time.`.trim();
- 
-+    const writingFlags = this.complianceService.enforceResumeWritingRules({
-+      rawContent: content,
-+    });
-+
-     const { blocked, complianceFlags } = await this.complianceService.validateAndAudit({
--      action: ComplianceAction.COVER_LETTER_GENERATION,
-+      action: ComplianceAction.FOLLOW_UP_GENERATION,
-       actorId: userId,
-+      baselineVersion,
-       job,
-       outputHash: createHash('sha256').update(content).digest('hex'),
--      extraFlags: [],
-+      extraFlags: writingFlags,
-     });
- 
-     if (blocked) {
-       const message = complianceFlags
-         .map((flag) => flag.message)
-         .filter(Boolean)
-         .join('; ');
-       throw new BadRequestException(message || 'Follow up could not be generated due to compliance.');
-     }
- 
-     return { job: { id: job.id, title: job.title, company: job.company }, content, complianceFlags };
-   }
- 
-   private matchesAnyGap(story: StarStory, gaps: string[]): boolean {
-     const haystack = `${story.title} ${story.competencies?.join(' ') ?? ''}`.toLowerCase();
-     return gaps.some((gap) => haystack.includes((gap ?? '').toLowerCase()));
-   }
- 
-   private gapFromText(gap: string, index: number): InterviewGap {
-     const trimmed = gap?.trim() || 'Interview prep focus';
-     return {
-       gapId: `gap-${index + 1}`,
-       domain: 'experience',
-       jdExcerpt: trimmed,
-       baselineExcerpt: null,
-diff --git a/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts b/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts
+diff --git a/.github/workflows/build-dev-images.yml b/.github/workflows/build-dev-images.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..4bc734fce1ae10d69c5a892da33bd9433801e0b0
+index 0000000000000000000000000000000000000000..55e666bba6af529d6eb895549a4f20bea7e20d91
 --- /dev/null
-+++ b/apps/api/src/migrations/1860000000000-ComplianceAuditEnhancements.ts
-@@ -0,0 +1,26 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
++++ b/.github/workflows/build-dev-images.yml
+@@ -0,0 +1,44 @@
++name: Build and push dev images
 +
-+export class ComplianceAuditEnhancements1860000000000 implements MigrationInterface {
-+  name = 'ComplianceAuditEnhancements1860000000000';
++on:
++  push:
++    branches:
++      - main
 +
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TYPE "compliance_audits_action_enum" ADD VALUE IF NOT EXISTS 'follow_up_gen'`,
-+    );
++permissions:
++  contents: read
++  packages: write
 +
-+    await queryRunner.query(
-+      `ALTER TABLE "compliance_audits" ADD COLUMN IF NOT EXISTS "baselineVersionId" uuid NULL`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "compliance_audits" ADD COLUMN IF NOT EXISTS "jobId" uuid NULL`,
-+    );
-+  }
++jobs:
++  build:
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        include:
++          - name: web
++            dockerfile: infra/docker/web.Dockerfile
++          - name: api
++            dockerfile: infra/docker/api.Dockerfile
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
 +
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "jobId"`);
-+    await queryRunner.query(
-+      `ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "baselineVersionId"`,
-+    );
-+    // Note: postgres enum values cannot be easily removed; retaining added value on down migration.
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      - name: Login to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.actor }}
++          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
++
++      - name: Build and push
++        uses: docker/build-push-action@v5
++        with:
++          context: .
++          file: ${{ matrix.dockerfile }}
++          push: true
++          tags: |
++            ghcr.io/${{ github.repository }}/${{ matrix.name }}:dev
++            ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ github.sha }}
+diff --git a/infra/nginx/api.dev.targetthisrole.ai.conf b/infra/nginx/api.dev.targetthisrole.ai.conf
+new file mode 100644
+index 0000000000000000000000000000000000000000..4789dc7ca6624eb4feca5ebab14f0bb658bc0dfc
+--- /dev/null
++++ b/infra/nginx/api.dev.targetthisrole.ai.conf
+@@ -0,0 +1,14 @@
++server {
++  listen 80;
++  server_name api.dev.targetthisrole.ai;
++
++  location / {
++    proxy_pass http://127.0.0.1:3001;
++    proxy_http_version 1.1;
++    proxy_set_header Upgrade $http_upgrade;
++    proxy_set_header Connection "upgrade";
++    proxy_set_header Host $host;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
 +  }
 +}
-diff --git a/apps/api/src/resume/resume.controller.ts b/apps/api/src/resume/resume.controller.ts
-index 6b4174465f844a5102f56d8c8e4f341a3b65b64f..a76b21f6170763e01c8239567bc001932dcc5c85 100644
---- a/apps/api/src/resume/resume.controller.ts
-+++ b/apps/api/src/resume/resume.controller.ts
-@@ -62,55 +62,56 @@ export class ResumeController {
-   ) {
-     const format = this.normalizeFormat(formatParam);
-     return this.handleExport(body, request, res, format);
-   }
- 
-   private normalizeFormat(value: string): ResumeExportFormat {
-     const normalized = (value ?? '').toLowerCase().trim();
-     if (normalized === 'pdf') return 'pdf';
-     if (normalized === 'docx') return 'docx';
-     throw new BadRequestException('Invalid format. Use docx or pdf.');
-   }
- 
-   private getUserId(request: Request & { user?: { id?: string } }) {
-     const userId = request.user?.id;
-     if (!userId) throw new BadRequestException('Invalid user context');
-     return userId;
-   }
- 
-   private parsePayload(body: ResumeRequestBody) {
-     const baselineId = body.baselineId?.trim();
-     const baselineVersionId = body.baselineVersionId?.trim();
-     const jobId = body.jobId?.trim();
-     const oneTap = Boolean(body.oneTap);
- 
-     if (!baselineId) throw new BadRequestException('baselineId is required');
-+    if (!baselineVersionId) throw new BadRequestException('baselineVersionId is required');
-     if (!jobId) throw new BadRequestException('jobId is required');
- 
-     return {
-       baselineId,
--      baselineVersionId: baselineVersionId ?? undefined,
-+      baselineVersionId,
-       jobId,
-       oneTap,
-     };
-   }
- 
-   private async handleGenerate(
-     body: ResumeRequestBody,
-     request: Request & { user?: { id?: string } },
-   ) {
-     const userId = this.getUserId(request);
-     const payload = this.parsePayload(body);
-     return this.resumeService.generateResume(userId, payload);
-   }
- 
-   private async handleExport(
-     body: ResumeRequestBody,
-     request: Request & { user?: { id?: string } },
-     res: Response,
-     format: ResumeExportFormat,
-   ) {
-     const userId = this.getUserId(request);
-     const payload = this.parsePayload(body);
- 
-     const file = await this.resumeService.exportResume(userId, payload, format);
- 
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
-index c20fe474c17b2589e01d6f9785eb3f1bd50759d9..5752ffa6fba0e502a99d7ea8a0b72bc22a819a01 100644
---- a/apps/api/src/resume/resume.service.spec.ts
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -1,26 +1,26 @@
--import { UnprocessableEntityException } from '@nestjs/common';
-+import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
- import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
- import { ComplianceService } from '../compliance/compliance.service';
- import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
- import { ResumeService } from './resume.service';
- 
- const mockBaseline = {
-   id: 'baseline-1',
-   userId: 'user-1',
-   sections: [
-     {
-       id: 'section-1',
-       sectionType: BaselineSectionType.EXPERIENCE,
-       title: 'Example Co',
-       content: 'Delivered results with 10% uptime improvement.',
-       includePolicy: BaselineIncludePolicy.ALWAYS,
-       order: 0,
-     },
-   ],
- };
- 
- const mockBaselineVersion = {
-   id: 'baseline-version-1',
-   baselineId: 'baseline-1',
-   hash: 'hash-1',
- };
-@@ -90,91 +90,99 @@ const buildService = (
-       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-       // @ts-ignore
-       fitAssessmentRepository,
-       complianceService,
-     ),
-     complianceService,
-   };
- };
- 
- describe('ResumeService', () => {
-   const request = {
-     baselineId: 'baseline-1',
-     baselineVersionId: 'baseline-version-1',
-     jobId: 'job-1',
-     oneTap: true,
-   };
- 
-   it('rejects one-tap generation when fit score is below 92', async () => {
-     const { service } = buildService(91);
- 
-     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-       UnprocessableEntityException,
-     );
-   });
- 
-+  it('requires a baselineVersionId for generation', async () => {
-+    const { service } = buildService(95);
+diff --git a/infra/nginx/app.dev.targetthisrole.ai.conf b/infra/nginx/app.dev.targetthisrole.ai.conf
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ca3355823ccb33097721a73ba101da7d81aa944
+--- /dev/null
++++ b/infra/nginx/app.dev.targetthisrole.ai.conf
+@@ -0,0 +1,14 @@
++server {
++  listen 80;
++  server_name app.dev.targetthisrole.ai;
 +
-+    await expect(
-+      service.generateResume('user-1', { ...request, baselineVersionId: '' }),
-+    ).rejects.toBeInstanceOf(BadRequestException);
-+  });
++  location / {
++    proxy_pass http://127.0.0.1:3000;
++    proxy_http_version 1.1;
++    proxy_set_header Upgrade $http_upgrade;
++    proxy_set_header Connection "upgrade";
++    proxy_set_header Host $host;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++  }
++}
+diff --git a/infra/terraform/cloud-init.yaml.tftpl b/infra/terraform/cloud-init.yaml.tftpl
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f85e3631388b2237619845b5d5e3b883c7cf017
+--- /dev/null
++++ b/infra/terraform/cloud-init.yaml.tftpl
+@@ -0,0 +1,35 @@
++#cloud-config
++package_update: true
++packages:
++  - docker.io
++  - docker-compose-plugin
++  - nginx
++  - certbot
++  - python3-certbot-nginx
++write_files:
++  - path: /opt/targetthisrole/docker-compose.yml
++    permissions: "0644"
++    content: |
++${indent(6, docker_compose)}
++  - path: /etc/nginx/sites-available/app.dev.targetthisrole.ai.conf
++    permissions: "0644"
++    content: |
++${indent(6, nginx_app_conf)}
++  - path: /etc/nginx/sites-available/api.dev.targetthisrole.ai.conf
++    permissions: "0644"
++    content: |
++${indent(6, nginx_api_conf)}
++runcmd:
++  - systemctl enable --now docker
++  - usermod -aG docker ubuntu
++  - mkdir -p /opt/targetthisrole
++  - echo "${ghcr_token}" | docker login ghcr.io -u "${ghcr_username}" --password-stdin
++  - docker compose -f /opt/targetthisrole/docker-compose.yml pull
++  - docker compose -f /opt/targetthisrole/docker-compose.yml up -d
++  - rm -f /etc/nginx/sites-enabled/default
++  - ln -s /etc/nginx/sites-available/app.dev.targetthisrole.ai.conf /etc/nginx/sites-enabled/app.dev.targetthisrole.ai.conf
++  - ln -s /etc/nginx/sites-available/api.dev.targetthisrole.ai.conf /etc/nginx/sites-enabled/api.dev.targetthisrole.ai.conf
++  - nginx -t
++  - systemctl enable --now nginx
++  - certbot --nginx -d app.dev.targetthisrole.ai -d api.dev.targetthisrole.ai --non-interactive --agree-tos --email "${certbot_email}" --redirect
++  - systemctl reload nginx
+diff --git a/infra/terraform/docker-compose.yml.tftpl b/infra/terraform/docker-compose.yml.tftpl
+new file mode 100644
+index 0000000000000000000000000000000000000000..6ecfae2b47692028cc45f7b6b48a28348b23e946
+--- /dev/null
++++ b/infra/terraform/docker-compose.yml.tftpl
+@@ -0,0 +1,14 @@
++version: "3.8"
++services:
++  web:
++    image: ${web_image}
++    restart: unless-stopped
++    ports:
++      - "127.0.0.1:3000:3000"
++  api:
++    image: ${api_image}
++    restart: unless-stopped
++    environment:
++      DATABASE_URL: "${database_url}"
++    ports:
++      - "127.0.0.1:3001:3001"
+diff --git a/infra/terraform/main.tf b/infra/terraform/main.tf
+new file mode 100644
+index 0000000000000000000000000000000000000000..33c831c3b6cd4883e527d17e148f0887dff50dc1
+--- /dev/null
++++ b/infra/terraform/main.tf
+@@ -0,0 +1,105 @@
++provider "digitalocean" {
++  token = var.do_token
++}
 +
-   it('allows one-tap generation when fit score is at least 92', async () => {
-     const { service } = buildService(92);
- 
-     const result = await service.generateResume('user-1', request);
- 
-     expect(result.ok).toBe(true);
-     expect(result.sections).toHaveLength(1);
-   });
- 
-   it('exports DOCX content with headers and body', async () => {
-     const { service } = buildService(95, []);
- 
-     const exportResult = await service.exportResume('user-1', request, 'docx');
- 
-     expect(exportResult.contentType).toBe(
-       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-     );
-     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
-     expect(exportResult.filename).toBe('resume.docx');
-   });
- 
-   it('blocks generation when baseline hash is missing', async () => {
-     const complianceService = {
-       enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-       validateAndAudit: jest.fn().mockResolvedValue({
-         complianceFlags: [
-           {
-             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
-             severity: ComplianceFlagSeverity.BLOCK,
-             message: 'Baseline version hash is required.',
-           },
-         ],
-         blocked: true,
-         audit: { id: 'audit-1' },
-       }),
-     } as unknown as ComplianceService;
- 
-     const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
- 
-     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
--      UnprocessableEntityException,
-+      BadRequestException,
-     );
-   });
- 
-   it('audits resume export actions', async () => {
-     const { service, complianceService } = buildService(95);
- 
-     await service.exportResume('user-1', request, 'pdf');
- 
-     expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
-       expect.objectContaining({
-         action: ComplianceAction.RESUME_EXPORT,
-         actorId: 'user-1',
-         baselineVersion: expect.objectContaining({ id: 'baseline-version-1' }),
-         job: expect.objectContaining({ id: 'job-1' }),
-         outputHash: expect.any(String),
-       }),
-     );
-   });
- 
-   it('blocks generation when invented metrics are present', async () => {
-     const inventedMetricFlag = [
-       {
-         code: ComplianceFlagCode.INVENTED_METRIC,
-         severity: ComplianceFlagSeverity.BLOCK,
-         message: 'Metric not in baseline.',
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index 0a6a1803bf611105313426ffb1590ce284539649..22c911fa45a2f5eea0a9914157c3062ce1673dcb 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -109,83 +109,74 @@ export class ResumeService {
-     const policyMap = new Map<string, BaselineBlockPolicy>(
-       policies.map((policy) => [policy.baselineSectionId, policy]),
-     );
- 
-     return [...sections]
-       .map((section) => {
-         const policy = policyMap.get(section.id);
-         return {
-           ...section,
-           includePolicy: policy?.includePolicy ?? section.includePolicy,
-           order: policy?.order ?? section.order,
-           sectionType: section.sectionType ?? section.type,
-         } as BaselineSection;
-       })
-       .sort((a, b) => a.order - b.order);
-   }
- 
-   async generateResume(userId: string, request: GenerateResumeRequest) {
-     const baselineId = request.baselineId?.trim();
-     const baselineVersionId = request.baselineVersionId?.trim();
-     const jobId = request.jobId?.trim();
- 
-     if (!baselineId) {
-       throw new BadRequestException('baselineId is required');
-     }
-+    if (!baselineVersionId) {
-+      throw new BadRequestException('baselineVersionId is required');
++locals {
++  database_url = format(
++    "postgresql://%s:%s@%s:%s/%s?sslmode=require",
++    urlencode(digitalocean_database_user.api_user.name),
++    urlencode(digitalocean_database_user.api_user.password),
++    digitalocean_database_cluster.postgres.host,
++    digitalocean_database_cluster.postgres.port,
++    digitalocean_database_db.app.name
++  )
++  docker_compose = templatefile("${path.module}/docker-compose.yml.tftpl", {
++    web_image    = var.web_image
++    api_image    = var.api_image
++    database_url = local.database_url
++  })
++}
++
++resource "digitalocean_database_cluster" "postgres" {
++  name       = var.db_cluster_name
++  engine     = "pg"
++  version    = var.db_version
++  size       = var.db_size
++  region     = var.region
++  node_count = 1
++}
++
++resource "digitalocean_database_db" "app" {
++  cluster_id = digitalocean_database_cluster.postgres.id
++  name       = var.db_name
++}
++
++resource "digitalocean_database_user" "api_user" {
++  cluster_id = digitalocean_database_cluster.postgres.id
++  name       = var.db_user_name
++}
++
++resource "digitalocean_droplet" "app" {
++  name   = var.droplet_name
++  region = var.region
++  size   = var.droplet_size
++  image  = "ubuntu-22-04-x64"
++
++  ssh_keys  = var.ssh_key_fingerprints
++  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
++    docker_compose = local.docker_compose
++    nginx_app_conf = file("${path.module}/../nginx/app.dev.targetthisrole.ai.conf")
++    nginx_api_conf = file("${path.module}/../nginx/api.dev.targetthisrole.ai.conf")
++    ghcr_username  = var.ghcr_username
++    ghcr_token     = var.ghcr_token
++    certbot_email  = var.certbot_email
++  })
++}
++
++resource "digitalocean_database_firewall" "postgres" {
++  cluster_id = digitalocean_database_cluster.postgres.id
++
++  rule {
++    type  = "droplet"
++    value = digitalocean_droplet.app.id
++  }
++}
++
++resource "digitalocean_firewall" "app" {
++  name = "${var.droplet_name}-fw"
++
++  droplet_ids = [digitalocean_droplet.app.id]
++
++  inbound_rule {
++    protocol         = "tcp"
++    port_range       = "22"
++    source_addresses = var.allowed_ssh_cidrs
++  }
++
++  inbound_rule {
++    protocol         = "tcp"
++    port_range       = "80"
++    source_addresses = ["0.0.0.0/0", "::/0"]
++  }
++
++  inbound_rule {
++    protocol         = "tcp"
++    port_range       = "443"
++    source_addresses = ["0.0.0.0/0", "::/0"]
++  }
++
++  outbound_rule {
++    protocol              = "tcp"
++    port_range            = "1-65535"
++    destination_addresses = ["0.0.0.0/0", "::/0"]
++  }
++
++  outbound_rule {
++    protocol              = "udp"
++    port_range            = "1-65535"
++    destination_addresses = ["0.0.0.0/0", "::/0"]
++  }
++
++  outbound_rule {
++    protocol              = "icmp"
++    destination_addresses = ["0.0.0.0/0", "::/0"]
++  }
++}
+diff --git a/infra/terraform/outputs.tf b/infra/terraform/outputs.tf
+new file mode 100644
+index 0000000000000000000000000000000000000000..975ff1dd4a79bbb2c312ca724573bfbae2db4c5c
+--- /dev/null
++++ b/infra/terraform/outputs.tf
+@@ -0,0 +1,14 @@
++output "droplet_ipv4" {
++  description = "Public IPv4 for the application droplet."
++  value       = digitalocean_droplet.app.ipv4_address
++}
++
++output "postgres_host" {
++  description = "Managed PostgreSQL host."
++  value       = digitalocean_database_cluster.postgres.host
++}
++
++output "postgres_port" {
++  description = "Managed PostgreSQL port."
++  value       = digitalocean_database_cluster.postgres.port
++}
+diff --git a/infra/terraform/variables.tf b/infra/terraform/variables.tf
+new file mode 100644
+index 0000000000000000000000000000000000000000..983969a66b1ed025fe9ebe30fb38148fa65058bb
+--- /dev/null
++++ b/infra/terraform/variables.tf
+@@ -0,0 +1,89 @@
++variable "do_token" {
++  description = "DigitalOcean API token."
++  type        = string
++  sensitive   = true
++}
++
++variable "region" {
++  description = "DigitalOcean region for resources."
++  type        = string
++  default     = "nyc3"
++}
++
++variable "droplet_name" {
++  description = "Name for the application droplet."
++  type        = string
++  default     = "targetthisrole-dev"
++}
++
++variable "droplet_size" {
++  description = "Droplet size slug."
++  type        = string
++  default     = "s-1vcpu-1gb"
++}
++
++variable "ssh_key_fingerprints" {
++  description = "SSH key fingerprints allowed to access the droplet."
++  type        = list(string)
++}
++
++variable "allowed_ssh_cidrs" {
++  description = "CIDR blocks allowed to access SSH."
++  type        = list(string)
++}
++
++variable "ghcr_username" {
++  description = "GitHub Container Registry username or org."
++  type        = string
++}
++
++variable "ghcr_token" {
++  description = "GitHub fine-grained PAT with read:packages."
++  type        = string
++  sensitive   = true
++}
++
++variable "web_image" {
++  description = "Fully qualified GHCR image for the web service."
++  type        = string
++}
++
++variable "api_image" {
++  description = "Fully qualified GHCR image for the API service."
++  type        = string
++}
++
++variable "db_cluster_name" {
++  description = "Name for the DigitalOcean PostgreSQL cluster."
++  type        = string
++  default     = "targetthisrole-dev-db"
++}
++
++variable "db_name" {
++  description = "Database name for the API."
++  type        = string
++  default     = "targetthisrole"
++}
++
++variable "db_user_name" {
++  description = "Database user name for the API."
++  type        = string
++  default     = "targetthisrole_api"
++}
++
++variable "db_size" {
++  description = "Database size slug."
++  type        = string
++  default     = "db-s-1vcpu-1gb"
++}
++
++variable "db_version" {
++  description = "PostgreSQL major version."
++  type        = string
++  default     = "15"
++}
++
++variable "certbot_email" {
++  description = "Email for Let's Encrypt notifications."
++  type        = string
++}
+diff --git a/infra/terraform/versions.tf b/infra/terraform/versions.tf
+new file mode 100644
+index 0000000000000000000000000000000000000000..d6018f2b07eb01a9078071f1631e4560d758a329
+--- /dev/null
++++ b/infra/terraform/versions.tf
+@@ -0,0 +1,10 @@
++terraform {
++  required_version = ">= 1.3.0"
++
++  required_providers {
++    digitalocean = {
++      source  = "digitalocean/digitalocean"
++      version = "~> 2.39"
 +    }
++  }
++}
+diff --git a/runbook.md b/runbook.md
+index 744df45e7460ced1594512a1d62f9ee5ad9cde6a..40fb3fa6a81e2f879521d97248f99625815e5197 100644
+--- a/runbook.md
++++ b/runbook.md
+@@ -8,25 +8,71 @@ docker compose -f docker-compose.dev.yml up -d --build
+ cd C:\Users\micha\OneDrive\Documents\GitHub\TargetThisRole
+ docker compose -f infra/docker/docker-compose.dev.yml up -d --build
  
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       relations: ['sections'],
-       order: { sections: { order: 'ASC' } },
-     });
+ ### Status
+ docker compose -f infra/docker/docker-compose.dev.yml ps
  
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
+ ### Logs
+ docker compose -f infra/docker/docker-compose.dev.yml logs -f --timestamps --tail=200
  
--    let targetBaselineVersionId = baselineVersionId;
--
--    if (!targetBaselineVersionId) {
--      const latestVersion = await this.baselineVersionRepository.findOne({
--        where: { baselineId: baseline.id },
--        order: { versionNumber: 'DESC', createdAt: 'DESC' },
--      });
--
--      targetBaselineVersionId = latestVersion?.id;
--    }
--
--    if (!targetBaselineVersionId) {
--      throw new NotFoundException('Baseline version not found');
--    }
--
-     const baselineVersion = await this.baselineVersionRepository.findOne({
--      where: { id: targetBaselineVersionId, baselineId: baseline.id },
-+      where: { id: baselineVersionId, baselineId: baseline.id },
-     });
+ ### Stop
+ docker compose -f infra/docker/docker-compose.dev.yml down
  
-     if (!baselineVersion) {
-       throw new NotFoundException('Baseline version not found');
-     }
-+    if (!baselineVersion.hash) {
-+      throw new BadRequestException('Baseline version hash missing');
-+    }
+ ### Rebuild API
+ docker compose -f infra/docker/docker-compose.dev.yml down -v api
+ docker compose -f infra/docker/docker-compose.dev.yml up -d --build api
+ docker compose -f infra/docker/docker-compose.dev.yml up -d
  
-     const policies = await this.baselineBlockPolicyRepository.find({
-       where: { baselineVersionId: baselineVersion.id },
-       relations: ['baselineSection'],
-       order: { order: 'ASC' },
-     });
+ ### Rebuild Web
+ docker compose -f infra/docker/docker-compose.dev.yml down -v web
+ docker compose -f infra/docker/docker-compose.dev.yml up -d --build web
+ docker compose -f infra/docker/docker-compose.dev.yml up -d
  
-     const sectionsWithPolicies = this.applyPoliciesToSections(
-       baseline.sections ?? [],
-       policies,
-     );
- 
-     const sections = sectionsWithPolicies.map((section) => ({
-       id: section.id,
-       type: section.sectionType,
-       title: section.title,
-       content: section.content,
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       order: section.order,
-       source: 'baseline',
-     }));
- 
-     const job = jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: jobId, userId },
-@@ -255,50 +246,53 @@ export class ResumeService {
-   ) {
-     const generation = await this.generateResume(userId, request);
-     const text = this.buildResumeText(
-       generation.sections.map((section) => ({
-         title: section.title,
-         content: section.content,
-       })),
-     );
- 
-     const buffer =
-       format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
- 
-     const contentType =
-       format === 'pdf'
-         ? 'application/pdf'
-         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-     const filename = `resume.${format}`;
- 
-     const baselineVersion = await this.baselineVersionRepository.findOne({
-       where: { id: generation.baselineVersionId, baselineId: generation.baselineId },
-     });
- 
-     if (!baselineVersion) {
-       throw new NotFoundException('Baseline version not found');
-     }
-+    if (!baselineVersion.hash) {
-+      throw new BadRequestException('Baseline version hash missing');
-+    }
- 
-     const job = generation.jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: generation.jobId, userId },
-         })
-       : null;
- 
-     const { complianceFlags, blocked } = await this.complianceService.validateAndAudit({
-       action: ComplianceAction.RESUME_EXPORT,
-       actorId: userId,
-       baselineVersion,
-       job,
-       outputHash: createHash('sha256')
-         .update(`${format}:${text}`)
-         .digest('hex'),
-     });
- 
-     if (blocked) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'unprocessable',
-           message: 'Compliance validation failed.',
-           details: { compliance_flags: complianceFlags },
-         },
-       });
+ ### Nuclear reset
+ docker compose -f infra/docker/docker-compose.dev.yml down -v
+ docker compose -f infra/docker/docker-compose.dev.yml up -d --build
++
++## DigitalOcean DEV Deployment (Terraform + GHCR)
++
++### Prereqs
++- Terraform installed.
++- DigitalOcean API token available.
++- GHCR images built via GitHub Actions (see `.github/workflows/build-dev-images.yml`).
++- Optional: set `GHCR_PAT` repo secret if you prefer a PAT over the default `GITHUB_TOKEN` for GHCR pushes.
++- SSH key uploaded to DigitalOcean.
++
++### Terraform init/apply
++```
++cd infra/terraform
++terraform init
++terraform apply \
++  -var="do_token=YOUR_DO_TOKEN" \
++  -var='ssh_key_fingerprints=["YOUR_SSH_FINGERPRINT"]' \
++  -var='allowed_ssh_cidrs=["YOUR_OFFICE_CIDR/32"]' \
++  -var="ghcr_username=YOUR_GHCR_USERNAME" \
++  -var="ghcr_token=YOUR_GHCR_PAT" \
++  -var="web_image=ghcr.io/OWNER/REPO/web:dev" \
++  -var="api_image=ghcr.io/OWNER/REPO/api:dev" \
++  -var="certbot_email=you@example.com"
++```
++
++### DNS setup (DreamHost)
++- Add A records pointing to the droplet IPv4:
++  - `app.dev.targetthisrole.ai`
++  - `api.dev.targetthisrole.ai`
++- Keep MX records unchanged.
++
++### Verify HTTPS
++- Visit `https://app.dev.targetthisrole.ai` and `https://api.dev.targetthisrole.ai`.
++- If certificates failed because DNS was not ready, re-run certbot on the droplet:
++  ```
++  sudo certbot --nginx -d app.dev.targetthisrole.ai -d api.dev.targetthisrole.ai --non-interactive --agree-tos --email you@example.com --redirect
++  ```
++
++### Deploy a new version
++1. Push to `main` to trigger GHCR builds.
++2. SSH to the droplet and pull/restart:
++   ```
++   cd /opt/targetthisrole
++   sudo docker compose pull
++   sudo docker compose up -d
++   ```
