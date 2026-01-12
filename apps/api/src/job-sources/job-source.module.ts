@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { JobSourceFetchCacheService } from './job-source-fetch-cache.service';
 import { JobSourceRegistry } from './job-source-registry.service';
 import { JOB_SOURCE_PROVIDERS } from './job-source.constants';
-import { GreenhouseJobSourceProvider } from './greenhouse-job-source.provider';
+import { GreenhouseJobSourceProvider } from './providers/greenhouse.provider';
 
 @Module({
   providers: [
