@@ -18,10 +18,63 @@ import {
   type SearchSetApiError,
   type SearchSetDto,
   type SearchSetResultItem,
+  type SearchSetRunMetadata,
 } from "@/lib/searchSetsClient";
 import type { TierGateError } from "@/lib/tiers";
 
 const RESULT_LIMIT = 10;
+
+const PROVIDER_ID_LABELS: Record<string, string> = {
+  greenhouse: 'Greenhouse',
+};
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  GREENHOUSE: 'Greenhouse',
+};
+
+function resolveProviderLabel(
+  metadata: SearchSetRunMetadata | null,
+  searchSet: SearchSetDto | null,
+) {
+  const providerId = metadata?.providerId;
+  if (providerId) {
+    return PROVIDER_ID_LABELS[providerId] ?? providerId;
+  }
+
+  if (searchSet?.sourceType) {
+    return SOURCE_TYPE_LABELS[searchSet.sourceType] ?? searchSet.sourceType;
+  }
+
+  return 'Saved jobs';
+}
+
+function formatCount(value?: number | null) {
+  if (typeof value === 'number') {
+    return `${value}`;
+  }
+  return '—';
+}
+
+function ScoreRing({ score }: { score: number | null }) {
+  const normalized = typeof score === 'number' ? Math.min(Math.max(score, 0), 100) : 0;
+  const degree = (normalized / 100) * 360;
+  const gradient = `conic-gradient(#f97316 ${degree}deg, #0f172a ${degree}deg)`;
+
+  return (
+    <div className="relative h-16 w-16">
+      <div
+        className="absolute inset-0 rounded-full border border-slate-800"
+        style={{ background: gradient }}
+      />
+      <div className="absolute inset-[4px] rounded-full bg-slate-900/80" />
+      <div className="relative flex h-full w-full items-center justify-center">
+        <span className="text-sm font-semibold text-white">
+          {typeof score === 'number' ? score.toFixed(1) : 'n/a'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 const KNOWN_RESULT_KEYS = new Set([
   "jobId",
@@ -38,6 +91,7 @@ type StoredSearchSetRun = {
   baselineVersionId: string;
   runAt: string;
   results: SearchSetResultItem[];
+  metadata?: SearchSetRunMetadata | null;
 };
 
 const SEARCH_SET_RUN_RESULTS_STORAGE_KEY = "target-this-role.search-set-run-results";
@@ -125,6 +179,7 @@ export default function SearchSetRunPage() {
   const [selectedBaselineVersionId, setSelectedBaselineVersionId] = useState("");
   const [running, setRunning] = useState(false);
   const [runResults, setRunResults] = useState<SearchSetResultItem[]>([]);
+  const [runMetadata, setRunMetadata] = useState<SearchSetRunMetadata | null>(null);
   const [runExecuted, setRunExecuted] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -175,6 +230,7 @@ export default function SearchSetRunPage() {
     }
 
     setRunResults(stored.results);
+    setRunMetadata(stored.metadata ?? null);
     setRunExecuted(true);
   }, [searchSetId, searchSet]);
 
@@ -228,6 +284,12 @@ export default function SearchSetRunPage() {
     !!selectedBaselineVersionId &&
     lastRunInfo.baselineVersionId !== selectedBaselineVersionId;
   const staleBaselineLabel = lastRunBaselineLabel ?? "the previously run baseline version";
+  const runDisabled =
+    running || !selectedBaselineVersionId || searchSetLoading || baselinesLoading;
+  const snapshotSourceUrl = runMetadata?.sourceSnapshot?.sourceUrl ?? searchSet?.sourceUrl;
+  const snapshotFetchedAt = runMetadata?.sourceSnapshot?.fetchedAt ?? searchSet?.lastRunAt ?? null;
+  const snapshotListingCount =
+    runMetadata?.fetchedListingCount ?? runMetadata?.sourceSnapshot?.listingCount;
 
   const handleRun = useCallback(async () => {
     if (!searchSetId || !selectedBaselineVersionId) return;
@@ -239,20 +301,22 @@ export default function SearchSetRunPage() {
     setTierGateError(null);
     setRunMessage(null);
 
-      try {
-        const response = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
-        const normalizedResults = response.results ?? [];
-        const runTimestamp = new Date().toISOString();
-        setRunResults(normalizedResults);
-        setRunExecuted(true);
-        const count = normalizedResults.length;
+    try {
+      const response = await runSearchSet(searchSetId, baselineVersionId, RESULT_LIMIT);
+      const normalizedResults = response.results ?? [];
+      const runTimestamp = new Date().toISOString();
+      setRunResults(normalizedResults);
+      setRunMetadata(response.metadata);
+      setRunExecuted(true);
+      const count = normalizedResults.length;
       setRunMessage(
-        count ? `Run complete — Found ${count} matching roles.` : "Run complete — No matches found.",
+        count ? `Run complete - Found ${count} matching roles.` : "Run complete - No matches found.",
       );
       persistStoredRunResults(searchSetId, {
         baselineVersionId,
         runAt: runTimestamp,
         results: normalizedResults,
+        metadata: response.metadata,
       });
       setSearchSet((prev) =>
         prev
@@ -410,10 +474,7 @@ export default function SearchSetRunPage() {
                   <p className="text-xs text-slate-400">Selected: {selectedBaselineLabel}</p>
                 ) : null}
 
-                <FormButton
-                  onClick={handleRun}
-                  disabled={running || !selectedBaselineVersionId || searchSetLoading || baselinesLoading}
-                >
+                <FormButton onClick={handleRun} disabled={runDisabled}>
                   {running ? "Running..." : "Run search set"}
                 </FormButton>
 
@@ -460,14 +521,83 @@ export default function SearchSetRunPage() {
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Source snapshot
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Provider pull details</h2>
+            </div>
+            <span className="text-xs text-slate-400">
+              {snapshotFetchedAt
+                ? `Last fetched ${formatDate(snapshotFetchedAt)}`
+                : 'Run the set to capture a snapshot'}
+            </span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Provider</p>
+              <p className="text-slate-100">{resolveProviderLabel(runMetadata, searchSet)}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Source URL</p>
+              {snapshotSourceUrl ? (
+                <a
+                  href={snapshotSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-sky-300 underline"
+                >
+                  {snapshotSourceUrl}
+                </a>
+              ) : (
+                <p className="text-sm text-slate-400">Not provided</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Fetched at</p>
+              <p className="text-slate-100">{formatDate(snapshotFetchedAt)}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Listing count
+              </p>
+              <p className="text-slate-100">{formatCount(snapshotListingCount)}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Ingested new</p>
+              <p className="text-slate-100">{formatCount(runMetadata?.ingestedNewCount)}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Deduped</p>
+              <p className="text-slate-100">{formatCount(runMetadata?.dedupedCount)}</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            {runMetadata?.sourceSnapshot
+              ? 'This snapshot reflects the last provider pull.'
+              : searchSet?.sourceType
+              ? 'Run the provider-backed set to capture metadata.'
+              : 'Legacy sets rely on saved jobs and do not produce provider snapshots.'}
+          </p>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Results</p>
               <h2 className="text-lg font-semibold text-slate-100">Matched roles</h2>
             </div>
-            <span className="text-xs text-slate-400">
-              {runResults.length
-                ? `${runResults.length} / ${RESULT_LIMIT} shown`
-                : "Run the set to view matches"}
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs text-slate-400">
+                {runResults.length
+                  ? `${runResults.length} / ${RESULT_LIMIT} shown`
+                  : "Run the set to view matches"}
+              </span>
+              <FormButton variant="ghost" onClick={handleRun} disabled={runDisabled}>
+                {running ? "Running..." : "Re-run"}
+              </FormButton>
+            </div>
           </div>
 
           {resultsAreStale ? (
@@ -482,11 +612,7 @@ export default function SearchSetRunPage() {
               title="Run the set to show matches"
               body="Pick a baseline version and press Run to see the strongest job matches."
               cta={
-                <FormButton
-                  variant="ghost"
-                  onClick={handleRun}
-                  disabled={running || !selectedBaselineVersionId || searchSetLoading || baselinesLoading}
-                >
+                <FormButton variant="ghost" onClick={handleRun} disabled={runDisabled}>
                   Run search set
                 </FormButton>
               }
@@ -503,78 +629,83 @@ export default function SearchSetRunPage() {
               {runResults.map((result, index) => {
                 const raw = result.raw ?? {};
                 const dimensionScores = raw.dimensionScores;
+                const location = typeof raw.location === "string" ? raw.location : null;
                 return (
                   <article
                     key={(result.jobId ?? index) + "-" + index}
                     className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/60 p-5 shadow"
                   >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <p className="text-lg font-semibold text-white">{result.title ?? "Untitled role"}</p>
-                      <p className="text-sm text-slate-300">
-                        {result.company ?? "Company unknown"}
-                        {result.jobId ? ` · ${result.jobId}` : ""}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className="inline-flex rounded-full border border-white/20 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-200">
-                        {result.verdict ?? "Verdict pending"}
-                      </span>
-                      <div className="text-2xl font-bold text-white">
-                        {typeof result.fitScore === "number" ? result.fitScore.toFixed(1) : "n/a"}
-                      </div>
-                      <div className="text-xs text-slate-400">Fit score</div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    {result.applyUrl ? (
-                      <a
-                        href={result.applyUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center justify-center rounded-full border border-white/20 bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2 text-xs font-semibold text-slate-900 transition hover:opacity-90"
-                      >
-                        Open apply link
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-400">Apply link not available</span>
-                    )}
-
-                    {result.sourceUrl ? (
-                      <a href={result.sourceUrl} target="_blank" rel="noreferrer" className="text-xs text-sky-300 underline">
-                        View source
-                      </a>
-                    ) : null}
-                  </div>
-
-                  {isRecord(dimensionScores) ? (
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {Object.entries(dimensionScores)
-                        .filter(([, value]) => typeof value === "number")
-                        .map(([dimension, value]) => (
-                          <span
-                            key={dimension}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-semibold text-slate-200"
-                          >
-                            {humanizeKey(dimension)}: {(value as number).toFixed(1)}
+                    <div className="flex flex-wrap items-start gap-4">
+                      <ScoreRing score={result.fitScore ?? null} />
+                      <div className="flex-1 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div>
+                            <p className="text-lg font-semibold text-white">{result.title ?? "Untitled role"}</p>
+                            <p className="text-sm text-slate-300">
+                              {result.company ?? "Company unknown"}
+                              {location ? ` · ${location}` : ""}
+                            </p>
+                          </div>
+                          <span className="inline-flex rounded-full border border-white/20 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-200">
+                            {result.verdict ?? "Verdict pending"}
                           </span>
-                        ))}
-                    </div>
-                  ) : null}
-
-                  {explanationEntries[index]?.length ? (
-                    <div className="flex flex-wrap gap-4 text-xs text-slate-300">
-                      {explanationEntries[index].map((entry) => (
-                        <div key={entry.key}>
-                          <span className="font-semibold text-slate-100">{entry.label}:</span> {entry.value}
                         </div>
-                      ))}
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          {result.applyUrl ? (
+                            <a
+                              href={result.applyUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center justify-center rounded-full border border-white/20 bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2 text-xs font-semibold text-slate-900 transition hover:opacity-90"
+                            >
+                              Open apply link
+                            </a>
+                          ) : (
+                            <span className="text-xs text-slate-400">Apply link not available</span>
+                          )}
+
+                          {result.sourceUrl ? (
+                            <a
+                              href={result.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-sky-300 underline"
+                            >
+                              View source
+                            </a>
+                          ) : null}
+                        </div>
+
+                        {isRecord(dimensionScores) ? (
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {Object.entries(dimensionScores)
+                              .filter(([, value]) => typeof value === "number")
+                              .map(([dimension, value]) => (
+                                <span
+                                  key={dimension}
+                                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 font-semibold text-slate-200"
+                                >
+                                  {humanizeKey(dimension)}: {(value as number).toFixed(1)}
+                                </span>
+                              ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : null}
-                </article>
-              );
-            })}
+
+                    {explanationEntries[index]?.length ? (
+                      <div className="flex flex-wrap gap-4 text-xs text-slate-300">
+                        {explanationEntries[index].map((entry) => (
+                          <div key={entry.key}>
+                            <span className="font-semibold text-slate-100">{entry.label}:</span> {entry.value}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

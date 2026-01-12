@@ -418,6 +418,9 @@ describe('SearchSetsRunnerService', () => {
     expect(response.metadata.usedProviderDiscovery).toBe(true);
     expect(response.metadata.providerId).toBe('greenhouse');
     expect(jobSourceRegistry.findProvider).toHaveBeenCalled();
+    expect(response.metadata.fetchedListingCount).toBe(listings.length);
+    expect(response.metadata.ingestedNewCount).toBe(listings.length);
+    expect(response.metadata.dedupedCount).toBe(0);
   });
 
   it('records failures without stopping successful listings', async () => {
@@ -486,6 +489,9 @@ describe('SearchSetsRunnerService', () => {
     expect(response.results).toHaveLength(1);
     expect(response.metadata.failureCount).toBe(1);
     expect(provider.parseJob).toHaveBeenCalledTimes(1);
+    expect(response.metadata.fetchedListingCount).toBe(listings.length);
+    expect(response.metadata.ingestedNewCount).toBe(1);
+    expect(response.metadata.dedupedCount).toBe(0);
 
     const recorded = searchSetRunsService.recordRun.mock.calls[0][0];
     expect(recorded.failureCount).toBe(1);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Alert } from '@/components/Alert';
 import { FormButton } from '@/components/FormButton';
@@ -13,10 +13,34 @@ import type { SearchSetDto } from '@/lib/searchSetsClient';
 
 type SearchSetPayload = {
   sourceUrl: string;
+  sourceType?: string;
+  sourceOptions?: {
+    maxListings?: number;
+  };
   titlePatterns?: string[];
   seniority?: string[];
   workMode?: string;
   parseWarning?: string;
+};
+
+type BaselineVersionLite = {
+  id: string;
+  label?: string | null;
+  filename?: string | null;
+  createdAt?: string | null;
+};
+
+type BaselineLite = {
+  id: string;
+  label?: string | null;
+  name?: string | null;
+  versions?: BaselineVersionLite[] | null;
+};
+
+type BaselineVersionOption = {
+  id: string;
+  display: string;
+  baselineLabel: string;
 };
 
 const SENIORITY_LABELS: Record<string, string> = {
@@ -51,10 +75,6 @@ function splitTitlePatterns(patterns?: string[]) {
   return { keywords, exclusions };
 }
 
-function normalizeBaseUrl(value: string): string {
-  return value.replace(/\/+$/, '');
-}
-
 function safeParseUrl(input: string): { url?: URL; warning?: string } {
   const trimmed = input.trim();
   if (!trimmed) return {};
@@ -62,7 +82,7 @@ function safeParseUrl(input: string): { url?: URL; warning?: string } {
   try {
     const url = new URL(trimmed);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return { warning: 'URL must start with http:// or https: / /.' };
+      return { warning: 'URL must start with http:// or https://.' };
     }
     return { url };
   } catch {
@@ -78,18 +98,83 @@ function tryParseJson(value: string): unknown | undefined {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function coerceBaselineList(payload: unknown): BaselineLite[] {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .filter(isRecord)
+    .map((b) => {
+      const id = typeof b.id === 'string' ? b.id : '';
+      const label =
+        typeof b.label === 'string'
+          ? b.label
+          : typeof b.name === 'string'
+            ? b.name
+            : undefined;
+
+      const versionsRaw = (b.versions ?? b.baselineVersions) as unknown;
+      const versions: BaselineVersionLite[] = Array.isArray(versionsRaw)
+        ? versionsRaw
+            .filter(isRecord)
+            .map((v) => ({
+              id: typeof v.id === 'string' ? v.id : '',
+              label: typeof v.label === 'string' ? v.label : null,
+              filename: typeof v.filename === 'string' ? v.filename : null,
+              createdAt: typeof v.createdAt === 'string' ? v.createdAt : null,
+            }))
+            .filter((v) => Boolean(v.id))
+        : [];
+
+      return {
+        id,
+        label,
+        versions,
+      };
+    })
+    .filter((b) => Boolean(b.id));
+}
+
+function formatBaselineVersionOption(
+  baseline: BaselineLite,
+  version: BaselineVersionLite,
+): BaselineVersionOption {
+  const baselineLabel = baseline.label?.trim() || `Baseline ${baseline.id.slice(0, 8)}`;
+  const versionLabel =
+    version.label?.trim() ||
+    version.filename?.trim() ||
+    `Version ${version.id.slice(0, 8)}`;
+
+  return {
+    id: version.id,
+    baselineLabel,
+    display: `${baselineLabel} · ${versionLabel}`,
+  };
+}
+
+async function fetchBaselines(): Promise<BaselineLite[]> {
+  const res = await fetch('/api/baselines', {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Failed to load baselines (${res.status})`);
+  }
+
+  const data = (await res.json()) as unknown;
+  return coerceBaselineList(data);
+}
+
 async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto> {
-  const envBase =
-    (process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined) ??
-    (process.env.API_BASE_URL as string | undefined);
-
-  const endpoint = envBase
-    ? `${normalizeBaseUrl(envBase)}/search-sets`
-    : '/api/search-sets';
-
-  const res = await fetch(endpoint, {
+  const res = await fetch('/api/search-sets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(payload),
   });
 
@@ -109,12 +194,7 @@ async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto>
   }
 
   const data = (await res.json()) as unknown;
-  if (
-    !data ||
-    typeof data !== 'object' ||
-    !('id' in data) ||
-    typeof (data as any).id !== 'string'
-  ) {
+  if (!data || typeof data !== 'object' || !('id' in data) || typeof (data as any).id !== 'string') {
     throw new Error('Unexpected response from createSearchSet.');
   }
 
@@ -125,6 +205,8 @@ export default function SearchSetsPage() {
   const router = useRouter();
 
   const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceType, setSourceType] = useState('');
+  const [maxListings, setMaxListings] = useState('50');
   const [titlePatternsInput, setTitlePatternsInput] = useState('');
   const [seniority, setSeniority] = useState<string>('');
   const [workMode, setWorkMode] = useState<string>('');
@@ -132,8 +214,73 @@ export default function SearchSetsPage() {
   const [pendingSearchSet, setPendingSearchSet] = useState<SearchSetDto | null>(null);
   const [error, setError] = useState<string | undefined>();
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  const [baselinesLoading, setBaselinesLoading] = useState(false);
+  const [baselinesError, setBaselinesError] = useState<string | null>(null);
+  const [baselineVersionId, setBaselineVersionId] = useState<string>('');
 
   const parsed = useMemo(() => safeParseUrl(sourceUrl), [sourceUrl]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const stored =
+      typeof window !== 'undefined'
+        ? sessionStorage.getItem('ttr:lastBaselineVersionId') ?? ''
+        : '';
+    if (stored) setBaselineVersionId(stored);
+
+    setBaselinesLoading(true);
+    setBaselinesError(null);
+
+    fetchBaselines()
+      .then((list) => {
+        if (!mounted) return;
+
+        const options = list
+          .flatMap((b) => (b.versions ?? []).map((v) => formatBaselineVersionOption(b, v)))
+          .filter((o) => Boolean(o.id));
+
+        if (!options.length) {
+          setBaselinesError('No baseline versions found. Upload a baseline first.');
+          return;
+        }
+
+        const stillValid = stored && options.some((o) => o.id === stored);
+        if (!stillValid) {
+          setBaselineVersionId(options[0].id);
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('ttr:lastBaselineVersionId', options[0].id);
+          }
+        }
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        setBaselinesError(e instanceof Error ? e.message : 'Failed to load baselines.');
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setBaselinesLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const maxListingsNumber = Number(maxListings);
+  const maxListingsValid =
+    Number.isFinite(maxListingsNumber) &&
+    Number.isInteger(maxListingsNumber) &&
+    maxListingsNumber >= 5 &&
+    maxListingsNumber <= 100;
+
+  const maxListingsError =
+    maxListings && !maxListingsValid ? 'Enter a number between 5 and 100.' : undefined;
+
+  const sourceTypeError = submitAttempted && !sourceType ? 'Select a source type.' : undefined;
+  const sourceSectionValid = Boolean(sourceType && parsed.url && maxListingsValid);
 
   const titlePatterns = useMemo(() => {
     return titlePatternsInput
@@ -149,6 +296,7 @@ export default function SearchSetsPage() {
     const seniorityValues = (pendingSearchSet.seniority ?? [])
       .map(formatSeniorityLabel)
       .filter(Boolean);
+
     const seniorityOrRole =
       seniorityValues.length > 0
         ? { label: 'Seniority', value: seniorityValues.join(', ') }
@@ -165,6 +313,7 @@ export default function SearchSetsPage() {
   }, [pendingSearchSet]);
 
   const onSubmit = useCallback(async () => {
+    setSubmitAttempted(true);
     setError(undefined);
     setTierGateError(null);
 
@@ -173,13 +322,29 @@ export default function SearchSetsPage() {
       return;
     }
 
+    if (!sourceSectionValid) {
+      setError('Complete the source configuration before creating a search set.');
+      return;
+    }
+
+    if (!baselineVersionId) {
+      setError('Select a baseline version before creating a search set.');
+      return;
+    }
+
     setPendingSearchSet(null);
     setSubmitting(true);
+
     try {
+      const normalizedMaxListings = maxListingsValid
+        ? Math.min(100, Math.max(5, Math.floor(maxListingsNumber)))
+        : 50;
+
       const payload: SearchSetPayload = {
+        sourceType,
+        sourceOptions: { maxListings: normalizedMaxListings },
         sourceUrl: parsed.url.toString(),
         titlePatterns: titlePatterns.length ? titlePatterns : undefined,
-        // Fix for R14: API expects array, UI is single-select string.
         seniority: seniority ? [seniority] : undefined,
         workMode: workMode || undefined,
         parseWarning: parsed.warning,
@@ -187,6 +352,10 @@ export default function SearchSetsPage() {
 
       const result = await createSearchSet(payload);
       setPendingSearchSet(result);
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('ttr:lastBaselineVersionId', baselineVersionId);
+      }
     } catch (e) {
       const tierGate = (e as any).tierGate as TierGateError | undefined;
       if (tierGate) {
@@ -197,14 +366,30 @@ export default function SearchSetsPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [parsed.url, parsed.warning, titlePatterns, seniority, workMode]);
+  }, [
+    parsed.url,
+    parsed.warning,
+    titlePatterns,
+    seniority,
+    workMode,
+    sourceSectionValid,
+    sourceType,
+    maxListingsValid,
+    maxListingsNumber,
+    baselineVersionId,
+  ]);
 
   const handleContinue = useCallback(() => {
     if (!pendingSearchSet) return;
     const { id } = pendingSearchSet;
     setPendingSearchSet(null);
-    router.push(`/search-sets/${id}`);
-  }, [pendingSearchSet, router]);
+
+    const params = new URLSearchParams();
+    if (baselineVersionId) params.set('baselineVersionId', baselineVersionId);
+
+    const qs = params.toString();
+    router.push(qs ? `/search-sets/${id}?${qs}` : `/search-sets/${id}`);
+  }, [pendingSearchSet, router, baselineVersionId]);
 
   return (
     <PageShell>
@@ -277,21 +462,117 @@ export default function SearchSetsPage() {
         <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
           <div className="space-y-6">
             <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                Job URL
-              </label>
-              <TextInput
-                type="url"
-                placeholder="https://..."
-                value={sourceUrl}
-                onChange={(event) => {
-                  setPendingSearchSet(null);
-                  setSourceUrl(event.target.value);
-                }}
-              />
-              {parsed.warning ? <Alert intent="warning">{parsed.warning}</Alert> : null}
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                Baseline
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Which baseline should we use?</h2>
             </div>
 
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                Baseline version
+              </label>
+              <select
+                value={baselineVersionId}
+                onChange={(event) => {
+                  setPendingSearchSet(null);
+                  setBaselineVersionId(event.target.value);
+                  if (typeof window !== 'undefined') {
+                    sessionStorage.setItem('ttr:lastBaselineVersionId', event.target.value);
+                  }
+                }}
+                disabled={baselinesLoading || Boolean(baselinesError)}
+                className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 disabled:opacity-60"
+              >
+                <option value="">
+                  {baselinesLoading ? 'Loading baseline versions...' : 'Select a baseline version'}
+                </option>
+              </select>
+
+              {baselinesError ? <Alert intent="warning">{baselinesError}</Alert> : null}
+
+              <p className="text-[11px] text-slate-400">
+                This selection will carry into the run page.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-6 pt-2">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                Source
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">
+                Where do the listings come from?
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Source type
+                </label>
+                <select
+                  value={sourceType}
+                  onChange={(event) => {
+                    setPendingSearchSet(null);
+                    setSourceType(event.target.value);
+                    setSubmitAttempted(false);
+                  }}
+                  className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
+                >
+                  <option value="">Select source type</option>
+                  <option value="GREENHOUSE">Greenhouse</option>
+                  <option value="MANUAL" disabled>
+                    Manual URL list (coming soon)
+                  </option>
+                </select>
+                <p className={`text-[11px] ${sourceTypeError ? 'text-rose-400' : 'text-slate-400'}`}>
+                  {sourceTypeError ?? 'Greenhouse is the only source we support today.'}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Source URL
+                </label>
+                <TextInput
+                  type="url"
+                  placeholder="https://..."
+                  value={sourceUrl}
+                  onChange={(event) => {
+                    setPendingSearchSet(null);
+                    setSourceUrl(event.target.value);
+                    setSubmitAttempted(false);
+                  }}
+                />
+                {parsed.warning ? <Alert intent="warning">{parsed.warning}</Alert> : null}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Max listings
+                </label>
+                <TextInput
+                  type="number"
+                  min={5}
+                  max={100}
+                  step={1}
+                  value={maxListings}
+                  onChange={(event) => {
+                    setPendingSearchSet(null);
+                    setMaxListings(event.target.value);
+                    setSubmitAttempted(false);
+                  }}
+                />
+                <p className={`text-[11px] ${maxListingsError ? 'text-rose-400' : 'text-slate-400'}`}>
+                  {maxListingsError ?? 'Limit how many listings we process (5-100).'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
             <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
                 Title patterns
@@ -351,7 +632,10 @@ export default function SearchSetsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <FormButton onClick={onSubmit} disabled={submitting}>
+            <FormButton
+              onClick={onSubmit}
+              disabled={!sourceSectionValid || submitting || !baselineVersionId || baselinesLoading}
+            >
               {submitting ? 'Creating...' : 'Create Search Set'}
             </FormButton>
           </div>

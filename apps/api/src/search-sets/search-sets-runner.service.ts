@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { FitScoringService } from '../analysis/fit-scoring.service';
@@ -19,13 +20,19 @@ import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { JobsService } from '../jobs/jobs.service';
 import { JobSourceRegistry } from '../job-sources/job-source-registry.service';
-import { JobSourceInput, ParsedJob } from '../job-sources/job-source.types';
-import { createHash, randomUUID } from 'node:crypto';
+import {
+  JobDetailRaw,
+  JobSourceInput,
+  ParsedJob,
+} from '../job-sources/job-source.types';
 import {
   SearchSetRunResultSummary,
   SearchSetRunSourceSnapshot,
 } from './search-set-run.entity';
-import { SearchSetRunRecordInput, SearchSetRunsService } from './search-set-runs.service';
+import {
+  SearchSetRunRecordInput,
+  SearchSetRunsService,
+} from './search-set-runs.service';
 import {
   SearchSet,
   SearchSetSeniority,
@@ -60,6 +67,9 @@ type SearchSetRunMetadata = {
   runInputHash: string | null;
   runId: string | null;
   failureCount: number;
+  fetchedListingCount: number;
+  ingestedNewCount: number;
+  dedupedCount: number;
 };
 
 type SearchSetRunResponse = {
@@ -96,9 +106,9 @@ export class SearchSetsRunnerService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-  private readonly fitScoringService: FitScoringService,
-  private readonly searchSetRunsService: SearchSetRunsService,
-) {}
+    private readonly fitScoringService: FitScoringService,
+    private readonly searchSetRunsService: SearchSetRunsService,
+  ) {}
 
   private readonly logger = new Logger(SearchSetsRunnerService.name);
 
@@ -132,6 +142,9 @@ export class SearchSetsRunnerService {
           runInputHash: null,
           runId: null,
           failureCount: 0,
+          fetchedListingCount: 0,
+          ingestedNewCount: 0,
+          dedupedCount: 0,
         },
       };
     }
@@ -173,7 +186,9 @@ export class SearchSetsRunnerService {
       order: { createdAt: 'DESC' },
     });
 
-    const matchedJobs = jobs.filter((job) => this.matchesSearchSet(job, searchSet));
+    const matchedJobs = jobs.filter((job) =>
+      this.matchesSearchSet(job, searchSet),
+    );
 
     if (!matchedJobs.length) {
       await this.recordRunSafely(searchSet, baselineVersionId, 0, {
@@ -196,6 +211,9 @@ export class SearchSetsRunnerService {
           runInputHash: null,
           runId,
           failureCount: 0,
+          fetchedListingCount: 0,
+          ingestedNewCount: 0,
+          dedupedCount: 0,
         },
       };
     }
@@ -229,6 +247,9 @@ export class SearchSetsRunnerService {
         runInputHash: null,
         runId,
         failureCount: 0,
+        fetchedListingCount: 0,
+        ingestedNewCount: 0,
+        dedupedCount: 0,
       },
     };
   }
@@ -291,6 +312,8 @@ export class SearchSetsRunnerService {
       selectedCount: slicedListings.length,
     });
 
+    const fetchedListingCount = listings.length;
+
     const dedupeStats: Record<DedupReason, number> = {
       externalId: 0,
       canonicalUrl: 0,
@@ -299,6 +322,7 @@ export class SearchSetsRunnerService {
     const discoveredJobs: Job[] = [];
     const seenJobIds = new Set<string>();
     let failureCount = 0;
+    let ingestedNewCount = 0;
 
     for (const listing of slicedListings) {
       try {
@@ -346,6 +370,10 @@ export class SearchSetsRunnerService {
           continue;
         }
 
+        if (dedupeReason === null) {
+          ingestedNewCount += 1;
+        }
+
         if (!this.matchesSearchSet(job, searchSet)) {
           continue;
         }
@@ -358,6 +386,11 @@ export class SearchSetsRunnerService {
         await this.delay(this.detailFetchDelayMs);
       }
     }
+
+    const dedupedCount = Object.values(dedupeStats).reduce(
+      (total, value) => total + value,
+      0,
+    );
 
     const runInputHash = this.computeRunInputHash(
       baselineVersionId,
@@ -400,6 +433,9 @@ export class SearchSetsRunnerService {
           runInputHash,
           runId,
           failureCount,
+          fetchedListingCount,
+          ingestedNewCount,
+          dedupedCount,
         },
       };
     }
@@ -415,7 +451,12 @@ export class SearchSetsRunnerService {
 
     logProviderRunComplete(results.length);
 
-    await this.recordRunSafely(searchSet, baselineVersionId, results.length, buildRunRecord(topResults));
+    await this.recordRunSafely(
+      searchSet,
+      baselineVersionId,
+      results.length,
+      buildRunRecord(topResults),
+    );
 
     return {
       results,
@@ -426,6 +467,9 @@ export class SearchSetsRunnerService {
         runInputHash,
         runId,
         failureCount,
+        fetchedListingCount,
+        ingestedNewCount,
+        dedupedCount,
       },
     };
   }
@@ -624,12 +668,7 @@ export class SearchSetsRunnerService {
         },
       });
       if (match) {
-        this.logDedupeHit(
-          context,
-          'externalId',
-          params.externalId,
-          match.id,
-        );
+        this.logDedupeHit(context, 'externalId', params.externalId, match.id);
         return { job: match, dedupeReason: 'externalId' };
       }
     }
@@ -639,12 +678,7 @@ export class SearchSetsRunnerService {
         where: { userId: params.userId, canonicalUrl: params.canonicalUrl },
       });
       if (byUrl) {
-        this.logDedupeHit(
-          context,
-          'canonicalUrl',
-          params.canonicalUrl,
-          byUrl.id,
-        );
+        this.logDedupeHit(context, 'canonicalUrl', params.canonicalUrl, byUrl.id);
         return { job: byUrl, dedupeReason: 'canonicalUrl' };
       }
     }
@@ -654,12 +688,7 @@ export class SearchSetsRunnerService {
         where: { userId: params.userId, dedupeHash: params.dedupeHash },
       });
       if (byHash) {
-        this.logDedupeHit(
-          context,
-          'dedupeHash',
-          params.dedupeHash,
-          byHash.id,
-        );
+        this.logDedupeHit(context, 'dedupeHash', params.dedupeHash, byHash.id);
         return { job: byHash, dedupeReason: 'dedupeHash' };
       }
     }
@@ -699,34 +728,34 @@ export class SearchSetsRunnerService {
     runRecord: SearchSetRunRecordInput,
   ) {
     try {
-      await this.searchSetsService.recordRunMetadata(searchSet, baselineVersionId, resultCount);
+      await this.searchSetsService.recordRunMetadata(
+        searchSet,
+        baselineVersionId,
+        resultCount,
+      );
     } catch {
-      // Intentional swallow
+      // Intentional swallow.
     }
 
     try {
       await this.searchSetRunsService.recordRun(runRecord);
     } catch {
-      // Do not block results on record saving
+      // Do not block results on record saving.
     }
   }
 
   private logEvent(event: string, payload: Record<string, unknown>) {
-    const serialized = JSON.stringify(
-      payload,
-      (_, value) => {
-        if (value instanceof Error) return value.message;
-        return value;
-      },
-    );
+    const serialized = JSON.stringify(payload, (_, value) => {
+      if (value instanceof Error) return value.message;
+      return value;
+    });
     this.logger.log(`${event} ${serialized}`);
   }
 
   private computeResultLimit(requested: number | undefined, available: number) {
     if (available === 0) return 0;
     const minLimit = available >= 5 ? 5 : available;
-    const normalized =
-      typeof requested === 'number' ? requested : 10;
+    const normalized = typeof requested === 'number' ? requested : 10;
     const limited = Math.min(Math.max(normalized, minLimit), 10);
     return Math.min(limited, available);
   }
@@ -763,10 +792,7 @@ export class SearchSetsRunnerService {
       order: { order: 'ASC' },
     });
 
-    const sections = this.applyPoliciesToSections(
-      baseline.sections ?? [],
-      policies,
-    );
+    const sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
 
     const additionSections =
       (baselineVersion.verifiedAdditions ?? []).map((content, index) =>
@@ -910,9 +936,7 @@ export class SearchSetsRunnerService {
       return true;
     }
     const normalized = (title ?? '').toLowerCase();
-    return patterns.some((pattern) =>
-      normalized.includes(pattern.toLowerCase()),
-    );
+    return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()));
   }
 
   private matchesSeniorities(job: Job, seniorities: SearchSetSeniority[] = []) {
@@ -938,9 +962,7 @@ export class SearchSetsRunnerService {
       return true;
     }
     const haystack = `${job.company ?? ''} ${job.rawDescription ?? ''}`.toLowerCase();
-    return industries.some((industry) =>
-      haystack.includes(industry.toLowerCase()),
-    );
+    return industries.some((industry) => haystack.includes(industry.toLowerCase()));
   }
 
   private matchesLocation(job: Job, location?: string | null) {
@@ -955,11 +977,7 @@ export class SearchSetsRunnerService {
 
     const normalized = title.toLowerCase();
 
-    if (
-      /\b(chief|c[et]o|executive|vp|vice president|director|head)\b/.test(
-        normalized,
-      )
-    ) {
+    if (/\b(chief|c[et]o|executive|vp|vice president|director|head)\b/.test(normalized)) {
       return SearchSetSeniority.EXECUTIVE;
     }
 
