@@ -7,10 +7,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import {
-  BaselineIncludePolicy,
-  BaselineSection,
-} from './baseline-section.entity';
+import { BaselineSection } from './baseline-section.entity';
+import type { BaselineIncludePolicy } from './baseline-section.entity';
 import { BaselineVersion } from './baseline-version.entity';
 
 @Entity({ name: 'baseline_block_policies' })
@@ -34,7 +32,7 @@ export class BaselineBlockPolicy {
   @Column()
   baselineSectionId!: string;
 
-  @Column({ type: 'varchar', default: BaselineIncludePolicy.OPTIONAL })
+  @Column({ type: 'varchar', default: 'optional' })
   includePolicy!: BaselineIncludePolicy;
 
   @Column({ name: 'orderIndex', type: 'int', default: 0 })

@@ -365,7 +365,7 @@ describe('SearchSetsRunnerService', () => {
   it('returns top 10 provider results and metadata', async () => {
     const listings = Array.from({ length: 15 }).map((_, index) => ({
       externalId: `gh-${index}`,
-      title: `Role ${index}`,
+      title: `Engineer Role ${index}`,
       location: 'Remote',
       url: `https://boards.greenhouse.io/company/jobs/gh-${index}`,
       postedAt: null,
@@ -418,5 +418,76 @@ describe('SearchSetsRunnerService', () => {
     expect(response.metadata.usedProviderDiscovery).toBe(true);
     expect(response.metadata.providerId).toBe('greenhouse');
     expect(jobSourceRegistry.findProvider).toHaveBeenCalled();
+  });
+
+  it('records failures without stopping successful listings', async () => {
+    const listings = [
+      {
+        externalId: 'gh-1',
+        title: 'Engineer Role A',
+        location: 'Remote',
+        url: 'https://boards.greenhouse.io/company/jobs/gh-1',
+        postedAt: null,
+      },
+      {
+        externalId: 'gh-2',
+        title: 'Engineer Role B',
+        location: 'Remote',
+        url: 'https://boards.greenhouse.io/company/jobs/gh-2',
+        postedAt: null,
+      },
+    ];
+
+    const provider = {
+      id: 'greenhouse',
+      fetchListings: jest.fn().mockResolvedValue(listings),
+      fetchJobDetail: jest.fn().mockImplementation((listing: JobSourceListing) => {
+        if (listing.externalId === 'gh-2') {
+          throw new Error('Timeout');
+        }
+        return Promise.resolve({
+          url: listing.url,
+          html: `<div>${listing.title}</div>`,
+          fetchedAt: new Date(),
+          metadata: {
+            title: listing.title,
+            company: 'Acme',
+            id: listing.externalId,
+          },
+        } as JobDetailRaw);
+      }),
+      parseJob: jest.fn().mockImplementation((detail: JobDetailRaw) => ({
+        title: detail.metadata?.title ?? 'Role',
+        company: 'Acme',
+        location: 'Remote',
+        descriptionText: 'Description text',
+        responsibilities: [],
+        requirements: [],
+        applyUrl: detail.metadata?.apply_url ?? detail.url,
+        sourceUrl: detail.url,
+        externalId: detail.metadata?.id ?? 'gh',
+      })),
+    };
+
+    const { service, baselineVersion, searchSetRunsService } = createService({
+      provider,
+      searchSetOverrides: {
+        sourceType: SearchSetSourceType.GREENHOUSE,
+        sourceUrl: 'https://boards.greenhouse.io/company',
+      },
+    });
+
+    const response = await service.runSearchSet(
+      'set-1',
+      'user-1',
+      baselineVersion.id,
+    );
+
+    expect(response.results).toHaveLength(1);
+    expect(response.metadata.failureCount).toBe(1);
+    expect(provider.parseJob).toHaveBeenCalledTimes(1);
+
+    const recorded = searchSetRunsService.recordRun.mock.calls[0][0];
+    expect(recorded.failureCount).toBe(1);
   });
 });

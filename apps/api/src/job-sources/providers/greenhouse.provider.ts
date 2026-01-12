@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { JobSourceFetchCacheService } from '../job-source-fetch-cache.service';
+import { JobSourceHttpService } from '../job-source-http.service';
 import { JobSourceProvider } from '../job-source.provider';
 import {
   JobSourceInput,
@@ -30,10 +31,15 @@ const REQUIREMENT_HEADINGS = [
 export class GreenhouseJobSourceProvider implements JobSourceProvider {
   readonly id = 'greenhouse';
 
-  private readonly fetchTimeoutMs = 15_000;
-  private readonly maxHtmlBytes = 1_000_000;
+  private readonly fetchOptions = {
+    timeoutMs: 15_000,
+    maxBytes: 1_000_000,
+  };
 
-  constructor(private readonly cache: JobSourceFetchCacheService) {}
+  constructor(
+    private readonly cache: JobSourceFetchCacheService,
+    private readonly jobSourceHttp: JobSourceHttpService,
+  ) {}
 
   canHandle(input: JobSourceInput): boolean {
     return input.sourceType === SearchSetSourceType.GREENHOUSE;
@@ -238,6 +244,11 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
     for (const line of lines) {
       const lower = line.toLowerCase();
 
+      if (/^apply\b/.test(lower)) {
+        current = null;
+        continue;
+      }
+
       if (RESPONSIBILITY_HEADINGS.some((heading) => lower.includes(heading))) {
         current = 'responsibilities';
         continue;
@@ -413,40 +424,8 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
 
   private async fetchBoardHtml(url: string): Promise<string> {
     const { value } = await this.cache.fetch(this.id, url, async () => {
-      return this.fetchHtml(url);
+      return this.jobSourceHttp.fetch(url, this.fetchOptions);
     });
     return value as string;
-  }
-
-  private async fetchHtml(url: string) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.fetchTimeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new BadRequestException('Could not reach Greenhouse.');
-      }
-
-      const buffer = await response.arrayBuffer();
-      if (buffer.byteLength > this.maxHtmlBytes) {
-        throw new BadRequestException('Greenhouse response is too large.');
-      }
-
-      return Buffer.from(buffer).toString('utf-8');
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new BadRequestException(
-        'Could not fetch HTML from Greenhouse board.',
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
   }
 }

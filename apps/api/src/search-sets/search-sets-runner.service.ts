@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,7 +20,7 @@ import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { JobsService } from '../jobs/jobs.service';
 import { JobSourceRegistry } from '../job-sources/job-source-registry.service';
 import { JobSourceInput, ParsedJob } from '../job-sources/job-source.types';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   SearchSetRunResultSummary,
   SearchSetRunSourceSnapshot,
@@ -43,11 +44,22 @@ type SearchSetRunResult = {
   dimensionScores: FitAssessment['dimensionScores'] | null;
 };
 
+type DedupReason = 'externalId' | 'canonicalUrl' | 'dedupeHash';
+
+type ProviderRunContext = {
+  runId: string;
+  providerId: string;
+  searchSetId: string;
+  baselineVersionId: string;
+};
+
 type SearchSetRunMetadata = {
   usedProviderDiscovery: boolean;
   providerId: string | null;
   sourceSnapshot: SearchSetRunSourceSnapshot | null;
   runInputHash: string | null;
+  runId: string | null;
+  failureCount: number;
 };
 
 type SearchSetRunResponse = {
@@ -84,9 +96,11 @@ export class SearchSetsRunnerService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-    private readonly fitScoringService: FitScoringService,
-    private readonly searchSetRunsService: SearchSetRunsService,
-  ) {}
+  private readonly fitScoringService: FitScoringService,
+  private readonly searchSetRunsService: SearchSetRunsService,
+) {}
+
+  private readonly logger = new Logger(SearchSetsRunnerService.name);
 
   private readonly detailFetchDelayMs = 250;
 
@@ -116,6 +130,8 @@ export class SearchSetsRunnerService {
           providerId: null,
           sourceSnapshot: null,
           runInputHash: null,
+          runId: null,
+          failureCount: 0,
         },
       };
     }
@@ -151,6 +167,7 @@ export class SearchSetsRunnerService {
     baselineContext: BaselineContext,
     limit?: number,
   ): Promise<SearchSetRunResponse> {
+    const runId = randomUUID();
     const jobs = await this.jobRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
@@ -160,11 +177,13 @@ export class SearchSetsRunnerService {
 
     if (!matchedJobs.length) {
       await this.recordRunSafely(searchSet, baselineVersionId, 0, {
+        runId,
         searchSetId: searchSet.id,
         baselineVersionId,
         sourceSnapshot: null,
         runInputHash: null,
         usedProviderDiscovery: false,
+        failureCount: 0,
         topResults: [],
       });
 
@@ -175,6 +194,8 @@ export class SearchSetsRunnerService {
           providerId: null,
           sourceSnapshot: null,
           runInputHash: null,
+          runId,
+          failureCount: 0,
         },
       };
     }
@@ -189,11 +210,13 @@ export class SearchSetsRunnerService {
     const topResults = this.summarizeTopResults(ranked);
 
     await this.recordRunSafely(searchSet, baselineVersionId, results.length, {
+      runId,
       searchSetId: searchSet.id,
       baselineVersionId,
       sourceSnapshot: null,
       runInputHash: null,
       usedProviderDiscovery: false,
+      failureCount: 0,
       topResults,
     });
 
@@ -204,6 +227,8 @@ export class SearchSetsRunnerService {
         providerId: null,
         sourceSnapshot: null,
         runInputHash: null,
+        runId,
+        failureCount: 0,
       },
     };
   }
@@ -215,6 +240,7 @@ export class SearchSetsRunnerService {
     baselineContext: BaselineContext,
     limit?: number,
   ): Promise<SearchSetRunResponse> {
+    const runId = randomUUID();
     const providerInput: JobSourceInput = {
       sourceType: searchSet.sourceType!,
       sourceUrl: searchSet.sourceUrl!,
@@ -226,7 +252,29 @@ export class SearchSetsRunnerService {
       throw new BadRequestException('No provider available for this source type.');
     }
 
-    const listings = await provider.fetchListings(providerInput);
+    const providerContext = {
+      runId,
+      providerId: provider.id,
+      searchSetId: searchSet.id,
+      baselineVersionId,
+    };
+
+    this.logEvent('provider_fetch_start', {
+      ...providerContext,
+      sourceUrl: providerInput.sourceUrl,
+    });
+
+    let listings: { externalId: string }[] = [];
+    try {
+      listings = await provider.fetchListings(providerInput);
+    } catch (error) {
+      this.logEvent('provider_fetch_failure', {
+        ...providerContext,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      throw new BadRequestException('Could not fetch listings from provider.');
+    }
+
     const maxListings = this.computeMaxListings(searchSet);
     const slicedListings = listings.slice(0, maxListings);
     const fetchedAt = new Date().toISOString();
@@ -237,21 +285,75 @@ export class SearchSetsRunnerService {
       fetchedAt,
     };
 
+    this.logEvent('provider_fetch_complete', {
+      ...providerContext,
+      listingCount: listings.length,
+      selectedCount: slicedListings.length,
+    });
+
+    const dedupeStats: Record<DedupReason, number> = {
+      externalId: 0,
+      canonicalUrl: 0,
+      dedupeHash: 0,
+    };
     const discoveredJobs: Job[] = [];
     const seenJobIds = new Set<string>();
+    let failureCount = 0;
 
     for (const listing of slicedListings) {
       try {
-        const detail = await provider.fetchJobDetail(listing);
-        const parsed = provider.parseJob(detail);
-        const job = await this.ingestOrReuseJob(userId, provider.id, parsed);
-        if (!job) continue;
-        if (!this.matchesSearchSet(job, searchSet)) continue;
-        if (seenJobIds.has(job.id)) continue;
+        let detail: JobDetailRaw;
+        try {
+          detail = await provider.fetchJobDetail(listing as never);
+        } catch (error) {
+          failureCount++;
+          this.logEvent('job_detail_failure', {
+            ...providerContext,
+            listingId: listing.externalId,
+            stage: 'detail_fetch',
+            reason: error instanceof Error ? error.message : 'unknown',
+          });
+          continue;
+        }
+
+        let parsed: ParsedJob;
+        try {
+          parsed = provider.parseJob(detail);
+        } catch (error) {
+          failureCount++;
+          this.logEvent('job_detail_failure', {
+            ...providerContext,
+            listingId: listing.externalId,
+            stage: 'parse',
+            reason: error instanceof Error ? error.message : 'unknown',
+          });
+          continue;
+        }
+
+        const { job, dedupeReason } = await this.ingestOrReuseJob(
+          userId,
+          provider.id,
+          parsed,
+          providerContext,
+        );
+
+        if (dedupeReason) {
+          dedupeStats[dedupeReason] += 1;
+        }
+
+        if (!job) {
+          failureCount++;
+          continue;
+        }
+
+        if (!this.matchesSearchSet(job, searchSet)) {
+          continue;
+        }
+        if (seenJobIds.has(job.id)) {
+          continue;
+        }
         seenJobIds.add(job.id);
         discoveredJobs.push(job);
-      } catch {
-        // skip failing listings without breaking the run
       } finally {
         await this.delay(this.detailFetchDelayMs);
       }
@@ -263,15 +365,31 @@ export class SearchSetsRunnerService {
       searchSet.sourceOptions,
     );
 
-    if (!discoveredJobs.length) {
-      await this.recordRunSafely(searchSet, baselineVersionId, 0, {
-        searchSetId: searchSet.id,
-        baselineVersionId,
-        sourceSnapshot,
-        runInputHash,
-        usedProviderDiscovery: true,
-        topResults: [],
+    const buildRunRecord = (topResults: SearchSetRunResultSummary[]) => ({
+      runId,
+      searchSetId: searchSet.id,
+      baselineVersionId,
+      sourceSnapshot,
+      runInputHash,
+      usedProviderDiscovery: true,
+      failureCount,
+      topResults,
+    });
+
+    const logProviderRunComplete = (resultCount: number) => {
+      this.logEvent('provider_run_complete', {
+        ...providerContext,
+        discoveredCount: discoveredJobs.length,
+        detailFetchCount: slicedListings.length,
+        resultCount,
+        failureCount,
+        dedupeStats,
       });
+    };
+
+    if (!discoveredJobs.length) {
+      logProviderRunComplete(0);
+      await this.recordRunSafely(searchSet, baselineVersionId, 0, buildRunRecord([]));
 
       return {
         results: [],
@@ -280,6 +398,8 @@ export class SearchSetsRunnerService {
           providerId: provider.id,
           sourceSnapshot,
           runInputHash,
+          runId,
+          failureCount,
         },
       };
     }
@@ -293,14 +413,9 @@ export class SearchSetsRunnerService {
 
     const topResults = this.summarizeTopResults(ranked);
 
-    await this.recordRunSafely(searchSet, baselineVersionId, results.length, {
-      searchSetId: searchSet.id,
-      baselineVersionId,
-      sourceSnapshot,
-      runInputHash,
-      usedProviderDiscovery: true,
-      topResults,
-    });
+    logProviderRunComplete(results.length);
+
+    await this.recordRunSafely(searchSet, baselineVersionId, results.length, buildRunRecord(topResults));
 
     return {
       results,
@@ -309,6 +424,8 @@ export class SearchSetsRunnerService {
         providerId: provider.id,
         sourceSnapshot,
         runInputHash,
+        runId,
+        failureCount,
       },
     };
   }
@@ -446,25 +563,29 @@ export class SearchSetsRunnerService {
     userId: string,
     providerId: string,
     parsed: ParsedJob,
-  ): Promise<Job | null> {
+    context: ProviderRunContext,
+  ): Promise<{ job: Job | null; dedupeReason: DedupReason | null }> {
     const canonicalUrl =
       this.normalizeUrl(parsed.applyUrl ?? parsed.sourceUrl) ?? null;
     const dedupeHash = this.computeDedupeHash(parsed);
 
-    const existing = await this.findDuplicateJob({
-      userId,
-      providerId,
-      externalId: parsed.externalId,
-      canonicalUrl,
-      dedupeHash,
-    });
+    const { job: existing, dedupeReason } = await this.findDuplicateJob(
+      {
+        userId,
+        providerId,
+        externalId: parsed.externalId,
+        canonicalUrl,
+        dedupeHash,
+      },
+      context,
+    );
 
     if (existing) {
-      return existing;
+      return { job: existing, dedupeReason };
     }
 
     try {
-      return await this.jobsService.createJob(userId, {
+      const created = await this.jobsService.createJob(userId, {
         title: parsed.title,
         company: parsed.company ?? null,
         rawDescription: parsed.descriptionText,
@@ -477,18 +598,22 @@ export class SearchSetsRunnerService {
         canonicalUrl,
         dedupeHash,
       });
+      return { job: created, dedupeReason: null };
     } catch {
-      return null;
+      return { job: null, dedupeReason: null };
     }
   }
 
-  private async findDuplicateJob(params: {
-    userId: string;
-    providerId: string;
-    externalId?: string;
-    canonicalUrl?: string | null;
-    dedupeHash?: string;
-  }): Promise<Job | null> {
+  private async findDuplicateJob(
+    params: {
+      userId: string;
+      providerId: string;
+      externalId?: string;
+      canonicalUrl?: string | null;
+      dedupeHash?: string;
+    },
+    context: ProviderRunContext,
+  ): Promise<{ job: Job | null; dedupeReason: DedupReason | null }> {
     if (params.externalId) {
       const match = await this.jobRepository.findOne({
         where: {
@@ -498,24 +623,62 @@ export class SearchSetsRunnerService {
           sourceExternalId: params.externalId,
         },
       });
-      if (match) return match;
+      if (match) {
+        this.logDedupeHit(
+          context,
+          'externalId',
+          params.externalId,
+          match.id,
+        );
+        return { job: match, dedupeReason: 'externalId' };
+      }
     }
 
     if (params.canonicalUrl) {
       const byUrl = await this.jobRepository.findOne({
         where: { userId: params.userId, canonicalUrl: params.canonicalUrl },
       });
-      if (byUrl) return byUrl;
+      if (byUrl) {
+        this.logDedupeHit(
+          context,
+          'canonicalUrl',
+          params.canonicalUrl,
+          byUrl.id,
+        );
+        return { job: byUrl, dedupeReason: 'canonicalUrl' };
+      }
     }
 
     if (params.dedupeHash) {
       const byHash = await this.jobRepository.findOne({
         where: { userId: params.userId, dedupeHash: params.dedupeHash },
       });
-      if (byHash) return byHash;
+      if (byHash) {
+        this.logDedupeHit(
+          context,
+          'dedupeHash',
+          params.dedupeHash,
+          byHash.id,
+        );
+        return { job: byHash, dedupeReason: 'dedupeHash' };
+      }
     }
 
-    return null;
+    return { job: null, dedupeReason: null };
+  }
+
+  private logDedupeHit(
+    context: ProviderRunContext,
+    reason: DedupReason,
+    identifier: string,
+    existingJobId: string,
+  ) {
+    this.logEvent('job_dedupe_hit', {
+      ...context,
+      dedupeReason: reason,
+      identifier,
+      existingJobId,
+    });
   }
 
   private computeDedupeHash(parsed: ParsedJob) {
@@ -546,6 +709,17 @@ export class SearchSetsRunnerService {
     } catch {
       // Do not block results on record saving
     }
+  }
+
+  private logEvent(event: string, payload: Record<string, unknown>) {
+    const serialized = JSON.stringify(
+      payload,
+      (_, value) => {
+        if (value instanceof Error) return value.message;
+        return value;
+      },
+    );
+    this.logger.log(`${event} ${serialized}`);
   }
 
   private computeResultLimit(requested: number | undefined, available: number) {

@@ -30,8 +30,11 @@ export class SearchSetRun {
   @Column({ type: 'varchar', length: 128, nullable: true })
   runInputHash!: string | null;
 
-  @Column({ type: 'jsonb', nullable: true })
-  topResults!: SearchSetRunResultSummary[] | null;
+@Column({ type: 'jsonb', nullable: true })
+topResults!: SearchSetRunResultSummary[] | null;
+
+  @Column({ type: 'int', default: 0 })
+  failureCount!: number;
 
   @Column({ type: 'boolean', default: false })
   usedProviderDiscovery!: boolean;

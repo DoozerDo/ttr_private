@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { JobSourceFetchCacheService } from '../job-source-fetch-cache.service';
+import { JobSourceHttpService } from '../job-source-http.service';
 import { GreenhouseJobSourceProvider } from './greenhouse.provider';
 
 const FIXTURE_DIR = join(__dirname, '../fixtures/greenhouse');
@@ -15,6 +16,7 @@ describe('GreenhouseJobSourceProvider', () => {
 
   let provider: GreenhouseJobSourceProvider;
   let cache: JobSourceFetchCacheService;
+  let httpService: JobSourceHttpService;
   let originalFetch: typeof globalThis.fetch | undefined;
 
   beforeAll(() => {
@@ -23,7 +25,8 @@ describe('GreenhouseJobSourceProvider', () => {
 
   beforeEach(() => {
     cache = new JobSourceFetchCacheService();
-    provider = new GreenhouseJobSourceProvider(cache);
+    httpService = new JobSourceHttpService();
+    provider = new GreenhouseJobSourceProvider(cache, httpService);
   });
 
   afterEach(() => {

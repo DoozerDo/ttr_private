@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JobSourceFetchCacheService } from './job-source-fetch-cache.service';
+import { JobSourceHttpService } from './job-source-http.service';
 import { JobSourceRegistry } from './job-source-registry.service';
 import { JOB_SOURCE_PROVIDERS } from './job-source.constants';
 import { GreenhouseJobSourceProvider } from './providers/greenhouse.provider';
@@ -8,6 +9,7 @@ import { GreenhouseJobSourceProvider } from './providers/greenhouse.provider';
   providers: [
     JobSourceRegistry,
     JobSourceFetchCacheService,
+    JobSourceHttpService,
 
     // Register the concrete provider so Nest can construct it (inject cache, etc.)
     GreenhouseJobSourceProvider,

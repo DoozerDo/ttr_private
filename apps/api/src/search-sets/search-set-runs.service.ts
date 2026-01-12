@@ -8,11 +8,13 @@ import {
 } from './search-set-run.entity';
 
 export type SearchSetRunRecordInput = {
+  runId: string;
   searchSetId: string;
   baselineVersionId: string;
   sourceSnapshot: SearchSetRunSourceSnapshot | null;
   runInputHash: string | null;
   usedProviderDiscovery: boolean;
+  failureCount: number;
   topResults: SearchSetRunResultSummary[];
 };
 
@@ -25,10 +27,12 @@ export class SearchSetRunsService {
 
   async recordRun(input: SearchSetRunRecordInput) {
     const entry = this.repository.create({
+      id: input.runId,
       searchSetId: input.searchSetId,
       baselineVersionId: input.baselineVersionId,
       sourceSnapshot: input.sourceSnapshot,
       runInputHash: input.runInputHash,
+      failureCount: input.failureCount,
       topResults: input.topResults.length ? input.topResults : null,
       usedProviderDiscovery: input.usedProviderDiscovery,
     });
