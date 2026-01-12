@@ -3,3 +3,6 @@
 /apps/api/storage
 /apps/api/storage/baselines
 /.tmp
+infra/terraform/terraform.dev.tfvars
+infra/terraform/terraform.prod.tfvars
+infra/terraform/terraform.tfstate
