@@ -12,6 +12,7 @@ import { parseTierGateError, type TierGateError } from '@/lib/tiers';
 import type { SearchSetDto } from '@/lib/searchSetsClient';
 
 type SearchSetPayload = {
+  baselineVersionId?: string;
   sourceUrl: string;
   sourceType?: string;
   sourceOptions?: {
@@ -218,6 +219,7 @@ export default function SearchSetsPage() {
 
   const [baselinesLoading, setBaselinesLoading] = useState(false);
   const [baselinesError, setBaselinesError] = useState<string | null>(null);
+  const [baselineOptions, setBaselineOptions] = useState<BaselineVersionOption[]>([]);
   const [baselineVersionId, setBaselineVersionId] = useState<string>('');
 
   const parsed = useMemo(() => safeParseUrl(sourceUrl), [sourceUrl]);
@@ -231,6 +233,7 @@ export default function SearchSetsPage() {
         : '';
     if (stored) setBaselineVersionId(stored);
 
+    setBaselineOptions([]);
     setBaselinesLoading(true);
     setBaselinesError(null);
 
@@ -242,8 +245,11 @@ export default function SearchSetsPage() {
           .flatMap((b) => (b.versions ?? []).map((v) => formatBaselineVersionOption(b, v)))
           .filter((o) => Boolean(o.id));
 
+        setBaselineOptions(options);
+
         if (!options.length) {
           setBaselinesError('No baseline versions found. Upload a baseline first.');
+          setBaselineVersionId('');
           return;
         }
 
@@ -257,6 +263,8 @@ export default function SearchSetsPage() {
       })
       .catch((e) => {
         if (!mounted) return;
+        setBaselineOptions([]);
+        setBaselineVersionId('');
         setBaselinesError(e instanceof Error ? e.message : 'Failed to load baselines.');
       })
       .finally(() => {
@@ -341,6 +349,7 @@ export default function SearchSetsPage() {
         : 50;
 
       const payload: SearchSetPayload = {
+        baselineVersionId,
         sourceType,
         sourceOptions: { maxListings: normalizedMaxListings },
         sourceUrl: parsed.url.toString(),
@@ -487,6 +496,11 @@ export default function SearchSetsPage() {
                 <option value="">
                   {baselinesLoading ? 'Loading baseline versions...' : 'Select a baseline version'}
                 </option>
+                {baselineOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.display}
+                  </option>
+                ))}
               </select>
 
               {baselinesError ? <Alert intent="warning">{baselinesError}</Alert> : null}

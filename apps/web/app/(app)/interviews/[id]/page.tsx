@@ -111,6 +111,26 @@ function readStringField(payload: unknown, keys: string[]): string | null {
   return null;
 }
 
+function formatDimensionLabel(value: string): string {
+  if (!value) return "";
+  return value
+    .replace(/[_-]+/g, " ")
+    .split(/\s+/)
+    .map((segment) => {
+      if (!segment) return "";
+      return segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase();
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
 function describeAdditionSource(addition: RecommendedAddition): string {
   const sources = Array.isArray(addition.sources) ? addition.sources : [];
   const labels: string[] = [];
@@ -265,6 +285,94 @@ export default function InterviewSessionPage() {
     return { expandedScore, originalScore, delta, expandedVerdict, originalVerdict };
   }, [session?.expandedFitAssessment]);
 
+  const expandedDimensionBreakdown = useMemo(() => {
+    const assessment = session?.expandedFitAssessment;
+    if (!assessment) return null;
+
+    const candidate =
+      (assessment as Record<string, unknown>).expandedDimensionScores ??
+      (assessment as Record<string, unknown>).dimensionScores;
+    if (!candidate || typeof candidate !== "object") return null;
+
+    const entries = Object.entries(candidate)
+      .map(([dimension, value]) => ({
+        dimension,
+        label: formatDimensionLabel(dimension),
+        value: typeof value === "number" && Number.isFinite(value) ? value : null,
+      }))
+      .filter(
+        (entry): entry is { dimension: string; label: string; value: number } => entry.value !== null,
+      );
+
+    return entries.length ? entries : null;
+  }, [session?.expandedFitAssessment]);
+
+  const expandedFitMetadata = useMemo(() => {
+    if (!session) return null;
+    const assessment = session.expandedFitAssessment;
+    const baselineName = session.baselineId ?? null;
+    const baselineVersionId = session.baselineVersionId ?? null;
+    const baselineVersionHash = session.baselineVersionHash ?? null;
+    const baselineVersionNumber =
+      readNumericField(assessment, ["baselineVersion", "baseline_version"]) ??
+      (typeof session.baselineVersion === "number" ? session.baselineVersion : null);
+
+    const timestamp =
+      readStringField(assessment, ["createdAt", "created_at"]) ?? session.updatedAt ?? null;
+    const computedAt = formatTimestamp(timestamp);
+
+    if (
+      !baselineName &&
+      !baselineVersionId &&
+      baselineVersionNumber == null &&
+      !baselineVersionHash &&
+      !computedAt
+    ) {
+      return null;
+    }
+
+    return {
+      baselineName,
+      baselineVersionId,
+      baselineVersionNumber,
+      baselineVersionHash,
+      computedAt,
+    };
+  }, [
+    session,
+    session?.baselineId,
+    session?.baselineVersion,
+    session?.baselineVersionHash,
+    session?.baselineVersionId,
+    session?.updatedAt,
+  ]);
+
+  const promotedBaselineMetadata = useMemo(() => {
+    const baselineVersionId =
+      promotionResult?.baselineVersionId ?? session?.promotedBaselineVersionId ?? null;
+    const versionNumber = promotionResult?.versionNumber ?? null;
+    const baselineVersionHash =
+      promotionResult?.baselineVersionHash ?? session?.baselineVersionHash ?? null;
+    const timestamp = promotionResult ? session?.updatedAt ?? null : null;
+    if (!baselineVersionId && versionNumber == null && !baselineVersionHash) {
+      return null;
+    }
+
+    return {
+      baselineVersionId,
+      versionNumber,
+      baselineVersionHash,
+      timestamp: formatTimestamp(timestamp),
+    };
+  }, [
+    promotionResult?.baselineVersionHash,
+    promotionResult?.baselineVersionId,
+    promotionResult?.versionNumber,
+    session?.promotedBaselineVersionId,
+    session?.baselineVersionHash,
+    session?.updatedAt,
+  ]);
+
   const verdictFromScore = (score: number | null | undefined) => {
     if (score === null || score === undefined) return null;
     if (score >= 80) return "APPLY";
@@ -382,7 +490,7 @@ const trimmedResponses = useMemo(
     setReviewMessage("All additions rejected. Interview completed.");
   };
 
-const handleRecomputeExpandedFit = async () => {
+  const handleRecomputeExpandedFit = async () => {
     if (!sessionId) return;
 
     setExpandedComputing(true);
@@ -391,6 +499,11 @@ const handleRecomputeExpandedFit = async () => {
 
     try {
       const updatedSession = await computeInterviewExpandedFit(sessionId);
+
+      if (!updatedSession || !updatedSession.expandedFitAssessment) {
+        throw new Error("Expanded fit computation did not return any data.");
+      }
+
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setReviewMessage("Expanded fit score updated.");
     } catch (computeError) {
@@ -764,25 +877,103 @@ const handleRecomputeExpandedFit = async () => {
                   <div className="space-y-4">
                     <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
                       {expandedFitDetails ? (
-                        <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-3">
-                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
-                            <p className="text-xs text-slate-400">Original score</p>
-                            <p className="text-xl font-bold text-white">{expandedFitDetails.originalScore ?? "-"}</p>
-                            <p className="text-xs text-slate-400">Verdict: {originalVerdict ?? "Unknown"}</p>
+                        <div className="space-y-3">
+                          <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-3">
+                            <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <p className="text-xs text-slate-400">Original score</p>
+                              <p className="text-xl font-bold text-white">
+                                {expandedFitDetails.originalScore ?? "-"}
+                              </p>
+                              <p className="text-xs text-slate-400">Verdict: {originalVerdict ?? "Unknown"}</p>
+                            </div>
+                            <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <p className="text-xs text-slate-400">Expanded score</p>
+                              <p className="text-xl font-bold text-white">
+                                {expandedFitDetails.expandedScore ?? "-"}
+                              </p>
+                              <p className="text-xs text-slate-400">Verdict: {expandedVerdict ?? "Unknown"}</p>
+                            </div>
+                            <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <p className="text-xs text-slate-400">Delta</p>
+                              <p className="text-xl font-bold text-white">
+                                {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined
+                                  ? (expandedFitDetails.delta >= 0 ? "+" : "") + expandedFitDetails.delta
+                                  : "-"}
+                              </p>
+                            </div>
                           </div>
-                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
-                            <p className="text-xs text-slate-400">Expanded score</p>
-                            <p className="text-xl font-bold text-white">{expandedFitDetails.expandedScore ?? "-"}</p>
-                            <p className="text-xs text-slate-400">Verdict: {expandedVerdict ?? "Unknown"}</p>
-                          </div>
-                          <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
-                            <p className="text-xs text-slate-400">Delta</p>
-                            <p className="text-xl font-bold text-white">
-                              {expandedFitDetails.delta !== null && expandedFitDetails.delta !== undefined
-                                ? (expandedFitDetails.delta >= 0 ? "+" : "") + expandedFitDetails.delta
-                                : "-"}
-                            </p>
-                          </div>
+                          {expandedDimensionBreakdown ? (
+                            <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-950/50 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                                Dimension breakdown
+                              </p>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                {expandedDimensionBreakdown.map((entry) => (
+                                  <div
+                                    key={entry.dimension}
+                                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-2 text-xs text-slate-200"
+                                  >
+                                    <span>{entry.label}</span>
+                                    <span className="font-semibold text-slate-100">{entry.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          {expandedFitMetadata ? (
+                            <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-950/50 p-3 text-xs text-slate-200">
+                              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                                Expanded fit metadata
+                              </p>
+                              {expandedFitMetadata.baselineName ? (
+                                <p className="text-sm text-slate-100">
+                                  Baseline: {expandedFitMetadata.baselineName}
+                                </p>
+                              ) : null}
+                              {expandedFitMetadata.baselineVersionId ? (
+                                <p>
+                                  <span className="text-xs text-slate-400">Version: </span>
+                                  <span className="text-sm text-slate-100">
+                                    {expandedFitMetadata.baselineVersionId}
+                                    {expandedFitMetadata.baselineVersionNumber != null
+                                      ? " (v" + expandedFitMetadata.baselineVersionNumber + ")"
+                                      : ""}
+                                    {expandedFitMetadata.baselineVersionHash
+                                      ? " (" + expandedFitMetadata.baselineVersionHash + ")"
+                                      : ""}
+                                  </span>
+                                </p>
+                              ) : null}
+                              {expandedFitMetadata.computedAt ? (
+                                <p className="text-xs text-slate-400">
+                                  Computed at: {expandedFitMetadata.computedAt}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {promotedBaselineMetadata ? (
+                            <div className="space-y-1 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-slate-200">
+                              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-200">
+                                Promoted baseline
+                              </p>
+                              {promotedBaselineMetadata.baselineVersionId ? (
+                                <p className="text-sm text-white">
+                                  {promotedBaselineMetadata.baselineVersionId}
+                                  {promotedBaselineMetadata.versionNumber != null
+                                    ? " (v" + promotedBaselineMetadata.versionNumber + ")"
+                                    : ""}
+                                  {promotedBaselineMetadata.baselineVersionHash
+                                    ? " (" + promotedBaselineMetadata.baselineVersionHash + ")"
+                                    : ""}
+                                </p>
+                              ) : null}
+                              {promotedBaselineMetadata.timestamp ? (
+                                <p className="text-xs text-slate-300">
+                                  Promoted at: {promotedBaselineMetadata.timestamp}
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <Alert intent="warning">Expanded fit has not been computed for this interview yet.</Alert>

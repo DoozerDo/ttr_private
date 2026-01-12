@@ -20,6 +20,8 @@ export type InterviewPromotionResponse = {
   versionNumber?: number | null;
 };
 
+export type InterviewExpandedFitResponse = InterviewSessionDto;
+
 const DECISION_STATUS: Record<RecommendedAdditionDecision, RecommendedAdditionStatus> = {
   accept: "accepted",
   reject: "rejected",
@@ -137,12 +139,21 @@ export async function updateInterviewAcceptedAdditions(
   });
 }
 
-export async function computeInterviewExpandedFit(id: string): Promise<InterviewSessionDto> {
-  return fetchInterview<InterviewSessionDto>(buildInterviewUrl(id, "/compute-expanded-fit"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+export async function computeInterviewExpandedFit(id: string): Promise<InterviewExpandedFitResponse> {
+  const result = await fetchInterview<InterviewExpandedFitResponse>(
+    buildInterviewUrl(id, "/compute-expanded-fit"),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+
+  if (!result) {
+    throw new Error("Empty response from expanded fit computation.");
+  }
+
+  return result;
 }
 
 export async function promoteInterviewAcceptedAdditions(
