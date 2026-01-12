@@ -24,7 +24,10 @@ import {
   submitInterviewAdditionDecisions,
   updateInterviewAcceptedAdditions,
 } from "@/lib/interviewsClient";
-import type { InterviewPromotionResponse } from "@/lib/interviewsClient";
+import type {
+  InterviewExpandedFitResponse,
+  InterviewPromotionResponse,
+} from "@/lib/interviewsClient";
 
 type ComplianceFlag = {
   code?: string;
@@ -163,6 +166,7 @@ export default function InterviewSessionPage() {
   const [acceptedError, setAcceptedError] = useState<string | null>(null);
   const [expandedComputing, setExpandedComputing] = useState(false);
   const [expandedComputeError, setExpandedComputeError] = useState<string | null>(null);
+  const [expandedFitResult, setExpandedFitResult] = useState<InterviewExpandedFitResponse | null>(null);
   const [promotionSaving, setPromotionSaving] = useState(false);
   const [promotionError, setPromotionError] = useState<string | null>(null);
   const [promotionResult, setPromotionResult] = useState<InterviewPromotionResponse | null>(null);
@@ -210,6 +214,12 @@ export default function InterviewSessionPage() {
   useEffect(() => {
     setAcceptedAdditionIds(session?.acceptedAdditionIds ?? []);
   }, [session?.acceptedAdditionIds]);
+
+  useEffect(() => {
+    if (!session?.expandedFitAssessment) {
+      setExpandedFitResult(null);
+    }
+  }, [session?.expandedFitAssessment]);
 
   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
@@ -262,16 +272,31 @@ export default function InterviewSessionPage() {
   }, [baselineVersionHash, session?.baselineVersionId]);
 
   const promotedBaselineReference = useMemo(() => {
-    const id = promotionResult?.baselineVersionId ?? session?.promotedBaselineVersionId ?? null;
-    const hash = promotionResult?.baselineVersionHash ?? null;
+    const id =
+      promotionResult?.baselineVersionId ??
+      expandedFitResult?.promotedBaselineVersionId ??
+      session?.promotedBaselineVersionId ??
+      null;
+    const hash =
+      promotionResult?.baselineVersionHash ??
+      expandedFitResult?.baselineVersionHash ??
+      null;
     if (id && hash) return `${id} (${hash})`;
     return id ?? hash ?? null;
-  }, [promotionResult?.baselineVersionHash, promotionResult?.baselineVersionId, session?.promotedBaselineVersionId]);
+  }, [
+    promotionResult?.baselineVersionHash,
+    promotionResult?.baselineVersionId,
+    session?.promotedBaselineVersionId,
+    expandedFitResult?.promotedBaselineVersionId,
+    expandedFitResult?.baselineVersionHash,
+  ]);
   const baselineAvailable = Boolean(session?.baselineId && session?.baselineVersionId);
   const baselineMissingForSession = Boolean(session) && !baselineAvailable;
+  const expandedFitSession = expandedFitResult ?? session;
+  const expandedFitAssessment = expandedFitSession?.expandedFitAssessment ?? null;
 
   const expandedFitDetails = useMemo(() => {
-    const assessment = session?.expandedFitAssessment;
+    const assessment = expandedFitAssessment;
     if (!assessment) return null;
 
     const expandedScore = readNumericField(assessment, ["expandedScore", "expanded_score"]);
@@ -283,10 +308,10 @@ export default function InterviewSessionPage() {
     if (expandedScore === null && originalScore === null && delta === null) return null;
 
     return { expandedScore, originalScore, delta, expandedVerdict, originalVerdict };
-  }, [session?.expandedFitAssessment]);
+  }, [expandedFitAssessment]);
 
   const expandedDimensionBreakdown = useMemo(() => {
-    const assessment = session?.expandedFitAssessment;
+    const assessment = expandedFitAssessment;
     if (!assessment) return null;
 
     const candidate =
@@ -305,20 +330,22 @@ export default function InterviewSessionPage() {
       );
 
     return entries.length ? entries : null;
-  }, [session?.expandedFitAssessment]);
+  }, [expandedFitAssessment]);
 
   const expandedFitMetadata = useMemo(() => {
-    if (!session) return null;
-    const assessment = session.expandedFitAssessment;
-    const baselineName = session.baselineId ?? null;
-    const baselineVersionId = session.baselineVersionId ?? null;
-    const baselineVersionHash = session.baselineVersionHash ?? null;
+    if (!expandedFitSession) return null;
+    const assessment = expandedFitSession.expandedFitAssessment;
+    const baselineName = expandedFitSession.baselineId ?? null;
+    const baselineVersionId = expandedFitSession.baselineVersionId ?? null;
+    const baselineVersionHash = expandedFitSession.baselineVersionHash ?? null;
     const baselineVersionNumber =
       readNumericField(assessment, ["baselineVersion", "baseline_version"]) ??
-      (typeof session.baselineVersion === "number" ? session.baselineVersion : null);
+      (typeof expandedFitSession.baselineVersion === "number"
+        ? expandedFitSession.baselineVersion
+        : null);
 
     const timestamp =
-      readStringField(assessment, ["createdAt", "created_at"]) ?? session.updatedAt ?? null;
+      readStringField(assessment, ["createdAt", "created_at"]) ?? expandedFitSession.updatedAt ?? null;
     const computedAt = formatTimestamp(timestamp);
 
     if (
@@ -340,20 +367,29 @@ export default function InterviewSessionPage() {
     };
   }, [
     session,
-    session?.baselineId,
-    session?.baselineVersion,
-    session?.baselineVersionHash,
-    session?.baselineVersionId,
-    session?.updatedAt,
-  ]);
+      expandedFitSession?.baselineId,
+      expandedFitSession?.baselineVersion,
+      expandedFitSession?.baselineVersionHash,
+      expandedFitSession?.baselineVersionId,
+      expandedFitSession?.updatedAt,
+      expandedFitSession?.expandedFitAssessment,
+    ]);
 
   const promotedBaselineMetadata = useMemo(() => {
     const baselineVersionId =
-      promotionResult?.baselineVersionId ?? session?.promotedBaselineVersionId ?? null;
+      promotionResult?.baselineVersionId ??
+      expandedFitResult?.promotedBaselineVersionId ??
+      session?.promotedBaselineVersionId ??
+      null;
     const versionNumber = promotionResult?.versionNumber ?? null;
     const baselineVersionHash =
-      promotionResult?.baselineVersionHash ?? session?.baselineVersionHash ?? null;
-    const timestamp = promotionResult ? session?.updatedAt ?? null : null;
+      promotionResult?.baselineVersionHash ??
+      expandedFitResult?.baselineVersionHash ??
+      session?.baselineVersionHash ??
+      null;
+    const timestamp = promotionResult
+      ? expandedFitResult?.updatedAt ?? session?.updatedAt ?? null
+      : null;
     if (!baselineVersionId && versionNumber == null && !baselineVersionHash) {
       return null;
     }
@@ -371,6 +407,9 @@ export default function InterviewSessionPage() {
     session?.promotedBaselineVersionId,
     session?.baselineVersionHash,
     session?.updatedAt,
+    expandedFitResult?.promotedBaselineVersionId,
+    expandedFitResult?.baselineVersionHash,
+    expandedFitResult?.updatedAt,
   ]);
 
   const verdictFromScore = (score: number | null | undefined) => {
@@ -505,7 +544,7 @@ const trimmedResponses = useMemo(
       }
 
       applySessionUpdate(updatedSession, { preserveAnswers: true });
-      setReviewMessage("Expanded fit score updated.");
+      setExpandedFitResult(updatedSession);
     } catch (computeError) {
       setExpandedComputeError(
         computeError instanceof Error ? computeError.message : "Unable to compute expanded fit.",
@@ -986,6 +1025,9 @@ const trimmedResponses = useMemo(
                       >
                         {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
                       </FormButton>
+                      {expandedComputeError ? (
+                        <p className="text-xs text-rose-300">Unable to compute expanded fit: {expandedComputeError}</p>
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-400">
                       Accepted additions: {acceptedAdditions.length} / {recommendedAdditions.length}
@@ -1016,7 +1058,6 @@ const trimmedResponses = useMemo(
                     </div>
                     {acceptedSaving ? <p className="text-xs text-slate-400">Saving accepted additions...</p> : null}
                     {acceptedError ? <Alert intent="error">{acceptedError}</Alert> : null}
-                    {expandedComputeError ? <Alert intent="error">{expandedComputeError}</Alert> : null}
                     {promotionError ? <Alert intent="error">{promotionError}</Alert> : null}
                     {reviewMessage ? <Alert intent="success">{reviewMessage}</Alert> : null}
                     {promotionResult ? (

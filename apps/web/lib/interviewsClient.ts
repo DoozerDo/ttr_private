@@ -1,5 +1,6 @@
 import type {
   AdditionDecisionPayload,
+  ExpandedFitAssessment,
   InterviewSessionDto,
   RecommendedAdditionDecision,
   RecommendedAdditionStatus,
@@ -20,7 +21,9 @@ export type InterviewPromotionResponse = {
   versionNumber?: number | null;
 };
 
-export type InterviewExpandedFitResponse = InterviewSessionDto;
+export type InterviewExpandedFitResponse = InterviewSessionDto & {
+  expandedFitAssessment: ExpandedFitAssessment | null;
+};
 
 const DECISION_STATUS: Record<RecommendedAdditionDecision, RecommendedAdditionStatus> = {
   accept: "accepted",
