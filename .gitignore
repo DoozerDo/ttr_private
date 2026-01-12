@@ -6,3 +6,8 @@
 infra/terraform/terraform.dev.tfvars
 infra/terraform/terraform.prod.tfvars
 infra/terraform/terraform.tfstate
+
+# Terraform
+**/.terraform/*
+**/*.tfstate
+**/*.tfstate.*
