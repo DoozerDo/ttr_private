@@ -44,6 +44,11 @@ type BaselineVersionOption = {
   baselineLabel: string;
 };
 
+type LoadStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const debugUiEnabled =
+  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_DEBUG_UI === 'true';
+
 const SENIORITY_LABELS: Record<string, string> = {
   ENTRY: 'Entry',
   MID: 'Mid',
@@ -218,9 +223,11 @@ export default function SearchSetsPage() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const [baselinesLoading, setBaselinesLoading] = useState(false);
+  const [baselinesFetchStatus, setBaselinesFetchStatus] = useState<LoadStatus>('idle');
   const [baselinesError, setBaselinesError] = useState<string | null>(null);
   const [baselineOptions, setBaselineOptions] = useState<BaselineVersionOption[]>([]);
   const [baselineVersionId, setBaselineVersionId] = useState<string>('');
+  const [baselineValidationError, setBaselineValidationError] = useState<string | null>(null);
 
   const parsed = useMemo(() => safeParseUrl(sourceUrl), [sourceUrl]);
 
@@ -235,6 +242,7 @@ export default function SearchSetsPage() {
 
     setBaselineOptions([]);
     setBaselinesLoading(true);
+    setBaselinesFetchStatus('loading');
     setBaselinesError(null);
 
     fetchBaselines()
@@ -246,6 +254,7 @@ export default function SearchSetsPage() {
           .filter((o) => Boolean(o.id));
 
         setBaselineOptions(options);
+        setBaselinesFetchStatus('success');
 
         if (!options.length) {
           setBaselinesError('No baseline versions found. Upload a baseline first.');
@@ -266,6 +275,7 @@ export default function SearchSetsPage() {
         setBaselineOptions([]);
         setBaselineVersionId('');
         setBaselinesError(e instanceof Error ? e.message : 'Failed to load baselines.');
+        setBaselinesFetchStatus('error');
       })
       .finally(() => {
         if (!mounted) return;
@@ -324,6 +334,7 @@ export default function SearchSetsPage() {
     setSubmitAttempted(true);
     setError(undefined);
     setTierGateError(null);
+    setBaselineValidationError(null);
 
     if (!parsed.url) {
       setError(parsed.warning || 'Invalid job URL.');
@@ -336,7 +347,7 @@ export default function SearchSetsPage() {
     }
 
     if (!baselineVersionId) {
-      setError('Select a baseline version before creating a search set.');
+      setBaselineValidationError('Select a baseline version before creating a search set.');
       return;
     }
 
@@ -359,6 +370,12 @@ export default function SearchSetsPage() {
         parseWarning: parsed.warning,
       };
 
+      if (debugUiEnabled) {
+        console.debug(
+          'createSearchSet payload includes baselineVersionId: ' +
+            (payload.baselineVersionId ? payload.baselineVersionId : 'missing'),
+        );
+      }
       const result = await createSearchSet(payload);
       setPendingSearchSet(result);
 
@@ -486,6 +503,7 @@ export default function SearchSetsPage() {
                 onChange={(event) => {
                   setPendingSearchSet(null);
                   setBaselineVersionId(event.target.value);
+                  setBaselineValidationError(null);
                   if (typeof window !== 'undefined') {
                     sessionStorage.setItem('ttr:lastBaselineVersionId', event.target.value);
                   }
@@ -504,10 +522,22 @@ export default function SearchSetsPage() {
               </select>
 
               {baselinesError ? <Alert intent="warning">{baselinesError}</Alert> : null}
+              {baselineValidationError ? (
+                <p className="text-[11px] text-rose-400">{baselineValidationError}</p>
+              ) : null}
 
               <p className="text-[11px] text-slate-400">
                 This selection will carry into the run page.
               </p>
+
+              {debugUiEnabled ? (
+                <div className="space-y-1 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Debug</p>
+                  <p>baselinesFetchStatus: {baselinesFetchStatus}</p>
+                  <p>baselineOptionsCount: {baselineOptions.length}</p>
+                  <p>selectedBaselineVersionId: {baselineVersionId || 'none'}</p>
+                </div>
+              ) : null}
             </div>
           </div>
 

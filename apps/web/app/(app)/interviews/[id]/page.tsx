@@ -151,6 +151,11 @@ function describeAdditionSource(addition: RecommendedAddition): string {
 
 const COMPLETION_STATUS_VALUES = ["complete", "completed", "done", "closed", "finished"];
 
+type ComputeStatus = "idle" | "loading" | "success" | "error";
+
+const debugUiEnabled =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+
 export default function InterviewSessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -166,6 +171,9 @@ export default function InterviewSessionPage() {
   const [acceptedError, setAcceptedError] = useState<string | null>(null);
   const [expandedComputing, setExpandedComputing] = useState(false);
   const [expandedComputeError, setExpandedComputeError] = useState<string | null>(null);
+  const [lastComputeStatus, setLastComputeStatus] = useState<ComputeStatus>('idle');
+  const [lastComputeAt, setLastComputeAt] = useState<string | null>(null);
+  const [hasExpandedFitData, setHasExpandedFitData] = useState(false);
   const [expandedFitResult, setExpandedFitResult] = useState<InterviewExpandedFitResponse | null>(null);
   const [promotionSaving, setPromotionSaving] = useState(false);
   const [promotionError, setPromotionError] = useState<string | null>(null);
@@ -535,20 +543,38 @@ const trimmedResponses = useMemo(
     setExpandedComputing(true);
     setExpandedComputeError(null);
     setReviewMessage(null);
+    setLastComputeStatus("loading");
 
     try {
       const updatedSession = await computeInterviewExpandedFit(sessionId);
+      const completedAt = new Date().toISOString();
 
       if (!updatedSession || !updatedSession.expandedFitAssessment) {
         throw new Error("Expanded fit computation did not return any data.");
       }
 
+      const expandedScore = readNumericField(updatedSession.expandedFitAssessment, [
+        "expandedScore",
+        "expanded_score",
+      ]);
+      const hasScore = expandedScore !== null;
+
       applySessionUpdate(updatedSession, { preserveAnswers: true });
       setExpandedFitResult(updatedSession);
+      setLastComputeStatus("success");
+      setLastComputeAt(completedAt);
+      setHasExpandedFitData(hasScore);
+
+      if (hasScore) {
+        setReviewMessage("Expanded fit score updated");
+      }
     } catch (computeError) {
-      setExpandedComputeError(
-        computeError instanceof Error ? computeError.message : "Unable to compute expanded fit.",
-      );
+      const message =
+        computeError instanceof Error ? computeError.message : "Unable to compute expanded fit.";
+      setExpandedComputeError(message);
+      setLastComputeStatus("error");
+      setLastComputeAt(new Date().toISOString());
+      setHasExpandedFitData(false);
     } finally {
       setExpandedComputing(false);
     }
@@ -1021,10 +1047,18 @@ const trimmedResponses = useMemo(
                         variant="secondary"
                         className="px-3 py-1 text-xs"
                         onClick={handleRecomputeExpandedFit}
-                        disabled={expandedComputing}
+                        disabled={expandedComputing || !sessionId}
                       >
                         {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
                       </FormButton>
+                      {debugUiEnabled ? (
+                        <div className="space-y-1 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Debug</p>
+                          <p>lastComputeStatus: {lastComputeStatus}</p>
+                          <p>lastComputeAt: {lastComputeAt ?? "never"}</p>
+                          <p>hasExpandedFitData: {hasExpandedFitData ? "true" : "false"}</p>
+                        </div>
+                      ) : null}
                       {expandedComputeError ? (
                         <p className="text-xs text-rose-300">Unable to compute expanded fit: {expandedComputeError}</p>
                       ) : null}

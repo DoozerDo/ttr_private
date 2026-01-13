@@ -5,6 +5,18 @@ import type {
   RecommendedAdditionDecision,
   RecommendedAdditionStatus,
 } from "./interviews";
+import apiRoutes from "./apiRoutes.json";
+
+export interface InterviewExpandedFitResponse extends InterviewSessionDto {
+  expandedFitAssessment: ExpandedFitAssessment | null;
+  expandedFitScore?: number | null;
+}
+
+type ApiRouteMap = {
+  expandedFitCompute: string;
+};
+
+const API_ROUTES: ApiRouteMap = apiRoutes;
 
 type RawInterviewPromotionResponse = {
   baselineVersionId?: string;
@@ -21,9 +33,109 @@ export type InterviewPromotionResponse = {
   versionNumber?: number | null;
 };
 
-export type InterviewExpandedFitResponse = InterviewSessionDto & {
-  expandedFitAssessment: ExpandedFitAssessment | null;
-};
+const debugUiEnabled =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function hasNumericScore(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasOwnPropertyValue(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function hasExpandedAssessmentScore(record: Record<string, unknown>): boolean {
+  const assessment = record.expandedFitAssessment;
+  if (assessment && isRecord(assessment)) {
+    const candidate =
+      (assessment as Record<string, unknown>).expandedScore ??
+      (assessment as Record<string, unknown>).expanded_score;
+
+    if (hasNumericScore(candidate)) {
+      return true;
+    }
+  }
+
+  const alt = record.expandedFitScore;
+  return hasNumericScore(alt);
+}
+
+function isInterviewExpandedFitResponse(value: unknown): value is InterviewExpandedFitResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (!hasOwnPropertyValue(record, "id") || !isString(record.id)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "status") || !isString(record.status)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "createdAt") || !isString(record.createdAt)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "updatedAt") || !isString(record.updatedAt)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "baselineId") || !isStringOrNull(record.baselineId)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "baselineVersionId") || !isStringOrNull(record.baselineVersionId)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "jobId") || !isStringOrNull(record.jobId)) {
+    return false;
+  }
+
+  if (!hasOwnPropertyValue(record, "expandedFitAssessment")) {
+    return false;
+  }
+
+  const assessment = record.expandedFitAssessment;
+  if (assessment !== null && !isRecord(assessment)) {
+    return false;
+  }
+
+  return hasExpandedAssessmentScore(record);
+}
+
+function expandedFitScoreFromResponse(response: InterviewExpandedFitResponse): number | null {
+  const assessment = response.expandedFitAssessment;
+  if (assessment && isRecord(assessment)) {
+    const maybeScore =
+      (assessment as Record<string, unknown>).expandedScore ??
+      (assessment as Record<string, unknown>).expanded_score;
+    if (hasNumericScore(maybeScore)) {
+      return maybeScore;
+    }
+  }
+
+  if (hasNumericScore(response.expandedFitScore)) {
+    return response.expandedFitScore;
+  }
+
+  return null;
+}
 
 const DECISION_STATUS: Record<RecommendedAdditionDecision, RecommendedAdditionStatus> = {
   accept: "accepted",
@@ -37,6 +149,10 @@ function buildInterviewUrl(id: string, suffix?: string) {
     return `/api/interviews/${encodedId}${suffix}`;
   }
   return `/api/interviews/${encodedId}`;
+}
+
+function expandedFitComputePath(id: string) {
+  return API_ROUTES.expandedFitCompute.replace("{id}", encodeURIComponent(id));
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {
@@ -142,21 +258,55 @@ export async function updateInterviewAcceptedAdditions(
   });
 }
 
-export async function computeInterviewExpandedFit(id: string): Promise<InterviewExpandedFitResponse> {
-  const result = await fetchInterview<InterviewExpandedFitResponse>(
-    buildInterviewUrl(id, "/compute-expanded-fit"),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    },
-  );
+export async function computeInterviewExpandedFit(
+  id: string,
+): Promise<InterviewExpandedFitResponse | null> {
+  const response = await fetch(expandedFitComputePath(id), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    cache: "no-store",
+    body: JSON.stringify({}),
+  });
 
-  if (!result) {
-    throw new Error("Empty response from expanded fit computation.");
+  const rawText = await response.text();
+  const trimmed = rawText.trim();
+  let parsed: unknown = null;
+
+  if (trimmed) {
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (parseError) {
+      throw new Error(
+        `Unable to parse expanded fit response: ${
+          parseError instanceof Error ? parseError.message : String(parseError)
+        }`,
+      );
+    }
   }
 
-  return result;
+  if (!response.ok) {
+    throw new Error(formatError(parsed ?? rawText, response.statusText || "Interview API error"));
+  }
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!isInterviewExpandedFitResponse(parsed)) {
+    throw new Error("Unexpected expanded fit response shape.");
+  }
+
+  const expandedScore = expandedFitScoreFromResponse(parsed);
+  if (debugUiEnabled) {
+    console.debug("computeInterviewExpandedFit response", {
+      interviewRecordId: id,
+      status: response.status,
+      hasExpandedFitScore: expandedScore !== null,
+    });
+  }
+
+  return parsed;
 }
 
 export async function promoteInterviewAcceptedAdditions(
