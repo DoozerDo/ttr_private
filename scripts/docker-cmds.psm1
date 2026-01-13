@@ -80,27 +80,27 @@ WARNING:
 
 
 Function Build-Both {
-    docker compose -f infra\docker\docker-compose.dev.yml up -d --build api web
+    docker compose -f infra\docker\docker-compose.local.yml up -d --build api web
 }
 
 function Build-All {
-    docker compose -f infra\docker\docker-compose.dev.yml down -v 
-    docker compose -f infra\docker\docker-compose.dev.yml up -d --build 
+    docker compose -f infra\docker\docker-compose.local.yml down -v 
+    docker compose -f infra\docker\docker-compose.local.yml up -d --build 
 }
 
 function Restart-Both {
-    docker compose -f infra\docker\docker-compose.dev.yml restart api web
+    docker compose -f infra\docker\docker-compose.local.yml restart api web
 }
 
 function Restart-All {
-    docker compose -f infra\docker\docker-compose.dev.yml restart 
+    docker compose -f infra\docker\docker-compose.local.yml restart 
 }
 
 Function Reset-Env {
     git reset --hard
     git clean -xfd
 
-    docker compose -f infra\docker\docker-compose.dev.yml down -v
+    docker compose -f infra\docker\docker-compose.local.yml down -v
     docker builder prune -af
 }
 
@@ -140,5 +140,5 @@ Function Update-NPM {
 
 
 Function Update-All {
-    docker compose -f infra\docker\docker-compose.dev.yml up -d --build
+    docker compose -f infra\docker\docker-compose.local.yml up -d --build
 }

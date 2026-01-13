@@ -1,0 +1,55 @@
+# docker-compose.dev.yml
+# Local development stack only.
+# Production deployments should use docker-compose.prod.yml or cloud-native config.
+# docker-compose.local.yml: “bind mounts + hot reload; not for servers”
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: targetthisrole
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    env_file:
+      - ../../apps/api/.env.development.local
+    environment:
+      NODE_ENV: development
+      TYPEORM_SYNCHRONIZE: "true"
+    command: sh -c "npm ci && npm run start:dev"
+    volumes:
+      - ../../apps/api:/usr/src/app
+      - /usr/src/app/node_modules
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+    env_file:
+      - ../../apps/web/.env.local
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../../apps/web:/usr/src/app
+      - /usr/src/app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
