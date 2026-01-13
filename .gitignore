@@ -40,3 +40,4 @@ infra/terraform/terraform.tfstate
 !.env.development.example
 !.env.production.example
 
+infra/terraform/output.txt

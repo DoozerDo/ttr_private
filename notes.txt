@@ -115,3 +115,6 @@ DO Notes:
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@159.203.110.143
 
 Not sure what this is: $env:USERPROFILE\.ssh\id_ed25519_targetthisrole -C "targetthisrole-dev"
+
+
+Terraform plan -var-file="terraform.dev.tfvars"
