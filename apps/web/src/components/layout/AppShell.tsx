@@ -30,12 +30,20 @@ const getStoredContext = () => {
   }
 };
 
+const disabledMessages: Record<string, string> = {
+  analyze: "Add a baseline and a job description to calculate your score.",
+  resume: "Select a baseline and job to generate documents.",
+  coverLetters: "Select a baseline and job to generate documents.",
+  interviewToolkit: "Add a job with an interview date to unlock tools.",
+  searchSets: "Upload a baseline to run Search Sets.",
+};
+
 const getDisabledReason = (route: RouteConfig, hasBaseline: boolean, hasJob: boolean) => {
   if (route.requiresBaseline && !hasBaseline) {
-    return "Upload a baseline to unlock this area";
+    return disabledMessages[route.id] ?? "Upload a baseline to unlock this area";
   }
   if (route.requiresJob && !hasJob) {
-    return "Add a job to proceed";
+    return disabledMessages[route.id] ?? "Add a job to proceed";
   }
   return null;
 };
@@ -194,6 +202,11 @@ export function AppShell({ children, userEmail }: AppShellProps) {
                 aria-disabled={disabledReason ? "true" : undefined}
               >
                 <span>{route.label}</span>
+                {route.subtext ? (
+                  <span className="text-[11px] font-medium text-slate-400 leading-tight">
+                    {route.subtext}
+                  </span>
+                ) : null}
                 {disabledReason ? (
                   <span className={disabledLabelClasses}>{disabledReason}</span>
                 ) : null}
