@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   ComplianceFlag,
@@ -10,7 +11,8 @@ import {
   ComplianceViolationPanel,
 } from "@/components/ComplianceViolationPanel";
 import { Alert } from "@/components/Alert";
-import { TierGateNotice } from "@/components/TierGateNotice";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FormButton } from "@/components/FormButton";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -130,6 +132,8 @@ export default function CoverLettersPage() {
     auditId?: string;
     baselineVersionHash?: string | null;
   } | null>(null);
+  const [isTierModalOpen, setIsTierModalOpen] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -224,8 +228,28 @@ export default function CoverLettersPage() {
           cache: "no-store",
         });
         if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Unable to load history.");
+          const payload = await readResponsePayload(response);
+          const tierGate = parseTierGateError({
+            status: response.status,
+            payload,
+          });
+
+          if (tierGate) {
+            if (cancelled) return;
+            setHistory([]);
+            setHistoryState("idle");
+            setHistoryError(null);
+            setTierGateError(tierGate);
+            setStatusMessage(null);
+            setErrorMessage(null);
+            return;
+          }
+
+          const message = formatErrorMessage(
+            payload,
+            "Unable to load history right now.",
+          );
+          throw new Error(message);
         }
 
         const data = (await response.json()) as CoverLetterDto[];
@@ -233,6 +257,7 @@ export default function CoverLettersPage() {
 
         setHistory(data);
         setHistoryState("idle");
+        setTierGateError(null);
         const latestTemplate = data[0]?.closingTemplateKey;
         setClosingTemplateKey(
           (current) => current || latestTemplate || defaultClosingTemplateKey,
@@ -303,8 +328,20 @@ export default function CoverLettersPage() {
   }, [jobState, jobs.length]);
 
   const canGenerate = Boolean(baselineId && jobId && !isGenerating);
+  const isTierGateActive = Boolean(tierGateError);
+  const openTierModal = () => setIsTierModalOpen(true);
+  const closeTierModal = () => setIsTierModalOpen(false);
+  const handleUpgradeConfirm = () => {
+    closeTierModal();
+    router.push("/pricing");
+  };
 
   const handleGenerate = async () => {
+    if (tierGateError) {
+      openTierModal();
+      return;
+    }
+
     if (!baselineId || !jobId) {
       setStatusMessage(null);
       setErrorMessage("Select a baseline and job to generate a cover letter.");
@@ -316,7 +353,6 @@ export default function CoverLettersPage() {
     setStatusMessage(null);
     setErrorMessage(null);
     setComplianceError(null);
-    setTierGateError(null);
     setCoverLetterCompliance(null);
 
     try {
@@ -335,6 +371,7 @@ export default function CoverLettersPage() {
 
         if (tierGate) {
           setTierGateError(tierGate);
+          openTierModal();
           return;
         }
 
@@ -637,14 +674,17 @@ export default function CoverLettersPage() {
                   minWidth: 180,
                 }}
               >
-                {isGenerating ? "Generating..." : "Generate"}
+                {isGenerating
+                  ? "Generating..."
+                  : isTierGateActive
+                    ? "Upgrade to generate"
+                    : "Generate"}
               </button>
               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
                 Uses your latest baseline version automatically.
               </span>
             </div>
 
-            {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
             {coverLetterCompliance ? (
               <ComplianceFlagPanel
                 title="Compliance warnings"
@@ -695,9 +735,28 @@ export default function CoverLettersPage() {
               </div>
             ) : null}
             {historyState === "idle" && sortedHistory.length === 0 ? (
-              <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>
-                No cover letters yet. Generate one to see it listed here.
-              </div>
+              isTierGateActive ? (
+                <div
+                  style={{
+                    ...ttrComponents.warningBox,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ fontWeight: 800 }}>Upgrade required</div>
+                  <div style={{ fontSize: 13, color: "rgba(226,232,240,0.85)" }}>
+                    Upgrade to unlock cover letter generation and history.
+                  </div>
+                  <FormButton onClick={openTierModal}>
+                    Upgrade to generate
+                  </FormButton>
+                </div>
+              ) : (
+                <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>
+                  No cover letters yet. Generate one to see it listed here.
+                </div>
+              )
             ) : null}
 
             {sortedHistory.map((item) => renderHistoryItem(item))}
@@ -740,6 +799,24 @@ export default function CoverLettersPage() {
             : "Select a history item or generate a cover letter to view it here."}
         </div>
       </section>
+      <ConfirmDialog
+        open={isTierModalOpen && Boolean(tierGateError)}
+        title="Upgrade required"
+        description={
+          <div className="text-sm text-slate-300">
+            <p>Upgrade to unlock cover letter generation.</p>
+            {tierGateError?.message ? (
+              <p className="mt-2 text-sm text-slate-200 font-semibold">
+                {tierGateError.message}
+              </p>
+            ) : null}
+          </div>
+        }
+        confirmLabel="Upgrade"
+        cancelLabel="Close"
+        onConfirm={handleUpgradeConfirm}
+        onCancel={closeTierModal}
+      />
     </InstrumentShell>
   );
 }
