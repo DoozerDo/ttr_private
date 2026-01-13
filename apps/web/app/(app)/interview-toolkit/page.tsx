@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Alert } from "@/components/Alert";
+import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   ComplianceFlag,
   ComplianceFlagPanel,
@@ -33,14 +34,6 @@ interface JobDto {
   id: string;
   title: string | null;
   company: string | null;
-}
-
-function TierGateNotice({ error }: { error: TierGateError }) {
-  return (
-    <Alert intent="warning">
-      {error.message || "This feature is not available on your current plan."}
-    </Alert>
-  );
 }
 
 function describeComplianceSummary(error: ParsedComplianceError) {

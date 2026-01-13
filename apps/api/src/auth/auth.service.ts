@@ -9,8 +9,8 @@ import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/user.entity';
-
-type SanitizedUser = Omit<User, 'passwordHash'>;
+import { getEntitlementsForTier } from '../features/feature-gates';
+import type { AuthResponseDto } from './dto/auth-response.dto';
 
 @Injectable()
 export class AuthService {
@@ -19,7 +19,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async register(payload: RegisterDto): Promise<{ user: SanitizedUser; accessToken: string }> {
+  async register(payload: RegisterDto): Promise<AuthResponseDto> {
     const existing = await this.usersService.findByEmail(payload.email);
 
     if (existing) {
@@ -32,7 +32,7 @@ export class AuthService {
     return this.buildAuthResponse(user);
   }
 
-  async login(payload: LoginDto): Promise<{ user: SanitizedUser; accessToken: string }> {
+  async login(payload: LoginDto): Promise<AuthResponseDto> {
     const user = await this.usersService.findByEmail(payload.email);
 
     if (!user) {
@@ -48,15 +48,23 @@ export class AuthService {
     return this.buildAuthResponse(user);
   }
 
-  private buildAuthResponse(user: User): { user: SanitizedUser; accessToken: string } {
+  private buildAuthResponse(user: User): AuthResponseDto {
+    const entitlements = getEntitlementsForTier(user.subscriptionTier);
+
     const payload = {
       sub: user.id,
       email: user.email,
       subscriptionTier: user.subscriptionTier,
+      entitlements,
     };
+
     const accessToken = this.jwtService.sign(payload);
+
     const { passwordHash, ...sanitizedUser } = user;
 
-    return { accessToken, user: sanitizedUser };
+    return {
+      accessToken,
+      user: { ...sanitizedUser, entitlements },
+    };
   }
 }

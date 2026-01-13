@@ -13,11 +13,20 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
 import { CoverLettersService } from './cover-letters.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
-import { assertFeatureAvailable, FeatureKey } from '../features/feature-gates';
+import {
+  assertFeatureAvailable,
+  Entitlements,
+  FeatureKey,
+  resolveEntitlementsFromUser,
+} from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 type TieredRequest = Request & {
-  user?: { id?: string; subscriptionTier?: SubscriptionTier };
+  user?: {
+    id?: string;
+    subscriptionTier?: SubscriptionTier;
+    entitlements?: Entitlements;
+  };
 };
 
 @Controller('cover-letters')
@@ -29,10 +38,8 @@ export class CoverLettersController {
   async generate(@Body() body: GenerateCoverLetterDto, @Req() request: TieredRequest) {
     const userId = this.requireUserId(request);
 
-    assertFeatureAvailable(
-      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
-      FeatureKey.COVER_LETTER_EXPORT,
-    );
+    const entitlements = resolveEntitlementsFromUser(request.user);
+    assertFeatureAvailable(entitlements, FeatureKey.COVER_LETTER_EXPORT);
 
     return this.coverLettersService.generateCoverLetter(userId, body);
   }
