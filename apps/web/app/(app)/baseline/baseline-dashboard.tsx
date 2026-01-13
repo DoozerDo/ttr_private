@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { CSSProperties, FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import type { BaselineDto } from "@/lib/baselines";
@@ -22,6 +22,7 @@ export function BaselineDashboard({
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const sortedBaselines = useMemo(
     () =>
@@ -31,22 +32,18 @@ export function BaselineDashboard({
       ),
     [baselines],
   );
+  const uploadButtonEnabled = Boolean(file) && !isUploading;
+  const canOpenFilePicker = !file && !isUploading;
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const uploadBaselineFile = async (fileToUpload: File) => {
+    if (isUploading) return;
     setError(null);
-
-    if (!file) {
-      setError("Please choose a PDF or DOCX file to upload.");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", file);
-
     setIsUploading(true);
 
     try {
+      const formData = new FormData();
+      formData.append("file", fileToUpload);
+
       const response = await fetch("/api/baselines", {
         method: "POST",
         credentials: "include",
@@ -68,12 +65,26 @@ export function BaselineDashboard({
 
       setBaselines((previous) => [data as BaselineDto, ...previous]);
       setFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
       setError("Unable to upload baseline right now.");
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!file) {
+      setError("Please choose a PDF or DOCX file to upload.");
+      return;
+    }
+
+    await uploadBaselineFile(file);
   };
 
   const handleRefresh = async () => {
@@ -125,16 +136,26 @@ export function BaselineDashboard({
     margin: "14px 0",
   };
 
-  const fileInputStyle: CSSProperties = {
-    width: "100%",
-    marginTop: 8,
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.10)",
-    background: "rgba(0,0,0,0.18)",
-    color: "rgba(241,245,249,0.9)",
-    fontSize: 13,
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+  const hiddenFileInputStyle: CSSProperties = {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    padding: 0,
+    margin: -1,
+    border: 0,
+    overflow: "hidden",
+    clip: "rect(0 0 0 0)",
+  };
+
+  const uploadButtonWrapperStyle: CSSProperties = {
+    position: "relative",
+    display: "inline-flex",
+  };
+
+  const fileInfoStyle: CSSProperties = {
+    margin: 0,
+    fontSize: 12,
+    color: "rgba(226,232,240,0.65)",
   };
 
   const secondaryButtonStyle: CSSProperties = {
@@ -195,8 +216,8 @@ export function BaselineDashboard({
           <p style={ttrTypography.subtleLabel}>Upload</p>
           <h2 style={sectionTitleStyle}>Upload baseline</h2>
           <p style={bodyTextStyle}>
-            Upload your locked baseline resume as a PDF or DOCX. We will store it
-            securely and generate initial sections for tailoring later.
+            Upload your resume as a PDF or DOCX. We will store it securely and
+            ingest its content for future tailoring.
           </p>
         </div>
 
@@ -213,46 +234,74 @@ export function BaselineDashboard({
             >
               Baseline file
             </label>
-            <input
-              id="baselineUpload"
-              type="file"
-              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              style={fileInputStyle}
-              disabled={isUploading}
-            />
-            <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
-              Accepted: PDF, DOCX{file ? ` • Selected: ${file.name}` : ""}
+            <div style={uploadButtonWrapperStyle}>
+              <input
+                id="baselineUpload"
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={async (event) => {
+                  const selected = event.target.files?.[0] ?? null;
+                  setFile(selected);
+                  if (!selected) return;
+                  await uploadBaselineFile(selected);
+                }}
+                style={hiddenFileInputStyle}
+                disabled={isUploading}
+              />
+              <button
+                type="submit"
+                disabled={!uploadButtonEnabled}
+                onMouseEnter={(e) => {
+                  if (!uploadButtonEnabled) return;
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow =
+                    "0 18px 30px rgba(249,115,22,0.32)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!uploadButtonEnabled) return;
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow =
+                    "0 15px 25px rgba(249,115,22,0.25)";
+                }}
+                style={{
+                  ...ttrComponents.primaryButton,
+                  width: "fit-content",
+                  padding: "12px 14px",
+                  fontSize: 13,
+                  opacity: uploadButtonEnabled ? 1 : 0.7,
+                  cursor: uploadButtonEnabled ? "pointer" : "not-allowed",
+                }}
+              >
+                {isUploading ? "Uploading..." : "Upload baseline"}
+              </button>
+              <label
+                htmlFor="baselineUpload"
+                aria-label="Choose baseline file"
+                tabIndex={canOpenFilePicker ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (!canOpenFilePicker) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  borderRadius: 12,
+                  cursor: canOpenFilePicker ? "pointer" : "default",
+                  pointerEvents: canOpenFilePicker ? "auto" : "none",
+                }}
+              />
             </div>
+            {file ? (
+              <p style={fileInfoStyle}>Selected: {file.name}</p>
+            ) : null}
           </div>
 
           {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
 
-          <button
-            type="submit"
-            disabled={isUploading}
-            onMouseEnter={(e) => {
-              if (isUploading) return;
-              e.currentTarget.style.transform = "translateY(-1px)";
-              e.currentTarget.style.boxShadow =
-                "0 18px 30px rgba(249,115,22,0.32)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow =
-                "0 15px 25px rgba(249,115,22,0.25)";
-            }}
-            style={{
-              ...ttrComponents.primaryButton,
-              width: "fit-content",
-              padding: "12px 14px",
-              fontSize: 13,
-              opacity: isUploading ? 0.7 : 1,
-              cursor: isUploading ? "not-allowed" : "pointer",
-            }}
-          >
-            {isUploading ? "Uploading..." : "Upload baseline"}
-          </button>
         </form>
       </section>
 
