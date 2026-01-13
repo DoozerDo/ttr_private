@@ -1,8 +1,12 @@
 import type {
   AdditionDecisionPayload,
   ExpandedFitAssessment,
+  InterviewAcceptedAddition,
+  InterviewAcceptedAdditionStatus,
   InterviewSessionDto,
+  RecommendedAddition,
   RecommendedAdditionDecision,
+  RecommendedAdditionSource,
   RecommendedAdditionStatus,
 } from "./interviews";
 import apiRoutes from "./apiRoutes.json";
@@ -194,6 +198,148 @@ function formatError(payload: unknown, fallback: string): string {
   return fallback;
 }
 
+const RECOMMENDED_ADDITION_STATUSES: RecommendedAdditionStatus[] = [
+  "proposed",
+  "accepted",
+  "rejected",
+  "deferred",
+];
+
+const ACCEPTED_ADDITION_STATUSES: InterviewAcceptedAdditionStatus[] = ["RECOMMENDED", "ACCEPTED"];
+
+function isRecommendedAdditionStatus(value: unknown): value is RecommendedAdditionStatus {
+  return typeof value === "string" && RECOMMENDED_ADDITION_STATUSES.includes(value as RecommendedAdditionStatus);
+}
+
+function isInterviewAcceptedAdditionStatus(value: unknown): value is InterviewAcceptedAdditionStatus {
+  return typeof value === "string" && ACCEPTED_ADDITION_STATUSES.includes(value as InterviewAcceptedAdditionStatus);
+}
+
+function parseRecommendedAdditionSource(value: unknown): RecommendedAdditionSource | null {
+  if (!isRecord(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  const source: RecommendedAdditionSource = {};
+
+  if (isString(record.gapId)) {
+    source.gapId = record.gapId;
+  }
+
+  if (typeof record.questionIndex === "number") {
+    source.questionIndex = record.questionIndex;
+  }
+
+  if (isString(record.questionPrompt)) {
+    source.questionPrompt = record.questionPrompt;
+  }
+
+  if (!source.gapId && source.questionIndex === undefined && !source.questionPrompt) {
+    return null;
+  }
+
+  return source;
+}
+
+function parseRecommendedAddition(value: unknown): RecommendedAddition | null {
+  if (!isRecord(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  const id = isString(record.id) ? record.id : "";
+  const text = isString(record.text) ? record.text.trim() : "";
+
+  if (!id || !text) return null;
+
+  const status = isRecommendedAdditionStatus(record.status) ? record.status : "proposed";
+  const sources = Array.isArray(record.sources)
+    ? record.sources
+        .map(parseRecommendedAdditionSource)
+        .filter((entry): entry is RecommendedAdditionSource => Boolean(entry))
+    : [];
+
+  return {
+    id,
+    text,
+    status,
+    sources,
+  };
+}
+
+function parseRecommendedAdditionsPayload(value: unknown): RecommendedAddition[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("Unexpected recommended additions response");
+  }
+
+  return value
+    .map(parseRecommendedAddition)
+    .filter((entry): entry is RecommendedAddition => Boolean(entry));
+}
+
+function parseInterviewAcceptedAddition(value: unknown): InterviewAcceptedAddition | null {
+  if (!isRecord(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  if (
+    !isString(record.id) ||
+    !isString(record.interviewId) ||
+    !isString(record.gapId) ||
+    !isString(record.suggestion) ||
+    !isString(record.createdAt) ||
+    !isString(record.updatedAt)
+  ) {
+    return null;
+  }
+
+  if (!isInterviewAcceptedAdditionStatus(record.status)) return null;
+
+  const category = record.category === undefined || record.category === null ? null : record.category;
+  if (category !== null && !isString(category)) return null;
+
+  const domain = record.domain === undefined || record.domain === null ? null : record.domain;
+  if (domain !== null && !isString(domain)) return null;
+
+  const recommendedAdditionId =
+    record.recommendedAdditionId === undefined || record.recommendedAdditionId === null
+      ? null
+      : record.recommendedAdditionId;
+
+  if (recommendedAdditionId !== null && !isString(recommendedAdditionId)) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    interviewId: record.interviewId,
+    gapId: record.gapId,
+    category,
+    domain,
+    suggestion: record.suggestion,
+    status: record.status,
+    recommendedAdditionId,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function parseInterviewAcceptedAdditionsPayload(value: unknown): InterviewAcceptedAddition[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("Unexpected accepted additions response");
+  }
+
+  return value
+    .map(parseInterviewAcceptedAddition)
+    .filter((entry): entry is InterviewAcceptedAddition => Boolean(entry));
+}
+
+function ensureInterviewAcceptedAddition(value: unknown): InterviewAcceptedAddition {
+  const parsed = parseInterviewAcceptedAddition(value);
+  if (!parsed) {
+    throw new Error("Unexpected accepted addition payload");
+  }
+  return parsed;
+}
+
 async function fetchInterview<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, init);
   const payload = await parseResponseBody(response);
@@ -256,6 +402,55 @@ export async function updateInterviewAcceptedAdditions(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ acceptedAdditionIds }),
   });
+}
+
+function recommendedAdditionsPath(id: string): string {
+  return buildInterviewUrl(id, "/recommended-additions");
+}
+
+function acceptedAdditionsPath(id: string): string {
+  return buildInterviewUrl(id, "/accepted-additions");
+}
+
+export async function fetchInterviewRecommendedAdditions(
+  id: string,
+): Promise<RecommendedAddition[]> {
+  const payload = await fetchInterview<unknown>(recommendedAdditionsPath(id), {
+    cache: "no-store",
+  });
+
+  return parseRecommendedAdditionsPayload(payload);
+}
+
+export async function fetchInterviewAcceptedAdditions(
+  id: string,
+): Promise<InterviewAcceptedAddition[]> {
+  const payload = await fetchInterview<unknown>(acceptedAdditionsPath(id), {
+    cache: "no-store",
+  });
+
+  return parseInterviewAcceptedAdditionsPayload(payload);
+}
+
+export type AcceptInterviewAdditionPayload = {
+  gapId: string;
+  suggestion: string;
+  category?: string;
+  domain?: string;
+  recommendedAdditionId?: string;
+};
+
+export async function acceptInterviewAddition(
+  id: string,
+  payload: AcceptInterviewAdditionPayload,
+): Promise<InterviewAcceptedAddition> {
+  const response = await fetchInterview<unknown>(acceptedAdditionsPath(id), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  return ensureInterviewAcceptedAddition(response);
 }
 
 export async function computeInterviewExpandedFit(

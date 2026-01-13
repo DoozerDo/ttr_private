@@ -19,6 +19,7 @@ import { InterviewRecordsService } from './interview-records.service';
 import { RecommendedAdditionsService } from './recommended-additions.service';
 import { InterviewResponse } from './interview-response.entity';
 import { InterviewSession } from './interview-session.entity';
+import { InterviewAcceptedAddition } from './interview-accepted-addition.entity';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import { InterviewsController } from './interviews.controller';
@@ -32,6 +33,7 @@ import { BaselineVersionService } from '../baseline/baseline-version.service';
       InterviewSession,
       InterviewResponse,
       Interview,
+      InterviewAcceptedAddition,
       Job,
       FitAssessment,
       Baseline,

@@ -44,8 +44,16 @@ describe('InterviewRecordsService', () => {
     remove: jest.fn(async (data: Interview) => data),
   });
 
+  const createAcceptedAdditionsRepository = () => ({
+    create: jest.fn(),
+    save: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn().mockResolvedValue(null),
+  });
+
   const createService = (
     repository = createMockRepository(),
+    acceptedAdditionsRepository = createAcceptedAdditionsRepository(),
     baselineVersionRepository = { findOne: jest.fn() },
     gapDetectionService: Partial<GapDetectionService> = {},
     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
@@ -59,6 +67,7 @@ describe('InterviewRecordsService', () => {
   ) =>
     new InterviewRecordsService(
       repository as never,
+      acceptedAdditionsRepository as never,
       baselineVersionRepository as never,
       gapDetectionService as GapDetectionService,
       interviewQuestionGenerator as InterviewQuestionGeneratorService,

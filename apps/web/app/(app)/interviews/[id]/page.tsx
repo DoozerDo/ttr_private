@@ -10,6 +10,7 @@ import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import type {
+  InterviewAcceptedAddition,
   InterviewGap,
   InterviewQuestion,
   InterviewSessionDto,
@@ -17,13 +18,17 @@ import type {
   RecommendedAdditionDecision,
 } from "@/lib/interviews";
 import {
+  acceptInterviewAddition,
   computeInterviewExpandedFit,
+  fetchInterviewAcceptedAdditions,
+  fetchInterviewRecommendedAdditions,
   getInterviewSession,
   promoteInterviewAcceptedAdditions,
   saveInterviewResponses,
   submitInterviewAdditionDecisions,
   updateInterviewAcceptedAdditions,
 } from "@/lib/interviewsClient";
+import type { AcceptInterviewAdditionPayload } from "@/lib/interviewsClient";
 import type {
   InterviewExpandedFitResponse,
   InterviewPromotionResponse,
@@ -179,6 +184,13 @@ export default function InterviewSessionPage() {
   const [promotionError, setPromotionError] = useState<string | null>(null);
   const [promotionResult, setPromotionResult] = useState<InterviewPromotionResponse | null>(null);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+  const [recommendedAdditionsState, setRecommendedAdditionsState] = useState<RecommendedAddition[]>([]);
+  const [recommendedFetchStatus, setRecommendedFetchStatus] = useState<ComputeStatus>('idle');
+  const [recommendedFetchError, setRecommendedFetchError] = useState<string | null>(null);
+  const [persistedAcceptedAdditions, setPersistedAcceptedAdditions] = useState<InterviewAcceptedAddition[]>([]);
+  const [acceptedFetchStatus, setAcceptedFetchStatus] = useState<ComputeStatus>('idle');
+  const [acceptedFetchError, setAcceptedFetchError] = useState<string | null>(null);
+  const [acceptingAdditionId, setAcceptingAdditionId] = useState<string | null>(null);
 
   const applySessionUpdate = useCallback(
     (data: InterviewSessionDto, options?: { preserveAnswers?: boolean }) => {
@@ -229,20 +241,85 @@ export default function InterviewSessionPage() {
     }
   }, [session?.expandedFitAssessment]);
 
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    setRecommendedFetchStatus("loading");
+    setRecommendedFetchError(null);
+
+    fetchInterviewRecommendedAdditions(sessionId)
+      .then((payload) => {
+        if (cancelled) return;
+        setRecommendedAdditionsState(payload);
+        setRecommendedFetchStatus("success");
+      })
+      .catch((fetchError) => {
+        if (cancelled) return;
+        setRecommendedFetchStatus("error");
+        setRecommendedFetchError(
+          fetchError instanceof Error ? fetchError.message : "Unable to load recommended additions.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    setAcceptedFetchStatus("loading");
+    setAcceptedFetchError(null);
+
+    fetchInterviewAcceptedAdditions(sessionId)
+      .then((payload) => {
+        if (cancelled) return;
+        setPersistedAcceptedAdditions(payload);
+        setAcceptedFetchStatus("success");
+      })
+      .catch((fetchError) => {
+        if (cancelled) return;
+        setAcceptedFetchStatus("error");
+        setAcceptedFetchError(
+          fetchError instanceof Error ? fetchError.message : "Unable to load accepted additions.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
   const questions: InterviewQuestion[] = useMemo(() => session?.questions ?? [], [session?.questions]);
   const gaps: InterviewGap[] = useMemo(() => session?.gapList ?? [], [session?.gapList]);
-  const recommendedAdditions: RecommendedAddition[] = useMemo(() => {
-    const additions = session?.recommendedAdditions ?? [];
-    return additions.map((addition) => ({
+  const acceptedRecommendationIds = useMemo(() => {
+    const set = new Set<string>();
+    persistedAcceptedAdditions.forEach((addition) => {
+      if (addition.recommendedAdditionId) {
+        set.add(addition.recommendedAdditionId);
+      }
+    });
+    acceptedAdditionIds.forEach((id) => set.add(id));
+    return set;
+  }, [persistedAcceptedAdditions, acceptedAdditionIds]);
+  const recommendedAdditions = useMemo(() => {
+    return recommendedAdditionsState.map((addition) => ({
       ...addition,
-      status: addition.status ?? "proposed",
+      status: acceptedRecommendationIds.has(addition.id) ? "accepted" : addition.status ?? "proposed",
     }));
-  }, [session?.recommendedAdditions]);
+  }, [recommendedAdditionsState, acceptedRecommendationIds]);
   const acceptedAdditionSet = useMemo(
     () => new Set(acceptedAdditionIds),
     [acceptedAdditionIds],
   );
-  const acceptedAdditions = useMemo(
+  const acceptedRecommendedAdditions = useMemo(
     () => recommendedAdditions.filter((addition) => acceptedAdditionSet.has(addition.id)),
     [acceptedAdditionSet, recommendedAdditions],
   );
@@ -256,6 +333,64 @@ export default function InterviewSessionPage() {
     gaps.forEach((gap) => map.set(gap.gapId, gap));
     return map;
   }, [gaps]);
+
+  const recommendedAdditionsByGap = useMemo(() => {
+    const map = new Map<string, RecommendedAddition[]>();
+    recommendedAdditions.forEach((addition) => {
+      const gapId = addition.sources?.find((source) => source?.gapId)?.gapId ?? addition.id;
+      const existing = map.get(gapId) ?? [];
+      existing.push(addition);
+      map.set(gapId, existing);
+    });
+    return map;
+  }, [recommendedAdditions]);
+
+  const handleAcceptAddition = useCallback(
+    async (addition: RecommendedAddition) => {
+      if (!sessionId || !addition?.id) return;
+
+      setAcceptingAdditionId(addition.id);
+      setRecommendedFetchError(null);
+
+      const fallbackGapId = gaps[0]?.gapId ?? addition.id ?? "";
+      const gapId = addition.sources?.find((source) => source?.gapId)?.gapId ?? fallbackGapId;
+
+      if (!gapId) {
+        setRecommendedFetchError("Unable to determine the gap for this addition.");
+        setAcceptingAdditionId(null);
+        return;
+      }
+
+      const gap = gapMap.get(gapId);
+      const payload: AcceptInterviewAdditionPayload = {
+        gapId,
+        suggestion: addition.text,
+        recommendedAdditionId: addition.id,
+      };
+
+      if (gap?.domain) {
+        payload.domain = gap.domain;
+      }
+
+      try {
+        const record = await acceptInterviewAddition(sessionId, payload);
+        setPersistedAcceptedAdditions((prev) => [
+          ...prev.filter((entry) => entry.id !== record.id),
+          record,
+        ]);
+        const nextAcceptedIds = Array.from(new Set([...acceptedAdditionIds, addition.id]));
+        setAcceptedAdditionIds(nextAcceptedIds);
+        await saveAcceptedAdditions(nextAcceptedIds);
+      } catch (acceptError) {
+        const message =
+          acceptError instanceof Error ? acceptError.message : "Unable to accept addition.";
+        setRecommendedFetchError(message);
+      } finally {
+        setAcceptingAdditionId(null);
+      }
+    },
+    [sessionId, acceptedAdditionIds, saveAcceptedAdditions, gapMap, gaps],
+  );
 
   const baselineVersionHash = useMemo(() => {
     if (typeof session?.baselineVersionHash === "string") return session.baselineVersionHash;
@@ -703,6 +838,105 @@ const trimmedResponses = useMemo(
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Session details</p>
               <h2 className="text-lg font-semibold text-slate-100">Interview prompts</h2>
             </div>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Recommended additions
+                </p>
+                <h3 className="text-lg font-semibold text-slate-100">Recommended additions</h3>
+              </div>
+              {recommendedFetchStatus === "loading" ? (
+                <Alert intent="info">Loading recommended additions...</Alert>
+              ) : null}
+              {recommendedFetchStatus === "error" && recommendedFetchError ? (
+                <Alert intent="error">{recommendedFetchError}</Alert>
+              ) : null}
+              {acceptedFetchError ? (
+                <Alert intent="error">{acceptedFetchError}</Alert>
+              ) : null}
+              {recommendedFetchStatus === "success" ? (
+                recommendedAdditions.length === 0 ? (
+                  <Alert intent="warning">
+                    No recommended additions were generated for this interview.
+                  </Alert>
+                ) : (
+                  <div className="space-y-3">
+                    {Array.from(recommendedAdditionsByGap.entries()).map(([gapId, additions]) => {
+                      const gap = gapMap.get(gapId);
+                      return (
+                        <div
+                          key={gapId}
+                          className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-4"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                                {gap ? `Gap ${gap.gapId}` : `Gap ${gapId}`}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                {gap ? `Domain: ${gap.domain}` : "General addition"}
+                              </p>
+                            </div>
+                            <span className="text-xs text-slate-400">
+                              {additions.length} suggestion{additions.length === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          <div className="space-y-3">
+                            {additions.map((addition) => {
+                              const isAccepted = acceptedRecommendationIds.has(addition.id);
+                              const isAccepting = acceptingAdditionId === addition.id;
+                              const statusColors = isAccepted
+                                ? "text-emerald-200 bg-emerald-500/10"
+                                : addition.status === "rejected"
+                                  ? "text-rose-200 bg-rose-500/10"
+                                  : addition.status === "deferred"
+                                    ? "text-amber-200 bg-amber-500/10"
+                                    : "text-slate-200 bg-white/5";
+                              return (
+                                <div
+                                  key={addition.id}
+                                  className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/60 p-3"
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm text-slate-100">{addition.text}</p>
+                                    <span
+                                      className={
+                                        "rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] " +
+                                        statusColors
+                                      }
+                                    >
+                                      {isAccepted
+                                        ? "Accepted"
+                                        : isAccepting
+                                          ? "Accepting..."
+                                          : addition.status ?? "Proposed"}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <FormButton
+                                      variant="ghost"
+                                      className="px-3 py-1 text-xs"
+                                      onClick={() => handleAcceptAddition(addition)}
+                                      disabled={isAccepted || isAccepting}
+                                    >
+                                      {isAccepted ? "Accepted" : "Accept"}
+                                    </FormButton>
+                                  </div>
+                                  <p className="text-xs text-slate-400">{describeAdditionSource(addition)}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : null}
+              <p className="text-xs text-slate-400">
+                Accepted additions recorded: {persistedAcceptedAdditions.length}
+              </p>
+            </div>
             {questions.length === 0 ? (
               <Alert intent="warning">No interview questions were generated for this session.</Alert>
             ) : (
@@ -1047,10 +1281,15 @@ const trimmedResponses = useMemo(
                         variant="secondary"
                         className="px-3 py-1 text-xs"
                         onClick={handleRecomputeExpandedFit}
-                        disabled={expandedComputing || !sessionId}
+                        disabled={expandedComputing || !sessionId || persistedAcceptedAdditions.length === 0}
                       >
                         {expandedComputing ? "Recomputing..." : "Recompute expanded score"}
                       </FormButton>
+                      {persistedAcceptedAdditions.length === 0 ? (
+                        <p className="text-xs text-slate-400">
+                          Accept at least one addition before computing the expanded fit score.
+                        </p>
+                      ) : null}
                       {debugUiEnabled ? (
                         <div className="space-y-1 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200">
                           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Debug</p>
@@ -1064,7 +1303,7 @@ const trimmedResponses = useMemo(
                       ) : null}
                     </div>
                     <p className="text-xs text-slate-400">
-                      Accepted additions: {acceptedAdditions.length} / {recommendedAdditions.length}
+                      Accepted additions: {acceptedRecommendedAdditions.length} / {recommendedAdditions.length}
                     </p>
                     <div className="space-y-3">
                       {recommendedAdditions.map((addition, index) => (

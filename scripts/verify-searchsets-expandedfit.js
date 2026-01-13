@@ -18,6 +18,7 @@ const baselineVersionIdEnv = process.env.BASELINE_VERSION_ID;
 const jobIdEnv = process.env.JOB_ID;
 const authToken = (process.env.AUTH_TOKEN || "").trim();
 const authCookie = (process.env.AUTH_COOKIE || "").trim();
+const acceptOneAddition = (process.env.ACCEPT_ONE_ADDITION || "").toLowerCase() === "true";
 
 if (!interviewRecordId) {
   console.error(`${tag} Missing required INTERVIEW_RECORD_ID environment variable.`);
@@ -33,6 +34,7 @@ const summary = [
 
 console.log(`${tag} AUTH_TOKEN present: ${Boolean(authToken)}`);
 console.log(`${tag} AUTH_COOKIE present: ${Boolean(authCookie)}`);
+console.log(`${tag} ACCEPT_ONE_ADDITION=${acceptOneAddition}`);
 
 if (!authToken && !authCookie) {
   console.warn(
@@ -250,6 +252,55 @@ function hasExpandedScore(payload) {
   return typeof score === "number" ? score : null;
 }
 
+async function acceptFirstRecommendedAddition() {
+  const recommendedPath = `/api/interviews/${encodeURIComponent(interviewRecordId)}/recommended-additions`;
+  const { response, parsed, url } = await request(recommendedPath);
+
+  if (!response.ok) {
+    const message = formatPayloadMessage(parsed, response.statusText || "Request failed");
+    throw new Error(`GET ${url} ${response.status} ${response.statusText}: ${message}`);
+  }
+
+  const recommendations = Array.isArray(parsed) ? parsed : [];
+  if (!recommendations.length) {
+    throw new Error("No recommended additions were returned from the interview.");
+  }
+
+  const addition = recommendations[0];
+  const fallbackGapId = typeof addition?.id === "string" ? addition.id : "gap";
+  const gapId =
+    Array.isArray(addition?.sources) && addition.sources.length
+      ? (addition.sources[0]?.gapId ?? fallbackGapId)
+      : fallbackGapId;
+  const suggestion =
+    typeof addition?.text === "string" && addition.text.trim()
+      ? addition.text.trim()
+      : fallbackGapId;
+
+  const payload = {
+    gapId,
+    suggestion,
+    recommendedAdditionId: addition?.id,
+  };
+
+  const acceptedPath = `/api/interviews/${encodeURIComponent(interviewRecordId)}/accepted-additions`;
+  const { response: acceptResponse, parsed: acceptParsed, url: acceptUrl } = await request(
+    acceptedPath,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    { json: true },
+  );
+
+  if (!acceptResponse.ok) {
+    const message = formatPayloadMessage(acceptParsed, acceptResponse.statusText || "Request failed");
+    throw new Error(`POST ${acceptUrl} ${acceptResponse.status} ${acceptResponse.statusText}: ${message}`);
+  }
+
+  console.log(`${tag} Accepted recommendation ${addition?.id ?? "unknown"}`);
+}
+
 (async function main() {
   console.log(`${tag} BASE_URL=${BASE_URL}`);
   console.log(`${tag} INTERVIEW_RECORD_ID=${interviewRecordId}`);
@@ -323,6 +374,18 @@ function hasExpandedScore(payload) {
         }`;
         markEndpointFailure();
       }
+    }
+  }
+
+  if (acceptOneAddition) {
+    try {
+      await acceptFirstRecommendedAddition();
+    } catch (acceptError) {
+      console.warn(
+        `${tag} Accepting a recommended addition failed: ${
+          acceptError instanceof Error ? acceptError.message : acceptError
+        }`,
+      );
     }
   }
 

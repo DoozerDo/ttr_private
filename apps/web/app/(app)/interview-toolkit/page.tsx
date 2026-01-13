@@ -19,7 +19,12 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import type { FollowUpPayload, StudyPacket } from "@/lib/interviewToolkit";
+import {
+  fetchStudyPacket,
+  StudyPacketError,
+  type FollowUpPayload,
+  type StudyPacket,
+} from "@/lib/interviewToolkit";
 import { getInterviewResourcesForJob } from "@/lib/interviewToolkit/resources";
 import { ResourcesList } from "./_components/ResourcesList";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
@@ -97,6 +102,9 @@ export default function InterviewToolkitPage() {
     "idle",
   );
   const [packetError, setPacketError] = useState<string | null>(null);
+  const [packetDebugInfo, setPacketDebugInfo] = useState<{ status?: number; endpoint: string } | null>(
+    null,
+  );
 
   const [followUpNotes, setFollowUpNotes] = useState<string>("");
   const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
@@ -125,6 +133,9 @@ export default function InterviewToolkitPage() {
     () => getInterviewResourcesForJob(selectedJobId || null),
     [selectedJobId],
   );
+
+  const debugUiEnabled =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
 
   useEffect(() => {
     const loadJobs = async () => {
@@ -173,36 +184,34 @@ export default function InterviewToolkitPage() {
         setPacket(null);
         setPacketState("idle");
         setPacketError(null);
+        setPacketDebugInfo(null);
         return;
       }
 
       setPacketState("loading");
       setPacketError(null);
+      setPacketDebugInfo(null);
 
       try {
-        const res = await fetch(
-          `/api/interview-toolkit/study-packet?jobId=${encodeURIComponent(
-            selectedJobId,
-          )}`,
-          {
-            cache: "no-store",
-          },
-        );
-
-        if (!res.ok) {
-          throw new Error((await res.text()) || "Unable to build study packet");
-        }
-
-        const data = (await res.json()) as StudyPacket;
-        setPacket(data ?? null);
+        const data = await fetchStudyPacket(selectedJobId);
+        setPacket(data);
         setPacketState("idle");
       } catch (error) {
         setPacket(null);
-        setPacketError(
-          error instanceof Error
-            ? error.message
-            : "Unable to build study packet",
-        );
+        if (error instanceof StudyPacketError) {
+          setPacketError(error.message);
+          setPacketDebugInfo({
+            endpoint: error.endpoint,
+            status: error.status,
+          });
+        } else {
+          setPacketError(
+            error instanceof Error
+              ? error.message
+              : "Unable to build study packet",
+          );
+          setPacketDebugInfo(null);
+        }
         setPacketState("error");
       }
     };
@@ -424,8 +433,18 @@ export default function InterviewToolkitPage() {
               <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
                 Building study packet...
               </div>
-            ) : packetError ? (
-              <Alert intent="error">{packetError}</Alert>
+            ) : packetState === "error" ? (
+              <Alert intent="error">
+                <div>{packetError ?? "Unable to build study packet."}</div>
+                {debugUiEnabled && packetDebugInfo ? (
+                  <p className="text-[11px] text-slate-400">
+                    {typeof packetDebugInfo.status === "number"
+                      ? `Status ${packetDebugInfo.status}. `
+                      : ""}
+                    Endpoint: {packetDebugInfo.endpoint}
+                  </p>
+                ) : null}
+              </Alert>
             ) : packet ? (
               <div className="space-y-5">
                 <div className="space-y-1">

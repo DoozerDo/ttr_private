@@ -2,5 +2,6 @@
   "baselines": "/api/baselines",
   "jobs": "/api/jobs",
   "searchSets": "/api/search-sets",
-  "expandedFitCompute": "/api/interviews/{id}/compute-expanded-fit"
+  "expandedFitCompute": "/api/interviews/{id}/compute-expanded-fit",
+  "interviewToolkitStudyPacket": "/api/interview-toolkit/{jobId}/study-packet"
 }
