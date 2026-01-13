@@ -1,1 +1,54 @@
 # docker-compose.dev.yml: “server runtime for dev environment (DigitalOcean)”
+version: "3.9"
+
+services:
+  web:
+    image: ghcr.io/targetthisrole/targetthisrole-web:dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      API_BASE_URL: http://api:3001
+      NEXT_PUBLIC_API_BASE_URL: ""
+    depends_on:
+      - api
+    networks:
+      - ttr_dev
+
+  api:
+    image: ghcr.io/targetthisrole/targetthisrole-api:dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      APP_VERSION: ${APP_VERSION:-dev}
+    networks:
+      - ttr_dev
+
+  proxy:
+    image: caddy:2.7.6
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CADDY_EMAIL: ${CADDY_EMAIL}
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+    networks:
+      - ttr_dev
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  ttr_dev:
+    driver: bridge

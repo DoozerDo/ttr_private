@@ -20,11 +20,25 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const corsOrigin =
+  const corsOriginRaw =
     config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
+  const corsOrigins = corsOriginRaw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
   app.enableCors({
-    origin: corsOrigin,
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error('Not allowed by CORS'), false);
+    },
   });
 
   const port = config.get<number>('PORT') ?? 3001;

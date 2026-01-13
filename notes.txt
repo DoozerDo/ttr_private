@@ -112,4 +112,6 @@ DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
 
 
 DO Notes: 
-$env:USERPROFILE\.ssh\id_ed25519_targetthisrole -C "targetthisrole-dev"
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@159.203.110.143
+
+Not sure what this is: $env:USERPROFILE\.ssh\id_ed25519_targetthisrole -C "targetthisrole-dev"

@@ -1,4 +1,4 @@
-# docker-compose.dev.yml
+# docker-compose.local.yml
 # Local development stack only.
 # Production deployments should use docker-compose.prod.yml or cloud-native config.
 # docker-compose.local.yml: “bind mounts + hot reload; not for servers”

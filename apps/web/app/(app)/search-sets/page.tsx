@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { PageShell } from '@/components/PageShell';
 import { TextInput } from '@/components/TextInput';
 import { TierGateNotice } from '@/components/TierGateNotice';
+import { buildPublicApiUrl } from '@/lib/apiBase';
 import { parseTierGateError, type TierGateError } from '@/lib/tiers';
 import type { SearchSetDto } from '@/lib/searchSetsClient';
 
@@ -51,10 +52,6 @@ function splitTitlePatterns(patterns?: string[]) {
   return { keywords, exclusions };
 }
 
-function normalizeBaseUrl(value: string): string {
-  return value.replace(/\/+$/, '');
-}
-
 function safeParseUrl(input: string): { url?: URL; warning?: string } {
   const trimmed = input.trim();
   if (!trimmed) return {};
@@ -79,13 +76,7 @@ function tryParseJson(value: string): unknown | undefined {
 }
 
 async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto> {
-  const envBase =
-    (process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined) ??
-    (process.env.API_BASE_URL as string | undefined);
-
-  const endpoint = envBase
-    ? `${normalizeBaseUrl(envBase)}/search-sets`
-    : '/api/search-sets';
+  const endpoint = buildPublicApiUrl('/search-sets');
 
   const res = await fetch(endpoint, {
     method: 'POST',

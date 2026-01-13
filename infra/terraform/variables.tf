@@ -32,26 +32,6 @@ variable "allowed_ssh_cidrs" {
   type        = list(string)
 }
 
-variable "ghcr_username" {
-  description = "GitHub Container Registry username or org."
-  type        = string
-}
-
-variable "ghcr_token" {
-  description = "GitHub fine-grained PAT with read:packages."
-  type        = string
-  sensitive   = true
-}
-
-variable "web_image" {
-  description = "Fully qualified GHCR image for the web service."
-  type        = string
-}
-
-variable "api_image" {
-  description = "Fully qualified GHCR image for the API service."
-  type        = string
-}
 
 variable "db_cluster_name" {
   description = "Name for the DigitalOcean PostgreSQL cluster."
@@ -81,9 +61,4 @@ variable "db_version" {
   description = "PostgreSQL major version."
   type        = string
   default     = "15"
-}
-
-variable "certbot_email" {
-  description = "Email for Let's Encrypt notifications."
-  type        = string
 }

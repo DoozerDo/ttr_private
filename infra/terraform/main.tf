@@ -2,22 +2,6 @@ provider "digitalocean" {
   token = var.do_token
 }
 
-locals {
-  database_url = format(
-    "postgresql://%s:%s@%s:%s/%s?sslmode=require",
-    urlencode(digitalocean_database_user.api_user.name),
-    urlencode(digitalocean_database_user.api_user.password),
-    digitalocean_database_cluster.postgres.host,
-    digitalocean_database_cluster.postgres.port,
-    digitalocean_database_db.app.name
-  )
-  docker_compose = templatefile("${path.module}/docker-compose.yml.tftpl", {
-    web_image    = var.web_image
-    api_image    = var.api_image
-    database_url = local.database_url
-  })
-}
-
 resource "digitalocean_database_cluster" "postgres" {
   name       = var.db_cluster_name
   engine     = "pg"
@@ -44,14 +28,7 @@ resource "digitalocean_droplet" "app" {
   image  = "ubuntu-22-04-x64"
 
   ssh_keys  = var.ssh_key_fingerprints
-  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
-    docker_compose = local.docker_compose
-    nginx_app_conf = file("${path.module}/../nginx/app.dev.targetthisrole.ai.conf")
-    nginx_api_conf = file("${path.module}/../nginx/api.dev.targetthisrole.ai.conf")
-    ghcr_username  = var.ghcr_username
-    ghcr_token     = var.ghcr_token
-    certbot_email  = var.certbot_email
-  })
+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {})
 }
 
 resource "digitalocean_database_firewall" "postgres" {

@@ -166,7 +166,9 @@ infra/docker/web.Dockerfile
 
 Docker Compose config lives under:
 
-infra/docker/docker-compose.dev.yml (dev)
+infra/docker/docker-compose.local.yml (local dev)
+
+infra/docker/docker-compose.dev.yml (DigitalOcean dev runtime)
 
 infra/docker/docker-compose.yml or similar for prod-like
 

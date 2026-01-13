@@ -126,7 +126,7 @@ We can flesh out the exact Dockerfile contents later; for now just know the patt
 
 4.2 docker-compose for local
 
-Create infra/docker/docker-compose.dev.yml with services:
+Create infra/docker/docker-compose.local.yml with services:
 
 api
 
@@ -161,7 +161,7 @@ Acts as a reverse proxy (later: targetthisrole.local → web, etc.)
 Goal of this step:
 You can run one command from the repo root:
 
-docker compose -f infra/docker/docker-compose.dev.yml up --build
+docker compose -f infra/docker/docker-compose.local.yml up --build
 
 And then:
 
@@ -169,7 +169,7 @@ http://localhost:3000 → frontend
 
 http://localhost:8080/health (or via nginx at /api/health) → backend
 
-This is exactly how it’ll run on DigitalOcean; the only thing that changes later is where the host machine lives and where Postgres lives (droplet vs. managed DB).
+DigitalOcean dev uses infra/docker/docker-compose.dev.yml with prebuilt images; local dev uses bind mounts via docker-compose.local.yml.
 
 5. Add configuration & environment handling
 
@@ -295,10 +295,10 @@ Scaffold NestJS in apps/api and add a GET /health.
 
 Scaffold Next.js in apps/web and add a page that calls /health and shows the result.
 
-Add a basic docker-compose.dev.yml with api, web, and db services (even if the DB isn’t used yet).
+Add a basic docker-compose.local.yml with api, web, and db services (even if the DB isn’t used yet).
 
 If you’d like, in the next message I can:
 
-Propose a specific docker-compose.dev.yml layout, and
+Propose a specific docker-compose.local.yml layout, and
 
 Outline the exact env vars we should standardize on for API and web.
