@@ -6,6 +6,7 @@ import { UpdateSearchSetDto } from './dto/update-search-set.dto';
 import {
   SearchSet,
   SearchSetSeniority,
+  SearchSetSourceType,
   SearchSetWorkMode,
 } from './search-set.entity';
 
@@ -243,6 +244,8 @@ export class SearchSetsService {
       workMode: this.normalizeWorkModes(dto.workMode ?? parsedFromUrl?.workMode),
       location: dto.location?.trim() ?? null,
       sourceUrl,
+      sourceType: dto.sourceType ?? null,
+      sourceOptions: dto.sourceOptions ?? null,
       urlBacked: parsedFromUrl?.urlBacked ?? false,
       parseWarning: parsedFromUrl?.parseWarning ?? null,
       isActive: dto.isActive ?? true,
@@ -305,6 +308,14 @@ export class SearchSetsService {
       searchSet.sourceUrl = this.normalizeSourceUrl(parsedFromUrl, dto.sourceUrl);
       searchSet.urlBacked = parsedFromUrl?.urlBacked ?? false;
       searchSet.parseWarning = parsedFromUrl?.parseWarning ?? null;
+    }
+
+    if (dto.sourceType !== undefined) {
+      searchSet.sourceType = dto.sourceType ?? null;
+    }
+
+    if (dto.sourceOptions !== undefined) {
+      searchSet.sourceOptions = dto.sourceOptions ?? null;
     }
 
     if (dto.isActive !== undefined) {

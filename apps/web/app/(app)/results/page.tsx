@@ -34,6 +34,108 @@ type LatestAnalysis = {
   jobId: string;
   overallScore?: number;
   note?: string;
+  verdict?: string | null;
+  jobTitle?: string | null;
+  company?: string | null;
+
+  // Optional, because API payloads often include these even if the UI does not always use them.
+  assessmentId?: string | null;
+  score?: number | null;
+};
+
+type VerdictDefinition = {
+  label: string;
+  description: string;
+};
+
+type NextStep = {
+  title: string;
+  description: string;
+};
+
+type NextStepArgs = {
+  score: number | null | undefined;
+  verdict?: string | null;
+  hasAnalysis: boolean;
+  hasResume: boolean;
+};
+
+const debugUiEnabled =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+
+const VERDICT_DEFINITIONS: Record<string, VerdictDefinition> = {
+  STRONG_APPLY: {
+    label: "Strong apply",
+    description: "This role closely matches your baseline. Prioritize it in your pipeline.",
+  },
+  APPLY: {
+    label: "Apply",
+    description: "You meet the core requirements. Focus on the highlighted strengths.",
+  },
+  CONSIDER: {
+    label: "Consider",
+    description: "There are some gaps. Address the highlighted areas before you proceed.",
+  },
+  SKIP: {
+    label: "Skip",
+    description: "Current alignment is low. Close the biggest gaps before investing more time.",
+  },
+};
+
+const DEFAULT_VERDICT: VerdictDefinition = {
+  label: "Verdict pending",
+  description: "Load an analysis to see how this role compares to your baseline.",
+};
+
+const normalizeVerdictKey = (value?: string | null) =>
+  value?.trim().replace(/[^A-Za-z0-9]/g, "_").toUpperCase() ?? "";
+
+const formatVerdict = (verdict?: string | null): VerdictDefinition => {
+  const key = normalizeVerdictKey(verdict);
+  return VERDICT_DEFINITIONS[key] ?? DEFAULT_VERDICT;
+};
+
+const getNextSteps = ({
+  score,
+  verdict,
+  hasAnalysis,
+  hasResume,
+}: NextStepArgs): NextStep[] => {
+  const verdictInfo = formatVerdict(verdict);
+  const needsMoreInsight = score === null || score === undefined || score < 92;
+  const steps: NextStep[] = [];
+
+  steps.push({
+    title: "Open Fit Review",
+    description: hasAnalysis
+      ? `Explore why this role received a ${verdictInfo.label.toLowerCase()} verdict and what to focus on next.`
+      : "Generate or load the latest analysis to surface Fit Review and tailored guidance.",
+  });
+
+  steps.push({
+    title: "Practice with Interview Toolkit",
+    description:
+      "Pair Fit Review insights with the Interview Toolkit or a guided session to tackle the most impactful gaps.",
+  });
+
+  if (needsMoreInsight) {
+    steps.push({
+      title: "Re-run the analysis",
+      description:
+        "Address the gaps Fit Review outlines, rerun the analysis, and confirm your baseline still reflects the role.",
+    });
+  }
+
+  steps.push({
+    title: "Generate a resume",
+    description: needsMoreInsight
+      ? "Once your fit score hits 92+, export a resume tailored to this opportunity."
+      : hasResume
+        ? "Download or share the resume you already generated."
+        : "One tap generation is available; export and share with confidence.",
+  });
+
+  return steps;
 };
 
 export default function ResultsPage() {
@@ -50,10 +152,12 @@ export default function ResultsPage() {
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeTierGateError, setResumeTierGateError] = useState<TierGateError | null>(null);
-  const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(null);
+  const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(
+    null,
+  );
+
   const resumeWarningFlags = (resumeResponse?.compliance_flags ?? []).filter(
-    (flag: { severity?: string | null }) =>
-      (flag?.severity ?? "warn").toLowerCase() !== "block",
+    (flag: { severity?: string | null }) => (flag?.severity ?? "warn").toLowerCase() !== "block",
   );
   const resumeAuditId = resumeResponse?.audit_id;
   const resumeBaselineHash =
@@ -92,6 +196,83 @@ export default function ResultsPage() {
     if (!jobId) return null;
     return `/api/analysis/job/${encodeURIComponent(jobId)}/latest`;
   }, [jobId]);
+
+  const latestScore: number | null = useMemo(() => {
+    if (!latest) return null;
+    const v =
+      latest.overallScore ??
+      (typeof latest.score === "number" ? latest.score : latest.score ?? null);
+    return typeof v === "number" ? v : null;
+  }, [latest]);
+
+  const verdictInfo = useMemo(() => formatVerdict(latest?.verdict ?? null), [latest?.verdict]);
+
+  const jobDescriptor = useMemo(() => {
+    if (latest?.jobTitle) {
+      return latest.company ? `${latest.jobTitle} at ${latest.company}` : latest.jobTitle;
+    }
+    return latest?.jobId ? "Job details loaded" : "No job selected";
+  }, [latest?.company, latest?.jobId, latest?.jobTitle]);
+
+  const baselineDescriptor = useMemo(() => {
+    if (latest?.baselineId) return "Baseline selected";
+    if (baselineId) return "Baseline context provided";
+    return "No baseline selected";
+  }, [baselineId, latest?.baselineId]);
+
+  const fitReviewPath = useMemo(() => {
+    const candidateJobId = (latest?.jobId || jobId || "").trim();
+    if (!candidateJobId) return "/fit-review";
+    return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
+  }, [jobId, latest?.jobId]);
+
+  const readyForResume = useMemo(() => {
+    return analysisSource === "latest" && !!latest?.jobId && !!latest?.baselineVersionId;
+  }, [analysisSource, latest?.baselineVersionId, latest?.jobId]);
+
+  const oneTapEligible = useMemo(() => {
+    if (latestScore === null) return false;
+    return latestScore >= 92;
+  }, [latestScore]);
+
+  const nextSteps = useMemo(() => {
+    return getNextSteps({
+      score: latestScore,
+      verdict: latest?.verdict ?? null,
+      hasAnalysis: !!latest,
+      hasResume: !!resumeResponse,
+    });
+  }, [latest, latestScore, resumeResponse]);
+
+  const debugMode = debugUiEnabled;
+
+  const latestStatusMessage = useMemo(() => {
+    if (loadingLatest) return "Loading latest analysis...";
+    if (!jobId) return "Enter a job ID to load the latest analysis.";
+    if (analysisSource === "latest" && latest) return "Latest analysis loaded.";
+    return "Load latest analysis to populate the score and unlock one tap export.";
+  }, [analysisSource, jobId, latest, loadingLatest]);
+
+  const analysisIndicatesGap = useMemo(() => {
+    if (latestScore === null) return false;
+    return latestScore < 92;
+  }, [latestScore]);
+
+  const showRealityCheckCard = true;
+
+  const runRealityCheckPath = useMemo(() => {
+    if (!jobId || !baselineId) return "/reality-check";
+    return `/reality-check/run?jobId=${encodeURIComponent(jobId)}&baselineId=${encodeURIComponent(
+      baselineId,
+    )}`;
+  }, [baselineId, jobId]);
+
+  const baselineUpdatePath = useMemo(() => {
+    if (!jobId || !baselineId) return "/reality-check";
+    return `/reality-check?jobId=${encodeURIComponent(jobId)}&baselineId=${encodeURIComponent(
+      baselineId,
+    )}`;
+  }, [baselineId, jobId]);
 
   async function loadLatest() {
     if (loadingLatest) return;
@@ -311,9 +492,7 @@ export default function ResultsPage() {
     }
 
     if (searchParams.get("realityCheckSkipped")) {
-      setSkipNote(
-        "You skipped the Reality Check update flow. Consider reviewing suggested updates later.",
-      );
+      setSkipNote("You skipped the Reality Check update flow. Consider reviewing suggested updates later.");
     }
   }, [searchParams]);
 
@@ -347,46 +526,12 @@ export default function ResultsPage() {
       }
     };
 
-    loadRealityCheck();
+    void loadRealityCheck();
 
     return () => {
       cancelled = true;
     };
   }, [jobId, baselineId]);
-
-  const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
-  const readyForResume =
-    analysisSource === "latest" &&
-    Boolean(resumeJobId && resumeBaselineVersionId && !loading && !loadingLatest);
-
-  const oneTapEligible = (latest?.overallScore ?? 0) >= 92;
-  const latestStatusMessage = loadingLatest
-    ? "Loading latest analysis..."
-    : latestEndpoint
-      ? `Calling: ${latestEndpoint}`
-      : "Ready to load data";
-
-  const encoding = (value: string) => encodeURIComponent(value);
-  const runRealityCheckPath =
-    jobId && baselineId
-      ? `/results/${encoding(jobId)}/reality-check?baselineId=${encoding(baselineId)}`
-      : "/results";
-  const suggestedSectionsParam = encodeURIComponent(
-    (realityCheck?.suggestedBaselineSections ?? []).join(","),
-  );
-  const baselineUpdatePath = baselineId
-    ? `/baseline/${baselineId}?jobId=${encoding(jobId)}&suggestedSections=${suggestedSectionsParam}`
-    : "/baseline";
-  const fitReviewPath = jobId ? `/fit-review?jobId=${encoding(jobId)}` : "/fit-review";
-  const analysisScore = latest?.overallScore ?? 100;
-  const analysisIndicatesGap = analysisScore < 85;
-  const showRealityCheckCard =
-    !baselineId ||
-    (baselineId &&
-      jobId &&
-      (analysisIndicatesGap ||
-        !realityCheck ||
-        realityCheck.outcome !== RealityCheckOutcome.VALID));
 
   return (
     <PageShell>
@@ -413,47 +558,50 @@ export default function ResultsPage() {
               </div>
               <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
                 {realityCheckLoading
-                  ? "Checking…"
+                  ? "Checking..."
                   : realityCheck
                     ? realityCheck.outcome.replace("_", " ")
                     : "Not run"}
               </span>
             </div>
-            <div className="text-sm text-slate-300 space-y-2">
+
+            <div className="space-y-2 text-sm text-slate-300">
               {!baselineId ? (
                 <p>
-                  Upload a baseline so Reality Check can verify its freshness before you generate
-                  outputs.
+                  Upload or select a baseline so Reality Check can confirm the document still mirrors
+                  this role before you generate outputs.
                 </p>
               ) : realityCheck ? (
                 realityCheck.outcome === RealityCheckOutcome.UPDATE_RECOMMENDED ? (
                   <p>
-                    Reality Check flagged sections that may be outdated. Review the suggested updates
-                    before generating outputs.
+                    Reality Check detected drift in baseline content. Review the suggested updates
+                    before generating artifacts.
                   </p>
                 ) : (
                   <p>
-                    This role appears mismatched against your current baseline. View the Fit Review to
-                    understand the gap before proceeding.
+                    Reality Check confirmed the baseline accurately reflects this job. Lean on Fit
+                    Review insights when building your next moves.
                   </p>
                 )
               ) : analysisIndicatesGap ? (
                 <p>
-                  Latest analysis score ({analysisScore}) indicates potential gaps. Run Reality Check
-                  to confirm whether your baseline still reflects reality.
+                  Fit Review surfaced new gaps, so Reality Check can help verify the baseline still
+                  matches the job before you share outputs.
                 </p>
               ) : (
                 <p>
-                  Reality Check has not been run for the current baseline and job. Run it now to make
-                  sure your baseline is still accurate.
+                  Reality Check has not been run for the current baseline/job pair. Run it now to
+                  validate baseline accuracy against reality.
                 </p>
               )}
             </div>
+
             {realityCheckError ? (
               <Alert intent="error" title="Reality Check">
                 <p>{realityCheckError}</p>
               </Alert>
             ) : null}
+
             <div className="flex flex-wrap gap-3">
               {!baselineId ? (
                 <FormButton onClick={() => router.push("/baseline")}>Go to Baselines</FormButton>
@@ -476,13 +624,42 @@ export default function ResultsPage() {
                   </>
                 )
               ) : (
-                <FormButton onClick={() => router.push(runRealityCheckPath)}>
-                  Run Reality Check
-                </FormButton>
+                <FormButton onClick={() => router.push(runRealityCheckPath)}>Run Reality Check</FormButton>
               )}
             </div>
           </section>
         ) : null}
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Next steps
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Where to focus now</h2>
+            </div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Action plan</span>
+          </div>
+
+          <ol className="list-decimal space-y-4 pl-4 text-sm text-slate-300 marker:text-slate-500">
+            {nextSteps.map((step, index) => (
+              <li key={step.title + "-" + index} className="space-y-1">
+                <p className="text-sm font-semibold text-slate-100">{step.title}</p>
+                <p>{step.description}</p>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex justify-end">
+            <FormButton
+              variant="ghost"
+              onClick={() => router.push(fitReviewPath)}
+              disabled={!latest?.jobId}
+            >
+              Open Fit Review
+            </FormButton>
+          </div>
+        </section>
 
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
@@ -492,119 +669,39 @@ export default function ResultsPage() {
           </Alert>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 lg:grid-cols-2">
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Selection</p>
-              <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                  Baseline
-                </label>
-                <TextInput
-                  value={baselineId}
-                  onChange={(event) => setManualBaselineId(event.target.value)}
-                  placeholder="Baseline ID"
-                  readOnly={analysisSource === "latest"}
-                />
-                {analysisSource === "latest" ? (
-                  <p className="text-[11px] text-slate-400">
-                    Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis, so this field cannot be edited while it is selected.
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                  Job
-                </label>
-                <TextInput
-                  value={jobId}
-                  onChange={(event) => setManualJobId(event.target.value)}
-                  placeholder="Job ID"
-                />
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
-              {analysisSource === "latest" ? (
-                <>
-                  <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                    Latest analysis
-                  </strong>
-                  <p className="mt-1">
-                    Loaded from job {latest?.jobId ?? "unknown"} and baseline {latest?.baselineId ?? "unknown"}. Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis. Modify the job above and load the latest analysis again to target a different baseline.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                    Manual selection
-                  </strong>
-                  <p className="mt-1">
-                    Edit the baseline/job IDs to reuse a specific analysis. Loading the latest will
-                    overwrite the values you entered.
-                  </p>
-                </>
-              )}
-            </div>
-            {!baselineId ? (
-              <Alert intent="warning">
-                Enter a baseline ID or visit the{" "}
-                <Link href="/baseline" className="text-sky-300 underline">
-                  baseline library
-                </Link>{" "}
-                to add one before generating resumes.
-              </Alert>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <FormButton
-                variant="secondary"
-                onClick={() => void loadLatest()}
-                disabled={!jobId || loading || loadingLatest}
-              >
-                {loadingLatest ? "Loading latest..." : "Load latest analysis"}
-              </FormButton>
-              <span className="text-xs text-slate-400">{latestStatusMessage}</span>
-            </div>
-          </section>
-
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   Latest analysis
                 </p>
-                <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Fit score</h2>
               </div>
               <div className="text-xs text-slate-400">
-                <div>Job: {latest?.jobId ?? "n/a"}</div>
-                <div>Fit Score: {latest?.overallScore ?? "n/a"}</div>
+                <div>{jobDescriptor}</div>
+                <div>{baselineDescriptor}</div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <FormButton
-                variant="ghost"
-                onClick={() => {
-                  if (latest?.jobId) {
-                    window.location.href =
-                      "/fit-review?jobId=" + encodeURIComponent(latest.jobId);
-                  }
-                }}
-                disabled={!latest?.jobId}
-              >
-                Open Fit Review
-              </FormButton>
-              <p className="text-xs text-slate-400">Review the latest match details in Fit Review.</p>
+
+            <div className="flex items-end gap-6">
+              <p className="text-4xl font-semibold text-white">
+                {latestScore !== null ? latestScore.toFixed(1) : "n/a"}
+              </p>
+              <div className="space-y-1 text-sm text-slate-300">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  {verdictInfo.label}
+                </p>
+                <p>{verdictInfo.description}</p>
+              </div>
             </div>
-            {latest ? (
-              <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
-                {JSON.stringify(latest, null, 2)}
-              </pre>
-            ) : (
+
+            {latest?.note ? <p className="text-sm text-slate-400">{latest.note}</p> : null}
+
+            {!latest ? (
               <EmptyState
                 title="No analysis yet"
-                body="Load the latest analysis to inspect the JSON payload."
+                body="Load the latest analysis to reveal the fit score and verdict."
                 cta={
                   <FormButton
                     variant="ghost"
@@ -616,7 +713,18 @@ export default function ResultsPage() {
                 }
                 className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
               />
-            )}
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton
+                variant="ghost"
+                onClick={() => router.push(fitReviewPath)}
+                disabled={!latest?.jobId}
+              >
+                Open Fit Review
+              </FormButton>
+              <p className="text-xs text-slate-400">Review the latest match details in Fit Review.</p>
+            </div>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -626,10 +734,15 @@ export default function ResultsPage() {
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Output</h2>
             </div>
+
             <div className="flex flex-wrap gap-3">
-              <FormButton onClick={() => void generateResume(false)} disabled={!readyForResume || loading}>
+              <FormButton
+                onClick={() => void generateResume(false)}
+                disabled={!readyForResume || loading}
+              >
                 {loading ? "Generating..." : "Generate resume"}
               </FormButton>
+
               <FormButton
                 variant="secondary"
                 onClick={() => void generateResume(true)}
@@ -645,6 +758,7 @@ export default function ResultsPage() {
                 {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
               </FormButton>
             </div>
+
             <div className="flex flex-wrap gap-3">
               <FormButton
                 variant="secondary"
@@ -653,6 +767,7 @@ export default function ResultsPage() {
               >
                 {exporting === "docx" ? "Downloading..." : "Download DOCX"}
               </FormButton>
+
               <FormButton
                 variant="secondary"
                 onClick={() => void exportResume("pdf")}
@@ -661,9 +776,37 @@ export default function ResultsPage() {
                 {exporting === "pdf" ? "Downloading..." : "Download PDF"}
               </FormButton>
             </div>
-            <p className="text-[11px] text-slate-400">
-              One tap generation is only enabled when the fit score is at least 92 and the latest analysis is ready. Manual generation remains available otherwise.
-            </p>
+
+            <div className="space-y-2 text-sm text-slate-300">
+              {oneTapEligible ? (
+                <p>
+                  One tap generation is enabled when your fit score reaches 92 and the latest analysis
+                  is ready. Manual generation remains available while you fine-tune your match.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <p>
+                    Your score is below 92. Follow these steps to reach the threshold:
+                  </p>
+                  <ol className="space-y-2 pl-4 text-slate-300">
+                    <li>Open Fit Review to inspect the verdict and confirmed gaps.</li>
+                    <li>
+                      Address the gaps with Interview Toolkit, a practice session, or other prep work.
+                    </li>
+                    <li>Re-run the analysis to confirm the baseline still reflects the role.</li>
+                  </ol>
+                  <p>Manual generation stays available while you move through those steps.</p>
+                  <FormButton
+                    variant="ghost"
+                    onClick={() => router.push(fitReviewPath)}
+                    disabled={!latest?.jobId}
+                  >
+                    Open Fit Review
+                  </FormButton>
+                </div>
+              )}
+            </div>
+
             {resumeTierGateError ? <TierGateNotice error={resumeTierGateError} /> : null}
             {resumeComplianceError ? <ComplianceViolationPanel error={resumeComplianceError} /> : null}
             {resumeError ? (
@@ -671,6 +814,7 @@ export default function ResultsPage() {
                 {resumeError}
               </Alert>
             ) : null}
+
             {resumeResponse ? (
               <>
                 {resumeWarningFlags.length ? (
@@ -683,7 +827,7 @@ export default function ResultsPage() {
                     intent="warning"
                   />
                 ) : null}
-                <pre className="rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200 whitespace-pre-wrap">
+                <pre className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200">
                   {JSON.stringify(resumeResponse, null, 2)}
                 </pre>
               </>
@@ -692,10 +836,7 @@ export default function ResultsPage() {
                 title="No resume yet"
                 body="Generate or export a resume to view the payload."
                 cta={
-                  <FormButton
-                    onClick={() => void generateResume(false)}
-                    disabled={!baselineId || !jobId || loading}
-                  >
+                  <FormButton onClick={() => void generateResume(false)} disabled={!baselineId || !jobId || loading}>
                     Generate now
                   </FormButton>
                 }
@@ -704,6 +845,124 @@ export default function ResultsPage() {
             )}
           </section>
         </div>
+
+        {debugMode ? (
+          <div className="space-y-6">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Selection
+                </p>
+                <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Baseline
+                  </label>
+                  <TextInput
+                    value={baselineId}
+                    onChange={(event) => setManualBaselineId(event.target.value)}
+                    placeholder="Baseline ID"
+                    readOnly={analysisSource === "latest"}
+                  />
+                  {analysisSource === "latest" ? (
+                    <p className="text-[11px] text-slate-400">
+                      Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis, so this field cannot be edited while it is selected.
+                    </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    Job
+                  </label>
+                  <TextInput
+                    value={jobId}
+                    onChange={(event) => setManualJobId(event.target.value)}
+                    placeholder="Job ID"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
+                {analysisSource === "latest" ? (
+                  <>
+                    <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                      Latest analysis
+                    </strong>
+                    <p className="mt-1">
+                      Loaded from job {latest?.jobId ?? "unknown"} and baseline {latest?.baselineId ?? "unknown"}. Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis. Modify the job above and load the latest analysis again to target a different baseline.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                      Manual selection
+                    </strong>
+                    <p className="mt-1">
+                      Edit the baseline/job IDs to reuse a specific analysis. Loading the latest will overwrite the values you entered.
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {!baselineId ? (
+                <Alert intent="warning">
+                  Enter a baseline ID or visit the{" "}
+                  <Link href="/baseline" className="text-sky-300 underline">
+                    baseline library
+                  </Link>{" "}
+                  to add one before generating resumes.
+                </Alert>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void loadLatest()}
+                  disabled={!jobId || loading || loadingLatest}
+                >
+                  {loadingLatest ? "Loading latest..." : "Load latest analysis"}
+                </FormButton>
+                <span className="text-xs text-slate-400">{latestStatusMessage}</span>
+              </div>
+            </section>
+
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Latest analysis
+                  </p>
+                  <h2 className="text-lg font-semibold text-slate-100">Raw JSON</h2>
+                </div>
+              </div>
+
+              {latest ? (
+                <pre className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200">
+                  {JSON.stringify(latest, null, 2)}
+                </pre>
+              ) : (
+                <EmptyState
+                  title="No analysis yet"
+                  body="Load the latest analysis to inspect the JSON payload."
+                  cta={
+                    <FormButton
+                      variant="ghost"
+                      onClick={() => void loadLatest()}
+                      disabled={!jobId || loading || loadingLatest}
+                    >
+                      {loadingLatest ? "Loading latest..." : "Load analysis"}
+                    </FormButton>
+                  }
+                  className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
+                />
+              )}
+            </section>
+          </div>
+        ) : null}
       </div>
     </PageShell>
   );

@@ -10,8 +10,13 @@ import { ComplianceFlagSeverity } from '../compliance/compliance.types';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import { CreateInterviewRecordDto } from './dto/create-interview.dto';
+import { CreateInterviewAcceptedAdditionDto } from './dto/create-accepted-addition.dto';
 import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
 import { Interview } from './interview.entity';
+import {
+  InterviewAcceptedAddition,
+  InterviewAcceptedAdditionStatus,
+} from './interview-accepted-addition.entity';
 import {
   InterviewGap,
   InterviewQuestion,
@@ -114,6 +119,8 @@ export class InterviewRecordsService {
   constructor(
     @InjectRepository(Interview)
     private readonly interviewsRepo: Repository<Interview>,
+    @InjectRepository(InterviewAcceptedAddition)
+    private readonly acceptedAdditionsRepository: Repository<InterviewAcceptedAddition>,
     @InjectRepository(BaselineVersion)
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     private readonly gapDetectionService: GapDetectionService,
@@ -166,6 +173,17 @@ export class InterviewRecordsService {
     if (!acceptedSet.size) return [];
     const validIds = new Set(additions.map((addition) => addition.id));
     return Array.from(acceptedSet).filter((id) => validIds.has(id));
+  }
+
+  private buildFallbackRecommendedAddition(gap: InterviewGap, index: number): RecommendedAddition {
+    const domainLabel = gap.domain ? gap.domain.replace(/[_-]+/g, ' ') : 'experience';
+    const text = `Share a ${domainLabel} story that addresses ${gap.gapId}.`;
+    return {
+      id: `gap-fallback-${gap.gapId}-${index}`,
+      text,
+      sources: [{ gapId: gap.gapId }],
+      status: 'proposed',
+    };
   }
 
   private async getBaselineVersionHash(
@@ -385,6 +403,86 @@ export class InterviewRecordsService {
     return this.buildInterviewResponse(saved);
   }
 
+  async listRecommendedAdditions(id: string, userId: string): Promise<RecommendedAddition[]> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    const normalized = normalizeRecommendedAdditions(interview.recommendedAdditions);
+    const gaps = Array.isArray(interview.gapList) ? interview.gapList : [];
+
+    const coveredGapIds = new Set<string>();
+    normalized.forEach((addition) => {
+      addition.sources.forEach((source) => {
+        if (source.gapId) {
+          coveredGapIds.add(source.gapId);
+        }
+      });
+    });
+
+    const fallbackAdditions = gaps
+      .filter((gap) => !coveredGapIds.has(gap.gapId))
+      .map((gap, index) => this.buildFallbackRecommendedAddition(gap, index));
+
+    return [...normalized, ...fallbackAdditions];
+  }
+
+  async acceptRecommendation(
+    id: string,
+    userId: string,
+    dto: CreateInterviewAcceptedAdditionDto,
+  ): Promise<InterviewAcceptedAddition> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+
+    const gapId = dto.gapId?.trim();
+    if (!gapId) {
+      throw new BadRequestException('gapId is required');
+    }
+
+    const suggestion = dto.suggestion?.trim();
+    if (!suggestion) {
+      throw new BadRequestException('suggestion is required');
+    }
+
+    const standardizedCategory = dto.category?.trim() ?? null;
+    const standardizedDomain = dto.domain?.trim() ?? null;
+    const recommendedAdditionId = dto.recommendedAdditionId?.trim() ?? null;
+
+    const existing = await this.acceptedAdditionsRepository.findOne({
+      where: {
+        interviewId: interview.id,
+        gapId,
+        suggestion,
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const addition = this.acceptedAdditionsRepository.create({
+      interviewId: interview.id,
+      gapId,
+      category: standardizedCategory,
+      domain: standardizedDomain,
+      suggestion,
+      status: 'ACCEPTED' as InterviewAcceptedAdditionStatus,
+      recommendedAdditionId,
+    });
+
+    return this.acceptedAdditionsRepository.save(addition);
+  }
+
+  async listAcceptedAdditions(id: string, userId: string): Promise<InterviewAcceptedAddition[]> {
+    const interview = await this.getInterviewRecordForUser(id, userId);
+    return this.fetchAcceptedAdditions(interview.id);
+  }
+
+  private async fetchAcceptedAdditions(interviewId: string): Promise<InterviewAcceptedAddition[]> {
+    return this.acceptedAdditionsRepository.find({
+      where: { interviewId },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   async computeExpandedFit(id: string, userId: string): Promise<Interview> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
@@ -396,17 +494,16 @@ export class InterviewRecordsService {
       throw new BadRequestException('jobId is required');
     }
 
-    const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
-      ? interview.recommendedAdditions
-      : [];
+    const acceptedAdditions = await this.fetchAcceptedAdditions(interview.id);
+    const verifiedAdditions = Array.from(
+      new Set(
+        acceptedAdditions
+          .map((addition) => addition.suggestion?.trim())
+          .filter((text): text is string => Boolean(text)),
+      ),
+    );
 
-    const acceptedIds = this.normalizeAcceptedAdditionIds(interview.acceptedAdditionIds ?? []);
-    const acceptedSet = new Set(acceptedIds);
-    const additions = acceptedIds.length
-      ? recommendedAdditions.filter((addition) => acceptedSet.has(addition.id))
-      : recommendedAdditions;
-
-    if (!additions.length) {
+    if (!verifiedAdditions.length) {
       throw new BadRequestException('No additions available for expanded scoring');
     }
 
@@ -419,7 +516,7 @@ export class InterviewRecordsService {
       baselineId: interview.baselineId,
       baselineVersion: baselineVersionNumber,
       interviewId: interview.id,
-      verifiedAdditions: additions.map((addition) => addition.text),
+      verifiedAdditions,
     });
 
     interview.expandedFitAssessment = {

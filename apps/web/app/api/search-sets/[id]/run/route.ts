@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
-  const { id } = await context.params;
+export const runtime = "nodejs";
+
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function POST(req: NextRequest, ctx: RouteContext) {
   const baseUrl = getApiBaseUrl();
-  const { token, error } = requireAuthToken(req);
+  const auth = requireAuthToken(req);
 
   if (!baseUrl) {
     return NextResponse.json(
@@ -16,21 +17,32 @@ export async function POST(
       { status: 500 },
     );
   }
+  if (!auth.token) return auth.error;
 
-  if (!token) {
-    return error;
+  const { id } = await ctx.params;
+
+  const url = new URL(req.url);
+  const baselineVersionId = url.searchParams.get("baselineVersionId")?.trim();
+
+  if (!baselineVersionId) {
+    return NextResponse.json(
+      { error: "baselineVersionId is required" },
+      { status: 400 },
+    );
   }
 
-  const body = await req.json();
-
-  const response = await fetch(`${baseUrl}/search-sets/${id}/run`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${baseUrl}/search-sets/${encodeURIComponent(id)}/run?baselineVersionId=${encodeURIComponent(
+      baselineVersionId,
+    )}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      cache: "no-store",
     },
-    body: JSON.stringify(body),
-  });
+  );
 
   return relayApiResponse(response);
 }

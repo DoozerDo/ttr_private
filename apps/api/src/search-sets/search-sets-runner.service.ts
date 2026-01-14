@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { FitScoringService } from '../analysis/fit-scoring.service';
@@ -15,7 +17,22 @@ import {
   BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { Job } from '../jobs/job.entity';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import { JobsService } from '../jobs/jobs.service';
+import { JobSourceRegistry } from '../job-sources/job-source-registry.service';
+import {
+  JobDetailRaw,
+  JobSourceInput,
+  ParsedJob,
+} from '../job-sources/job-source.types';
+import {
+  SearchSetRunResultSummary,
+  SearchSetRunSourceSnapshot,
+} from './search-set-run.entity';
+import {
+  SearchSetRunRecordInput,
+  SearchSetRunsService,
+} from './search-set-runs.service';
 import {
   SearchSet,
   SearchSetSeniority,
@@ -32,6 +49,32 @@ type SearchSetRunResult = {
   fitScore: number | null;
   verdict: FitAssessment['verdict'] | null;
   dimensionScores: FitAssessment['dimensionScores'] | null;
+};
+
+type DedupReason = 'externalId' | 'canonicalUrl' | 'dedupeHash';
+
+type ProviderRunContext = {
+  runId: string;
+  providerId: string;
+  searchSetId: string;
+  baselineVersionId: string;
+};
+
+type SearchSetRunMetadata = {
+  usedProviderDiscovery: boolean;
+  providerId: string | null;
+  sourceSnapshot: SearchSetRunSourceSnapshot | null;
+  runInputHash: string | null;
+  runId: string | null;
+  failureCount: number;
+  fetchedListingCount: number;
+  ingestedNewCount: number;
+  dedupedCount: number;
+};
+
+type SearchSetRunResponse = {
+  results: SearchSetRunResult[];
+  metadata: SearchSetRunMetadata;
 };
 
 type BaselineContext = {
@@ -52,7 +95,9 @@ export class SearchSetsRunnerService {
   constructor(
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
+    private readonly jobsService: JobsService,
     private readonly searchSetsService: SearchSetsService,
+    private readonly jobSourceRegistry: JobSourceRegistry,
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     @InjectRepository(Baseline)
@@ -62,14 +107,19 @@ export class SearchSetsRunnerService {
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     private readonly fitScoringService: FitScoringService,
+    private readonly searchSetRunsService: SearchSetRunsService,
   ) {}
+
+  private readonly logger = new Logger(SearchSetsRunnerService.name);
+
+  private readonly detailFetchDelayMs = 250;
 
   async runSearchSet(
     searchSetId: string,
     userId: string,
     baselineVersionId: string,
     limit?: number,
-  ): Promise<SearchSetRunResult[]> {
+  ): Promise<SearchSetRunResponse> {
     const normalizedBaselineVersionId = baselineVersionId?.trim();
     if (!normalizedBaselineVersionId) {
       throw new BadRequestException(
@@ -83,7 +133,20 @@ export class SearchSetsRunnerService {
     );
 
     if (!searchSet.isActive) {
-      return [];
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: false,
+          providerId: null,
+          sourceSnapshot: null,
+          runInputHash: null,
+          runId: null,
+          failureCount: 0,
+          fetchedListingCount: 0,
+          ingestedNewCount: 0,
+          dedupedCount: 0,
+        },
+      };
     }
 
     const baselineContext = await this.loadBaselineForVersion(
@@ -91,27 +154,345 @@ export class SearchSetsRunnerService {
       normalizedBaselineVersionId,
     );
 
+    if (searchSet.sourceType && searchSet.sourceUrl) {
+      return this.runProviderSearchSet(
+        searchSet,
+        userId,
+        normalizedBaselineVersionId,
+        baselineContext,
+        limit,
+      );
+    }
+
+    return this.runLegacySearchSet(
+      searchSet,
+      userId,
+      normalizedBaselineVersionId,
+      baselineContext,
+      limit,
+    );
+  }
+
+  private async runLegacySearchSet(
+    searchSet: SearchSet,
+    userId: string,
+    baselineVersionId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<SearchSetRunResponse> {
+    const runId = randomUUID();
     const jobs = await this.jobRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
     });
 
-    const matchedJobs = jobs.filter((job) => this.matchesSearchSet(job, searchSet));
+    const matchedJobs = jobs.filter((job) =>
+      this.matchesSearchSet(job, searchSet),
+    );
 
     if (!matchedJobs.length) {
-      await this.recordRunSafely(searchSet, normalizedBaselineVersionId, 0);
-      return [];
+      await this.recordRunSafely(searchSet, baselineVersionId, 0, {
+        runId,
+        searchSetId: searchSet.id,
+        baselineVersionId,
+        sourceSnapshot: null,
+        runInputHash: null,
+        usedProviderDiscovery: false,
+        failureCount: 0,
+        topResults: [],
+      });
+
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: false,
+          providerId: null,
+          sourceSnapshot: null,
+          runInputHash: null,
+          runId,
+          failureCount: 0,
+          fetchedListingCount: 0,
+          ingestedNewCount: 0,
+          dedupedCount: 0,
+        },
+      };
+    }
+
+    const { results, ranked } = await this.scoreJobsWithBaseline(
+      matchedJobs,
+      userId,
+      baselineContext,
+      limit,
+    );
+
+    const topResults = this.summarizeTopResults(ranked);
+
+    await this.recordRunSafely(searchSet, baselineVersionId, results.length, {
+      runId,
+      searchSetId: searchSet.id,
+      baselineVersionId,
+      sourceSnapshot: null,
+      runInputHash: null,
+      usedProviderDiscovery: false,
+      failureCount: 0,
+      topResults,
+    });
+
+    return {
+      results,
+      metadata: {
+        usedProviderDiscovery: false,
+        providerId: null,
+        sourceSnapshot: null,
+        runInputHash: null,
+        runId,
+        failureCount: 0,
+        fetchedListingCount: 0,
+        ingestedNewCount: 0,
+        dedupedCount: 0,
+      },
+    };
+  }
+
+  private async runProviderSearchSet(
+    searchSet: SearchSet,
+    userId: string,
+    baselineVersionId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<SearchSetRunResponse> {
+    const runId = randomUUID();
+    const providerInput: JobSourceInput = {
+      sourceType: searchSet.sourceType!,
+      sourceUrl: searchSet.sourceUrl!,
+      options: searchSet.sourceOptions ?? null,
+    };
+
+    const provider = this.jobSourceRegistry.findProvider(providerInput);
+    if (!provider) {
+      throw new BadRequestException('No provider available for this source type.');
+    }
+
+    const providerContext = {
+      runId,
+      providerId: provider.id,
+      searchSetId: searchSet.id,
+      baselineVersionId,
+    };
+
+    this.logEvent('provider_fetch_start', {
+      ...providerContext,
+      sourceUrl: providerInput.sourceUrl,
+    });
+
+    let listings: { externalId: string }[] = [];
+    try {
+      listings = await provider.fetchListings(providerInput);
+    } catch (error) {
+      this.logEvent('provider_fetch_failure', {
+        ...providerContext,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      throw new BadRequestException('Could not fetch listings from provider.');
+    }
+
+    const maxListings = this.computeMaxListings(searchSet);
+    const slicedListings = listings.slice(0, maxListings);
+    const fetchedAt = new Date().toISOString();
+    const sourceSnapshot: SearchSetRunSourceSnapshot = {
+      sourceUrl: searchSet.sourceUrl ?? null,
+      providerId: provider.id,
+      listingCount: listings.length,
+      fetchedAt,
+    };
+
+    this.logEvent('provider_fetch_complete', {
+      ...providerContext,
+      listingCount: listings.length,
+      selectedCount: slicedListings.length,
+    });
+
+    const fetchedListingCount = listings.length;
+
+    const dedupeStats: Record<DedupReason, number> = {
+      externalId: 0,
+      canonicalUrl: 0,
+      dedupeHash: 0,
+    };
+    const discoveredJobs: Job[] = [];
+    const seenJobIds = new Set<string>();
+    let failureCount = 0;
+    let ingestedNewCount = 0;
+
+    for (const listing of slicedListings) {
+      try {
+        let detail: JobDetailRaw;
+        try {
+          detail = await provider.fetchJobDetail(listing as never);
+        } catch (error) {
+          failureCount++;
+          this.logEvent('job_detail_failure', {
+            ...providerContext,
+            listingId: listing.externalId,
+            stage: 'detail_fetch',
+            reason: error instanceof Error ? error.message : 'unknown',
+          });
+          continue;
+        }
+
+        let parsed: ParsedJob;
+        try {
+          parsed = provider.parseJob(detail);
+        } catch (error) {
+          failureCount++;
+          this.logEvent('job_detail_failure', {
+            ...providerContext,
+            listingId: listing.externalId,
+            stage: 'parse',
+            reason: error instanceof Error ? error.message : 'unknown',
+          });
+          continue;
+        }
+
+        const { job, dedupeReason } = await this.ingestOrReuseJob(
+          userId,
+          provider.id,
+          parsed,
+          providerContext,
+        );
+
+        if (dedupeReason) {
+          dedupeStats[dedupeReason] += 1;
+        }
+
+        if (!job) {
+          failureCount++;
+          continue;
+        }
+
+        if (dedupeReason === null) {
+          ingestedNewCount += 1;
+        }
+
+        if (!this.matchesSearchSet(job, searchSet)) {
+          continue;
+        }
+        if (seenJobIds.has(job.id)) {
+          continue;
+        }
+        seenJobIds.add(job.id);
+        discoveredJobs.push(job);
+      } finally {
+        await this.delay(this.detailFetchDelayMs);
+      }
+    }
+
+    const dedupedCount = Object.values(dedupeStats).reduce(
+      (total, value) => total + value,
+      0,
+    );
+
+    const runInputHash = this.computeRunInputHash(
+      baselineVersionId,
+      sourceSnapshot,
+      searchSet.sourceOptions,
+    );
+
+    const buildRunRecord = (topResults: SearchSetRunResultSummary[]) => ({
+      runId,
+      searchSetId: searchSet.id,
+      baselineVersionId,
+      sourceSnapshot,
+      runInputHash,
+      usedProviderDiscovery: true,
+      failureCount,
+      topResults,
+    });
+
+    const logProviderRunComplete = (resultCount: number) => {
+      this.logEvent('provider_run_complete', {
+        ...providerContext,
+        discoveredCount: discoveredJobs.length,
+        detailFetchCount: slicedListings.length,
+        resultCount,
+        failureCount,
+        dedupeStats,
+      });
+    };
+
+    if (!discoveredJobs.length) {
+      logProviderRunComplete(0);
+      await this.recordRunSafely(searchSet, baselineVersionId, 0, buildRunRecord([]));
+
+      return {
+        results: [],
+        metadata: {
+          usedProviderDiscovery: true,
+          providerId: provider.id,
+          sourceSnapshot,
+          runInputHash,
+          runId,
+          failureCount,
+          fetchedListingCount,
+          ingestedNewCount,
+          dedupedCount,
+        },
+      };
+    }
+
+    const { results, ranked } = await this.scoreJobsWithBaseline(
+      discoveredJobs,
+      userId,
+      baselineContext,
+      limit,
+    );
+
+    const topResults = this.summarizeTopResults(ranked);
+
+    logProviderRunComplete(results.length);
+
+    await this.recordRunSafely(
+      searchSet,
+      baselineVersionId,
+      results.length,
+      buildRunRecord(topResults),
+    );
+
+    return {
+      results,
+      metadata: {
+        usedProviderDiscovery: true,
+        providerId: provider.id,
+        sourceSnapshot,
+        runInputHash,
+        runId,
+        failureCount,
+        fetchedListingCount,
+        ingestedNewCount,
+        dedupedCount,
+      },
+    };
+  }
+
+  private async scoreJobsWithBaseline(
+    jobs: Job[],
+    userId: string,
+    baselineContext: BaselineContext,
+    limit?: number,
+  ): Promise<{ results: SearchSetRunResult[]; ranked: ScoredJob[] }> {
+    if (!jobs.length) {
+      return { results: [], ranked: [] };
     }
 
     const latestAssessments = await this.loadLatestAssessments(
-      matchedJobs.map((job) => job.id),
+      jobs.map((job) => job.id),
       userId,
       baselineContext.baseline.id,
       baselineContext.baselineVersion.versionNumber ?? null,
     );
 
     const scoredJobs = await Promise.all(
-      matchedJobs.map(async (job) => {
+      jobs.map(async (job) => {
         const assessment = latestAssessments.get(job.id);
         if (assessment) {
           return {
@@ -129,12 +510,13 @@ export class SearchSetsRunnerService {
       }),
     );
 
-    const limitCount = this.computeResultLimit(limit, matchedJobs.length);
+    const limitCount = this.computeResultLimit(limit, jobs.length);
 
     const sorted = scoredJobs
       .map((entry) => ({
         ...entry,
-        sortScore: typeof entry.overallScore === 'number' ? entry.overallScore : -1,
+        sortScore:
+          typeof entry.overallScore === 'number' ? entry.overallScore : -1,
       }))
       .sort((a, b) => {
         if (b.sortScore !== a.sortScore) {
@@ -163,16 +545,217 @@ export class SearchSetsRunnerService {
       dimensionScores: entry.dimensionScores ?? null,
     }));
 
-    await this.recordRunSafely(searchSet, normalizedBaselineVersionId, results.length);
+    return { results, ranked: sorted };
+  }
 
-    return results;
+  private summarizeTopResults(ranked: ScoredJob[]): SearchSetRunResultSummary[] {
+    return ranked.map((entry) => ({
+      jobId: entry.job.id,
+      fitScore: entry.overallScore ?? null,
+      verdict: entry.verdict ?? null,
+    }));
+  }
+
+  private computeMaxListings(searchSet: SearchSet): number {
+    const candidate = searchSet.sourceOptions?.maxListings;
+    const parsed =
+      typeof candidate === 'number'
+        ? candidate
+        : typeof candidate === 'string'
+        ? Number(candidate)
+        : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(Math.max(Math.floor(parsed), 1), 200);
+    }
+    return 50;
+  }
+
+  private computeRunInputHash(
+    baselineVersionId: string,
+    sourceSnapshot: SearchSetRunSourceSnapshot,
+    options?: Record<string, unknown> | null,
+  ): string {
+    const payload = this.normalizeForHash({
+      baselineVersionId,
+      sourceSnapshot,
+      sourceOptions: options ?? null,
+    });
+
+    return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private normalizeForHash(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeForHash(item));
+    }
+
+    if (value && typeof value === 'object') {
+      const sorted: Record<string, unknown> = {};
+      const entries = Object.entries(value as Record<string, unknown>).sort(
+        ([a], [b]) => a.localeCompare(b),
+      );
+      for (const [key, entryValue] of entries) {
+        sorted[key] = this.normalizeForHash(entryValue);
+      }
+      return sorted;
+    }
+
+    return value;
+  }
+
+  private async ingestOrReuseJob(
+    userId: string,
+    providerId: string,
+    parsed: ParsedJob,
+    context: ProviderRunContext,
+  ): Promise<{ job: Job | null; dedupeReason: DedupReason | null }> {
+    const canonicalUrl =
+      this.normalizeUrl(parsed.applyUrl ?? parsed.sourceUrl) ?? null;
+    const dedupeHash = this.computeDedupeHash(parsed);
+
+    const { job: existing, dedupeReason } = await this.findDuplicateJob(
+      {
+        userId,
+        providerId,
+        externalId: parsed.externalId,
+        canonicalUrl,
+        dedupeHash,
+      },
+      context,
+    );
+
+    if (existing) {
+      return { job: existing, dedupeReason };
+    }
+
+    try {
+      const created = await this.jobsService.createJob(userId, {
+        title: parsed.title,
+        company: parsed.company ?? null,
+        rawDescription: parsed.descriptionText,
+        sourceUrl: parsed.sourceUrl,
+        responsibilities: parsed.responsibilities,
+        requirements: parsed.requirements,
+        jdIngestionMethod: JobIngestionMethod.SOURCE_PROVIDER,
+        sourceProviderId: providerId,
+        sourceExternalId: parsed.externalId,
+        canonicalUrl,
+        dedupeHash,
+      });
+      return { job: created, dedupeReason: null };
+    } catch {
+      return { job: null, dedupeReason: null };
+    }
+  }
+
+  private async findDuplicateJob(
+    params: {
+      userId: string;
+      providerId: string;
+      externalId?: string;
+      canonicalUrl?: string | null;
+      dedupeHash?: string;
+    },
+    context: ProviderRunContext,
+  ): Promise<{ job: Job | null; dedupeReason: DedupReason | null }> {
+    if (params.externalId) {
+      const match = await this.jobRepository.findOne({
+        where: {
+          userId: params.userId,
+          jdIngestionMethod: JobIngestionMethod.SOURCE_PROVIDER,
+          sourceProviderId: params.providerId,
+          sourceExternalId: params.externalId,
+        },
+      });
+      if (match) {
+        this.logDedupeHit(context, 'externalId', params.externalId, match.id);
+        return { job: match, dedupeReason: 'externalId' };
+      }
+    }
+
+    if (params.canonicalUrl) {
+      const byUrl = await this.jobRepository.findOne({
+        where: { userId: params.userId, canonicalUrl: params.canonicalUrl },
+      });
+      if (byUrl) {
+        this.logDedupeHit(context, 'canonicalUrl', params.canonicalUrl, byUrl.id);
+        return { job: byUrl, dedupeReason: 'canonicalUrl' };
+      }
+    }
+
+    if (params.dedupeHash) {
+      const byHash = await this.jobRepository.findOne({
+        where: { userId: params.userId, dedupeHash: params.dedupeHash },
+      });
+      if (byHash) {
+        this.logDedupeHit(context, 'dedupeHash', params.dedupeHash, byHash.id);
+        return { job: byHash, dedupeReason: 'dedupeHash' };
+      }
+    }
+
+    return { job: null, dedupeReason: null };
+  }
+
+  private logDedupeHit(
+    context: ProviderRunContext,
+    reason: DedupReason,
+    identifier: string,
+    existingJobId: string,
+  ) {
+    this.logEvent('job_dedupe_hit', {
+      ...context,
+      dedupeReason: reason,
+      identifier,
+      existingJobId,
+    });
+  }
+
+  private computeDedupeHash(parsed: ParsedJob) {
+    const payload = `${parsed.descriptionText ?? ''}|${parsed.title ?? ''}|${
+      parsed.company ?? ''
+    }`;
+    return createHash('sha256').update(payload).digest('hex');
+  }
+
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async recordRunSafely(
+    searchSet: SearchSet,
+    baselineVersionId: string,
+    resultCount: number,
+    runRecord: SearchSetRunRecordInput,
+  ) {
+    try {
+      await this.searchSetsService.recordRunMetadata(
+        searchSet,
+        baselineVersionId,
+        resultCount,
+      );
+    } catch {
+      // Intentional swallow.
+    }
+
+    try {
+      await this.searchSetRunsService.recordRun(runRecord);
+    } catch {
+      // Do not block results on record saving.
+    }
+  }
+
+  private logEvent(event: string, payload: Record<string, unknown>) {
+    const serialized = JSON.stringify(payload, (_, value) => {
+      if (value instanceof Error) return value.message;
+      return value;
+    });
+    this.logger.log(`${event} ${serialized}`);
   }
 
   private computeResultLimit(requested: number | undefined, available: number) {
     if (available === 0) return 0;
     const minLimit = available >= 5 ? 5 : available;
-    const normalized =
-      typeof requested === 'number' ? requested : 10;
+    const normalized = typeof requested === 'number' ? requested : 10;
     const limited = Math.min(Math.max(normalized, minLimit), 10);
     return Math.min(limited, available);
   }
@@ -209,10 +792,7 @@ export class SearchSetsRunnerService {
       order: { order: 'ASC' },
     });
 
-    const sections = this.applyPoliciesToSections(
-      baseline.sections ?? [],
-      policies,
-    );
+    const sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
 
     const additionSections =
       (baselineVersion.verifiedAdditions ?? []).map((content, index) =>
@@ -356,9 +936,7 @@ export class SearchSetsRunnerService {
       return true;
     }
     const normalized = (title ?? '').toLowerCase();
-    return patterns.some((pattern) =>
-      normalized.includes(pattern.toLowerCase()),
-    );
+    return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()));
   }
 
   private matchesSeniorities(job: Job, seniorities: SearchSetSeniority[] = []) {
@@ -384,9 +962,7 @@ export class SearchSetsRunnerService {
       return true;
     }
     const haystack = `${job.company ?? ''} ${job.rawDescription ?? ''}`.toLowerCase();
-    return industries.some((industry) =>
-      haystack.includes(industry.toLowerCase()),
-    );
+    return industries.some((industry) => haystack.includes(industry.toLowerCase()));
   }
 
   private matchesLocation(job: Job, location?: string | null) {
@@ -401,11 +977,7 @@ export class SearchSetsRunnerService {
 
     const normalized = title.toLowerCase();
 
-    if (
-      /\b(chief|c[et]o|executive|vp|vice president|director|head)\b/.test(
-        normalized,
-      )
-    ) {
+    if (/\b(chief|c[et]o|executive|vp|vice president|director|head)\b/.test(normalized)) {
       return SearchSetSeniority.EXECUTIVE;
     }
 
@@ -494,21 +1066,5 @@ export class SearchSetsRunnerService {
     }
 
     return null;
-  }
-
-  private async recordRunSafely(
-    searchSet: SearchSet,
-    baselineVersionId: string,
-    resultCount: number,
-  ) {
-    try {
-      await this.searchSetsService.recordRunMetadata(
-        searchSet,
-        baselineVersionId,
-        resultCount,
-      );
-    } catch {
-      // Persisting run metadata should not block delivering results.
-    }
   }
 }

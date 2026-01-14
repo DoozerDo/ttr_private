@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
+import { getEntitlementsForTier } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 describe('ResumeController tier gating', () => {
@@ -17,7 +18,10 @@ describe('ResumeController tier gating', () => {
 
   it('rejects FREE tier resume generation with TIER_GATED', async () => {
     const request = {
-      user: { id: 'user-1', subscriptionTier: SubscriptionTier.FREE },
+      user: {
+        id: 'user-1',
+        entitlements: getEntitlementsForTier(SubscriptionTier.FREE),
+      },
     } as any;
 
     let capturedError: unknown;

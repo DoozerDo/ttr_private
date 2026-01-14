@@ -7,15 +7,31 @@ export type RouteConfig = {
   requiresBaseline?: boolean;
   requiresJob?: boolean;
   featureFlag?: string;
+  subtext?: string;
   showInSidebar?: boolean;
 };
 
-const baseRoutes: RouteConfig[] = [
+const sidebarNavRoutes: RouteConfig[] = [
   {
     id: "dashboard",
     label: "Dashboard",
     href: "/",
     requiresAuth: true,
+    subtext: "Settings",
+  },
+  {
+    id: "baselines",
+    label: "Baseline Library",
+    href: "/baseline",
+    requiresAuth: true,
+    subtext: "Upload a baseline to begin targeting a role",
+  },
+  {
+    id: "jobs",
+    label: "Job Description Library",
+    href: "/jobs",
+    requiresAuth: true,
+    subtext: "Upload a job description you wish to target",
   },
   {
     id: "analyze",
@@ -23,21 +39,43 @@ const baseRoutes: RouteConfig[] = [
     href: "/analyze",
     requiresAuth: true,
     requiresBaseline: true,
-  },
-  {
-    id: "baselines",
-    label: "Baselines",
-    href: "/baseline",
-    requiresAuth: true,
+    subtext: "Calculate your Compatibility Score",
   },
   {
     id: "resume",
-    label: "Resume Studio",
+    label: "Resume and Cover Letter Studio",
     href: "/results",
     requiresAuth: true,
     requiresBaseline: true,
     requiresJob: true,
+    subtext: "Generate tailored documents",
   },
+  {
+    id: "searchSets",
+    label: "Search Sets",
+    href: "/search-sets",
+    requiresAuth: true,
+    requiresBaseline: true,
+    subtext: "Find your next role",
+  },
+  {
+    id: "jobTracker",
+    label: "Job Tracker",
+    href: "/applications",
+    requiresAuth: true,
+    subtext: "What roles am I pursuing?",
+  },
+  {
+    id: "interviewToolkit",
+    label: "Interview Toolkit",
+    href: "/interview-toolkit",
+    requiresAuth: true,
+    requiresJob: true,
+    subtext: "Interview scheduled. Now what?",
+  },
+];
+
+const hiddenRoutes: RouteConfig[] = [
   {
     id: "coverLetters",
     label: "Cover Letter Studio",
@@ -46,33 +84,9 @@ const baseRoutes: RouteConfig[] = [
     requiresBaseline: true,
     requiresJob: true,
   },
-  {
-    id: "interviewToolkit",
-    label: "Interview Toolkit",
-    href: "/interview-toolkit",
-    requiresAuth: true,
-    requiresJob: true,
-  },
-  {
-    id: "searchSets",
-    label: "Search Sets",
-    href: "/search-sets",
-    requiresAuth: true,
-    requiresBaseline: true,
-  },
-  {
-    id: "jobs",
-    label: "Jobs",
-    href: "/jobs",
-    requiresAuth: true,
-  },
-  {
-    id: "jobTracker",
-    label: "Job Tracker",
-    href: "/applications",
-    requiresAuth: true,
-  },
 ];
+
+const baseRoutes: RouteConfig[] = [...sidebarNavRoutes, ...hiddenRoutes];
 
 const settingsRoute: RouteConfig = {
   id: "settings",
@@ -84,7 +98,7 @@ const settingsRoute: RouteConfig = {
 
 const allRoutes = [...baseRoutes, settingsRoute];
 
-export const sidebarRoutes = baseRoutes;
+export const sidebarRoutes = sidebarNavRoutes;
 
 export const routeLookup = new Map(allRoutes.map((route) => [route.id, route]));
 

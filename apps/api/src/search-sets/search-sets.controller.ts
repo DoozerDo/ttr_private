@@ -16,7 +16,12 @@ import { CreateSearchSetDto } from './dto/create-search-set.dto';
 import { UpdateSearchSetDto } from './dto/update-search-set.dto';
 import { SearchSetsRunnerService } from './search-sets-runner.service';
 import { SearchSetsService } from './search-sets.service';
-import { assertFeatureAvailable, FeatureKey } from '../features/feature-gates';
+import {
+  assertFeatureAvailable,
+  Entitlements,
+  FeatureKey,
+  resolveEntitlementsFromUser,
+} from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 @Controller('search-sets')
@@ -107,10 +112,8 @@ export class SearchSetsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    assertFeatureAvailable(
-      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
-      FeatureKey.SEARCH_SET_RUN,
-    );
+    const entitlements = resolveEntitlementsFromUser(request.user);
+    assertFeatureAvailable(entitlements, FeatureKey.SEARCH_SET_RUN);
 
     const baselineVersionId = body?.baselineVersionId?.trim();
     if (!baselineVersionId) {
@@ -149,5 +152,9 @@ export class SearchSetsController {
   }
 }
 type TieredRequest = Request & {
-  user?: { id?: string; subscriptionTier?: SubscriptionTier };
+  user?: {
+    id?: string;
+    subscriptionTier?: SubscriptionTier;
+    entitlements?: Entitlements;
+  };
 };

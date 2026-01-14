@@ -1,7 +1,5 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import Link from "next/link";
-
 import { Alert } from "@/components/Alert";
 import { RetryButton } from "@/components/RetryButton";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
@@ -81,20 +79,10 @@ export default async function BaselinePage() {
 
   const { baselines, error: baselineFetchError } = await fetchBaselines();
 
-  const rightSlot = (
-    <Link
-      href="/analyze"
-      style={ttrComponents.secondaryButton}
-    >
-      Analyze a role
-    </Link>
-  );
-
   return (
     <InstrumentPanelShell
       kicker="Baseline console"
       title="Baseline library"
-      rightSlot={rightSlot}
     >
       <section style={ttrComponents.basePanel}>
         <div

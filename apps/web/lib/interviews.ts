@@ -46,6 +46,21 @@ export type AdditionDecisionPayload = {
   decision: RecommendedAdditionDecision;
 };
 
+export type InterviewAcceptedAdditionStatus = "RECOMMENDED" | "ACCEPTED";
+
+export interface InterviewAcceptedAddition {
+  id: string;
+  interviewId: string;
+  gapId: string;
+  category: string | null;
+  domain: string | null;
+  suggestion: string;
+  status: InterviewAcceptedAdditionStatus;
+  recommendedAdditionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ExpandedFitAssessment {
   expandedScore?: number | null;
   originalScore?: number | null;

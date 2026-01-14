@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   ComplianceFlag,
@@ -10,7 +11,8 @@ import {
   ComplianceViolationPanel,
 } from "@/components/ComplianceViolationPanel";
 import { Alert } from "@/components/Alert";
-import { TierGateNotice } from "@/components/TierGateNotice";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FormButton } from "@/components/FormButton";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -24,6 +26,8 @@ import {
   coverLetterClosingTemplates,
   defaultClosingTemplateKey,
 } from "@/lib/coverLetters";
+import { WAITLIST_ROUTE, getBillingConfig } from "@/src/lib/billing";
+import { useEntitlements } from "@/src/lib/entitlements";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrLayout, ttrTypography } from "../ui/ttrStyles";
 
@@ -130,6 +134,22 @@ export default function CoverLettersPage() {
     auditId?: string;
     baselineVersionHash?: string | null;
   } | null>(null);
+  const [isTierModalOpen, setIsTierModalOpen] = useState(false);
+  const router = useRouter();
+  const { profile } = useEntitlements();
+  const { billingLive } = getBillingConfig();
+  const showBetaBadge = Boolean(
+    profile?.entitlements?.betaUnlockPro &&
+      profile.entitlements.reasons.includes("beta_unlocked"),
+  );
+  const tierGateHistoryMessage = billingLive
+    ? "Upgrade to unlock cover letter generation and history."
+    : "Billing is not live yet. Join the waitlist to be the first invited when we open.";
+  const tierGateActionLabel = billingLive ? "Upgrade to generate" : "Billing in beta";
+  const tierGateModalLabel = billingLive ? "Upgrade" : "Join the waitlist";
+  const tierGateModalDescription = billingLive
+    ? "Upgrade to unlock cover letter generation."
+    : "Billing is not live yet. Let us know you'd like access.";
 
   useEffect(() => {
     let cancelled = false;
@@ -224,8 +244,28 @@ export default function CoverLettersPage() {
           cache: "no-store",
         });
         if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Unable to load history.");
+          const payload = await readResponsePayload(response);
+          const tierGate = parseTierGateError({
+            status: response.status,
+            payload,
+          });
+
+          if (tierGate) {
+            if (cancelled) return;
+            setHistory([]);
+            setHistoryState("idle");
+            setHistoryError(null);
+            setTierGateError(tierGate);
+            setStatusMessage(null);
+            setErrorMessage(null);
+            return;
+          }
+
+          const message = formatErrorMessage(
+            payload,
+            "Unable to load history right now.",
+          );
+          throw new Error(message);
         }
 
         const data = (await response.json()) as CoverLetterDto[];
@@ -233,6 +273,7 @@ export default function CoverLettersPage() {
 
         setHistory(data);
         setHistoryState("idle");
+        setTierGateError(null);
         const latestTemplate = data[0]?.closingTemplateKey;
         setClosingTemplateKey(
           (current) => current || latestTemplate || defaultClosingTemplateKey,
@@ -303,8 +344,24 @@ export default function CoverLettersPage() {
   }, [jobState, jobs.length]);
 
   const canGenerate = Boolean(baselineId && jobId && !isGenerating);
+  const isTierGateActive = billingLive && Boolean(tierGateError);
+  const openTierModal = () => {
+    if (billingLive) {
+      setIsTierModalOpen(true);
+    }
+  };
+  const closeTierModal = () => setIsTierModalOpen(false);
+  const handleUpgradeConfirm = () => {
+    closeTierModal();
+    router.push(billingLive ? "/pricing" : WAITLIST_ROUTE);
+  };
 
   const handleGenerate = async () => {
+    if (tierGateError && billingLive) {
+      openTierModal();
+      return;
+    }
+
     if (!baselineId || !jobId) {
       setStatusMessage(null);
       setErrorMessage("Select a baseline and job to generate a cover letter.");
@@ -316,7 +373,6 @@ export default function CoverLettersPage() {
     setStatusMessage(null);
     setErrorMessage(null);
     setComplianceError(null);
-    setTierGateError(null);
     setCoverLetterCompliance(null);
 
     try {
@@ -335,6 +391,7 @@ export default function CoverLettersPage() {
 
         if (tierGate) {
           setTierGateError(tierGate);
+          openTierModal();
           return;
         }
 
@@ -498,6 +555,16 @@ export default function CoverLettersPage() {
               Select a baseline and job to craft a tailored cover letter.
               Generated content is saved to your history for quick review.
             </p>
+            {!billingLive ? (
+              <Alert intent="info">
+                Billing is still in beta, so generation remains available for everyone.
+                Join the{" "}
+                <Link href={WAITLIST_ROUTE} className="text-sky-300 underline">
+                  waitlist
+                </Link>{" "}
+                to be the first invited when we open sign-ups.
+              </Alert>
+            ) : null}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -625,26 +692,55 @@ export default function CoverLettersPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-                style={{
-                  ...ttrComponents.primaryButton,
-                  opacity: canGenerate ? 1 : 0.6,
-                  cursor: canGenerate ? "pointer" : "not-allowed",
-                  minWidth: 180,
-                }}
-              >
-                {isGenerating ? "Generating..." : "Generate"}
-              </button>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+              style={{
+                ...ttrComponents.primaryButton,
+                opacity: canGenerate ? 1 : 0.6,
+                cursor: canGenerate ? "pointer" : "not-allowed",
+                minWidth: 180,
+              }}
+            >
+              {isGenerating
+                ? "Generating..."
+                : !billingLive && Boolean(tierGateError)
+                  ? tierGateActionLabel
+                  : isTierGateActive
+                    ? tierGateActionLabel
+                    : "Generate"}
+            </button>
+              {showBetaBadge ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    letterSpacing: 0.5,
+                    fontWeight: 600,
+                    color: "rgba(251,191,36,0.95)",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    padding: "2px 10px",
+                    background: "rgba(251,191,36,0.08)",
+                    textTransform: "none",
+                  }}
+                >
+                  Pro feature (beta unlocked)
+                </span>
+              ) : null}
               <span style={{ fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
                 Uses your latest baseline version automatically.
               </span>
             </div>
 
-            {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
             {coverLetterCompliance ? (
               <ComplianceFlagPanel
                 title="Compliance warnings"
@@ -695,9 +791,28 @@ export default function CoverLettersPage() {
               </div>
             ) : null}
             {historyState === "idle" && sortedHistory.length === 0 ? (
-              <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>
-                No cover letters yet. Generate one to see it listed here.
-              </div>
+              isTierGateActive ? (
+                <div
+                  style={{
+                    ...ttrComponents.warningBox,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                <div style={{ fontWeight: 800 }}>Upgrade required</div>
+                <div style={{ fontSize: 13, color: "rgba(226,232,240,0.85)" }}>
+                  {tierGateHistoryMessage}
+                </div>
+                <FormButton onClick={openTierModal}>
+                  {tierGateActionLabel}
+                </FormButton>
+                </div>
+              ) : (
+                <div style={{ color: "rgba(226,232,240,0.7)", fontSize: 13 }}>
+                  No cover letters yet. Generate one to see it listed here.
+                </div>
+              )
             ) : null}
 
             {sortedHistory.map((item) => renderHistoryItem(item))}
@@ -740,6 +855,24 @@ export default function CoverLettersPage() {
             : "Select a history item or generate a cover letter to view it here."}
         </div>
       </section>
+      <ConfirmDialog
+        open={billingLive && isTierModalOpen && Boolean(tierGateError)}
+        title="Upgrade required"
+        description={
+          <div className="text-sm text-slate-300">
+            <p>{tierGateModalDescription}</p>
+            {tierGateError?.message ? (
+              <p className="mt-2 text-sm text-slate-200 font-semibold">
+                {tierGateError.message}
+              </p>
+            ) : null}
+          </div>
+        }
+        confirmLabel={tierGateModalLabel}
+        cancelLabel="Close"
+        onConfirm={handleUpgradeConfirm}
+        onCancel={closeTierModal}
+      />
     </InstrumentShell>
   );
 }

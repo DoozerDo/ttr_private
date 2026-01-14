@@ -14,6 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { CreateInterviewRecordDto } from './dto/create-interview.dto';
 import { ApplyAdditionDecisionsDto } from './dto/apply-addition-decisions.dto';
+import { CreateInterviewAcceptedAdditionDto } from './dto/create-accepted-addition.dto';
 import { UpdateInterviewRecordDto } from './dto/update-interview.dto';
 import { UpdateAcceptedAdditionsDto } from './dto/update-accepted-additions.dto';
 import { InterviewRecordsService } from './interview-records.service';
@@ -62,6 +63,49 @@ export class InterviewRecordsController {
     }
 
     return this.interviewRecordsService.getInterviewRecordForUserResponse(id, userId);
+  }
+
+  @Get(':id/recommended-additions')
+  async getRecommendedAdditions(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.listRecommendedAdditions(id, userId);
+  }
+
+  @Get(':id/accepted-additions')
+  async getAcceptedAdditions(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.listAcceptedAdditions(id, userId);
+  }
+
+  @Post(':id/accepted-additions')
+  async acceptAddition(
+    @Param('id') id: string,
+    @Body() body: CreateInterviewAcceptedAdditionDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.acceptRecommendation(id, userId, body);
   }
 
   @Patch(':id')

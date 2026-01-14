@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { isIP } from 'node:net';
 import { Repository } from 'typeorm';
 import { Job, JobIngestionMethod } from './job.entity';
+import { extractTextFromHtml } from './html-utils';
 import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
 
 export type CreateJobInput = {
@@ -13,6 +14,10 @@ export type CreateJobInput = {
   responsibilities?: string[];
   requirements?: string[];
   jdIngestionMethod?: JobIngestionMethod;
+  sourceProviderId?: string | null;
+  sourceExternalId?: string | null;
+  canonicalUrl?: string | null;
+  dedupeHash?: string | null;
 };
 
 export type IngestJobDescriptionInput = {
@@ -92,10 +97,13 @@ export class JobsService {
     const ingestionMethod =
       payload.jdIngestionMethod ?? JobIngestionMethod.PASTE;
 
-    if (
-      ingestionMethod !== JobIngestionMethod.PASTE &&
-      ingestionMethod !== JobIngestionMethod.URL
-    ) {
+    const allowedIngestionMethods = [
+      JobIngestionMethod.PASTE,
+      JobIngestionMethod.URL,
+      JobIngestionMethod.SOURCE_PROVIDER,
+    ];
+
+    if (!allowedIngestionMethods.includes(ingestionMethod)) {
       throw new BadRequestException('Invalid jdIngestionMethod value');
     }
 
@@ -103,9 +111,20 @@ export class JobsService {
     if (sourceUrl) {
       this.validateUrl(sourceUrl);
     }
-    if (ingestionMethod === JobIngestionMethod.URL && !sourceUrl) {
-      throw new BadRequestException('sourceUrl is required for URL ingestion.');
+    if (
+      (ingestionMethod === JobIngestionMethod.URL ||
+        ingestionMethod === JobIngestionMethod.SOURCE_PROVIDER) &&
+      !sourceUrl
+    ) {
+      throw new BadRequestException(
+        'sourceUrl is required for URL or provider ingestion.',
+      );
     }
+
+    const sourceProviderId = payload.sourceProviderId?.trim() || null;
+    const sourceExternalId = payload.sourceExternalId?.trim() || null;
+    const canonicalUrl = payload.canonicalUrl?.trim() || null;
+    const dedupeHash = payload.dedupeHash?.trim() || null;
 
     const job = this.jobRepository.create({
       userId,
@@ -113,6 +132,10 @@ export class JobsService {
       company: payload.company?.trim() || null,
       rawDescription,
       sourceUrl,
+      sourceProviderId,
+      sourceExternalId,
+      canonicalUrl,
+      dedupeHash,
       normalizedResponsibilities: responsibilities,
       normalizedRequirements: requirements,
       jdIngestionMethod: ingestionMethod,
@@ -273,57 +296,3 @@ const isPrivateIp = (ipAddress: string) => {
   return false;
 };
 
-const extractTextFromHtml = (html: string) => {
-  const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-  const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  let content = mainMatch?.[1] ?? articleMatch?.[1] ?? bodyMatch?.[1] ?? html;
-
-  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
-  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
-  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
-  content = content.replace(/<aside[\s\S]*?<\/aside>/gi, '');
-
-  content = content.replace(/<li[^>]*>/gi, '\n- ');
-  content = content.replace(/<\/li>/gi, '\n');
-  content = content.replace(
-    /<(br|p|div|section|article|h[1-6]|tr|td|ul|ol)[^>]*>/gi,
-    '\n',
-  );
-  content = content.replace(/<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi, '\n');
-
-  const text = content.replace(/<[^>]+>/g, '');
-
-  return decodeHtmlEntities(text)
-    .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter((line) => line.length > 0)
-    .filter((line, index, array) => line !== array[index - 1])
-    .join('\n');
-};
-
-const decodeHtmlEntities = (input: string) => {
-  const basicMap: Record<string, string> = {
-    '&nbsp;': ' ',
-    '&amp;': '&',
-    '&lt;': '<',
-    '&gt;': '>',
-    '&quot;': '"',
-    '&#39;': "'",
-  };
-
-  let output = input.replace(
-    /&(nbsp|amp|lt|gt|quot|#39);/g,
-    (match) => basicMap[match] ?? match,
-  );
-
-  output = output.replace(/&#(\d+);/g, (_, code) => {
-    const value = Number(code);
-    if (Number.isNaN(value)) return _;
-    return String.fromCharCode(value);
-  });
-
-  return output;
-};

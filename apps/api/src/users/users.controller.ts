@@ -14,6 +14,7 @@ import { UpdateSubscriptionTierDto } from './dto/update-subscription-tier.dto';
 import { UsersService } from './users.service';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { UserRole } from './user.entity';
+import { Entitlements } from '../features/feature-gates';
 
 type UserRequest = Request & {
   user?: {
@@ -21,6 +22,7 @@ type UserRequest = Request & {
     email?: string;
     role?: UserRole;
     subscriptionTier?: SubscriptionTier;
+    entitlements?: Entitlements;
   };
 };
 

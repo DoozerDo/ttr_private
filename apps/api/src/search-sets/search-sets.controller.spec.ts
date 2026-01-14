@@ -87,7 +87,16 @@ describe('SearchSetsController', () => {
 
   it('runs a search set', async () => {
     const { controller, runnerService } = createController();
-    runnerService.runSearchSet.mockResolvedValue([{ jobId: 'job-1' }] as any);
+    const runResponse = {
+      results: [{ jobId: 'job-1' }],
+      metadata: {
+        usedProviderDiscovery: false,
+        providerId: null,
+        sourceSnapshot: null,
+        runInputHash: null,
+      },
+    };
+    runnerService.runSearchSet.mockResolvedValue(runResponse as any);
 
     const result = await controller.runSearchSet(
       'set-1',
@@ -101,7 +110,7 @@ describe('SearchSetsController', () => {
       'baseline-version-1',
       5,
     );
-    expect(result).toEqual([{ jobId: 'job-1' }]);
+    expect(result).toEqual(runResponse);
   });
 
   it('throws when baselineVersionId is missing', async () => {

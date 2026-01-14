@@ -11,7 +11,12 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { ResumeService } from './resume.service';
-import { assertFeatureAvailable, FeatureKey } from '../features/feature-gates';
+import {
+  assertFeatureAvailable,
+  Entitlements,
+  FeatureKey,
+  resolveEntitlementsFromUser,
+} from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 
 type ResumeExportFormat = 'docx' | 'pdf';
@@ -25,7 +30,11 @@ interface ResumeRequestBody {
 }
 
 type TieredResumeRequest = Request & {
-  user?: { id?: string; subscriptionTier?: SubscriptionTier };
+  user?: {
+    id?: string;
+    subscriptionTier?: SubscriptionTier;
+    entitlements?: Entitlements;
+  };
 };
 
 @Controller('resume')
@@ -108,10 +117,8 @@ export class ResumeController {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
 
-    assertFeatureAvailable(
-      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
-      FeatureKey.RESUME_EXPORT,
-    );
+    const entitlements = resolveEntitlementsFromUser(request.user);
+    assertFeatureAvailable(entitlements, FeatureKey.RESUME_EXPORT);
     return this.resumeService.generateResume(userId, payload);
   }
 
@@ -124,10 +131,8 @@ export class ResumeController {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
 
-    assertFeatureAvailable(
-      request.user?.subscriptionTier ?? SubscriptionTier.FREE,
-      FeatureKey.RESUME_EXPORT,
-    );
+    const entitlements = resolveEntitlementsFromUser(request.user);
+    assertFeatureAvailable(entitlements, FeatureKey.RESUME_EXPORT);
 
     const file = await this.resumeService.exportResume(userId, payload, format);
 

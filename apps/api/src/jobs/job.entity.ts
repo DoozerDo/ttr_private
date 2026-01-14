@@ -9,6 +9,7 @@ import {
 export enum JobIngestionMethod {
   PASTE = 'PASTE',
   URL = 'URL',
+  SOURCE_PROVIDER = 'SOURCE_PROVIDER',
 }
 
 @Entity({ name: 'jobs' })
@@ -30,6 +31,18 @@ export class Job {
 
   @Column({ type: 'varchar', length: 2048, nullable: true })
   sourceUrl!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  sourceProviderId!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  sourceExternalId!: string | null;
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  canonicalUrl!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  dedupeHash!: string | null;
 
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   normalizedResponsibilities!: string[];

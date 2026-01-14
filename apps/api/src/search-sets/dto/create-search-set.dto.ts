@@ -1,4 +1,8 @@
-import { SearchSetSeniority, SearchSetWorkMode } from '../search-set.entity';
+import {
+  SearchSetSeniority,
+  SearchSetWorkMode,
+  SearchSetSourceType,
+} from '../search-set.entity';
 
 export class CreateSearchSetDto {
   titlePatterns?: string[];
@@ -6,6 +10,8 @@ export class CreateSearchSetDto {
   industry?: string[];
   workMode?: SearchSetWorkMode[];
   location?: string | null;
+  sourceType?: SearchSetSourceType | null;
   sourceUrl?: string | null;
+  sourceOptions?: Record<string, unknown> | null;
   isActive?: boolean;
 }

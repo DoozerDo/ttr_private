@@ -25,6 +25,8 @@ export type SearchSetDto = {
   id: string;
 
   sourceUrl?: string;
+  sourceType?: string | null;
+  sourceOptions?: Record<string, unknown> | null;
   titlePatterns?: string[];
   seniority?: string[];
   workMode?: string;
@@ -57,9 +59,29 @@ export type SearchSetResultItem = {
   raw?: Record<string, unknown>;
 };
 
+export type SearchSetRunSourceSnapshot = {
+  sourceUrl: string | null;
+  providerId: string;
+  listingCount: number;
+  fetchedAt: string;
+};
+
+export type SearchSetRunMetadata = {
+  usedProviderDiscovery?: boolean;
+  providerId?: string | null;
+  sourceSnapshot?: SearchSetRunSourceSnapshot | null;
+  runInputHash?: string | null;
+  runId?: string | null;
+  failureCount?: number | null;
+  fetchedListingCount?: number | null;
+  ingestedNewCount?: number | null;
+  dedupedCount?: number | null;
+};
+
 export type SearchSetRunResult = {
-  results?: SearchSetResultItem[];
-  raw?: unknown;
+  results: SearchSetResultItem[];
+  metadata: SearchSetRunMetadata;
+  raw: unknown;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -163,6 +185,10 @@ function normalizeSearchSetDto(value: unknown): SearchSetDto {
     id: value.id,
 
     sourceUrl: typeof value.sourceUrl === "string" ? value.sourceUrl : undefined,
+    sourceType: typeof value.sourceType === "string" ? value.sourceType : undefined,
+    sourceOptions: isObject(value.sourceOptions)
+      ? (value.sourceOptions as Record<string, unknown>)
+      : null,
     titlePatterns: asStringArray(value.titlePatterns),
     seniority: asStringArray(value.seniority),
     workMode: typeof value.workMode === "string" ? value.workMode : undefined,
@@ -222,6 +248,32 @@ export function normalizeSearchSetRunResult(value: unknown): SearchSetResultItem
   return [];
 }
 
+function normalizeSearchSetRunMetadata(value: unknown): SearchSetRunMetadata {
+  const metadata = isObject(value) ? (value as Record<string, unknown>) : {};
+  const snapshotRaw = isObject(metadata.sourceSnapshot) ? metadata.sourceSnapshot : null;
+
+  const snapshot: SearchSetRunSourceSnapshot | null = snapshotRaw
+    ? {
+        sourceUrl: asNullableString(snapshotRaw.sourceUrl) ?? null,
+        providerId: asNullableString(snapshotRaw.providerId) ?? '',
+        listingCount: asNullableNumber(snapshotRaw.listingCount) ?? 0,
+        fetchedAt: asNullableString(snapshotRaw.fetchedAt) ?? '',
+      }
+    : null;
+
+  return {
+    usedProviderDiscovery: metadata.usedProviderDiscovery === true,
+    providerId: asNullableString(metadata.providerId) ?? null,
+    sourceSnapshot: snapshot,
+    runInputHash: asNullableString(metadata.runInputHash) ?? null,
+    runId: asNullableString(metadata.runId) ?? null,
+    failureCount: asNullableNumber(metadata.failureCount) ?? null,
+    fetchedListingCount: asNullableNumber(metadata.fetchedListingCount) ?? null,
+    ingestedNewCount: asNullableNumber(metadata.ingestedNewCount) ?? null,
+    dedupedCount: asNullableNumber(metadata.dedupedCount) ?? null,
+  };
+}
+
 export async function getSearchSet(id: string) {
   const raw = await api<unknown>(`/api/search-sets/${id}`, { cache: "no-store" });
   return normalizeSearchSetDto(raw);
@@ -247,8 +299,10 @@ export async function runSearchSet(
     : `/api/search-sets/${id}/run`;
 
   const raw = await api<unknown>(url, { method: "POST" });
+  const rawObject = isObject(raw) ? (raw as Record<string, unknown>) : null;
   return {
     raw,
     results: normalizeSearchSetRunResult(raw),
+    metadata: normalizeSearchSetRunMetadata(rawObject?.metadata),
   };
 }

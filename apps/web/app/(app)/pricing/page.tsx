@@ -1,175 +1,68 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { apiFetchJson } from '../lib/api';
-import { InstrumentShell } from '../ui/InstrumentShell';
-import { ttrComponents, ttrTypography } from '../ui/ttrStyles';
-import { SubscriptionTier, tierLabels } from '@/lib/tiers';
+import { PageHeader } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageShell";
 
-type UserProfile = {
-  subscriptionTier?: SubscriptionTier;
-  email?: string;
-};
+import { useEntitlements } from "@/src/lib/entitlements";
 
-type PricingTier = 'FREE' | 'PRO' | 'COACH' | 'ENTERPRISE';
+function normalizeTierLabel(raw: unknown): string {
+  if (!raw || typeof raw !== "string") return "Free";
+  const t = raw.toLowerCase();
 
-const tierCards: Array<{
-  tier: PricingTier;
-  title: string;
-  price: string;
-  highlights: string[];
-  footer?: string;
-}> = [
-  {
-    tier: 'FREE',
-    title: 'Free',
-    price: 'Free',
-    highlights: ['Limited Fit Scores', 'Limited tailoring', 'No Baseline Expansion Interview'],
-  },
-  {
-    tier: 'PRO',
-    title: 'Pro',
-    price: '$12-$15/mo',
-    highlights: [
-      'Unlimited Fit Scores',
-      'Unlimited tailoring',
-      'Full Baseline Expansion Interview',
-      'Interview Toolkit',
-      'Job Tracker',
-    ],
-  },
-  {
-    tier: 'COACH',
-    title: 'Coach',
-    price: '$49-$79/mo',
-    highlights: [
-      'Manage up to 10 users',
-      'White-label exports',
-      'Interview transcripts',
-      'Private baselines',
-    ],
-    footer: 'Billing pilot coming soon. Contact us for access.',
-  },
-  {
-    tier: 'ENTERPRISE',
-    title: 'Enterprise',
-    price: '$10K-$50K annually',
-    highlights: [
-      'SSO',
-      'Outplacement workflow',
-      'Admin dashboard',
-      'Reporting',
-      'Bulk user management',
-    ],
-    footer: 'Contact your account team for tailored deployment.',
-  },
-];
+  if (t === "free") return "Free";
+  if (t === "pro") return "Pro";
+  if (t === "team") return "Team";
+  if (t === "enterprise") return "Enterprise";
 
-function pricingTierMatchesUserTier(pricingTier: PricingTier, userTier: SubscriptionTier | null) {
-  if (!userTier) return pricingTier === 'FREE';
-
-  if (pricingTier === 'FREE') return userTier === SubscriptionTier.FREE;
-  if (pricingTier === 'PRO') return userTier === SubscriptionTier.PRO;
-
-  return false;
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 export default function PricingPage() {
-  const [userTier, setUserTier] = useState<SubscriptionTier | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { profile } = useEntitlements();
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const profile = await apiFetchJson<UserProfile>('/api/users/me');
-        if (!cancelled && profile?.subscriptionTier) {
-          setUserTier(profile.subscriptionTier);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError((e as Error).message);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const activeLabel = userTier ? tierLabels[userTier] : 'Free';
+  const effectiveTier = profile?.entitlements?.effectiveTier;
+  const activeLabel = normalizeTierLabel(effectiveTier);
 
   return (
-    <InstrumentShell
-      kicker="Accounts"
-      title="Pricing & tiers"
-      subtitle="Choose the plan that unlocks the features you need."
-    >
-      {loading ? (
-        <div style={{ ...ttrComponents.warningBox, marginBottom: 12 }}>Loading plan info…</div>
-      ) : null}
-      {error ? (
-        <div style={{ ...ttrComponents.dangerBox, marginBottom: 12 }}>{error}</div>
-      ) : null}
+    <PageShell>
+      <PageHeader title="Pricing and tiers" />
 
-      <div style={{ marginBottom: 18 }}>
-        <span style={{ ...ttrTypography.paragraph, fontWeight: 700 }}>
-          Current plan: <strong>{activeLabel}</strong>
-        </span>
+      <div style={{ marginTop: 8, opacity: 0.85 }}>
+        Billing is not live yet. This page is informational only during beta.
       </div>
 
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 16,
+          marginTop: 16,
+          padding: 16,
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: "rgba(255,255,255,0.04)",
         }}
       >
-        {tierCards.map((card) => {
-          const isActive = pricingTierMatchesUserTier(card.tier, userTier);
-
-          return (
-            <div
-              key={card.tier}
-              style={{
-                borderRadius: 18,
-                border: isActive ? '2px solid #fbbf24' : '1px solid rgba(255,255,255,0.2)',
-                padding: 18,
-                background: isActive
-                  ? 'linear-gradient(135deg, rgba(251,191,36,0.12), rgba(255,255,255,0.02))'
-                  : 'rgba(15,23,42,0.8)',
-                boxShadow: isActive ? '0 15px 45px rgba(251,191,36,0.35)' : undefined,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span style={{ fontSize: 16, fontWeight: 900 }}>{card.title}</span>
-                <span style={{ fontSize: 14, color: 'rgba(248,250,252,0.75)', fontWeight: 600 }}>
-                  {card.price}
-                </span>
-              </div>
-              <ul style={{ paddingLeft: 18, margin: '12px 0', color: 'rgba(226,232,240,0.9)' }}>
-                {card.highlights.map((item) => (
-                  <li key={item} style={{ fontSize: 13, marginBottom: 6 }}>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              {card.footer ? (
-                <div style={{ fontSize: 12, color: 'rgba(226,232,240,0.7)', marginTop: 8 }}>
-                  {card.footer}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+        <div style={{ fontWeight: 600 }}>Billing disabled</div>
+        <div style={{ marginTop: 6, opacity: 0.9 }}>
+          Paid upgrades are disabled during beta. If you have beta unlock enabled,
+          you will still see Pro features where applicable.
+        </div>
       </div>
-    </InstrumentShell>
+
+      <div
+        style={{
+          marginTop: 16,
+          padding: 16,
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.12)",
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>Current plan</div>
+        <div style={{ marginTop: 6 }}>{activeLabel}</div>
+      </div>
+
+      <div style={{ marginTop: 20, opacity: 0.85 }}>
+        When billing goes live, upgrades will be handled here. For now, this page
+        exists to prevent dead ends and confusion.
+      </div>
+    </PageShell>
   );
 }
