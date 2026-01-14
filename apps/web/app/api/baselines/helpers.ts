@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
-export function getApiBaseUrl(): string | undefined {
-  return process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
+export function getApiBaseUrl(): string | null {
+  const serverBaseUrl = process.env.API_BASE_URL?.trim();
+  if (serverBaseUrl) return serverBaseUrl;
+
+  const publicBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (publicBaseUrl) return publicBaseUrl;
+
+  return "http://api:3001";
 }
 
 function cloneHeaders(response: Response) {

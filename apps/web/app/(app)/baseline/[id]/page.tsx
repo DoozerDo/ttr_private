@@ -261,7 +261,7 @@ export default async function BaselineDetailPage({
       : null;
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
+    <main className="min-h-screen px-4 py-8">
       <div className="mx-auto flex max-w-5xl flex-col gap-6">
         <div className="flex items-center justify-between">
           <div className="space-y-2">

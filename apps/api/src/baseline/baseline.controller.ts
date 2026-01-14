@@ -15,6 +15,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Express } from 'express';
+import type { BaselineCreationResult } from './baseline.service';
 import { BaselineService } from './baseline.service';
 import { BaselineVersionService } from './baseline-version.service';
 
@@ -31,7 +32,7 @@ export class BaselineController {
   async uploadBaseline(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() request: Request & { user?: { id?: string } },
-  ) {
+  ): Promise<BaselineCreationResult> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -44,7 +45,7 @@ export class BaselineController {
 
     const sections = await this.baselineService.buildSectionsFromFile(file);
 
-    const baseline = await this.baselineService.createBaseline(
+    const result = await this.baselineService.createBaseline(
       userId,
       {
         originalname: file.originalname,
@@ -54,7 +55,7 @@ export class BaselineController {
       sections,
     );
 
-    return baseline;
+    return result;
   }
 
   @Post(':id/reparse')
@@ -72,14 +73,46 @@ export class BaselineController {
   }
 
   @Get()
-  async listBaselines(@Req() request: Request & { user?: { id?: string } }) {
+  async listBaselines(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('includeArchived') includeArchived?: string,
+  ) {
     const userId = request.user?.id;
 
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.baselineService.listBaselinesForUser(userId);
+    const include = includeArchived === 'true';
+    return this.baselineService.listBaselinesForUser(userId, include);
+  }
+
+  @Patch(':id/archive')
+  async archiveBaseline(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineService.archiveBaseline(userId, id);
+  }
+
+  @Patch(':id/restore')
+  async restoreBaseline(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.baselineService.restoreBaseline(userId, id);
   }
 
   @Get(':id')

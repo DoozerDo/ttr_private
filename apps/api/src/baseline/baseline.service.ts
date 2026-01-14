@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import type { Express } from 'express';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -15,7 +15,7 @@ import {
   BaselineSectionType,
   BaselineIncludePolicy,
 } from './baseline-section.entity';
-import { Baseline } from './baseline.entity';
+import { Baseline, BaselineStatus } from './baseline.entity';
 import { BaselineParserService, ParsedSection } from './baseline-parser.service';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
@@ -56,6 +56,17 @@ type PolicySectionInput = {
   id: string;
   includePolicy?: BaselineIncludePolicy | null;
   order?: number | null;
+};
+
+type BaselineUploadStatus = {
+  isDuplicate: boolean;
+  versionNumber: number;
+  message: string;
+};
+
+export type BaselineCreationResult = {
+  baseline: Baseline;
+  uploadStatus: BaselineUploadStatus;
 };
 
 @Injectable()
@@ -234,85 +245,262 @@ export class BaselineService {
       throw new BadRequestException('Baseline file hash is required');
     }
 
-    return this.baselineRepository.manager.transaction(async (manager) => {
-      const baseline = manager.create(Baseline, {
-        userId,
-        originalFilename: file.originalname,
-        mimeType: file.mimetype,
-        storagePath: file.path,
-        hash: fileHash,
-        sections:
-          parsedSections?.map((section, index) => ({
-            sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-            title: section.title ?? null,
-            content: this.sanitizeSectionContent(section.content),
-            includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-            order: section.order ?? index,
-          })) ?? [
-            {
-              sectionType: BaselineSectionType.OTHER,
-              title: null,
-              content: this.sanitizeSectionContent(),
-              includePolicy: BaselineIncludePolicy.OPTIONAL,
-              order: 0,
-            },
-          ],
-      });
+    return this.baselineRepository.manager.transaction(
+      async (manager) => {
+        const existingBaseline = await manager.findOne(Baseline, {
+          where: { userId, hash: fileHash },
+          relations: ['sections', 'versions'],
+          order: { versions: { versionNumber: 'DESC', createdAt: 'DESC' } },
+        });
 
-      const savedBaseline = await manager.save(baseline);
+        if (existingBaseline) {
+          return this.handleDuplicateBaselineUpload(
+            manager,
+            existingBaseline,
+            file,
+          );
+        }
 
-      // VERIFY: Persisting the initial version increments the current baseline version.
-      const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
-
-      const policyState = this.normalizePoliciesFromSections(
-        (savedBaseline.sections ?? []) as PolicySectionInput[],
-      );
-      const versionHash = this.buildVersionHash(fileHash, policyState);
-      const allowlistSnapshot = buildBaselineAllowlistSnapshot(savedBaseline.sections ?? []);
-
-      const versionRecord = manager.create(BaselineVersion, {
-        baselineId: savedBaseline.id,
-        versionNumber: nextVersionNumber,
-        fileHash: versionHash,
-        storagePath: savedBaseline.storagePath,
-        verifiedAdditions: [],
-        additionDiff: null,
-        promotedFromInterviewId: null,
-        allowedCompanies: allowlistSnapshot.allowedCompanies,
-        allowedRoles: allowlistSnapshot.allowedRoles,
-        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
-        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
-      });
-
-      const savedVersion = await manager.save(versionRecord);
-
-      const policyEntities = policyState.map((policy) =>
-        manager.create(BaselineBlockPolicy, {
-          baselineVersionId: savedVersion.id,
-          baselineSectionId: policy.baselineSectionId,
-          includePolicy: policy.includePolicy,
-          order: policy.order,
-        }),
-      );
-
-      await manager.save(policyEntities);
-
-      savedBaseline.version = nextVersionNumber;
-      savedBaseline.versions = [savedVersion];
-
-      return manager.save(savedBaseline);
-    });
+        return this.createBaselineRecord(
+          manager,
+          userId,
+          file,
+          fileHash,
+          parsedSections,
+        );
+      },
+    );
   }
 
-  async listBaselinesForUser(userId: string) {
+  private async createBaselineRecord(
+    manager: EntityManager,
+    userId: string,
+    file: FileMetadata,
+    fileHash: string,
+    parsedSections?: Partial<BaselineSection>[],
+  ): Promise<BaselineCreationResult> {
+    const baseline = manager.create(Baseline, {
+      userId,
+      originalFilename: file.originalname,
+      mimeType: file.mimetype,
+      storagePath: file.path,
+      hash: fileHash,
+      status: BaselineStatus.ACTIVE,
+      archivedAt: null,
+      sections:
+        parsedSections?.map((section, index) => ({
+          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+          title: section.title ?? null,
+          content: this.sanitizeSectionContent(section.content),
+          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+          order: section.order ?? index,
+        })) ?? [
+          {
+            sectionType: BaselineSectionType.OTHER,
+            title: null,
+            content: this.sanitizeSectionContent(),
+            includePolicy: BaselineIncludePolicy.OPTIONAL,
+            order: 0,
+          },
+        ],
+    });
+
+    const savedBaseline = await manager.save(baseline);
+
+    const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
+
+    const policyState = this.normalizePoliciesFromSections(
+      (savedBaseline.sections ?? []) as PolicySectionInput[],
+    );
+    const versionHash = this.buildVersionHash(fileHash, policyState);
+    const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+      savedBaseline.sections ?? [],
+    );
+
+    const versionRecord = manager.create(BaselineVersion, {
+      baselineId: savedBaseline.id,
+      versionNumber: nextVersionNumber,
+      fileHash: versionHash,
+      storagePath: savedBaseline.storagePath,
+      verifiedAdditions: [],
+      additionDiff: null,
+      promotedFromInterviewId: null,
+      allowedCompanies: allowlistSnapshot.allowedCompanies,
+      allowedRoles: allowlistSnapshot.allowedRoles,
+      allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+      allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+    });
+
+    const savedVersion = await manager.save(versionRecord);
+
+    const policyEntities = policyState.map((policy) =>
+      manager.create(BaselineBlockPolicy, {
+        baselineVersionId: savedVersion.id,
+        baselineSectionId: policy.baselineSectionId,
+        includePolicy: policy.includePolicy,
+        order: policy.order,
+      }),
+    );
+
+    await manager.save(policyEntities);
+
+    savedBaseline.version = nextVersionNumber;
+    savedBaseline.versions = [savedVersion];
+
+    const finalBaseline = await manager.save(savedBaseline);
+
+    return {
+      baseline: finalBaseline,
+      uploadStatus: {
+        isDuplicate: false,
+        versionNumber: nextVersionNumber,
+        message: `Baseline uploaded as version ${nextVersionNumber}.`,
+      },
+    };
+  }
+
+  private async handleDuplicateBaselineUpload(
+    manager: EntityManager,
+    baseline: Baseline,
+    file: FileMetadata,
+  ): Promise<BaselineCreationResult> {
+    if (!baseline.id) {
+      throw new BadRequestException(
+        'Duplicate baseline upload failed: missing baseline id',
+      );
+    }
+    const latestVersion =
+      baseline.versions?.[0] ?? (await this.getLatestVersionForBaseline(baseline.id));
+
+    const nextVersionNumber =
+      (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
+
+    const policyState = this.normalizePoliciesFromSections(
+      (baseline.sections ?? []) as PolicySectionInput[],
+    );
+    const additions = latestVersion?.verifiedAdditions ?? [];
+    const versionHash = this.buildVersionHash(
+      baseline.hash,
+      policyState,
+      additions,
+    );
+    const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+      baseline.sections ?? [],
+    );
+
+    const versionRecord = manager.create(BaselineVersion, {
+      versionNumber: nextVersionNumber,
+      fileHash: versionHash,
+      storagePath: file.path,
+      verifiedAdditions: additions,
+      additionDiff: latestVersion?.additionDiff ?? null,
+      promotedFromInterviewId: latestVersion?.promotedFromInterviewId ?? null,
+      allowedCompanies: allowlistSnapshot.allowedCompanies,
+      allowedRoles: allowlistSnapshot.allowedRoles,
+      allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+      allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+    });
+
+    versionRecord.baselineId = baseline.id;
+    versionRecord.baseline = baseline;
+
+    const savedVersion = await manager.save(versionRecord);
+
+    const latestPolicies = latestVersion
+      ? await this.baselineBlockPolicyRepository.find({
+          where: { baselineVersionId: latestVersion.id },
+          order: { order: 'ASC' },
+        })
+      : [];
+
+    const policyEntities = latestPolicies.map((policy) =>
+      manager.create(BaselineBlockPolicy, {
+        baselineVersionId: savedVersion.id,
+        baselineSectionId: policy.baselineSectionId,
+        includePolicy: policy.includePolicy,
+        order: policy.order,
+      }),
+    );
+
+    await manager.save(policyEntities);
+
+    await manager.update(
+      Baseline,
+      { id: baseline.id },
+      {
+        version: nextVersionNumber,
+        storagePath: file.path,
+        mimeType: file.mimetype,
+        originalFilename: file.originalname,
+      },
+    );
+
+    const refreshedBaseline = await manager.findOne(Baseline, {
+      where: { id: baseline.id },
+      relations: ['sections', 'versions'],
+      order: {
+        sections: { order: 'ASC' },
+        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
+      },
+    });
+
+    return {
+      baseline: refreshedBaseline ?? baseline,
+      uploadStatus: {
+        isDuplicate: true,
+        versionNumber: nextVersionNumber,
+        message: `Baseline already exists. Added version ${nextVersionNumber}.`,
+      },
+    };
+  }
+
+  async listBaselinesForUser(userId: string, includeArchived = false) {
+    const statusFilter = includeArchived
+      ? {}
+      : { status: BaselineStatus.ACTIVE };
+
     return this.baselineRepository.find({
-      where: { userId },
+      where: {
+        userId,
+        ...statusFilter,
+      },
       relations: ['versions'],
       order: {
         createdAt: 'DESC',
         versions: { versionNumber: 'DESC', createdAt: 'DESC' },
       },
     });
+  }
+
+  async archiveBaseline(userId: string, baselineId: string) {
+    return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ARCHIVED);
+  }
+
+  async restoreBaseline(userId: string, baselineId: string) {
+    return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ACTIVE);
+  }
+
+  private async updateBaselineStatus(
+    userId: string,
+    baselineId: string,
+    status: BaselineStatus,
+  ) {
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    if (baseline.status === status) {
+      return baseline;
+    }
+
+    baseline.status = status;
+    baseline.archivedAt = status === BaselineStatus.ARCHIVED ? new Date() : null;
+
+    return this.baselineRepository.save(baseline);
   }
 
   async getBaselineByIdForUser(id: string, userId: string) {

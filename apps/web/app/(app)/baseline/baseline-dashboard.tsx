@@ -5,7 +5,14 @@ import type { CSSProperties, FormEvent } from "react";
 import { useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
-import type { BaselineDto } from "@/lib/baselines";
+import {
+  archiveBaseline,
+  BaselineDto,
+  BaselineUploadResponse,
+  BaselineUploadStatus,
+  listBaselines,
+  restoreBaseline,
+} from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 
@@ -13,6 +20,16 @@ interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
   initialFetchError?: string | null;
 }
+
+const isBaselineUploadResponse = (
+  value: unknown,
+): value is BaselineUploadResponse =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      "baseline" in value &&
+      "uploadStatus" in value,
+  );
 
 export function BaselineDashboard({
   initialBaselines,
@@ -22,7 +39,17 @@ export function BaselineDashboard({
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<BaselineUploadStatus | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshBaselines = async (includeArchived = showArchived) => {
+    const latest = await listBaselines(includeArchived);
+    setBaselines(latest);
+  };
 
   const sortedBaselines = useMemo(
     () =>
@@ -38,6 +65,7 @@ export function BaselineDashboard({
   const uploadBaselineFile = async (fileToUpload: File) => {
     if (isUploading) return;
     setError(null);
+    setUploadStatus(null);
     setIsUploading(true);
 
     try {
@@ -63,7 +91,30 @@ export function BaselineDashboard({
         return;
       }
 
-      setBaselines((previous) => [data as BaselineDto, ...previous]);
+      const uploadResponse = isBaselineUploadResponse(data)
+        ? data
+        : { baseline: data as BaselineDto, uploadStatus: null };
+
+      const baselineRecord = uploadResponse.baseline;
+      const status =
+        uploadResponse.uploadStatus ??
+        ({
+          isDuplicate: false,
+          versionNumber: baselineRecord.version ?? 0,
+          message: `Baseline uploaded as version ${baselineRecord.version ?? 0}.`,
+        } as BaselineUploadStatus);
+
+      setUploadStatus(status);
+
+      setBaselines((previous) => {
+        const filtered = previous.filter((entry) => entry.id !== baselineRecord.id);
+        return [baselineRecord, ...filtered];
+      });
+      try {
+        await refreshBaselines(showArchived);
+      } catch (refreshError) {
+        console.error("Unable to refresh baselines after upload", refreshError);
+      }
       setFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -88,31 +139,48 @@ export function BaselineDashboard({
   };
 
   const handleRefresh = async () => {
-    setIsUploading(true);
     setError(null);
+    setIsRefreshing(true);
 
     try {
-      const response = await fetch("/api/baselines", {
-        cache: "no-store",
-        credentials: "include",
-      });
-
-      const data = await response.json();
-
-      if (response.status === 401) {
-        window.location.href = "/auth/login";
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Unable to refresh baselines");
-      }
-
-      setBaselines(data as BaselineDto[]);
+      await refreshBaselines(showArchived);
     } catch (refreshError: any) {
       setError(refreshError?.message || "Unable to refresh baselines");
     } finally {
-      setIsUploading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleShowArchivedToggle = async () => {
+    const nextShowArchived = !showArchived;
+    setShowArchived(nextShowArchived);
+    setError(null);
+    setIsRefreshing(true);
+
+    try {
+      await refreshBaselines(nextShowArchived);
+    } catch (toggleError: any) {
+      setError(toggleError?.message || "Unable to load archived baselines");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleBaselineStatusUpdate = async (baseline: BaselineDto) => {
+    setError(null);
+    setIsRefreshing(true);
+
+    try {
+      if (baseline.status === "ACTIVE") {
+        await archiveBaseline(baseline.id);
+      } else {
+        await restoreBaseline(baseline.id);
+      }
+      await refreshBaselines(showArchived);
+    } catch (statusError: any) {
+      setError(statusError?.message || "Unable to update baseline status");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -176,6 +244,34 @@ export function BaselineDashboard({
     userSelect: "none",
   };
 
+  const statusActionButtonStyle: CSSProperties = {
+    ...secondaryButtonStyle,
+    padding: "6px 10px",
+    fontSize: 12,
+  };
+
+  const archivedBadgeStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.25)",
+    background: "rgba(255,255,255,0.05)",
+    fontSize: 11,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: "rgba(226,232,240,0.75)",
+  };
+
+  const toggleLabelStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    color: "rgba(226,232,240,0.75)",
+  };
+
   const listItemStyle: CSSProperties = {
     padding: "12px 0",
     display: "flex",
@@ -210,8 +306,14 @@ export function BaselineDashboard({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <section
+        style={{
+          ...ttrComponents.basePanel,
+          padding: 18,
+          flex: "0 0 auto",
+        }}
+      >
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <p style={ttrTypography.subtleLabel}>Upload</p>
           <h2 style={sectionTitleStyle}>Upload baseline</h2>
@@ -301,11 +403,31 @@ export function BaselineDashboard({
           </div>
 
           {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
+          {uploadStatus ? (
+            <div
+              style={{
+                ...(uploadStatus.isDuplicate
+                  ? ttrComponents.warningBox
+                  : ttrComponents.successBox),
+                marginTop: 4,
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 13 }}>{uploadStatus.message}</p>
+            </div>
+          ) : null}
 
         </form>
       </section>
 
-      <section style={{ ...ttrComponents.basePanel, padding: 18 }}>
+      <section
+        style={{
+          ...ttrComponents.basePanel,
+          padding: 18,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         <div
           style={{
             display: "flex",
@@ -321,29 +443,49 @@ export function BaselineDashboard({
             <p style={bodyTextStyle}>Latest uploads appear first.</p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={isUploading}
-            onMouseEnter={(e) => {
-              if (isUploading) return;
-              e.currentTarget.style.transform = "translateY(-1px)";
-              e.currentTarget.style.boxShadow =
-                "0 18px 28px rgba(0,0,0,0.35)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow =
-                "0 12px 22px rgba(0,0,0,0.25)";
-            }}
+          <div
             style={{
-              ...secondaryButtonStyle,
-              opacity: isUploading ? 0.7 : 1,
-              cursor: isUploading ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
             }}
           >
-            Refresh
-          </button>
+            <label style={toggleLabelStyle}>
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={handleShowArchivedToggle}
+                disabled={isRefreshing || isUploading}
+                style={{ cursor: "pointer" }}
+              />
+              Show archived
+            </label>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isUploading || isRefreshing}
+              onMouseEnter={(e) => {
+                if (isUploading || isRefreshing) return;
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow =
+                  "0 18px 28px rgba(0,0,0,0.35)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 22px rgba(0,0,0,0.25)";
+              }}
+              style={{
+                ...secondaryButtonStyle,
+                opacity: isUploading || isRefreshing ? 0.7 : 1,
+                cursor:
+                  isUploading || isRefreshing ? "not-allowed" : "pointer",
+              }}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         {initialFetchError ? (
@@ -352,52 +494,101 @@ export function BaselineDashboard({
           </Alert>
         ) : null}
 
-        <div style={dividerStyle} />
-
-        {sortedBaselines.length === 0 ? (
-          initialFetchError ? null : (
-            <p
-              style={{
-                margin: 0,
-                fontSize: 13,
-                color: "rgba(226,232,240,0.7)",
-              }}
-            >
-              No baselines uploaded yet.
-            </p>
-          )
-        ) : (
-          <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-            {sortedBaselines.map((baseline, index) => (
-              <li
-                key={baseline.id}
-                style={{
-                  ...listItemStyle,
-                  borderTop:
-                    index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            overflow: "hidden",
+          }}
+        >
+          <div style={dividerStyle} />
+          <div
+            style={{
+              overflowY: "auto",
+              maxHeight: "60vh",
+            }}
+          >
+            {sortedBaselines.length === 0 ? (
+              initialFetchError ? null : (
+                <p
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    minWidth: 220,
+                    margin: 0,
+                    fontSize: 13,
+                    color: "rgba(226,232,240,0.7)",
                   }}
                 >
-                  <p style={filenameStyle}>{baseline.originalFilename}</p>
-                  <p style={metaStyle}>
-                    Uploaded {formatDateTime(baseline.createdAt)}
-                  </p>
-                </div>
+                  No baselines uploaded yet.
+                </p>
+              )
+            ) : (
+              <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                {sortedBaselines.map((baseline, index) => (
+                  <li
+                    key={baseline.id}
+                    style={{
+                      ...listItemStyle,
+                      borderTop:
+                        index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        minWidth: 220,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <p style={filenameStyle}>{baseline.originalFilename}</p>
+                        {baseline.status === "ARCHIVED" ? (
+                          <span style={archivedBadgeStyle}>Archived</span>
+                        ) : null}
+                      </div>
+                      <p style={metaStyle}>
+                        Uploaded {formatDateTime(baseline.createdAt)}
+                      </p>
+                    </div>
 
-                <Link href={`/baseline/${baseline.id}`} style={linkStyle}>
-                  View details
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Link href={`/baseline/${baseline.id}`} style={linkStyle}>
+                        View details
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleBaselineStatusUpdate(baseline)}
+                        disabled={isUploading || isRefreshing}
+                        style={{
+                          ...statusActionButtonStyle,
+                          opacity: isUploading || isRefreshing ? 0.6 : 1,
+                          cursor:
+                            isUploading || isRefreshing
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
+                      >
+                        {baseline.status === "ACTIVE" ? "Archive" : "Restore"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </section>
     </div>
   );

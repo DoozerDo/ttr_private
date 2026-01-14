@@ -22,24 +22,42 @@ async function bootstrap() {
 
   const corsOriginRaw =
     config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
-  const corsOrigins = corsOriginRaw
+  const envOrigins = corsOriginRaw
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const defaultOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const corsOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
-  app.enableCors({
-    origin: (origin, callback) => {
+  const corsOptions = {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin) {
         return callback(null, true);
       }
 
-      if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
+      if (corsOrigins.includes(origin)) {
         return callback(null, true);
       }
 
       return callback(new Error('Not allowed by CORS'), false);
     },
-  });
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 204,
+  };
+
+  app.enableCors(corsOptions);
+
+  const isProduction = config.get<string>('NODE_ENV') === 'production';
+  if (!isProduction) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `DEV CORS allowlist: ${corsOrigins.join(
+        ', ',
+      )}; credentials enabled`,
+    );
+  }
 
   const port = config.get<number>('PORT') ?? 3001;
 

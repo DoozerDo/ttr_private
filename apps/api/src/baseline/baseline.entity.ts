@@ -9,6 +9,11 @@ import {
 import { BaselineSection } from './baseline-section.entity';
 import { BaselineVersion } from './baseline-version.entity';
 
+export enum BaselineStatus {
+  ACTIVE = 'ACTIVE',
+  ARCHIVED = 'ARCHIVED',
+}
+
 @Entity({ name: 'baselines' })
 export class Baseline {
   @PrimaryGeneratedColumn('uuid')
@@ -31,6 +36,16 @@ export class Baseline {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   hash!: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: BaselineStatus,
+    default: BaselineStatus.ACTIVE,
+  })
+  status!: BaselineStatus;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  archivedAt!: Date | null;
 
   @OneToMany(() => BaselineSection, (section) => section.baseline, {
     cascade: true,
