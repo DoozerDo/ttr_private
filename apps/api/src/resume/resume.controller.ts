@@ -117,8 +117,6 @@ export class ResumeController {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
 
-    const entitlements = resolveEntitlementsFromUser(request.user);
-    assertFeatureAvailable(entitlements, FeatureKey.RESUME_EXPORT);
     return this.resumeService.generateResume(userId, payload);
   }
 

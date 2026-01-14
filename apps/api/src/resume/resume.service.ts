@@ -42,12 +42,14 @@ export class ResumeService {
     private readonly complianceService: ComplianceService,
   ) {}
 
-  private async ensureOneTapAllowed(userId: string, jobId: string) {
-    const assessment = await this.fitAssessmentRepository.findOne({
+  private async findLatestAssessment(userId: string, jobId: string) {
+    return this.fitAssessmentRepository.findOne({
       where: { userId, jobId },
       order: { createdAt: 'DESC' },
     });
+  }
 
+  private ensureOneTapAllowed(assessment?: FitAssessment | null) {
     if (!assessment || assessment.overallScore < 92) {
       throw new UnprocessableEntityException({
         error: {
@@ -191,8 +193,12 @@ export class ResumeService {
       throw new NotFoundException('Job not found');
     }
 
+    const latestAssessment = jobId
+      ? await this.findLatestAssessment(userId, jobId)
+      : null;
+
     if (request.oneTap && jobId) {
-      await this.ensureOneTapAllowed(userId, jobId);
+      this.ensureOneTapAllowed(latestAssessment);
     }
 
     const outputHash = createHash('sha256')
@@ -238,6 +244,8 @@ export class ResumeService {
       });
     }
 
+    const quality = latestAssessment && latestAssessment.overallScore >= 92 ? 'optimized' : 'draft';
+
     return {
       ok: true,
       baselineId: baseline.id,
@@ -247,6 +255,7 @@ export class ResumeService {
       compliance_flags: complianceFlags,
       audit_id: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
+      quality,
     };
   }
 

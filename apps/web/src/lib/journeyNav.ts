@@ -45,7 +45,7 @@ const normalizePathname = (pathname?: string) => {
   return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
 };
 
-const findStepIdForPathname = (pathname?: string): JourneyStepId | null => {
+export function getStepIdForPathname(pathname?: string): JourneyStepId | null {
   const normalized = normalizePathname(pathname);
   if (!normalized) {
     return null;
@@ -82,7 +82,7 @@ export function resolveJourneyNavState(input: ResolveJourneyNavStateInput): Jour
   const candidateActive =
     (explicitActiveStepId && JOURNEY_NAV_STEPS.some((step) => step.id === explicitActiveStepId)
       ? explicitActiveStepId
-      : findStepIdForPathname(input.currentPathname)) ?? DEFAULT_STEP_ID;
+      : getStepIdForPathname(input.currentPathname)) ?? DEFAULT_STEP_ID;
 
   const activeStepId = candidateActive ?? DEFAULT_STEP_ID;
   const activeIndex = JOURNEY_NAV_STEPS.findIndex((step) => step.id === activeStepId);
@@ -118,7 +118,7 @@ export function resolveJourneyNavState(input: ResolveJourneyNavStateInput): Jour
 }
 
 export function resolveJourneyNavStateFromPathname(pathname?: string): JourneyNavState {
-  const activeStepId = findStepIdForPathname(pathname) ?? DEFAULT_STEP_ID;
+  const activeStepId = getStepIdForPathname(pathname) ?? DEFAULT_STEP_ID;
 
   return resolveJourneyNavState({
     currentPathname: pathname,

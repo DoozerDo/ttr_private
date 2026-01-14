@@ -45,10 +45,14 @@ export function JourneyNavV1({
   const shouldReduceMotion = useReducedMotion();
   const [isTyping, setIsTyping] = useState(false);
 
+  const [arrowOverlayKey, setArrowOverlayKey] = useState(0);
+  const arrowOverlayInitializedRef = useRef(false);
+  const [rippling, setRippling] = useState(false);
+  const rippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevActiveIndexRef = useRef<number | null>(null);
-  const hasMountedRef = useRef(false);
+  const prevActiveStepIdRef = useRef<JourneyStepId | null>(null);
   const pulseDuration = useMemo(() => createPulseDuration(), []);
   const [isImpacting, setIsImpacting] = useState(false);
   const arrowKeyRef = useRef(0);
@@ -102,35 +106,78 @@ export function JourneyNavV1({
     };
   }, []);
 
+  const triggerRipple = () => {
+    if (shouldReduceMotion) return;
+    setRippling(true);
+    if (rippleTimerRef.current) {
+      clearTimeout(rippleTimerRef.current);
+    }
+    rippleTimerRef.current = setTimeout(() => {
+      setRippling(false);
+      rippleTimerRef.current = null;
+    }, 420);
+  };
+
+  useEffect(() => {
+    if (shouldReduceMotion) {
+      return;
+    }
+    if (!arrowOverlayInitializedRef.current) {
+      arrowOverlayInitializedRef.current = true;
+      return;
+    }
+    setArrowOverlayKey((prev) => prev + 1);
+  }, [state.activeStepId, shouldReduceMotion]);
+
+  useEffect(() => {
+    if (shouldReduceMotion) {
+      setRippling(false);
+    }
+  }, [shouldReduceMotion]);
+
+  useEffect(() => {
+    return () => {
+      if (rippleTimerRef.current) {
+        clearTimeout(rippleTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!state.steps.length) {
+      prevActiveStepIdRef.current = null;
       return;
     }
 
-    if (!hasMountedRef.current) {
-      hasMountedRef.current = true;
-      prevActiveIndexRef.current = activeIndex;
+    const previousStepId = prevActiveStepIdRef.current;
+    const previousIndex =
+      previousStepId === null ? -1 : state.steps.findIndex((step) => step.id === previousStepId);
+    const currentIndex = state.steps.findIndex((step) => step.id === state.activeStepId);
+
+    prevActiveStepIdRef.current = state.activeStepId;
+
+    const isForward = previousIndex >= 0 && currentIndex > previousIndex;
+
+    if (isForward && !shouldReduceMotion && state.steps.length > 1) {
+      const startPercent = clamp((previousIndex / denominator) * 100 - 3, 0, 100);
+      const endPercent = clamp((currentIndex / denominator) * 100, 0, 100);
+      arrowKeyRef.current += 1;
+      setArrowFlight({ key: arrowKeyRef.current, startPercent, endPercent });
+      setIsImpacting(false);
       return;
     }
 
-    const previousIndex = prevActiveIndexRef.current ?? activeIndex;
-    const isForward = activeIndex > previousIndex;
-    prevActiveIndexRef.current = activeIndex;
-
-    // Do not animate arrows if reduced motion is requested or there is no forward progression.
-    if (shouldReduceMotion || !isForward || state.steps.length < 2) {
-      if (shouldReduceMotion && isForward) {
-        onActiveStepAdvanced?.();
-      }
-      return;
+    if (shouldReduceMotion && isForward) {
+      onActiveStepAdvanced?.();
     }
-
-    const startPercent = clamp((previousIndex / denominator) * 100 - 3, 0, 100);
-    const endPercent = clamp((activeIndex / denominator) * 100, 0, 100);
-    arrowKeyRef.current += 1;
-    setArrowFlight({ key: arrowKeyRef.current, startPercent, endPercent });
-    setIsImpacting(false);
-  }, [activeIndex, denominator, onActiveStepAdvanced, shouldReduceMotion, state.steps.length]);
+  }, [
+    denominator,
+    onActiveStepAdvanced,
+    shouldReduceMotion,
+    state.activeStepId,
+    state.steps,
+    state.steps.length,
+  ]);
 
   const handleArrowComplete = () => {
     setArrowFlight(null);
@@ -169,7 +216,7 @@ export function JourneyNavV1({
             const isActive = step.state === JourneyStepState.Active;
             const isCompleted = step.state === JourneyStepState.Completed;
             const isLocked = step.state === JourneyStepState.Locked;
-            const isClickable = !isLocked && Boolean(onStepClick);
+            const isClickable = isCompleted && Boolean(onStepClick);
 
             const nodeClass = [
               "journey-nav-step-button",
@@ -177,6 +224,12 @@ export function JourneyNavV1({
               isCompleted ? "journey-nav-step-completed" : "",
               isLocked ? "journey-nav-step-locked" : "",
               isActive && isImpacting ? "journey-nav-step-impact" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            const iconAreaClass = [
+              "journey-nav-icon-area",
+              isActive && rippling ? "journey-nav-icon-area--ripple" : "",
             ]
               .filter(Boolean)
               .join(" ");
@@ -194,9 +247,7 @@ export function JourneyNavV1({
                 disabled={isLocked}
                 title={isLocked ? LOCKED_TOOLTIP : undefined}
               >
-                <span className="journey-nav-icon-area">
-                  <span className="journey-nav-icon-ring outer" />
-                  <span className="journey-nav-icon-ring inner" />
+                <span className={iconAreaClass}>
                   {isActive && shouldPulse ? (
                     <motion.span
                       className="journey-nav-icon-pulse"
@@ -215,6 +266,38 @@ export function JourneyNavV1({
                         },
                       }}
                     />
+                  ) : null}
+                  {isActive && !shouldReduceMotion ? (
+                    <span className="journey-nav-icon-arrow" aria-hidden>
+                      <motion.svg
+                        key={`journey-nav-target-arrow-${step.id}-${arrowOverlayKey}`}
+                        viewBox="0 0 28 28"
+                        role="presentation"
+                        aria-hidden="true"
+                        initial={{ x: -28, y: -18, rotate: -18, opacity: 0 }}
+                        animate={{ x: 0, y: 0, rotate: -1, opacity: 1 }}
+                        transition={{
+                          duration: 0.64,
+                          ease: "easeOut",
+                        }}
+                        onAnimationComplete={triggerRipple}
+                      >
+                        <path
+                          d="M4 14h14"
+                          stroke="#fde68a"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M18 9l8 5-8 5"
+                          stroke="#fbbf24"
+                          strokeWidth="2.3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </motion.svg>
+                    </span>
                   ) : null}
                   {isCompleted ? (
                     <span className="journey-nav-icon-check" aria-hidden>
@@ -246,15 +329,26 @@ export function JourneyNavV1({
                 }}
                 animate={{
                   left: `${arrowFlight.endPercent}%`,
-                  opacity: [1, 0],
+                  opacity: [1, 1, 0],
+                  scale: [1, 1.04, 1],
                 }}
                 transition={{
                   left: { duration: ARROW_DURATION_MS / 1000, ease: "easeOut" },
-                  opacity: { duration: 0.05, delay: (ARROW_DURATION_MS - 50) / 1000 },
+                  opacity: {
+                    duration: 0.12,
+                    delay: ARROW_DURATION_MS / 1000 + 0.15,
+                  },
+                  scale: {
+                    duration: 0.18,
+                    delay: ARROW_DURATION_MS / 1000,
+                    ease: "easeOut",
+                  },
                 }}
                 onAnimationComplete={handleArrowComplete}
               >
+                <span className="journey-nav-arrow-shaft" />
                 <span className="journey-nav-arrow-head" />
+                <span className="journey-nav-arrow-fletching" />
               </motion.span>
             )}
           </AnimatePresence>
@@ -371,49 +465,127 @@ export function JourneyNavV1({
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(20, 28, 45, 0.7));
-          box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05),
-            inset 0 15px 20px rgba(15, 23, 42, 0.7), 0 5px 15px rgba(2, 6, 23, 0.65);
+          background: radial-gradient(
+            circle,
+            rgba(248, 250, 252, 1) 0%,
+            rgba(248, 250, 252, 1) 8%,
+            rgba(251, 191, 36, 0.95) 8%,
+            rgba(251, 191, 36, 0.95) 18%,
+            rgba(192, 132, 252, 0.85) 19%,
+            rgba(192, 132, 252, 0.85) 32%,
+            rgba(99, 102, 241, 0.75) 33%,
+            rgba(99, 102, 241, 0.75) 46%,
+            rgba(15, 23, 42, 0.95) 47%,
+            rgba(15, 23, 42, 0.95) 100%
+          );
+          border: 2px solid rgba(99, 102, 241, 0.35);
+          box-shadow: inset 0 0 12px rgba(15, 23, 42, 0.85),
+            inset 0 8px 20px rgba(15, 23, 42, 0.8), 0 8px 32px rgba(2, 6, 23, 0.75);
+          --journey-nav-target-translate: 0px;
+          transform: translateY(var(--journey-nav-target-translate)) scale(1);
+          transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
+            background 0.18s ease;
+        }
+
+        .journey-nav-icon-area::after {
+          content: "";
+          position: absolute;
+          inset: 8px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          pointer-events: none;
         }
 
         .journey-nav-icon-pulse {
           position: absolute;
-          width: 64px;
-          height: 64px;
+          width: 68px;
+          height: 68px;
           border-radius: 999px;
-          background: radial-gradient(circle, rgba(192, 132, 252, 0.4), rgba(99, 102, 241, 0));
+          background: radial-gradient(circle, rgba(192, 132, 252, 0.5), rgba(129, 140, 248, 0));
           pointer-events: none;
+          z-index: 0;
         }
 
-        .journey-nav-icon-ring {
+        .journey-nav-icon-arrow {
           position: absolute;
-          border: 1px solid rgba(148, 163, 184, 0.5);
-          border-radius: 999px;
-        }
-
-        .journey-nav-icon-ring.outer {
+          top: 50%;
+          left: 50%;
           width: 48px;
           height: 48px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          z-index: 1;
+          transform: translate(-50%, -50%);
         }
 
-        .journey-nav-icon-ring.inner {
+        .journey-nav-icon-arrow svg {
           width: 36px;
           height: 36px;
         }
 
-        .journey-nav-step-active .journey-nav-icon-ring.outer,
-        .journey-nav-step-active .journey-nav-icon-ring.inner {
-          border-color: #c4b5fd;
+        .journey-nav-icon-area--ripple {
+          animation: journey-nav-target-ripple 0.42s ease-out both;
+        }
+
+        @keyframes journey-nav-target-ripple {
+          0% {
+            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
+          }
+          60% {
+            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1.08);
+          }
+          100% {
+            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
+          }
         }
 
         .journey-nav-step-active .journey-nav-icon-area {
-          box-shadow: 0 0 25px rgba(129, 140, 248, 0.55),
-            inset 0 0 12px rgba(129, 140, 248, 0.3);
+          border-color: #c4b5fd;
+          box-shadow: 0 0 25px rgba(129, 140, 248, 0.45),
+            inset 0 0 20px rgba(129, 140, 248, 0.35);
+          --journey-nav-target-translate: -1px;
+          background: radial-gradient(
+            circle,
+            rgba(253, 244, 255, 1) 0%,
+            rgba(253, 244, 255, 1) 9%,
+            rgba(251, 191, 36, 0.95) 10%,
+            rgba(251, 191, 36, 0.95) 20%,
+            rgba(192, 132, 252, 0.95) 20.5%,
+            rgba(192, 132, 252, 0.95) 33%,
+            rgba(129, 140, 248, 0.9) 33.5%,
+            rgba(129, 140, 248, 0.9) 47%,
+            rgba(15, 23, 42, 0.95) 48%,
+            rgba(15, 23, 42, 0.95) 100%
+          );
         }
 
         .journey-nav-step-completed .journey-nav-icon-area {
-          background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 1));
-          box-shadow: inset 0 0 12px rgba(226, 232, 240, 0.2);
+          background: radial-gradient(
+            circle,
+            rgba(226, 232, 240, 0.9) 0%,
+            rgba(226, 232, 240, 0.9) 10%,
+            rgba(148, 163, 184, 0.55) 10%,
+            rgba(148, 163, 184, 0.55) 25%,
+            rgba(99, 102, 241, 0.4) 25%,
+            rgba(99, 102, 241, 0.4) 45%,
+            rgba(15, 23, 42, 0.9) 46%,
+            rgba(15, 23, 42, 0.9) 100%
+          );
+          box-shadow: inset 0 0 14px rgba(8, 11, 21, 0.8), 0 6px 18px rgba(2, 6, 23, 0.6);
+        }
+
+        .journey-nav-step-locked .journey-nav-icon-area {
+          background: radial-gradient(
+            circle,
+            rgba(148, 163, 184, 0.45) 0%,
+            rgba(148, 163, 184, 0.45) 28%,
+            rgba(30, 41, 59, 0.85) 29%,
+            rgba(30, 41, 59, 0.85) 100%
+          );
+          border-color: rgba(148, 163, 184, 0.35);
+          box-shadow: inset 0 0 10px rgba(15, 23, 42, 0.8);
         }
 
         .journey-nav-icon-target {
@@ -423,6 +595,8 @@ export function JourneyNavV1({
           width: 100%;
           height: 100%;
           position: relative;
+          pointer-events: none;
+          z-index: 1;
         }
 
         .journey-nav-icon-center {
@@ -431,6 +605,7 @@ export function JourneyNavV1({
           border-radius: 999px;
           background: linear-gradient(135deg, #f3e8ff, #c084fc);
           box-shadow: 0 0 8px rgba(192, 132, 252, 0.7);
+          z-index: 2;
         }
 
         .journey-nav-icon-check {
@@ -439,6 +614,7 @@ export function JourneyNavV1({
           display: flex;
           align-items: center;
           justify-content: center;
+          z-index: 3;
         }
 
         .journey-nav-icon-check svg {
@@ -475,6 +651,16 @@ export function JourneyNavV1({
           align-items: center;
           justify-content: center;
           opacity: 0;
+          pointer-events: none;
+          z-index: 30;
+        }
+
+        .journey-nav-arrow-shaft {
+          position: absolute;
+          width: 64%;
+          height: 3px;
+          background: linear-gradient(90deg, rgba(192, 132, 252, 0.25), rgba(99, 102, 241, 0.85));
+          left: -10%;
         }
 
         .journey-nav-arrow-head {
@@ -483,7 +669,18 @@ export function JourneyNavV1({
           background: linear-gradient(90deg, #c084fc, #8b5cf6);
           clip-path: polygon(0 0, 100% 50%, 0 100%);
           display: inline-block;
+          box-shadow: 0 0 12px rgba(192, 132, 252, 0.65);
           transform-origin: center;
+        }
+
+        .journey-nav-arrow-fletching {
+          position: absolute;
+          width: 10px;
+          height: 16px;
+          right: 12px;
+          border-radius: 999px 0 0 999px;
+          background: linear-gradient(90deg, rgba(129, 140, 248, 0), rgba(129, 140, 248, 0.5));
+          box-shadow: inset 0 0 4px rgba(99, 102, 241, 0.7);
         }
       `}</style>
     </nav>

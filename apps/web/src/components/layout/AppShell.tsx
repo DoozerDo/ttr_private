@@ -6,34 +6,41 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
-import { resolveJourneyNavStateFromPathname } from "@/src/lib/journeyNav";
+import { JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
+import {
+  inferAndSyncJourneyCompletions,
+  resolveJourneyNavStateFromAppState,
+  useJourneyNavAppState,
+} from "@/src/lib/journeyNavStore";
 
 const isDev = process.env.NODE_ENV === "development";
 
 type StoredContext = {
   hasBaseline: boolean;
   hasJob: boolean;
+  lastAnalysis: unknown | null;
 };
 
 const getStoredContext = (): StoredContext => {
   if (typeof window === "undefined") {
-    return { hasBaseline: false, hasJob: false };
+    return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
 
   try {
     const payload = sessionStorage.getItem("ttr:lastAnalysis");
     if (!payload) {
-      return { hasBaseline: false, hasJob: false };
+      return { hasBaseline: false, hasJob: false, lastAnalysis: null };
     }
 
     const parsed = JSON.parse(payload) as { result?: { baselineId?: string; jobId?: string } };
     return {
       hasBaseline: Boolean(parsed?.result?.baselineId),
       hasJob: Boolean(parsed?.result?.jobId),
+      lastAnalysis: parsed,
     };
   } catch (error) {
     console.error("Unable to read stored session", error);
-    return { hasBaseline: false, hasJob: false };
+    return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
 };
 
@@ -78,6 +85,8 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const lastPath = useRef(pathname);
+
+  const journeyAppState = useJourneyNavAppState();
 
   const refreshContext = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -139,7 +148,20 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
-  }, []);
+
+    // Use cheap real signals to drive the journey completion state.
+    // This avoids hunting for events across the app.
+    const resolved = resolveJourneyNavStateFromAppState(pathname, journeyAppState);
+
+    inferAndSyncJourneyCompletions({
+      pathname,
+      steps: resolved.steps,
+      hasBaseline: Boolean(baselinesOk),
+      hasJob: Boolean(jobsOk),
+      lastAnalysis: stored.lastAnalysis,
+      appState: journeyAppState,
+    });
+  }, [pathname, journeyAppState]);
 
   useEffect(() => {
     refreshContext();
@@ -240,8 +262,27 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   }, [navRoutes, pathname]);
 
   const journeyNavState = useMemo(
-    () => resolveJourneyNavStateFromPathname(pathname),
-    [pathname],
+    () => resolveJourneyNavStateFromAppState(pathname, journeyAppState),
+    [pathname, journeyAppState],
+  );
+
+  const handleJourneyStepClick = useCallback(
+    (stepId: JourneyStepId) => {
+      const step = journeyNavState.steps.find((s) => s.id === stepId);
+      if (!step) return;
+
+      // Only allow navigation to completed steps for review
+      if (step.state !== JourneyStepState.Completed) return;
+
+      journeyAppState.setActiveOverride(stepId);
+
+      // Route mapping: prefer the route table if ids line up
+      const route = navRoutes.find((r) => r.id === stepId);
+      if (route?.href) {
+        router.push(route.href);
+      }
+    },
+    [journeyNavState.steps, journeyAppState, navRoutes, router],
   );
 
   return (
@@ -352,7 +393,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
         {JOURNEY_NAV_V1_ENABLED ? (
           <div className="sticky top-16 z-10 border-b border-white/10 bg-slate-950/80 px-6 py-3">
-            <JourneyNavV1 state={journeyNavState} />
+            <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
           </div>
         ) : null}
 

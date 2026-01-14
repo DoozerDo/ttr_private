@@ -16,7 +16,7 @@ describe('ResumeController tier gating', () => {
     controller = new ResumeController(resumeService);
   });
 
-  it('rejects FREE tier resume generation with TIER_GATED', async () => {
+  it('allows FREE tier resume generation', async () => {
     const request = {
       user: {
         id: 'user-1',
@@ -24,24 +24,34 @@ describe('ResumeController tier gating', () => {
       },
     } as any;
 
-    let capturedError: unknown;
+    await controller.generateResume(
+      { baselineId: 'baseline-1', baselineVersionId: 'version-1', jobId: 'job-1' },
+      request,
+    );
 
-    try {
-      await controller.generateResume(
+    expect(resumeService.generateResume).toHaveBeenCalled();
+  });
+
+  it('blocks FREE tier resume export with TIER_GATED', async () => {
+    const request = {
+      user: {
+        id: 'user-1',
+        entitlements: getEntitlementsForTier(SubscriptionTier.FREE),
+      },
+    } as any;
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+    } as any;
+
+    await expect(
+      controller.exportResume(
         { baselineId: 'baseline-1', baselineVersionId: 'version-1', jobId: 'job-1' },
         request,
-      );
-    } catch (error) {
-      capturedError = error;
-    }
+        res,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
-    expect(capturedError).toBeInstanceOf(ForbiddenException);
-    expect(capturedError).toMatchObject({
-      response: expect.objectContaining({
-        errorCode: 'TIER_GATED',
-      }),
-    });
-
-    expect(resumeService.generateResume).not.toHaveBeenCalled();
+    expect(resumeService.exportResume).not.toHaveBeenCalled();
   });
 });

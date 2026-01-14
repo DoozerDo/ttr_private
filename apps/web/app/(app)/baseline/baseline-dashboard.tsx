@@ -13,6 +13,7 @@ import {
   listBaselines,
   restoreBaseline,
 } from "@/lib/baselines";
+import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
@@ -120,6 +121,7 @@ export function BaselineDashboard({
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      markJourneyStepCompleted("baselines");
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
       setError("Unable to upload baseline right now.");

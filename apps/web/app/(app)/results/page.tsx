@@ -14,7 +14,6 @@ import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
-import { TierGateNotice } from "@/components/TierGateNotice";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -27,6 +26,7 @@ import {
   RealityCheckOutcome,
   getRealityCheck,
 } from "@/lib/realityCheck";
+import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -77,8 +77,9 @@ const VERDICT_DEFINITIONS: Record<string, VerdictDefinition> = {
     description: "There are some gaps. Address the highlighted areas before you proceed.",
   },
   SKIP: {
-    label: "Skip",
-    description: "Current alignment is low. Close the biggest gaps before investing more time.",
+    label: "Target acquired",
+    description:
+      "Significant gaps detected. Open Fit Review to see the highest impact adjustments.",
   },
 };
 
@@ -233,6 +234,17 @@ export default function ResultsPage() {
   const oneTapEligible = useMemo(() => {
     if (latestScore === null) return false;
     return latestScore >= 92;
+  }, [latestScore]);
+
+  const qualityBadge = useMemo(() => {
+    if (latestScore === null) return null;
+    const optimized = latestScore >= 92;
+    return {
+      label: optimized ? "Optimized" : "Draft",
+      toneClass: optimized
+        ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+        : "border-amber-300/40 bg-amber-500/10 text-amber-200",
+    };
   }, [latestScore]);
 
   const nextSteps = useMemo(() => {
@@ -661,7 +673,17 @@ export default function ResultsPage() {
           </div>
         </section>
 
-        {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
+        {tierGateError ? (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-50">
+            <span>
+              {tierGateError.message ?? "A plan update may unlock resume generation."}{" "}
+            </span>
+            <Link href="/pricing" className="font-semibold text-white underline">
+              View plans
+            </Link>
+            .
+          </div>
+        ) : null}
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
         {error ? (
           <Alert intent="error" title="Uh oh">
@@ -728,11 +750,20 @@ export default function ResultsPage() {
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Generate resume
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Output</h2>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Generate resume
+                </p>
+                <h2 className="text-lg font-semibold text-slate-100">Output</h2>
+              </div>
+              {qualityBadge ? (
+                <span
+                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
+                >
+                  {qualityBadge.label}
+                </span>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -740,7 +771,11 @@ export default function ResultsPage() {
                 onClick={() => void generateResume(false)}
                 disabled={!readyForResume || loading}
               >
-                {loading ? "Generating..." : "Generate resume"}
+                {loading
+                  ? "Generating..."
+                  : latestScore !== null && latestScore >= 92
+                    ? "Generate resume"
+                    : "Generate draft resume"}
               </FormButton>
 
               <FormButton
@@ -760,21 +795,21 @@ export default function ResultsPage() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <FormButton
-                variant="secondary"
-                onClick={() => void exportResume("docx")}
-                disabled={!readyForResume || !oneTapEligible || !!exporting}
-              >
-                {exporting === "docx" ? "Downloading..." : "Download DOCX"}
-              </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportResume("docx")}
+                  disabled={!readyForResume || !oneTapEligible || !!exporting}
+                >
+                  {exporting === "docx" ? "Downloading..." : "Download DOCX"}
+                </FormButton>
 
-              <FormButton
-                variant="secondary"
-                onClick={() => void exportResume("pdf")}
-                disabled={!readyForResume || !oneTapEligible || !!exporting}
-              >
-                {exporting === "pdf" ? "Downloading..." : "Download PDF"}
-              </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportResume("pdf")}
+                  disabled={!readyForResume || !oneTapEligible || !!exporting}
+                >
+                  {exporting === "pdf" ? "Downloading..." : "Download PDF"}
+                </FormButton>
             </div>
 
             <div className="space-y-2 text-sm text-slate-300">
@@ -807,7 +842,15 @@ export default function ResultsPage() {
               )}
             </div>
 
-            {resumeTierGateError ? <TierGateNotice error={resumeTierGateError} /> : null}
+            {resumeTierGateError ? (
+              <p className="text-sm text-amber-300">
+                {resumeTierGateError.message ?? "Resume generation is limited by your current plan."}{" "}
+                <Link href="/pricing" className="font-semibold text-white underline">
+                  View plans
+                </Link>
+                .
+              </p>
+            ) : null}
             {resumeComplianceError ? <ComplianceViolationPanel error={resumeComplianceError} /> : null}
             {resumeError ? (
               <Alert intent="error" title="Unable to generate resume">
@@ -833,11 +876,11 @@ export default function ResultsPage() {
               </>
             ) : (
               <EmptyState
-                title="No resume yet"
-                body="Generate or export a resume to view the payload."
+                title="No resume generated yet"
+                body="Generate a draft to view the payload."
                 cta={
-                  <FormButton onClick={() => void generateResume(false)} disabled={!baselineId || !jobId || loading}>
-                    Generate now
+                  <FormButton onClick={() => void generateResume(false)} disabled={!readyForResume || loading}>
+                    Generate draft resume
                   </FormButton>
                 }
                 className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"

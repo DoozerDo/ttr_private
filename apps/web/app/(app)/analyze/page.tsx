@@ -12,6 +12,7 @@ import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
 import type { AnalysisResult, StoredPayload } from "../lib/session";
 import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
+import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 type ApiStatus = "unknown" | "online" | "offline";
 
@@ -398,6 +399,7 @@ export default function AnalyzePage() {
 
       setResult(data);
       setRestoredAt(null);
+      markJourneyStepCompleted("analyze");
 
       const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
       saveLastAnalysis(payload);

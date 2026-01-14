@@ -9,6 +9,7 @@ import type { JobDto } from "@/lib/jobs";
 import { InstrumentPanelShell } from "@/app/(app)/ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getJobDetailsHref } from "@/src/navigation/routes";
+import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -230,6 +231,7 @@ export default function JobIngestionPage() {
       setJobs((previous) => [data as JobDto, ...previous]);
       resetForm();
       setSuccess("Job description saved. Ready to analyze fit.");
+      markJourneyStepCompleted("jobs");
     } catch {
       setError("Unable to save job right now.");
     } finally {

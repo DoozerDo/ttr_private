@@ -129,6 +129,22 @@ describe('ResumeService', () => {
     expect(result.sections).toHaveLength(1);
   });
 
+  it('returns draft quality when fit score is below 92', async () => {
+    const { service } = buildService(90);
+
+    const result = await service.generateResume('user-1', { ...request, oneTap: false });
+
+    expect(result.quality).toBe('draft');
+  });
+
+  it('returns optimized quality when fit score is at least 92', async () => {
+    const { service } = buildService(94);
+
+    const result = await service.generateResume('user-1', { ...request, oneTap: false });
+
+    expect(result.quality).toBe('optimized');
+  });
+
   it('exports DOCX content with headers and body', async () => {
     const { service } = buildService(95, []);
 
