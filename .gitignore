@@ -1,43 +1,57 @@
-/apps/api/storage/baselines
-/apps/api/storage
-
-.env
-.env.*
-!.env.example
-node_modules/
-dist/
-build/
-.next/
-out/
-coverage/
-*.log
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-**/db_data/
-# Terraform working dir & local state
-**/.terraform/
-*.tfstate
-*.tfstate.*
-crash.log
-crash.*.log
-# Variables often contain secrets
-*.tfvars
-*.tfvars.json
-# Override files
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-/.tmp
-infra/terraform/terraform.dev.tfvars
-infra/terraform/terraform.prod.tfvars
-infra/terraform/terraform.tfstate
+# =====================
+# Secrets / Env files
+# =====================
 .env
 .env.*
 !.env.example
 !.env.development.example
 !.env.production.example
 
-infra/terraform/output.txt
+# =====================
+# Node / Next.js
+# =====================
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+# =====================
+# Logs
+# =====================
+*.log
+crash.log
+crash.*.log
+
+# =====================
+# OS / Editor
+# =====================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =====================
+# Docker / Runtime data
+# =====================
+**/db_data/
+**/.tmp/
+
+# =====================
+# Terraform
+# =====================
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# =====================
+# App storage (runtime artifacts)
+# =====================
+/apps/api/storage
