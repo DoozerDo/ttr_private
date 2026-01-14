@@ -471,21 +471,29 @@ export default function JobIngestionPage() {
                   key={job.id}
                   style={{
                     borderTop: index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
-                    padding: "12px 0",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
                   }}
                 >
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "rgba(248,250,252,0.95)" }}>
-                    {job.title || "Untitled role"}
-                  </p>
-                  <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
-                    {job.company || "Company not specified"}
-                  </p>
-                  <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
-                    {new Date(job.createdAt).toLocaleString()}
-                  </p>
+                  <Link
+                    href={`/jobs/${job.id}`}
+                    className="block space-y-1 px-0 py-3 transition hover:text-white"
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: "rgba(248,250,252,0.95)",
+                      }}
+                    >
+                      {job.title || "Untitled role"}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
+                      {job.company || "Company not specified"}
+                    </p>
+                    <p style={{ margin: 0, fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
+                      {new Date(job.createdAt).toLocaleString()}
+                    </p>
+                  </Link>
                 </li>
               ))}
             </ul>
