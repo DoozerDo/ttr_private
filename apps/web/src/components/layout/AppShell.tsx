@@ -181,25 +181,36 @@ export function AppShell({ children, userEmail }: AppShellProps) {
           {navRoutes.map((route) => {
             const isActive = activeRouteIds.has(route.id);
             const disabledReason = getDisabledReason(route, hasBaseline, hasJob);
+            const isDisabled = Boolean(disabledReason);
+
             const baseClasses =
               "flex flex-col rounded-2xl border px-3 py-2 text-left text-sm font-semibold transition";
             const enabledClasses =
               "border-white/10 bg-transparent text-slate-100 hover:bg-slate-900/40";
             const activeClasses =
               "border-amber-400/60 bg-amber-400/20 text-amber-200 shadow-sm";
-            const disabledLabelClasses =
-              "text-[11px] font-medium text-slate-400 leading-tight";
+            const disabledClasses = "cursor-not-allowed opacity-60 hover:bg-transparent";
+            const disabledLabelClasses = "text-[11px] font-medium text-slate-400 leading-tight";
 
             return (
               <Link
                 key={route.id}
                 href={route.href}
+                onClick={(event) => {
+                  if (isDisabled) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
+                  setMenuOpen(false);
+                }}
+                tabIndex={isDisabled ? -1 : 0}
                 className={`${baseClasses} ${
                   isActive ? activeClasses : enabledClasses
-                } ${disabledReason ? "cursor-pointer" : ""}`}
+                } ${isDisabled ? disabledClasses : ""}`}
                 aria-current={isActive ? "page" : undefined}
                 title={disabledReason ?? undefined}
-                aria-disabled={disabledReason ? "true" : undefined}
+                aria-disabled={isDisabled ? "true" : undefined}
               >
                 <span>{route.label}</span>
                 {route.subtext ? (
@@ -272,9 +283,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">{children}</main>
       </div>
     </div>
   );

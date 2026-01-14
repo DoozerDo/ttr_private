@@ -4,7 +4,9 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -68,14 +70,46 @@ export class JobsController {
   }
 
   @Get()
-  async listJobs(@Req() request: Request & { user?: { id?: string } }) {
+  async listJobs(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('includeArchived') includeArchived?: string,
+  ) {
     const userId = request.user?.id;
 
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.jobsService.listJobsForUser(userId);
+    const include = includeArchived === 'true';
+    return this.jobsService.listJobsForUser(userId, include);
+  }
+
+  @Patch(':id/archive')
+  async archiveJob(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.jobsService.archiveJob(id, userId);
+  }
+
+  @Patch(':id/restore')
+  async restoreJob(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.jobsService.restoreJob(id, userId);
   }
 
   @Get(':id')

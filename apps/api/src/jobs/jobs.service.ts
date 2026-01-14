@@ -145,15 +145,49 @@ export class JobsService {
     return this.jobRepository.save(job);
   }
 
-  async listJobsForUser(userId: string) {
+  async listJobsForUser(userId: string, includeArchived = false) {
+    const where = includeArchived ? { userId } : { userId, isArchived: false };
+
     return this.jobRepository.find({
-      where: { userId },
+      where,
       order: { createdAt: 'DESC' },
     });
   }
 
   async getJobForUser(id: string, userId: string) {
-    const job = await this.jobRepository.findOne({ where: { id, userId } });
+    return this.findJobForUser(id, userId);
+  }
+
+  async archiveJob(jobId: string, userId: string) {
+    const job = await this.findJobForUser(jobId, userId);
+
+    if (job.isArchived && job.archivedAt) {
+      return job;
+    }
+
+    job.isArchived = true;
+    job.archivedAt = new Date();
+
+    return this.jobRepository.save(job);
+  }
+
+  async restoreJob(jobId: string, userId: string) {
+    const job = await this.findJobForUser(jobId, userId);
+
+    if (!job.isArchived && !job.archivedAt) {
+      return job;
+    }
+
+    job.isArchived = false;
+    job.archivedAt = null;
+
+    return this.jobRepository.save(job);
+  }
+
+  private async findJobForUser(jobId: string, userId: string) {
+    const job = await this.jobRepository.findOne({
+      where: { id: jobId, userId },
+    });
 
     if (!job) {
       throw new NotFoundException('Job not found');

@@ -11,4 +11,6 @@ export interface JobDto {
   jdParsedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
+  isArchived?: boolean;
 }

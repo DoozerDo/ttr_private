@@ -14,6 +14,7 @@ import type {
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { BaselinePolicyEditor } from "./baseline-policy-editor";
+import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
 function computeBaseUrl({
   protocol,
@@ -75,7 +76,7 @@ async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
       await buildInternalFetchOptions(),
     );
 
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       redirect("/auth/login");
     }
 
@@ -108,7 +109,7 @@ async function fetchBaselineVersions(
       await buildInternalFetchOptions(),
     );
 
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       redirect("/auth/login");
     }
 
@@ -346,7 +347,7 @@ export default async function BaselineDetailPage({
               {hasActiveFilter ? (
                 <p className="text-sm text-gray-600">
                   Filtering to suggested areas: {suggestedSectionsRaw || "selected sections"}.
-                  <Link href={`/baseline/${resolvedParams.id}`}>Clear filter</Link>
+                  <Link href={getBaselineDetailsHref(resolvedParams.id ?? "")}>Clear filter</Link>
                 </p>
               ) : null}
               {!hasRenderableSections && !fallbackContent ? (

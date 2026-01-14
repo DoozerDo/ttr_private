@@ -8,6 +8,7 @@ import { Alert } from "@/components/Alert";
 import type { JobDto } from "@/lib/jobs";
 import { InstrumentPanelShell } from "@/app/(app)/ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
+import { getJobDetailsHref } from "@/src/navigation/routes";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -474,7 +475,7 @@ export default function JobIngestionPage() {
                   }}
                 >
                   <Link
-                    href={`/jobs/${job.id}`}
+                    href={getJobDetailsHref(job.id)}
                     className="block space-y-1 px-0 py-3 transition hover:text-white"
                   >
                     <p

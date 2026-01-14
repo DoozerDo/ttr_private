@@ -107,3 +107,11 @@ export function getRouteById(id: string) {
 }
 
 export { settingsRoute };
+
+export function getJobDetailsHref(jobId: string) {
+  return `/jobs/${encodeURIComponent(jobId)}`;
+}
+
+export function getBaselineDetailsHref(baselineId: string) {
+  return `/baseline/${encodeURIComponent(baselineId)}`;
+}

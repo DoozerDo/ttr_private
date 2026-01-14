@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../helpers";
+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 
-export async function GET(
+export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
@@ -22,8 +22,8 @@ export async function GET(
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/jobs/${encodeURIComponent(id)}`, {
-    method: "GET",
+  const response = await fetch(`${baseUrl}/jobs/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,

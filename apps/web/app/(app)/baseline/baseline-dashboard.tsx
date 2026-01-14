@@ -15,6 +15,7 @@ import {
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
+import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -564,7 +565,7 @@ export function BaselineDashboard({
                         gap: 8,
                       }}
                     >
-                      <Link href={`/baseline/${baseline.id}`} style={linkStyle}>
+                      <Link href={getBaselineDetailsHref(baseline.id)} style={linkStyle}>
                         View details
                       </Link>
                       <button

@@ -7,6 +7,10 @@ const API_ROUTES = {
 
 const JOBS_API_PATH = API_ROUTES.jobs;
 
+type ListJobsOptions = {
+  includeArchived?: boolean;
+};
+
 function isServer(): boolean {
   return typeof window === "undefined";
 }
@@ -38,7 +42,7 @@ async function getServerForwardHeaders(): Promise<Record<string, string> | undef
   try {
     const mod = await import("next/headers");
 
-    // In this Next version, these can be async.
+    // Next 16 dynamic APIs can be async.
     const hdrs = await (mod.headers as unknown as () => Promise<Headers>)();
     const cookieStore = await (mod.cookies as unknown as () => Promise<{ toString: () => string }>)();
 
@@ -72,7 +76,7 @@ async function parseErrorMessage(response: Response, action: string): Promise<st
 
     if (message) return message.trim();
   } catch {
-    // Ignore non-JSON responses to avoid showing HTML.
+    // Ignore non JSON responses to avoid showing HTML.
   }
 
   return fallback;
@@ -92,6 +96,27 @@ async function ensureJsonResponse<T>(response: Response, action: string): Promis
   return (await response.json()) as T;
 }
 
+function buildListUrl(options?: ListJobsOptions): string {
+  // We always request includeArchived true when possible and filter in UI.
+  // If the API supports a query param, we pass it through anyway.
+  const includeArchived = options?.includeArchived ?? false;
+  const query = includeArchived ? "?includeArchived=true" : "";
+  return `${JOBS_API_PATH}${query}`;
+}
+
+export async function listJobs(options?: ListJobsOptions): Promise<JobDto[]> {
+  const url = buildApiUrl(buildListUrl(options));
+  const forwardedHeaders = await getServerForwardHeaders();
+
+  const response = await fetch(url, {
+    cache: "no-store",
+    credentials: "include",
+    headers: forwardedHeaders,
+  });
+
+  return ensureJsonResponse<JobDto[]>(response, "Load jobs");
+}
+
 export async function getJob(jobId: string): Promise<JobDto> {
   const encodedId = encodeURIComponent(jobId);
   const url = buildApiUrl(`${JOBS_API_PATH}/${encodedId}`);
@@ -105,4 +130,36 @@ export async function getJob(jobId: string): Promise<JobDto> {
   });
 
   return ensureJsonResponse<JobDto>(response, "Load job");
+}
+
+export async function archiveJob(jobId: string): Promise<JobDto> {
+  const encodedId = encodeURIComponent(jobId);
+  const url = buildApiUrl(`${JOBS_API_PATH}/${encodedId}/archive`);
+
+  const forwardedHeaders = await getServerForwardHeaders();
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    cache: "no-store",
+    credentials: "include",
+    headers: forwardedHeaders,
+  });
+
+  return ensureJsonResponse<JobDto>(response, "Archive job");
+}
+
+export async function restoreJob(jobId: string): Promise<JobDto> {
+  const encodedId = encodeURIComponent(jobId);
+  const url = buildApiUrl(`${JOBS_API_PATH}/${encodedId}/restore`);
+
+  const forwardedHeaders = await getServerForwardHeaders();
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    cache: "no-store",
+    credentials: "include",
+    headers: forwardedHeaders,
+  });
+
+  return ensureJsonResponse<JobDto>(response, "Restore job");
 }
