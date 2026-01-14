@@ -21,7 +21,18 @@ export type JourneyNavState = {
   completedStepIds: JourneyStepId[];
 };
 
-const navigationRoutes = [...sidebarRoutes, settingsRoute];
+const baseNavigationRoutes = [...sidebarRoutes, settingsRoute];
+
+const navigationRoutes = (() => {
+  const seenIds = new Set<RouteConfig["id"]>();
+  const deduped: RouteConfig[] = [];
+  for (const route of baseNavigationRoutes) {
+    if (seenIds.has(route.id)) continue;
+    seenIds.add(route.id);
+    deduped.push(route);
+  }
+  return deduped;
+})();
 
 export const JOURNEY_NAV_STEPS: JourneyStep[] = navigationRoutes.map((route) => ({
   id: route.id,

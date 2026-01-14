@@ -1,9 +1,16 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { JourneyNavState, JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
+import {
+  JourneyNavState,
+  JourneyStepId,
+  JourneyStepState,
+  resolveJourneyNavStateFromPathname,
+} from "@/src/lib/journeyNav";
+import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 
 export const JOURNEY_NAV_V1_ENABLED =
   process.env.NEXT_PUBLIC_JOURNEY_NAV_V1_ENABLED === "true" ||
@@ -19,10 +26,9 @@ type JourneyNavV1Props = {
 };
 
 const LOCKED_TOOLTIP = "Locked until previous steps are completed.";
-const IDLE_PULSE_MIN_MS = 2200;
-const IDLE_PULSE_MAX_MS = 2800;
 const IMPACT_DURATION_MS = 140;
 const ARROW_DURATION_MS = 320;
+const TARGET_ARROW_FLY_DURATION_MS = 420;
 
 type ArrowFlight = {
   key: number;
@@ -32,9 +38,52 @@ type ArrowFlight = {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-function createPulseDuration() {
-  return IDLE_PULSE_MIN_MS + Math.random() * (IDLE_PULSE_MAX_MS - IDLE_PULSE_MIN_MS);
-}
+type ArrowOverlayProps = {
+  onImpact: () => void;
+  shouldReduceMotion: boolean;
+};
+
+const ArrowOverlay = ({ onImpact, shouldReduceMotion }: ArrowOverlayProps) => {
+  const arrowContent = (
+    <svg viewBox="0 0 40 40" role="presentation" aria-hidden="true">
+      <path
+        d="M4 20h22"
+        stroke="#fde68a"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M26 13l12 7-12 7"
+        stroke="#fbbf24"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+
+  if (shouldReduceMotion) {
+    return (
+      <div className="journey-nav-arrow-overlay" aria-hidden>
+        {arrowContent}
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      className="journey-nav-arrow-overlay"
+      initial={{ translateX: -40, translateY: -10, rotate: -12, opacity: 0 }}
+      animate={{ translateX: 0, translateY: 0, rotate: 0, opacity: 1 }}
+      transition={{ duration: TARGET_ARROW_FLY_DURATION_MS / 1000, ease: "easeOut" }}
+      onAnimationComplete={onImpact}
+      aria-hidden
+    >
+      {arrowContent}
+    </motion.div>
+  );
+};
 
 export function JourneyNavV1({
   state,
@@ -43,23 +92,24 @@ export function JourneyNavV1({
   ariaLabel,
 }: JourneyNavV1Props) {
   const shouldReduceMotion = useReducedMotion();
+  const pathname = usePathname() ?? "/";
+  const pathActiveStepId = resolveJourneyNavStateFromPathname(pathname).activeStepId;
+  const { activeOverrideStepId, setActiveOverride } = useJourneyNavAppState();
   const [isTyping, setIsTyping] = useState(false);
 
-  const [arrowOverlayKey, setArrowOverlayKey] = useState(0);
-  const arrowOverlayInitializedRef = useRef(false);
   const [rippling, setRippling] = useState(false);
   const rippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveStepIdRef = useRef<JourneyStepId | null>(null);
-  const pulseDuration = useMemo(() => createPulseDuration(), []);
+  const prevPathnameRef = useRef<string | null>(null);
   const [isImpacting, setIsImpacting] = useState(false);
   const arrowKeyRef = useRef(0);
   const [arrowFlight, setArrowFlight] = useState<ArrowFlight | null>(null);
 
   const denominator = Math.max(state.steps.length - 1, 1);
-  const rawActiveIndex = state.steps.findIndex((step) => step.id === state.activeStepId);
+  const rawActiveIndex = state.steps.findIndex((step) => step.id === pathActiveStepId);
   const activeIndex = rawActiveIndex < 0 ? 0 : rawActiveIndex;
   const progressPercent =
     state.steps.length === 0
@@ -106,6 +156,17 @@ export function JourneyNavV1({
     };
   }, []);
 
+  useEffect(() => {
+    if (
+      prevPathnameRef.current &&
+      prevPathnameRef.current !== pathname &&
+      activeOverrideStepId !== null
+    ) {
+      setActiveOverride(null);
+    }
+    prevPathnameRef.current = pathname;
+  }, [activeOverrideStepId, pathname, setActiveOverride]);
+
   const triggerRipple = () => {
     if (shouldReduceMotion) return;
     setRippling(true);
@@ -117,17 +178,6 @@ export function JourneyNavV1({
       rippleTimerRef.current = null;
     }, 420);
   };
-
-  useEffect(() => {
-    if (shouldReduceMotion) {
-      return;
-    }
-    if (!arrowOverlayInitializedRef.current) {
-      arrowOverlayInitializedRef.current = true;
-      return;
-    }
-    setArrowOverlayKey((prev) => prev + 1);
-  }, [state.activeStepId, shouldReduceMotion]);
 
   useEffect(() => {
     if (shouldReduceMotion) {
@@ -152,9 +202,9 @@ export function JourneyNavV1({
     const previousStepId = prevActiveStepIdRef.current;
     const previousIndex =
       previousStepId === null ? -1 : state.steps.findIndex((step) => step.id === previousStepId);
-    const currentIndex = state.steps.findIndex((step) => step.id === state.activeStepId);
+    const currentIndex = state.steps.findIndex((step) => step.id === pathActiveStepId);
 
-    prevActiveStepIdRef.current = state.activeStepId;
+    prevActiveStepIdRef.current = pathActiveStepId;
 
     const isForward = previousIndex >= 0 && currentIndex > previousIndex;
 
@@ -173,8 +223,8 @@ export function JourneyNavV1({
   }, [
     denominator,
     onActiveStepAdvanced,
+    pathActiveStepId,
     shouldReduceMotion,
-    state.activeStepId,
     state.steps,
     state.steps.length,
   ]);
@@ -213,10 +263,11 @@ export function JourneyNavV1({
 
         <div className="journey-nav-step-grid">
           {state.steps.map((step) => {
-            const isActive = step.state === JourneyStepState.Active;
+            const isActive = step.id === pathActiveStepId;
             const isCompleted = step.state === JourneyStepState.Completed;
             const isLocked = step.state === JourneyStepState.Locked;
             const isClickable = isCompleted && Boolean(onStepClick);
+            const showPulse = shouldPulse && isActive;
 
             const nodeClass = [
               "journey-nav-step-button",
@@ -248,68 +299,17 @@ export function JourneyNavV1({
                 title={isLocked ? LOCKED_TOOLTIP : undefined}
               >
                 <span className={iconAreaClass}>
-                  {isActive && shouldPulse ? (
-                    <motion.span
-                      className="journey-nav-icon-pulse"
-                      aria-hidden
-                      initial={false}
-                      animate="pulse"
-                      variants={{
-                        pulse: {
-                          scale: [1, 1.08, 1],
-                          opacity: [0.6, 0, 0.6],
-                          transition: {
-                            duration: pulseDuration / 1000,
-                            ease: "easeInOut",
-                            repeat: Infinity,
-                          },
-                        },
-                      }}
+                  {showPulse ? <span className="journey-nav-target-pulse" aria-hidden /> : null}
+                  {isActive ? (
+                    <ArrowOverlay
+                      key={pathActiveStepId}
+                      onImpact={triggerRipple}
+                      shouldReduceMotion={!!shouldReduceMotion}
                     />
                   ) : null}
-                  {isActive && !shouldReduceMotion ? (
-                    <span className="journey-nav-icon-arrow" aria-hidden>
-                      <motion.svg
-                        key={`journey-nav-target-arrow-${step.id}-${arrowOverlayKey}`}
-                        viewBox="0 0 28 28"
-                        role="presentation"
-                        aria-hidden="true"
-                        initial={{ x: -28, y: -18, rotate: -18, opacity: 0 }}
-                        animate={{ x: 0, y: 0, rotate: -1, opacity: 1 }}
-                        transition={{
-                          duration: 0.64,
-                          ease: "easeOut",
-                        }}
-                        onAnimationComplete={triggerRipple}
-                      >
-                        <path
-                          d="M4 14h14"
-                          stroke="#fde68a"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M18 9l8 5-8 5"
-                          stroke="#fbbf24"
-                          strokeWidth="2.3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </motion.svg>
-                    </span>
-                  ) : null}
-                  {isCompleted ? (
-                    <span className="journey-nav-icon-check" aria-hidden>
-                      <svg viewBox="0 0 24 24" role="presentation">
-                        <path d="M6 12l4 4 8-8" />
-                      </svg>
-                    </span>
-                  ) : (
-                    <span className="journey-nav-icon-target" aria-hidden>
-                      {isActive ? <span className="journey-nav-icon-center" /> : null}
-                    </span>
-                  )}
+                  <span className="journey-nav-icon-target" aria-hidden>
+                    {isActive ? <span className="journey-nav-icon-center" /> : null}
+                  </span>
                 </span>
                 <span className="journey-nav-step-label">{step.label}</span>
               </button>
@@ -467,16 +467,12 @@ export function JourneyNavV1({
           justify-content: center;
           background: radial-gradient(
             circle,
-            rgba(248, 250, 252, 1) 0%,
-            rgba(248, 250, 252, 1) 8%,
-            rgba(251, 191, 36, 0.95) 8%,
-            rgba(251, 191, 36, 0.95) 18%,
-            rgba(192, 132, 252, 0.85) 19%,
-            rgba(192, 132, 252, 0.85) 32%,
-            rgba(99, 102, 241, 0.75) 33%,
-            rgba(99, 102, 241, 0.75) 46%,
-            rgba(15, 23, 42, 0.95) 47%,
-            rgba(15, 23, 42, 0.95) 100%
+            rgba(15, 23, 42, 0.95) 0%,
+            rgba(15, 23, 42, 0.95) 32%,
+            rgba(79, 70, 229, 0.2) 33%,
+            rgba(79, 70, 229, 0.2) 46%,
+            rgba(30, 41, 59, 0.85) 47%,
+            rgba(30, 41, 59, 0.85) 100%
           );
           border: 2px solid rgba(99, 102, 241, 0.35);
           box-shadow: inset 0 0 12px rgba(15, 23, 42, 0.85),
@@ -485,6 +481,7 @@ export function JourneyNavV1({
           transform: translateY(var(--journey-nav-target-translate)) scale(1);
           transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
             background 0.18s ease;
+          overflow: visible;
         }
 
         .journey-nav-icon-area::after {
@@ -496,33 +493,29 @@ export function JourneyNavV1({
           pointer-events: none;
         }
 
-        .journey-nav-icon-pulse {
+        .journey-nav-target-pulse {
           position: absolute;
-          width: 68px;
-          height: 68px;
+          inset: -6px;
           border-radius: 999px;
-          background: radial-gradient(circle, rgba(192, 132, 252, 0.5), rgba(129, 140, 248, 0));
+          background: radial-gradient(circle, rgba(129, 140, 248, 0.5), rgba(99, 102, 241, 0));
           pointer-events: none;
           z-index: 0;
+          animation: journey-nav-target-pulse 2.5s ease-in-out infinite;
         }
 
-        .journey-nav-icon-arrow {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          width: 48px;
-          height: 48px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          pointer-events: none;
-          z-index: 1;
-          transform: translate(-50%, -50%);
-        }
-
-        .journey-nav-icon-arrow svg {
-          width: 36px;
-          height: 36px;
+        @keyframes journey-nav-target-pulse {
+          0% {
+            transform: scale(1);
+            opacity: 0.6;
+          }
+          45% {
+            transform: scale(1.12);
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 0;
+          }
         }
 
         .journey-nav-icon-area--ripple {
@@ -534,7 +527,7 @@ export function JourneyNavV1({
             transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
           }
           60% {
-            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1.08);
+            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1.06);
           }
           100% {
             transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
@@ -548,15 +541,15 @@ export function JourneyNavV1({
           --journey-nav-target-translate: -1px;
           background: radial-gradient(
             circle,
-            rgba(253, 244, 255, 1) 0%,
-            rgba(253, 244, 255, 1) 9%,
-            rgba(251, 191, 36, 0.95) 10%,
+            rgba(255, 255, 255, 0.95) 0%,
+            rgba(255, 255, 255, 0.95) 10%,
+            rgba(251, 191, 36, 0.95) 11%,
             rgba(251, 191, 36, 0.95) 20%,
-            rgba(192, 132, 252, 0.95) 20.5%,
-            rgba(192, 132, 252, 0.95) 33%,
-            rgba(129, 140, 248, 0.9) 33.5%,
-            rgba(129, 140, 248, 0.9) 47%,
-            rgba(15, 23, 42, 0.95) 48%,
+            rgba(192, 132, 252, 0.95) 21%,
+            rgba(192, 132, 252, 0.95) 30%,
+            rgba(129, 140, 248, 0.9) 31%,
+            rgba(129, 140, 248, 0.9) 45%,
+            rgba(15, 23, 42, 0.95) 46%,
             rgba(15, 23, 42, 0.95) 100%
           );
         }
@@ -566,11 +559,11 @@ export function JourneyNavV1({
             circle,
             rgba(226, 232, 240, 0.9) 0%,
             rgba(226, 232, 240, 0.9) 10%,
-            rgba(148, 163, 184, 0.55) 10%,
-            rgba(148, 163, 184, 0.55) 25%,
-            rgba(99, 102, 241, 0.4) 25%,
-            rgba(99, 102, 241, 0.4) 45%,
-            rgba(15, 23, 42, 0.9) 46%,
+            rgba(148, 163, 184, 0.45) 10%,
+            rgba(148, 163, 184, 0.45) 28%,
+            rgba(99, 102, 241, 0.4) 28%,
+            rgba(99, 102, 241, 0.4) 48%,
+            rgba(15, 23, 42, 0.9) 49%,
             rgba(15, 23, 42, 0.9) 100%
           );
           box-shadow: inset 0 0 14px rgba(8, 11, 21, 0.8), 0 6px 18px rgba(2, 6, 23, 0.6);
@@ -608,23 +601,18 @@ export function JourneyNavV1({
           z-index: 2;
         }
 
-        .journey-nav-icon-check {
+        .journey-nav-arrow-overlay {
           position: absolute;
           inset: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          display: grid;
+          place-items: center;
+          pointer-events: none;
           z-index: 3;
         }
 
-        .journey-nav-icon-check svg {
+        .journey-nav-arrow-overlay svg {
           width: 32px;
           height: 32px;
-          stroke: #a5f3fc;
-          stroke-width: 2.5;
-          fill: none;
-          stroke-linecap: round;
-          stroke-linejoin: round;
         }
 
         .journey-nav-step-label {
