@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
 
 const isDev = process.env.NODE_ENV === "development";
 
-const getStoredContext = () => {
+type StoredContext = {
+  hasBaseline: boolean;
+  hasJob: boolean;
+};
+
+const getStoredContext = (): StoredContext => {
   if (typeof window === "undefined") {
     return { hasBaseline: false, hasJob: false };
   }
@@ -53,6 +58,14 @@ type AppShellProps = {
   userEmail?: string | null;
 };
 
+async function safeJson<T>(response: Response): Promise<T | null> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function AppShell({ children, userEmail }: AppShellProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
@@ -64,26 +77,84 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const lastPath = useRef(pathname);
 
-  useEffect(() => {
-    const update = () => {
-      const { hasBaseline, hasJob } = getStoredContext();
-      setHasBaseline(hasBaseline);
-      setHasJob(hasJob);
-    };
+  const refreshContext = useCallback(async () => {
+    if (typeof window === "undefined") return;
 
-    update();
+    // Start with whatever we have from stored analysis context (cheap signal).
+    const stored = getStoredContext();
 
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === "ttr:lastAnalysis") {
-        update();
+    // Then confirm by asking the API for actual lists.
+    // These calls use cookies (same-origin), so we include credentials.
+    let baselinesOk = false;
+    let jobsOk = false;
+
+    try {
+      const baselineRes = await fetch("/api/baselines", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (baselineRes.ok) {
+        const data = await safeJson<unknown>(baselineRes);
+        // We only need truthiness of "has any".
+        // If API shape changes, stored context still provides a fallback.
+        if (Array.isArray(data)) {
+          baselinesOk = data.length > 0;
+        } else if (data && typeof data === "object") {
+          const maybe = data as { items?: unknown[]; baselines?: unknown[] };
+          if (Array.isArray(maybe.items)) baselinesOk = maybe.items.length > 0;
+          if (Array.isArray(maybe.baselines)) baselinesOk = maybe.baselines.length > 0;
+        } else {
+          baselinesOk = stored.hasBaseline;
+        }
+      } else {
+        baselinesOk = stored.hasBaseline;
       }
-    };
+    } catch {
+      baselinesOk = stored.hasBaseline;
+    }
 
-    window.addEventListener("storage", handleStorage);
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-    };
+    try {
+      const jobsRes = await fetch("/api/jobs", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (jobsRes.ok) {
+        const data = await safeJson<unknown>(jobsRes);
+        if (Array.isArray(data)) {
+          jobsOk = data.length > 0;
+        } else if (data && typeof data === "object") {
+          const maybe = data as { items?: unknown[]; jobs?: unknown[] };
+          if (Array.isArray(maybe.items)) jobsOk = maybe.items.length > 0;
+          if (Array.isArray(maybe.jobs)) jobsOk = maybe.jobs.length > 0;
+        } else {
+          jobsOk = stored.hasJob;
+        }
+      } else {
+        jobsOk = stored.hasJob;
+      }
+    } catch {
+      jobsOk = stored.hasJob;
+    }
+
+    setHasBaseline(Boolean(baselinesOk));
+    setHasJob(Boolean(jobsOk));
   }, []);
+
+  useEffect(() => {
+    refreshContext();
+  }, [refreshContext]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      refreshContext();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshContext]);
 
   useEffect(() => {
     if (!isDev) return;
@@ -189,25 +260,19 @@ export function AppShell({ children, userEmail }: AppShellProps) {
               "border-white/10 bg-transparent text-slate-100 hover:bg-slate-900/40";
             const activeClasses =
               "border-amber-400/60 bg-amber-400/20 text-amber-200 shadow-sm";
-            const disabledClasses = "cursor-not-allowed opacity-60 hover:bg-transparent";
+            const disabledClasses = "opacity-60";
             const disabledLabelClasses = "text-[11px] font-medium text-slate-400 leading-tight";
 
             return (
               <Link
                 key={route.id}
                 href={route.href}
-                onClick={(event) => {
-                  if (isDisabled) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                  }
+                onClick={() => {
                   setMenuOpen(false);
                 }}
-                tabIndex={isDisabled ? -1 : 0}
-                className={`${baseClasses} ${
-                  isActive ? activeClasses : enabledClasses
-                } ${isDisabled ? disabledClasses : ""}`}
+                className={`${baseClasses} ${isActive ? activeClasses : enabledClasses} ${
+                  isDisabled ? disabledClasses : ""
+                }`}
                 aria-current={isActive ? "page" : undefined}
                 title={disabledReason ?? undefined}
                 aria-disabled={isDisabled ? "true" : undefined}
@@ -253,7 +318,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
               >
                 <span>{userEmail ?? "Account"}</span>
                 <span aria-hidden="true" className="text-xs">
-                  ?
+                  ˅
                 </span>
               </button>
 
