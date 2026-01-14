@@ -1,0 +1,16 @@
+{
+  "name": "targetthisrole",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build:web": "npm -w apps/web run build",
+    "build:api": "npm -w apps/api run build",
+    "build:both": "npm run build:api && npm run build:web",
+    "lint:web": "npm -w apps/web run lint",
+    "lint:api": "npm -w apps/api run lint",
+    "test:api": "npm -w apps/api run test",
+    "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1"
+  }
+}
