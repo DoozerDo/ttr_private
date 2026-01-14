@@ -1,5 +1,57 @@
-/apps/api/storage/baselines
-/apps/api/storage/baselines
+# =====================
+# Secrets / Env files
+# =====================
+.env
+.env.*
+!.env.example
+!.env.development.example
+!.env.production.example
+
+# =====================
+# Node / Next.js
+# =====================
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+# =====================
+# Logs
+# =====================
+*.log
+crash.log
+crash.*.log
+
+# =====================
+# OS / Editor
+# =====================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =====================
+# Docker / Runtime data
+# =====================
+**/db_data/
+**/.tmp/
+
+# =====================
+# Terraform
+# =====================
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# =====================
+# App storage (runtime artifacts)
+# =====================
 /apps/api/storage
-/apps/api/storage/baselines
-/.tmp
