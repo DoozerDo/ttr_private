@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { TierGateNotice } from "@/components/TierGateNotice";
 
 import type { BaselineDto } from "@/lib/baselines";
 import {
@@ -167,6 +166,8 @@ function humanizeKey(key: string): string {
 export default function SearchSetRunPage() {
   const params = useParams<{ id: string }>();
   const searchSetId = params?.id ?? "";
+  const router = useRouter();
+  const handleUpgrade = useCallback(() => router.push("/pricing"), [router]);
 
   const [searchSet, setSearchSet] = useState<SearchSetDto | null>(null);
   const [searchSetLoading, setSearchSetLoading] = useState(true);
@@ -184,6 +185,7 @@ export default function SearchSetRunPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
+  const canRunSearchSets = !tierGateError;
   const [runMessage, setRunMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -275,9 +277,14 @@ export default function SearchSetRunPage() {
           resultCount:
             typeof searchSet.lastRunResultCount === "number" ? searchSet.lastRunResultCount : null,
         }
-      : null;
+        : null;
 
   const lastRunBaselineLabel = getBaselineLabel(lastRunInfo?.baselineVersionId);
+  const runStateMessage = lastRunInfo?.at
+    ? `Last run on ${formatDate(lastRunInfo.at)} using baseline ${
+        lastRunBaselineLabel ?? "baseline version unknown"
+      }.`
+    : "This search set has not been run yet.";
   const resultsAreStale =
     runExecuted &&
     !!lastRunInfo?.baselineVersionId &&
@@ -285,14 +292,14 @@ export default function SearchSetRunPage() {
     lastRunInfo.baselineVersionId !== selectedBaselineVersionId;
   const staleBaselineLabel = lastRunBaselineLabel ?? "the previously run baseline version";
   const runDisabled =
-    running || !selectedBaselineVersionId || searchSetLoading || baselinesLoading;
+    running || !selectedBaselineVersionId || searchSetLoading || baselinesLoading || !canRunSearchSets;
   const snapshotSourceUrl = runMetadata?.sourceSnapshot?.sourceUrl ?? searchSet?.sourceUrl;
   const snapshotFetchedAt = runMetadata?.sourceSnapshot?.fetchedAt ?? searchSet?.lastRunAt ?? null;
   const snapshotListingCount =
     runMetadata?.fetchedListingCount ?? runMetadata?.sourceSnapshot?.listingCount;
 
   const handleRun = useCallback(async () => {
-    if (!searchSetId || !selectedBaselineVersionId) return;
+    if (!searchSetId || !selectedBaselineVersionId || !canRunSearchSets) return;
     const baselineVersionId = selectedBaselineVersionId;
 
     setRunning(true);
@@ -335,12 +342,13 @@ export default function SearchSetRunPage() {
       }
       if (apiError.tierGate) {
         setTierGateError(apiError.tierGate);
+      } else {
+        setRunError(apiError.message ?? "Unable to run this search set.");
       }
-      setRunError(apiError.message ?? "Unable to run this search set.");
     } finally {
       setRunning(false);
     }
-  }, [searchSetId, selectedBaselineVersionId]);
+  }, [searchSetId, selectedBaselineVersionId, canRunSearchSets]);
 
   const explanationEntries = useMemo(() => {
     return runResults.map((result) => {
@@ -383,6 +391,10 @@ export default function SearchSetRunPage() {
           }
         />
 
+        {searchSet ? (
+          <p className="text-sm text-slate-300">{runStateMessage}</p>
+        ) : null}
+
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
             <div>
@@ -420,7 +432,16 @@ export default function SearchSetRunPage() {
                     ))}
                 </div>
 
-                {searchSet.parseWarning ? <Alert intent="warning">{searchSet.parseWarning}</Alert> : null}
+                {searchSet.parseWarning ? (
+                  <Alert intent="warning">
+                    <div className="space-y-2">
+                      <p>{searchSet.parseWarning}</p>
+                      <p className="text-xs text-slate-200">
+                        This means results may be broader and less targeted, but the search set can still run.
+                      </p>
+                    </div>
+                  </Alert>
+                ) : null}
               </div>
             ) : (
               <EmptyState
@@ -437,7 +458,20 @@ export default function SearchSetRunPage() {
               <h2 className="text-lg font-semibold text-slate-100">Selection</h2>
             </div>
 
-            {baselinesLoading ? (
+            {!canRunSearchSets ? (
+              <Alert intent="warning" title="PRO required">
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-200">
+                    Running search sets requires the PRO plan.
+                  </p>
+                  <div className="flex justify-end">
+                    <FormButton variant="secondary" onClick={handleUpgrade}>
+                      Upgrade to PRO
+                    </FormButton>
+                  </div>
+                </div>
+              </Alert>
+            ) : baselinesLoading ? (
               <p className="text-sm text-slate-400">Loading baseline versions...</p>
             ) : baselinesError ? (
               <Alert intent="error">{baselinesError}</Alert>
@@ -474,12 +508,7 @@ export default function SearchSetRunPage() {
                   <p className="text-xs text-slate-400">Selected: {selectedBaselineLabel}</p>
                 ) : null}
 
-                <FormButton onClick={handleRun} disabled={runDisabled}>
-                  {running ? "Running..." : "Run search set"}
-                </FormButton>
-
-                {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
-                {runError ? <Alert intent="error">{runError}</Alert> : null}
+                {canRunSearchSets && runError ? <Alert intent="error">{runError}</Alert> : null}
 
                 {validationErrors.length ? (
                   <Alert intent="warning" title="Validation issues">
@@ -492,27 +521,6 @@ export default function SearchSetRunPage() {
                 ) : null}
 
                 {runMessage ? <Alert intent="success">{runMessage}</Alert> : null}
-
-                {lastRunInfo ? (
-                  <div className="space-y-1 rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
-                    <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span className="font-semibold uppercase tracking-[0.3em]">Last run</span>
-                      <span>{formatDate(lastRunInfo.at)}</span>
-                    </div>
-                    <p className="text-sm text-white">
-                      {lastRunBaselineLabel ?? "Baseline version unknown"}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {typeof lastRunInfo.resultCount === "number"
-                        ? `${lastRunInfo.resultCount} results returned`
-                        : "Results count unavailable"}
-                    </p>
-                  </div>
-                ) : searchSet ? (
-                  <p className="text-xs text-slate-400">
-                    Run this set once to capture timestamp, baseline, and results metadata.
-                  </p>
-                ) : null}
               </div>
             )}
           </section>
@@ -529,9 +537,19 @@ export default function SearchSetRunPage() {
             <span className="text-xs text-slate-400">
               {snapshotFetchedAt
                 ? `Last fetched ${formatDate(snapshotFetchedAt)}`
-                : 'Run the set to capture a snapshot'}
+                : canRunSearchSets
+                  ? 'Run the set to capture a snapshot'
+                  : 'Upgrade to PRO to run this search set.'}
             </span>
           </div>
+
+          {!runExecuted ? (
+            <p className="text-xs text-slate-400">
+              {canRunSearchSets
+                ? 'Run the search set to capture metadata and view results.'
+                : 'Upgrade to PRO to run this search set.'}
+            </p>
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1">
@@ -577,7 +595,9 @@ export default function SearchSetRunPage() {
             {runMetadata?.sourceSnapshot
               ? 'This snapshot reflects the last provider pull.'
               : searchSet?.sourceType
-              ? 'Run the provider-backed set to capture metadata.'
+              ? canRunSearchSets
+                ? 'Run the provider-backed set to capture metadata.'
+                : 'Upgrade to PRO to run this search set.'
               : 'Legacy sets rely on saved jobs and do not produce provider snapshots.'}
           </p>
         </section>
@@ -590,13 +610,17 @@ export default function SearchSetRunPage() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-xs text-slate-400">
-                {runResults.length
-                  ? `${runResults.length} / ${RESULT_LIMIT} shown`
-                  : "Run the set to view matches"}
+                {!canRunSearchSets
+                  ? "Upgrade to PRO to run this search set and view matched roles."
+                  : runResults.length
+                    ? `${runResults.length} / ${RESULT_LIMIT} shown`
+                    : "Run the set to view matches"}
               </span>
-              <FormButton variant="ghost" onClick={handleRun} disabled={runDisabled}>
-                {running ? "Running..." : "Re-run"}
-              </FormButton>
+              {canRunSearchSets ? (
+                <FormButton onClick={handleRun} disabled={runDisabled}>
+                  {running ? "Running..." : runExecuted ? "Re-run" : "Run search set"}
+                </FormButton>
+              ) : null}
             </div>
           </div>
 
@@ -608,16 +632,19 @@ export default function SearchSetRunPage() {
           ) : null}
 
           {!runExecuted ? (
-            <EmptyState
-              title="Run the set to show matches"
-              body="Pick a baseline version and press Run to see the strongest job matches."
-              cta={
-                <FormButton variant="ghost" onClick={handleRun} disabled={runDisabled}>
-                  Run search set
-                </FormButton>
-              }
-              className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-8 shadow-none text-slate-400"
-            />
+            !canRunSearchSets ? (
+              <EmptyState
+                title="Upgrade to PRO to view matches"
+                body="Upgrade to PRO to run this search set and view matched roles."
+                className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-8 shadow-none text-slate-400"
+              />
+            ) : (
+              <EmptyState
+                title="Run the set to show matches"
+                body="Pick a baseline version and press Run to see the strongest job matches."
+                className="max-w-full border border-dashed border-white/20 bg-transparent px-4 py-8 shadow-none text-slate-400"
+              />
+            )
           ) : runResults.length === 0 ? (
             <EmptyState
               title="No matches yet"

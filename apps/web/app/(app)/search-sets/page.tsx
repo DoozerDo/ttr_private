@@ -96,6 +96,11 @@ function safeParseUrl(input: string): { url?: URL; warning?: string } {
   }
 }
 
+function isGreenhouseJobBoard(url: URL): boolean {
+  const host = url.host.toLowerCase();
+  return host === 'greenhouse.io' || host.endsWith('.greenhouse.io');
+}
+
 function tryParseJson(value: string): unknown | undefined {
   try {
     return JSON.parse(value);
@@ -121,7 +126,7 @@ function coerceBaselineList(payload: unknown): BaselineLite[] {
             ? b.name
             : undefined;
 
-      const versionsRaw = (b.versions ?? b.baselineVersions) as unknown;
+      const versionsRaw = (b.versions ?? (b as any).baselineVersions) as unknown;
       const versions: BaselineVersionLite[] = Array.isArray(versionsRaw)
         ? versionsRaw
             .filter(isRecord)
@@ -147,7 +152,8 @@ function formatBaselineVersionOption(
   baseline: BaselineLite,
   version: BaselineVersionLite,
 ): BaselineVersionOption {
-  const baselineLabel = baseline.label?.trim() || `Baseline ${baseline.id.slice(0, 8)}`;
+  const baselineLabel =
+    baseline.label?.trim() || `Baseline ${baseline.id.slice(0, 8)}`;
   const versionLabel =
     version.label?.trim() ||
     version.filename?.trim() ||
@@ -168,8 +174,10 @@ async function fetchBaselines(): Promise<BaselineLite[]> {
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(text || `Failed to load baselines (${res.status})`);
+    await res.text().catch(() => '');
+    const error = new Error('Failed to load baselines.');
+    Object.assign(error, { status: res.status });
+    throw error;
   }
 
   const data = (await res.json()) as unknown;
@@ -196,11 +204,18 @@ async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto>
       throw Object.assign(new Error('TIER_GATED'), { tierGate });
     }
 
-    throw new Error(text || `Request failed (${res.status})`);
+    const error = new Error(text || `Request failed (${res.status})`);
+    Object.assign(error, { status: res.status });
+    throw error;
   }
 
   const data = (await res.json()) as unknown;
-  if (!data || typeof data !== 'object' || !('id' in data) || typeof (data as any).id !== 'string') {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    !('id' in data) ||
+    typeof (data as any).id !== 'string'
+  ) {
     throw new Error('Unexpected response from createSearchSet.');
   }
 
@@ -230,6 +245,12 @@ export default function SearchSetsPage() {
   const [baselineValidationError, setBaselineValidationError] = useState<string | null>(null);
 
   const parsed = useMemo(() => safeParseUrl(sourceUrl), [sourceUrl]);
+  const parsedUrl = parsed.url;
+  const clearFormErrors = useCallback(() => {
+    setError(undefined);
+    setTierGateError(null);
+    setSubmitAttempted(false);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -250,17 +271,24 @@ export default function SearchSetsPage() {
         if (!mounted) return;
 
         const options = list
-          .flatMap((b) => (b.versions ?? []).map((v) => formatBaselineVersionOption(b, v)))
+          .flatMap((b) =>
+            (b.versions ?? []).map((v) => formatBaselineVersionOption(b, v)),
+          )
           .filter((o) => Boolean(o.id));
 
         setBaselineOptions(options);
-        setBaselinesFetchStatus('success');
-
         if (!options.length) {
-          setBaselinesError('No baseline versions found. Upload a baseline first.');
+          setBaselinesFetchStatus('success');
+          setBaselinesError('You need to upload a baseline before creating a search set.');
           setBaselineVersionId('');
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('ttr:lastBaselineVersionId');
+          }
           return;
         }
+
+        setBaselinesFetchStatus('success');
+        setBaselinesError(null);
 
         const stillValid = stored && options.some((o) => o.id === stored);
         if (!stillValid) {
@@ -274,7 +302,17 @@ export default function SearchSetsPage() {
         if (!mounted) return;
         setBaselineOptions([]);
         setBaselineVersionId('');
-        setBaselinesError(e instanceof Error ? e.message : 'Failed to load baselines.');
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('ttr:lastBaselineVersionId');
+        }
+
+        const status =
+          typeof (e as any).status === 'number' ? (e as any).status : undefined;
+        const message =
+          status === 401
+            ? 'We could not load your baselines. Please make sure you are signed in and try again.'
+            : 'We ran into a problem loading your baselines. Please refresh the page and try again.';
+        setBaselinesError(message);
         setBaselinesFetchStatus('error');
       })
       .finally(() => {
@@ -287,6 +325,26 @@ export default function SearchSetsPage() {
     };
   }, []);
 
+  const baselineOptionsLoaded =
+    baselinesFetchStatus === 'success' && baselineOptions.length > 0;
+  const baselineFormReady = baselineOptionsLoaded && Boolean(baselineVersionId);
+  const formInputsDisabled = !baselineFormReady;
+  const baselineDropdownDisabled = baselinesLoading || !baselineOptionsLoaded;
+  const baselineDropdownPlaceholder = baselinesLoading
+    ? 'Loading baseline versions...'
+    : baselineOptionsLoaded
+      ? 'Select a baseline version'
+      : 'No baselines available';
+
+  const greenhouseDomainUnsupported =
+    sourceType === 'GREENHOUSE' && parsedUrl instanceof URL && !isGreenhouseJobBoard(parsedUrl);
+  const greenhouseApplicationUrlUnsupported =
+    sourceType === 'GREENHOUSE' &&
+    parsedUrl instanceof URL &&
+    parsedUrl.pathname.toLowerCase().includes('/applications/');
+  const greenhouseSourceUrlUnsupported =
+    greenhouseDomainUnsupported || greenhouseApplicationUrlUnsupported;
+
   const maxListingsNumber = Number(maxListings);
   const maxListingsValid =
     Number.isFinite(maxListingsNumber) &&
@@ -298,7 +356,10 @@ export default function SearchSetsPage() {
     maxListings && !maxListingsValid ? 'Enter a number between 5 and 100.' : undefined;
 
   const sourceTypeError = submitAttempted && !sourceType ? 'Select a source type.' : undefined;
-  const sourceSectionValid = Boolean(sourceType && parsed.url && maxListingsValid);
+
+  const sourceSectionValid = Boolean(
+    sourceType && parsedUrl instanceof URL && maxListingsValid && !greenhouseSourceUrlUnsupported,
+  );
 
   const titlePatterns = useMemo(() => {
     return titlePatternsInput
@@ -336,8 +397,12 @@ export default function SearchSetsPage() {
     setTierGateError(null);
     setBaselineValidationError(null);
 
-    if (!parsed.url) {
+    if (!(parsedUrl instanceof URL)) {
       setError(parsed.warning || 'Invalid job URL.');
+      return;
+    }
+
+    if (greenhouseSourceUrlUnsupported) {
       return;
     }
 
@@ -363,7 +428,7 @@ export default function SearchSetsPage() {
         baselineVersionId,
         sourceType,
         sourceOptions: { maxListings: normalizedMaxListings },
-        sourceUrl: parsed.url.toString(),
+        sourceUrl: parsedUrl.toString(),
         titlePatterns: titlePatterns.length ? titlePatterns : undefined,
         seniority: seniority ? [seniority] : undefined,
         workMode: workMode || undefined,
@@ -376,6 +441,7 @@ export default function SearchSetsPage() {
             (payload.baselineVersionId ? payload.baselineVersionId : 'missing'),
         );
       }
+
       const result = await createSearchSet(payload);
       setPendingSearchSet(result);
 
@@ -387,13 +453,19 @@ export default function SearchSetsPage() {
       if (tierGate) {
         setTierGateError(tierGate);
       } else {
-        setError((e as Error).message);
+        const status =
+          typeof (e as any).status === 'number' ? (e as any).status : undefined;
+        const validationError = status != null && status >= 400 && status < 500;
+        const userMessage = validationError
+          ? 'We could not create this search set. Please check the source URL and your filters, then try again.'
+          : 'Something went wrong while creating your search set. This is on us. Please try again in a moment.';
+        setError(userMessage);
       }
     } finally {
       setSubmitting(false);
     }
   }, [
-    parsed.url,
+    parsedUrl,
     parsed.warning,
     titlePatterns,
     seniority,
@@ -402,6 +474,7 @@ export default function SearchSetsPage() {
     sourceType,
     maxListingsValid,
     maxListingsNumber,
+    greenhouseSourceUrlUnsupported,
     baselineVersionId,
   ]);
 
@@ -428,7 +501,14 @@ export default function SearchSetsPage() {
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
         {error ? (
           <Alert intent="error" title="Unable to create search set">
-            {error}
+            <div className="space-y-3">
+              <p>{error}</p>
+              <div className="flex justify-end">
+                <FormButton variant="secondary" onClick={onSubmit} disabled={submitting}>
+                  Try again
+                </FormButton>
+              </div>
+            </div>
           </Alert>
         ) : null}
 
@@ -501,6 +581,7 @@ export default function SearchSetsPage() {
               <select
                 value={baselineVersionId}
                 onChange={(event) => {
+                  clearFormErrors();
                   setPendingSearchSet(null);
                   setBaselineVersionId(event.target.value);
                   setBaselineValidationError(null);
@@ -508,12 +589,10 @@ export default function SearchSetsPage() {
                     sessionStorage.setItem('ttr:lastBaselineVersionId', event.target.value);
                   }
                 }}
-                disabled={baselinesLoading || Boolean(baselinesError)}
+                disabled={baselineDropdownDisabled}
                 className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 disabled:opacity-60"
               >
-                <option value="">
-                  {baselinesLoading ? 'Loading baseline versions...' : 'Select a baseline version'}
-                </option>
+                <option value="">{baselineDropdownPlaceholder}</option>
                 {baselineOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.display}
@@ -526,9 +605,7 @@ export default function SearchSetsPage() {
                 <p className="text-[11px] text-rose-400">{baselineValidationError}</p>
               ) : null}
 
-              <p className="text-[11px] text-slate-400">
-                This selection will carry into the run page.
-              </p>
+              <p className="text-[11px] text-slate-400">This selection will carry into the run page.</p>
 
               {debugUiEnabled ? (
                 <div className="space-y-1 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200">
@@ -559,10 +636,11 @@ export default function SearchSetsPage() {
                 <select
                   value={sourceType}
                   onChange={(event) => {
+                    clearFormErrors();
                     setPendingSearchSet(null);
                     setSourceType(event.target.value);
-                    setSubmitAttempted(false);
                   }}
+                  disabled={formInputsDisabled}
                   className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
                 >
                   <option value="">Select source type</option>
@@ -585,12 +663,23 @@ export default function SearchSetsPage() {
                   placeholder="https://..."
                   value={sourceUrl}
                   onChange={(event) => {
+                    clearFormErrors();
                     setPendingSearchSet(null);
                     setSourceUrl(event.target.value);
-                    setSubmitAttempted(false);
                   }}
+                  disabled={formInputsDisabled}
                 />
                 {parsed.warning ? <Alert intent="warning">{parsed.warning}</Alert> : null}
+                {greenhouseDomainUnsupported ? (
+                  <Alert intent="error">
+                    This source URL does not appear to be supported. We currently support Greenhouse job boards only.
+                  </Alert>
+                ) : null}
+                {greenhouseApplicationUrlUnsupported ? (
+                  <Alert intent="error">
+                    Please paste a Greenhouse job board or listings URL. Application links are not supported.
+                  </Alert>
+                ) : null}
               </div>
 
               <div className="space-y-1">
@@ -604,10 +693,11 @@ export default function SearchSetsPage() {
                   step={1}
                   value={maxListings}
                   onChange={(event) => {
+                    clearFormErrors();
                     setPendingSearchSet(null);
                     setMaxListings(event.target.value);
-                    setSubmitAttempted(false);
                   }}
+                  disabled={formInputsDisabled}
                 />
                 <p className={`text-[11px] ${maxListingsError ? 'text-rose-400' : 'text-slate-400'}`}>
                   {maxListingsError ?? 'Limit how many listings we process (5-100).'}
@@ -625,9 +715,11 @@ export default function SearchSetsPage() {
                 placeholder="Director Support, Support Operations..."
                 value={titlePatternsInput}
                 onChange={(event) => {
+                  clearFormErrors();
                   setPendingSearchSet(null);
                   setTitlePatternsInput(event.target.value);
                 }}
+                disabled={formInputsDisabled}
               />
               <p className="text-[11px] text-slate-400">Comma separated.</p>
             </div>
@@ -639,9 +731,11 @@ export default function SearchSetsPage() {
               <select
                 value={seniority}
                 onChange={(event) => {
+                  clearFormErrors();
                   setPendingSearchSet(null);
                   setSeniority(event.target.value);
                 }}
+                disabled={formInputsDisabled}
                 className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
               >
                 <option value="">Select seniority</option>
@@ -662,9 +756,11 @@ export default function SearchSetsPage() {
               <select
                 value={workMode}
                 onChange={(event) => {
+                  clearFormErrors();
                   setPendingSearchSet(null);
                   setWorkMode(event.target.value);
                 }}
+                disabled={formInputsDisabled}
                 className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
               >
                 <option value="">Select work mode</option>
@@ -678,7 +774,13 @@ export default function SearchSetsPage() {
           <div className="flex flex-wrap gap-3">
             <FormButton
               onClick={onSubmit}
-              disabled={!sourceSectionValid || submitting || !baselineVersionId || baselinesLoading}
+              disabled={
+                !sourceSectionValid ||
+                submitting ||
+                !baselineFormReady ||
+                baselinesLoading ||
+                greenhouseSourceUrlUnsupported
+              }
             >
               {submitting ? 'Creating...' : 'Create Search Set'}
             </FormButton>
