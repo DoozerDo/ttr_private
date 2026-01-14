@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
+import { resolveJourneyNavStateFromPathname } from "@/src/lib/journeyNav";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -80,11 +82,8 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   const refreshContext = useCallback(async () => {
     if (typeof window === "undefined") return;
 
-    // Start with whatever we have from stored analysis context (cheap signal).
     const stored = getStoredContext();
 
-    // Then confirm by asking the API for actual lists.
-    // These calls use cookies (same-origin), so we include credentials.
     let baselinesOk = false;
     let jobsOk = false;
 
@@ -97,8 +96,6 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
       if (baselineRes.ok) {
         const data = await safeJson<unknown>(baselineRes);
-        // We only need truthiness of "has any".
-        // If API shape changes, stored context still provides a fallback.
         if (Array.isArray(data)) {
           baselinesOk = data.length > 0;
         } else if (data && typeof data === "object") {
@@ -242,6 +239,11 @@ export function AppShell({ children, userEmail }: AppShellProps) {
     );
   }, [navRoutes, pathname]);
 
+  const journeyNavState = useMemo(
+    () => resolveJourneyNavStateFromPathname(pathname),
+    [pathname],
+  );
+
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
       <aside className="flex w-64 flex-shrink-0 flex-col border-r border-white/10 bg-slate-950/70 px-4 py-6">
@@ -347,6 +349,12 @@ export function AppShell({ children, userEmail }: AppShellProps) {
             </div>
           </div>
         </header>
+
+        {JOURNEY_NAV_V1_ENABLED ? (
+          <div className="sticky top-16 z-10 border-b border-white/10 bg-slate-950/80 px-6 py-3">
+            <JourneyNavV1 state={journeyNavState} />
+          </div>
+        ) : null}
 
         <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">{children}</main>
       </div>
