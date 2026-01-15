@@ -1,1068 +1,153 @@
-# diff --git a/Clearbase/Code_Build.txt b/Clearbase/Code_Build.txt
-# index aa2f61aed605cf24448aae2d996114aa56990d1e..a7c4df456e36b03413ad4d9d0ad81ca05d4f520e 100644
-# --- a/Clearbase/Code_Build.txt
-# +++ b/Clearbase/Code_Build.txt
-# @@ -104,94 +104,94 @@ Now we containerize, but keep it simple and DO-ready.
- 
-#  4.1 Dockerfiles
- 
-#  Create:
- 
-#  infra/docker/api.Dockerfile
- 
-#  infra/docker/web.Dockerfile
- 
-#  Each should:
- 
-#  Use a Node LTS base image
- 
-#  Copy the relevant app directory
- 
-#  Install dependencies
- 
-#  Build (for web if needed)
- 
-#  Run the app
- 
-#  We can flesh out the exact Dockerfile contents later; for now just know the pattern.
- 
-#  4.2 docker-compose for local
- 
-# -Create infra/docker/docker-compose.dev.yml with services:
-# +Create infra/docker/docker-compose.local.yml with services:
- 
-#  api
- 
-#  Build from api.Dockerfile
- 
-#  Mount code as a volume (for live reload if desired)
- 
-#  Depends on db
- 
-#  Env vars for DB connection, etc.
- 
-#  web
- 
-#  Build from web.Dockerfile
- 
-#  Uses NEXT_PUBLIC_API_BASE_URL=http://api:3001 (API’s internal docker name)
- 
-#  db
- 
-#  Use postgres:16 (or similar) image
- 
-#  Expose port 5432 locally
- 
-#  Env vars for POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
- 
-#  Volume for data persistence (db_data:/var/lib/postgresql/data)
- 
-#  nginx (optional at first)
- 
-#  Acts as a reverse proxy (later: targetthisrole.local → web, etc.)
- 
-#  Goal of this step:
-#  You can run one command from the repo root:
- 
-# -docker compose -f infra/docker/docker-compose.dev.yml up --build
-# +docker compose -f infra/docker/docker-compose.local.yml up --build
- 
-#  And then:
- 
-#  http://localhost:3000 → frontend
- 
-#  http://localhost:8080/health (or via nginx at /api/health) → backend
- 
-# -This is exactly how it’ll run on DigitalOcean; the only thing that changes later is where the host machine lives and where Postgres lives (droplet vs. managed DB).
-# +DigitalOcean dev uses infra/docker/docker-compose.dev.yml with prebuilt images; local dev uses bind mounts via docker-compose.local.yml.
- 
-#  5. Add configuration & environment handling
- 
-#  To avoid refactors later, get config patterns right now:
- 
-#  .env for local non-Docker runs:
- 
-#  DATABASE_URL=...
- 
-#  JWT_SECRET=...
- 
-#  NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
- 
-#  .env.docker (optional) for Docker-specific config:
- 
-#  DATABASE_URL=postgres://user:pass@db:5432/dbname
- 
-#  NEXT_PUBLIC_API_BASE_URL=http://api:3001
- 
-#  In code, never hardcode localhost. Always read from env.
- 
-#  This way, when you move to DO:
- 
-#  Frontend env: NEXT_PUBLIC_API_BASE_URL=https://api.targetthisrole.com
- 
-# @@ -273,32 +273,32 @@ Create a droplet (manually at first).
- 
-#  Install Docker + docker-compose.
- 
-#  Copy repo & env files to the droplet.
- 
-#  Run the same docker compose up -d command.
- 
-#  Later:
- 
-#  Replace local Postgres container with DO Managed DB.
- 
-#  Add Terraform to codify the droplet, DB, firewall, etc.
- 
-#  But we don’t need to touch that now; the choices we’re making above already future-proof the structure.
- 
-#  What I’d suggest you do next
- 
-#  If you want a concrete immediate to-do list:
- 
-#  Create the folder structure (apps/api, apps/web, infra/docker).
- 
-#  Scaffold NestJS in apps/api and add a GET /health.
- 
-#  Scaffold Next.js in apps/web and add a page that calls /health and shows the result.
- 
-# -Add a basic docker-compose.dev.yml with api, web, and db services (even if the DB isn’t used yet).
-# +Add a basic docker-compose.local.yml with api, web, and db services (even if the DB isn’t used yet).
- 
-#  If you’d like, in the next message I can:
- 
-# -Propose a specific docker-compose.dev.yml layout, and
-# +Propose a specific docker-compose.local.yml layout, and
- 
-# -Outline the exact env vars we should standardize on for API and web.
-# \ No newline at end of file
-# +Outline the exact env vars we should standardize on for API and web.
-# diff --git a/Clearbase/Codex.txt b/Clearbase/Codex.txt
-# index 44ca3d75d05390cc1cf44fd6fb0955a0a32e9cc7..28ef62b610ec813a88172302cfe49169f0638df2 100644
-# --- a/Clearbase/Codex.txt
-# +++ b/Clearbase/Codex.txt
-# @@ -144,51 +144,53 @@ Prod: .env.production / .env.production.local
- 
-#  If you introduce new env vars, you MUST:
- 
-#  Add them to the appropriate .env.* files when generating patches.
- 
-#  Use ConfigService (backend) or process.env.NEXT_PUBLIC_* (frontend) to read them.
- 
-#  4. Docker & future infrastructure
- 
-#  The project is intended to run:
- 
-#  Locally via Docker Compose (dev and prod-like)
- 
-#  Later on a DigitalOcean Droplet, then possibly Azure
- 
-#  When generating Docker-related assets, follow these rules:
- 
-#  Dockerfiles live under infra/docker/, e.g.:
- 
-#  infra/docker/api.Dockerfile
- 
-#  infra/docker/web.Dockerfile
- 
-#  Docker Compose config lives under:
- 
-# -infra/docker/docker-compose.dev.yml (dev)
-# +infra/docker/docker-compose.local.yml (local dev)
-# +
-# +infra/docker/docker-compose.dev.yml (DigitalOcean dev runtime)
- 
-#  infra/docker/docker-compose.yml or similar for prod-like
- 
-#  Services:
- 
-#  api – NestJS service
- 
-#  web – Next.js service
- 
-#  db – PostgreSQL service (dev only; prod will use managed DB)
- 
-#  Optionally nginx as reverse proxy
- 
-#  Never hardcode secrets into Dockerfiles or compose files; use env vars.
- 
-#  5. Code style & organization
- 
-#  When editing or generating code:
- 
-#  Use TypeScript everywhere (backend & frontend).
- 
-#  Follow NestJS best practices:
- 
-#  Controllers, services, modules in separate files.
- 
-# @@ -273,26 +275,26 @@ If a requested change is too large for one response, implement the most critical
-#  When I ask for changes, do the following:
- 
-#  Inspect the existing files you plan to modify so you merge correctly with current code and style.
- 
-#  Apply the architecture & spec described above.
- 
-#  Choose sensible file and module names that match the feature and the existing Nest/Next conventions.
- 
-#  Avoid unnecessary questions.
- 
-#  If something is ambiguous, make a reasonable assumption and note it briefly in your summary.
- 
-#  Prefer to build vertical slices that are demonstrable (API + minimal frontend) when I ask for new features.
- 
-#  Examples of the kinds of requests I’ll make:
- 
-#  “Create an Auth module with email/password signup/login, JWT tokens, and protected routes.”
- 
-#  “Scaffold the Baseline Library backend module according to the spec and expose minimal CRUD endpoints.”
- 
-#  “Add a simple Job Ingestion endpoint and a frontend page where the user can paste a job description and see that it’s stored.”
- 
-#  For each, you should produce patches that are ready to apply and run.
- 
-#  That’s the end of the master instructions.
-# -Use this repo, architecture, and style for all future changes unless I explicitly say otherwise.
-# \ No newline at end of file
-# +Use this repo, architecture, and style for all future changes unless I explicitly say otherwise.
-diff --git a/apps/api/.env.development.local b/apps/api/.env.development.local
-index 43e36ad9d3b7de88ebfa32284fe366b8ee7b41b9..9a5e7acc7173573e55dc990763c4f4cb7aecca99 100644
---- a/apps/api/.env.development.local
-+++ b/apps/api/.env.development.local
-@@ -1,8 +1,9 @@
- PORT=3001
-+# Comma-separated allowlist, e.g. http://localhost:3000,https://app.dev.targetthisrole.ai
- CORS_ORIGIN=http://localhost:3000
- APP_VERSION=0.1.0-dev
- 
- # For DB inside Docker you probably want:
- DATABASE_URL=postgres://postgres:postgres@db:5432/targetthisrole
- 
- JWT_SECRET=super-secret-dev-key
-diff --git a/apps/api/src/main.ts b/apps/api/src/main.ts
-index aac72c586c7dc98d2aff76771f52eb6b18592eae..15147e351797e23a984b505a5d04c26c59235dea 100644
---- a/apps/api/src/main.ts
-+++ b/apps/api/src/main.ts
-@@ -1,34 +1,48 @@
- ﻿import { NestFactory } from '@nestjs/core';
- import { AppModule } from './app.module';
- import { ConfigService } from '@nestjs/config';
- import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
- 
- async function bootstrap() {
-   // Log anything that would otherwise kill a request or process silently
-   process.on('unhandledRejection', (reason: any) => {
-     // eslint-disable-next-line no-console
-     console.error('unhandledRejection:', reason);
-   });
- 
-   process.on('uncaughtException', (err: any) => {
-     // eslint-disable-next-line no-console
-     console.error('uncaughtException:', err);
-   });
- 
-   const app = await NestFactory.create(AppModule);
-   const config = app.get(ConfigService);
- 
-   app.useGlobalFilters(new AllExceptionsFilter());
- 
--  const corsOrigin =
-+  const corsOriginRaw =
-     config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
-+  const corsOrigins = corsOriginRaw
-+    .split(',')
-+    .map((origin) => origin.trim())
-+    .filter(Boolean);
- 
-   app.enableCors({
--    origin: corsOrigin,
-+    origin: (origin, callback) => {
-+      if (!origin) {
-+        return callback(null, true);
-+      }
-+
-+      if (corsOrigins.includes('*') || corsOrigins.includes(origin)) {
-+        return callback(null, true);
-+      }
-+
-+      return callback(new Error('Not allowed by CORS'), false);
-+    },
-   });
- 
-   const port = config.get<number>('PORT') ?? 3001;
- 
-   await app.listen(port, '0.0.0.0');
- }
- bootstrap();
-diff --git a/apps/web/app/(app)/search-sets/page.tsx b/apps/web/app/(app)/search-sets/page.tsx
-index 8e3cc5ff0cbccb20fdc508574f400a0e23137d32..cb7dbb8d12658198158f6c3501ec3e926feb5baa 100644
---- a/apps/web/app/(app)/search-sets/page.tsx
-+++ b/apps/web/app/(app)/search-sets/page.tsx
-@@ -1,113 +1,104 @@
- 'use client';
- 
- import { useCallback, useMemo, useState } from 'react';
- import { useRouter } from 'next/navigation';
- import { Alert } from '@/components/Alert';
- import { FormButton } from '@/components/FormButton';
- import { PageHeader } from '@/components/PageHeader';
- import { PageShell } from '@/components/PageShell';
- import { TextInput } from '@/components/TextInput';
- import { TierGateNotice } from '@/components/TierGateNotice';
-+import { buildPublicApiUrl } from '@/lib/apiBase';
- import { parseTierGateError, type TierGateError } from '@/lib/tiers';
- import type { SearchSetDto } from '@/lib/searchSetsClient';
- 
- type SearchSetPayload = {
-   sourceUrl: string;
-   titlePatterns?: string[];
-   seniority?: string[];
-   workMode?: string;
-   parseWarning?: string;
- };
- 
- const SENIORITY_LABELS: Record<string, string> = {
-   ENTRY: 'Entry',
-   MID: 'Mid',
-   SENIOR: 'Senior',
-   LEAD: 'Lead',
-   EXECUTIVE: 'Executive',
-   ANY: 'Any',
- };
- 
- function formatSeniorityLabel(value: string): string {
-   if (!value) return '';
-   const normalized = value.toUpperCase();
-   return SENIORITY_LABELS[normalized] ?? value;
- }
- 
- function splitTitlePatterns(patterns?: string[]) {
-   const normalized = (patterns ?? [])
-     .map((pattern) => pattern?.trim() ?? '')
-     .filter(Boolean);
- 
-   const exclusions = normalized
-     .filter((entry) => entry.startsWith('-') || entry.startsWith('!'))
-     .map((entry) => entry.slice(1).trim())
-     .filter(Boolean);
- 
-   const keywords = normalized.filter(
-     (entry) => !entry.startsWith('-') && !entry.startsWith('!'),
-   );
- 
-   return { keywords, exclusions };
- }
- 
--function normalizeBaseUrl(value: string): string {
--  return value.replace(/\/+$/, '');
--}
--
- function safeParseUrl(input: string): { url?: URL; warning?: string } {
-   const trimmed = input.trim();
-   if (!trimmed) return {};
- 
-   try {
-     const url = new URL(trimmed);
-     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-       return { warning: 'URL must start with http:// or https: / /.' };
-     }
-     return { url };
-   } catch {
-     return { warning: 'Invalid URL.' };
-   }
- }
- 
- function tryParseJson(value: string): unknown | undefined {
-   try {
-     return JSON.parse(value);
-   } catch {
-     return undefined;
-   }
- }
- 
- async function createSearchSet(payload: SearchSetPayload): Promise<SearchSetDto> {
--  const envBase =
--    (process.env.NEXT_PUBLIC_API_BASE_URL as string | undefined) ??
--    (process.env.API_BASE_URL as string | undefined);
--
--  const endpoint = envBase
--    ? `${normalizeBaseUrl(envBase)}/search-sets`
--    : '/api/search-sets';
-+  const endpoint = buildPublicApiUrl('/search-sets');
- 
-   const res = await fetch(endpoint, {
-     method: 'POST',
-     headers: { 'Content-Type': 'application/json' },
-     body: JSON.stringify(payload),
-   });
- 
-   if (!res.ok) {
-     const text = await res.text().catch(() => '');
-     const parsedPayload = tryParseJson(text);
-     const tierGate = parseTierGateError({
-       status: res.status,
-       payload: parsedPayload ?? text,
-     });
- 
-     if (tierGate) {
-       throw Object.assign(new Error('TIER_GATED'), { tierGate });
-     }
- 
-     throw new Error(text || `Request failed (${res.status})`);
-   }
- 
-   const data = (await res.json()) as unknown;
-   if (
-     !data ||
-diff --git a/apps/web/lib/apiBase.ts b/apps/web/lib/apiBase.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..064dadc3b251b0d2dcf4897f9668c6fea1d047c4
---- /dev/null
-+++ b/apps/web/lib/apiBase.ts
-@@ -0,0 +1,29 @@
-+export function getPublicApiBaseUrl(): string | null {
-+  const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
-+
-+  if (raw !== undefined) {
-+    const trimmed = raw.trim();
-+    if (!trimmed) {
-+      return "";
-+    }
-+
-+    return trimmed.replace(/\/+$/, "");
-+  }
-+
-+  if (process.env.NODE_ENV === "production") {
-+    return "";
-+  }
-+
-+  return null;
-+}
-+
-+export function buildPublicApiUrl(path: string): string {
-+  const base = getPublicApiBaseUrl();
-+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-+
-+  if (!base || base === "") {
-+    return `/api${normalizedPath}`;
-+  }
-+
-+  return `${base}${normalizedPath}`;
-+}
-diff --git a/infra/deploy/deploy-dev.sh b/infra/deploy/deploy-dev.sh
-new file mode 100755
-index 0000000000000000000000000000000000000000..aedfe59679350cc937dbde0edec3d5baffd21686
---- /dev/null
-+++ b/infra/deploy/deploy-dev.sh
-@@ -0,0 +1,23 @@
-+#!/usr/bin/env bash
-+set -euo pipefail
-+
-+DEPLOY_HOST=${DEPLOY_HOST:?"Set DEPLOY_HOST to the droplet IP or hostname."}
-+DEPLOY_USER=${DEPLOY_USER:-ubuntu}
-+DEPLOY_PATH=${DEPLOY_PATH:-/opt/targetthisrole}
-+GHCR_USERNAME=${GHCR_USERNAME:?"Set GHCR_USERNAME for ghcr.io login."}
-+GHCR_TOKEN=${GHCR_TOKEN:?"Set GHCR_TOKEN for ghcr.io login."}
-+DEPLOY_ENV_FILE=${DEPLOY_ENV_FILE:-}
-+
-+ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p ${DEPLOY_PATH}"
-+
-+scp infra/docker/docker-compose.dev.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.dev.yml"
-+scp infra/docker/Caddyfile "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/Caddyfile"
-+
-+if [[ -n "${DEPLOY_ENV_FILE}" ]]; then
-+  scp "${DEPLOY_ENV_FILE}" "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/.env"
-+fi
-+
-+ssh "${DEPLOY_USER}@${DEPLOY_HOST}" "\
-+  echo '${GHCR_TOKEN}' | sudo docker login ghcr.io -u '${GHCR_USERNAME}' --password-stdin && \
-+  sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml pull && \
-+  sudo docker compose -f ${DEPLOY_PATH}/docker-compose.dev.yml up -d"
-diff --git a/infra/docker/.env.example b/infra/docker/.env.example
-new file mode 100644
-index 0000000000000000000000000000000000000000..15d22e630cdb24fb06be1b741ad462a1c24c1947
---- /dev/null
-+++ b/infra/docker/.env.example
-@@ -0,0 +1,5 @@
-+# DigitalOcean dev environment variables
-+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/targetthisrole?sslmode=require
-+CORS_ORIGIN=https://app.dev.targetthisrole.ai
-+CADDY_EMAIL=you@example.com
-+APP_VERSION=dev
-diff --git a/infra/docker/Caddyfile b/infra/docker/Caddyfile
-new file mode 100644
-index 0000000000000000000000000000000000000000..791fce9ff4ad47c5918472e819108c81c80c7e1f
---- /dev/null
-+++ b/infra/docker/Caddyfile
-@@ -0,0 +1,13 @@
-+{
-+  email {$CADDY_EMAIL}
-+}
-+
-+{$APP_DOMAIN} {
-+  encode zstd gzip
-+
-+  handle_path /api* {
-+    reverse_proxy api:3001
-+  }
-+
-+  reverse_proxy web:3000
-+}
-# diff --git a/infra/docker/docker-compose.dev.yml b/infra/docker/docker-compose.dev.yml
-# index 818f9171d7a3c7eea5173a35a4f5ef20a280b5a9..b0c76b255318768de60113e929b8e2b37c08f956 100644
-# --- a/infra/docker/docker-compose.dev.yml
-# +++ b/infra/docker/docker-compose.dev.yml
-# @@ -1 +1,54 @@
-# -# docker-compose.dev.yml: “server runtime for dev environment (DigitalOcean)”
-# \ No newline at end of file
-# +# docker-compose.dev.yml: “server runtime for dev environment (DigitalOcean)”
-# +version: "3.9"
-# +
-# +services:
-# +  web:
-# +    image: ghcr.io/targetthisrole/targetthisrole-web:dev
-# +    restart: unless-stopped
-# +    environment:
-# +      NODE_ENV: development
-# +      API_BASE_URL: http://api:3001
-# +      NEXT_PUBLIC_API_BASE_URL: ""
-# +    depends_on:
-# +      - api
-# +    networks:
-# +      - ttr_dev
-# +
-# +  api:
-# +    image: ghcr.io/targetthisrole/targetthisrole-api:dev
-# +    restart: unless-stopped
-# +    environment:
-# +      NODE_ENV: production
-# +      PORT: 3001
-# +      DATABASE_URL: ${DATABASE_URL}
-# +      CORS_ORIGIN: ${CORS_ORIGIN}
-# +      APP_VERSION: ${APP_VERSION:-dev}
-# +    networks:
-# +      - ttr_dev
-# +
-# +  proxy:
-# +    image: caddy:2.7.6
-# +    restart: unless-stopped
-# +    ports:
-# +      - "80:80"
-# +      - "443:443"
-# +    environment:
-# +      CADDY_EMAIL: ${CADDY_EMAIL}
-# +      APP_DOMAIN: ${APP_DOMAIN}
-# +    volumes:
-# +      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-# +      - caddy_data:/data
-# +      - caddy_config:/config
-# +    depends_on:
-# +      - web
-# +      - api
-# +    networks:
-# +      - ttr_dev
-# +
-# +volumes:
-# +  caddy_data:
-# +  caddy_config:
-# +
-# +networks:
-# +  ttr_dev:
-# +    driver: bridge
-diff --git a/infra/docker/docker-compose.local.yml b/infra/docker/docker-compose.local.yml
-index ec548c5b91aaaa3d048563b926fd42623de0a889..60e70e37bfffb76aaabda5dd3f6879341327090f 100644
---- a/infra/docker/docker-compose.local.yml
-+++ b/infra/docker/docker-compose.local.yml
-@@ -1,26 +1,26 @@
--# docker-compose.dev.yml
-+# docker-compose.local.yml
- # Local development stack only.
- # Production deployments should use docker-compose.prod.yml or cloud-native config.
- # docker-compose.local.yml: “bind mounts + hot reload; not for servers”
- version: "3.9"
- 
- services:
-   db:
-     image: postgres:16-alpine
+diff --git a/.github/workflows/build-dev-images.yml b/.github/workflows/build-dev-images.yml
+index 1b5a2068db9827abf1bbabe20950bb210a86a13e..ffee394928c2ed86b5535796b821f6ff4521bf01 100644
+--- a/.github/workflows/build-dev-images.yml
++++ b/.github/workflows/build-dev-images.yml
+@@ -1,44 +1,46 @@
+ name: Build and push dev images
+ 
+ on:
+   push:
+     branches:
+       - do-setup
+ 
+ permissions:
+   contents: read
+   packages: write
+ 
+ jobs:
+   build:
+     runs-on: ubuntu-latest
+     strategy:
+       matrix:
+         include:
+           - name: web
+             dockerfile: infra/docker/web.Dockerfile
+           - name: api
+             dockerfile: infra/docker/api.Dockerfile
++          - name: proxy
++            dockerfile: infra/docker/proxy.Dockerfile
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v4
+ 
+       - name: Set up Docker Buildx
+         uses: docker/setup-buildx-action@v3
+ 
+       - name: Login to GHCR
+         uses: docker/login-action@v3
+         with:
+           registry: ghcr.io
+           username: ${{ github.actor }}
+           password: ${{ secrets.GHCR_PAT || github.token }}
+ 
+       - name: Build and push
+         uses: docker/build-push-action@v5
+         with:
+           context: .
+           file: ${{ matrix.dockerfile }}
+           push: true
+           tags: |
+             ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:dev
+             ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:${{ github.sha }}
+diff --git a/infra/docker/docker-compose.dev.yml b/infra/docker/docker-compose.dev.yml
+index b0c76b255318768de60113e929b8e2b37c08f956..bf8850a97f1f46fa4f8d9cd08f8376c9a24cc3c6 100644
+--- a/infra/docker/docker-compose.dev.yml
++++ b/infra/docker/docker-compose.dev.yml
+@@ -5,50 +5,49 @@ services:
+   web:
+     image: ghcr.io/targetthisrole/targetthisrole-web:dev
      restart: unless-stopped
      environment:
-       POSTGRES_DB: targetthisrole
-       POSTGRES_USER: postgres
-       POSTGRES_PASSWORD: postgres
-     ports:
-       - "5432:5432"
-     volumes:
-       - db_data:/var/lib/postgresql/data
+       NODE_ENV: development
+       API_BASE_URL: http://api:3001
+       NEXT_PUBLIC_API_BASE_URL: ""
+     depends_on:
+       - api
+     networks:
+       - ttr_dev
  
    api:
-     build:
-       context: ../..
-       dockerfile: infra/docker/api.Dockerfile
-     env_file:
-       - ../../apps/api/.env.development.local
+     image: ghcr.io/targetthisrole/targetthisrole-api:dev
+     restart: unless-stopped
      environment:
+       NODE_ENV: production
+       PORT: 3001
+       DATABASE_URL: ${DATABASE_URL}
+       CORS_ORIGIN: ${CORS_ORIGIN}
+       APP_VERSION: ${APP_VERSION:-dev}
+     networks:
+       - ttr_dev
+ 
+   proxy:
+-    image: caddy:2.7.6
++    image: ghcr.io/targetthisrole/targetthisrole-proxy:dev
+     restart: unless-stopped
+     ports:
+       - "80:80"
+       - "443:443"
+     environment:
+       CADDY_EMAIL: ${CADDY_EMAIL}
+       APP_DOMAIN: ${APP_DOMAIN}
+     volumes:
+-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+       - caddy_data:/data
+       - caddy_config:/config
+     depends_on:
+       - web
+       - api
+     networks:
+       - ttr_dev
+ 
+ volumes:
+   caddy_data:
+   caddy_config:
+ 
+ networks:
+   ttr_dev:
+     driver: bridge
+diff --git a/infra/docker/proxy.Dockerfile b/infra/docker/proxy.Dockerfile
+new file mode 100644
+index 0000000000000000000000000000000000000000..355aeff3ee75677392e703eb2b239fe0841771e6
+--- /dev/null
++++ b/infra/docker/proxy.Dockerfile
+@@ -0,0 +1,3 @@
++FROM caddy:2.7.6
++
++COPY infra/docker/Caddyfile /etc/caddy/Caddyfile
 diff --git a/infra/terraform/cloud-init.yaml.tftpl b/infra/terraform/cloud-init.yaml.tftpl
-index 6f85e3631388b2237619845b5d5e3b883c7cf017..9d10fce617b7deeefc9c891d9c1fe8dee9d87284 100644
+index 9d10fce617b7deeefc9c891d9c1fe8dee9d87284..e3880c6c972b6483009154dadb25360f2795f777 100644
 --- a/infra/terraform/cloud-init.yaml.tftpl
 +++ b/infra/terraform/cloud-init.yaml.tftpl
-@@ -1,35 +1,9 @@
+@@ -1,9 +1,31 @@
  #cloud-config
++network:
++  config: disabled
  package_update: true
  packages:
    - docker.io
    - docker-compose-plugin
--  - nginx
--  - certbot
--  - python3-certbot-nginx
--write_files:
--  - path: /opt/targetthisrole/docker-compose.yml
--    permissions: "0644"
--    content: |
--${indent(6, docker_compose)}
--  - path: /etc/nginx/sites-available/app.dev.targetthisrole.ai.conf
--    permissions: "0644"
--    content: |
--${indent(6, nginx_app_conf)}
--  - path: /etc/nginx/sites-available/api.dev.targetthisrole.ai.conf
--    permissions: "0644"
--    content: |
--${indent(6, nginx_api_conf)}
++  - python3
  runcmd:
    - systemctl enable --now docker
-   - usermod -aG docker ubuntu
+-  - usermod -aG docker ubuntu
    - mkdir -p /opt/targetthisrole
--  - echo "${ghcr_token}" | docker login ghcr.io -u "${ghcr_username}" --password-stdin
--  - docker compose -f /opt/targetthisrole/docker-compose.yml pull
--  - docker compose -f /opt/targetthisrole/docker-compose.yml up -d
--  - rm -f /etc/nginx/sites-enabled/default
--  - ln -s /etc/nginx/sites-available/app.dev.targetthisrole.ai.conf /etc/nginx/sites-enabled/app.dev.targetthisrole.ai.conf
--  - ln -s /etc/nginx/sites-available/api.dev.targetthisrole.ai.conf /etc/nginx/sites-enabled/api.dev.targetthisrole.ai.conf
--  - nginx -t
--  - systemctl enable --now nginx
--  - certbot --nginx -d app.dev.targetthisrole.ai -d api.dev.targetthisrole.ai --non-interactive --agree-tos --email "${certbot_email}" --redirect
--  - systemctl reload nginx
-diff --git a/infra/terraform/docker-compose.yml.tftpl b/infra/terraform/docker-compose.yml.tftpl
-deleted file mode 100644
-index 6ecfae2b47692028cc45f7b6b48a28348b23e946..0000000000000000000000000000000000000000
---- a/infra/terraform/docker-compose.yml.tftpl
-+++ /dev/null
-@@ -1,14 +0,0 @@
--version: "3.8"
--services:
--  web:
--    image: ${web_image}
--    restart: unless-stopped
--    ports:
--      - "127.0.0.1:3000:3000"
--  api:
--    image: ${api_image}
--    restart: unless-stopped
--    environment:
--      DATABASE_URL: "${database_url}"
--    ports:
--      - "127.0.0.1:3001:3001"
-diff --git a/infra/terraform/main.tf b/infra/terraform/main.tf
-index 33c831c3b6cd4883e527d17e148f0887dff50dc1..f5e9cc5b43d35c654ac7f94b7ffca5f2fbe71843 100644
---- a/infra/terraform/main.tf
-+++ b/infra/terraform/main.tf
-@@ -1,79 +1,56 @@
- provider "digitalocean" {
-   token = var.do_token
- }
- 
--locals {
--  database_url = format(
--    "postgresql://%s:%s@%s:%s/%s?sslmode=require",
--    urlencode(digitalocean_database_user.api_user.name),
--    urlencode(digitalocean_database_user.api_user.password),
--    digitalocean_database_cluster.postgres.host,
--    digitalocean_database_cluster.postgres.port,
--    digitalocean_database_db.app.name
--  )
--  docker_compose = templatefile("${path.module}/docker-compose.yml.tftpl", {
--    web_image    = var.web_image
--    api_image    = var.api_image
--    database_url = local.database_url
--  })
--}
--
- resource "digitalocean_database_cluster" "postgres" {
-   name       = var.db_cluster_name
-   engine     = "pg"
-   version    = var.db_version
-   size       = var.db_size
-   region     = var.region
-   node_count = 1
- }
- 
- resource "digitalocean_database_db" "app" {
-   cluster_id = digitalocean_database_cluster.postgres.id
-   name       = var.db_name
- }
- 
- resource "digitalocean_database_user" "api_user" {
-   cluster_id = digitalocean_database_cluster.postgres.id
-   name       = var.db_user_name
- }
- 
- resource "digitalocean_droplet" "app" {
-   name   = var.droplet_name
-   region = var.region
-   size   = var.droplet_size
-   image  = "ubuntu-22-04-x64"
- 
-   ssh_keys  = var.ssh_key_fingerprints
--  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
--    docker_compose = local.docker_compose
--    nginx_app_conf = file("${path.module}/../nginx/app.dev.targetthisrole.ai.conf")
--    nginx_api_conf = file("${path.module}/../nginx/api.dev.targetthisrole.ai.conf")
--    ghcr_username  = var.ghcr_username
--    ghcr_token     = var.ghcr_token
--    certbot_email  = var.certbot_email
--  })
-+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {})
- }
- 
- resource "digitalocean_database_firewall" "postgres" {
-   cluster_id = digitalocean_database_cluster.postgres.id
- 
-   rule {
-     type  = "droplet"
-     value = digitalocean_droplet.app.id
-   }
- }
- 
- resource "digitalocean_firewall" "app" {
-   name = "${var.droplet_name}-fw"
- 
-   droplet_ids = [digitalocean_droplet.app.id]
- 
-   inbound_rule {
-     protocol         = "tcp"
-     port_range       = "22"
-     source_addresses = var.allowed_ssh_cidrs
-   }
- 
-   inbound_rule {
-     protocol         = "tcp"
-     port_range       = "80"
-diff --git a/infra/terraform/variables.tf b/infra/terraform/variables.tf
-index 983969a66b1ed025fe9ebe30fb38148fa65058bb..6e62532eae3e55a15a96bede5c17af23030bc6de 100644
---- a/infra/terraform/variables.tf
-+++ b/infra/terraform/variables.tf
-@@ -10,80 +10,55 @@ variable "region" {
-   default     = "nyc3"
- }
- 
- variable "droplet_name" {
-   description = "Name for the application droplet."
-   type        = string
-   default     = "targetthisrole-dev"
- }
- 
- variable "droplet_size" {
-   description = "Droplet size slug."
-   type        = string
-   default     = "s-1vcpu-1gb"
- }
- 
- variable "ssh_key_fingerprints" {
-   description = "SSH key fingerprints allowed to access the droplet."
-   type        = list(string)
- }
- 
- variable "allowed_ssh_cidrs" {
-   description = "CIDR blocks allowed to access SSH."
-   type        = list(string)
- }
- 
--variable "ghcr_username" {
--  description = "GitHub Container Registry username or org."
--  type        = string
--}
--
--variable "ghcr_token" {
--  description = "GitHub fine-grained PAT with read:packages."
--  type        = string
--  sensitive   = true
--}
--
--variable "web_image" {
--  description = "Fully qualified GHCR image for the web service."
--  type        = string
--}
--
--variable "api_image" {
--  description = "Fully qualified GHCR image for the API service."
--  type        = string
--}
- 
- variable "db_cluster_name" {
-   description = "Name for the DigitalOcean PostgreSQL cluster."
-   type        = string
-   default     = "targetthisrole-dev-db"
- }
- 
- variable "db_name" {
-   description = "Database name for the API."
-   type        = string
-   default     = "targetthisrole"
- }
- 
- variable "db_user_name" {
-   description = "Database user name for the API."
-   type        = string
-   default     = "targetthisrole_api"
- }
- 
- variable "db_size" {
-   description = "Database size slug."
-   type        = string
-   default     = "db-s-1vcpu-1gb"
- }
- 
- variable "db_version" {
-   description = "PostgreSQL major version."
-   type        = string
-   default     = "15"
- }
--
--variable "certbot_email" {
--  description = "Email for Let's Encrypt notifications."
--  type        = string
--}
-diff --git a/notes.txt b/notes.txt
-index 35e9c97de35407054e2ec1e11ac3007b60e5842e..d04a48862fd684639847de552ff6a650f6e18174 100644
---- a/notes.txt
-+++ b/notes.txt
-@@ -16,78 +16,78 @@ http://localhost:3001/version
- cd apps/api
- npm install
- 
- cd apps/web
- npm install
- 
- 
- ##Ignore these for now. 
- cd apps/api
- npm run start:dev
- cd apps/web
- npm run dev
- 
- 
- 
- ###Git Patching###
- git apply --check codex.patch
- git apply codex.patch
- 
- Testing: 
- .\apps\api> npm test -- --runInBand
- .\apps\web> npm run lint
- 
- 
- ###Docker
--docker compose -f infra/docker/docker-compose.dev.yml logs api --tail=100
-+docker compose -f infra/docker/docker-compose.local.yml logs api --tail=100
- 
- Restart API:
--docker compose -f infra\docker\docker-compose.dev.yml restart api 
-+docker compose -f infra\docker\docker-compose.local.yml restart api 
- 
- Rebuild API:
--docker compose -f infra\docker\docker-compose.dev.yml down -v api
--docker compose -f infra\docker\docker-compose.dev.yml up -d --build api
--docker compose -f infra\docker\docker-compose.dev.yml up -d
-+docker compose -f infra\docker\docker-compose.local.yml down -v api
-+docker compose -f infra\docker\docker-compose.local.yml up -d --build api
-+docker compose -f infra\docker\docker-compose.local.yml up -d
- 
- Rebuild Web:
--docker compose -f infra\docker\docker-compose.dev.yml down -v web
--docker compose -f infra\docker\docker-compose.dev.yml up -d --build web
--docker compose -f infra\docker\docker-compose.dev.yml up -d
-+docker compose -f infra\docker\docker-compose.local.yml down -v web
-+docker compose -f infra\docker\docker-compose.local.yml up -d --build web
-+docker compose -f infra\docker\docker-compose.local.yml up -d
- 
- Rebuild Both:
--docker compose -f infra\docker\docker-compose.dev.yml down -v web api
--docker compose -f infra\docker\docker-compose.dev.yml up -d --build web api
-+docker compose -f infra\docker\docker-compose.local.yml down -v web api
-+docker compose -f infra\docker\docker-compose.local.yml up -d --build web api
- 
- Rebuild All: 
--docker compose -f infra\docker\docker-compose.dev.yml down -v
--docker compose -f infra/docker/docker-compose.dev.yml up -d --build
-+docker compose -f infra\docker\docker-compose.local.yml down -v
-+docker compose -f infra/docker/docker-compose.local.yml up -d --build
- 
- Docker Logs:
--docker compose -f infra\docker\docker-compose.dev.yml logs -f --timestamps
-+docker compose -f infra\docker\docker-compose.local.yml logs -f --timestamps
- 
- Docker Container Check: 
--docker compose -f infra/docker/docker-compose.dev.yml ps 
-+docker compose -f infra/docker/docker-compose.local.yml ps 
- 
- DB
- Connect:
- docker exec -it docker-db-1 psql -U postgres -d targetthisrole
- 
- Cmds: 
- \dt
- 
- SELECT COUNT(*) AS users FROM users;
- SELECT COUNT(*) AS baselines FROM baselines;
- SELECT COUNT(*) AS sections FROM baseline_sections;
- SELECT COUNT(*) AS jobs FROM jobs;
- SELECT COUNT(*) AS fits FROM fit_assessments;
- SELECT COUNT(*) AS interviews FROM interviews;
- SELECT COUNT(*) AS drafts FROM resume_drafts;
- SELECT COUNT(*) AS audit FROM audit_logs;
- 
- 
- SELECT id, email
- FROM users
- LIMIT 10;
- 
- SELECT *
- FROM users
- LIMIT 10;
-diff --git a/runbook.md b/runbook.md
-index 40fb3fa6a81e2f879521d97248f99625815e5197..2604167c52fc41ae685cbf6285fbf59d2ff053b9 100644
---- a/runbook.md
-+++ b/runbook.md
-@@ -1,78 +1,93 @@
--## Build / Start (Docker – Dev)
--
--cd infra/docker
--docker compose -f docker-compose.dev.yml up -d --build
--## Docker Dev (LOQ)
-+## Local Dev (Docker)
- 
- ### Start
--cd C:\Users\micha\OneDrive\Documents\GitHub\TargetThisRole
--docker compose -f infra/docker/docker-compose.dev.yml up -d --build
-+```
-+docker compose -f infra/docker/docker-compose.local.yml up -d --build
-+```
- 
- ### Status
--docker compose -f infra/docker/docker-compose.dev.yml ps
-+```
-+docker compose -f infra/docker/docker-compose.local.yml ps
-+```
- 
- ### Logs
--docker compose -f infra/docker/docker-compose.dev.yml logs -f --timestamps --tail=200
-+```
-+docker compose -f infra/docker/docker-compose.local.yml logs -f --timestamps --tail=200
-+```
- 
- ### Stop
--docker compose -f infra/docker/docker-compose.dev.yml down
-+```
-+docker compose -f infra/docker/docker-compose.local.yml down
-+```
- 
- ### Rebuild API
--docker compose -f infra/docker/docker-compose.dev.yml down -v api
--docker compose -f infra/docker/docker-compose.dev.yml up -d --build api
--docker compose -f infra/docker/docker-compose.dev.yml up -d
-+```
-+docker compose -f infra/docker/docker-compose.local.yml down -v api
-+docker compose -f infra/docker/docker-compose.local.yml up -d --build api
-+docker compose -f infra/docker/docker-compose.local.yml up -d
-+```
- 
- ### Rebuild Web
--docker compose -f infra/docker/docker-compose.dev.yml down -v web
--docker compose -f infra/docker/docker-compose.dev.yml up -d --build web
--docker compose -f infra/docker/docker-compose.dev.yml up -d
-+```
-+docker compose -f infra/docker/docker-compose.local.yml down -v web
-+docker compose -f infra/docker/docker-compose.local.yml up -d --build web
-+docker compose -f infra/docker/docker-compose.local.yml up -d
-+```
- 
- ### Nuclear reset
--docker compose -f infra/docker/docker-compose.dev.yml down -v
--docker compose -f infra/docker/docker-compose.dev.yml up -d --build
-+```
-+docker compose -f infra/docker/docker-compose.local.yml down -v
-+docker compose -f infra/docker/docker-compose.local.yml up -d --build
-+```
- 
--## DigitalOcean DEV Deployment (Terraform + GHCR)
-+## DigitalOcean Dev Deployment (Terraform + GHCR)
- 
- ### Prereqs
- - Terraform installed.
- - DigitalOcean API token available.
- - GHCR images built via GitHub Actions (see `.github/workflows/build-dev-images.yml`).
- - Optional: set `GHCR_PAT` repo secret if you prefer a PAT over the default `GITHUB_TOKEN` for GHCR pushes.
- - SSH key uploaded to DigitalOcean.
- 
- ### Terraform init/apply
- ```
- cd infra/terraform
- terraform init
- terraform apply \
-   -var="do_token=YOUR_DO_TOKEN" \
-   -var='ssh_key_fingerprints=["YOUR_SSH_FINGERPRINT"]' \
--  -var='allowed_ssh_cidrs=["YOUR_OFFICE_CIDR/32"]' \
--  -var="ghcr_username=YOUR_GHCR_USERNAME" \
--  -var="ghcr_token=YOUR_GHCR_PAT" \
--  -var="web_image=ghcr.io/OWNER/REPO/web:dev" \
--  -var="api_image=ghcr.io/OWNER/REPO/api:dev" \
--  -var="certbot_email=you@example.com"
-+  -var='allowed_ssh_cidrs=["YOUR_OFFICE_CIDR/32"]'
- ```
- 
- ### DNS setup (DreamHost)
--- Add A records pointing to the droplet IPv4:
-+- Add an A record pointing to the droplet IPv4:
-   - `app.dev.targetthisrole.ai`
--  - `api.dev.targetthisrole.ai`
- - Keep MX records unchanged.
- 
--### Verify HTTPS
--- Visit `https://app.dev.targetthisrole.ai` and `https://api.dev.targetthisrole.ai`.
--- If certificates failed because DNS was not ready, re-run certbot on the droplet:
--  ```
--  sudo certbot --nginx -d app.dev.targetthisrole.ai -d api.dev.targetthisrole.ai --non-interactive --agree-tos --email you@example.com --redirect
--  ```
--
--### Deploy a new version
--1. Push to `main` to trigger GHCR builds.
--2. SSH to the droplet and pull/restart:
-+### Configure environment
-+1. Copy the env template and fill in values:
-+   ```
-+   cp infra/docker/.env.example /tmp/targetthisrole.dev.env
-    ```
--   cd /opt/targetthisrole
--   sudo docker compose pull
--   sudo docker compose up -d
-+2. Populate `DATABASE_URL` using the database host/port outputs and the generated DB user password:
-    ```
-+   cd infra/terraform
-+   terraform output -raw postgres_host
-+   terraform output -raw postgres_port
-+   terraform state show digitalocean_database_user.api_user
-+   ```
-+3. Update `CORS_ORIGIN` to allow the app domain (e.g. `https://app.dev.targetthisrole.ai`).
++  - |
++    bash -lc 'set -euo pipefail
++    if ! docker compose version >/dev/null 2>&1; then
++      apt-get update -y
++      apt-get install -y docker-compose-plugin
++    fi
++    if ! docker compose version >/dev/null 2>&1; then
++      mkdir -p /usr/local/lib/docker/cli-plugins
++      python3 - <<'"'"'PY'"'"'
++import pathlib
++import urllib.request
 +
-+### Deploy a new version
-+```
-+export DEPLOY_HOST=YOUR_DROPLET_IP
-+export GHCR_USERNAME=YOUR_GHCR_USERNAME
-+export GHCR_TOKEN=YOUR_GHCR_PAT
-+export DEPLOY_ENV_FILE=/tmp/targetthisrole.dev.env
-+./infra/deploy/deploy-dev.sh
-+```
-+This copies `infra/docker/docker-compose.dev.yml` and `infra/docker/Caddyfile.dev` to `/opt/targetthisrole` on the droplet and runs `docker compose` from there.
-+
-+### Verify
-+- API health through the proxy: `https://app.dev.targetthisrole.ai/api/health`
-+- Web loads and API calls work through `/api`.
++target = pathlib.Path("/usr/local/lib/docker/cli-plugins/docker-compose")
++url = "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64"
++with urllib.request.urlopen(url) as response, target.open("wb") as output:
++    output.write(response.read())
++PY
++      chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
++    fi
++    docker compose version'

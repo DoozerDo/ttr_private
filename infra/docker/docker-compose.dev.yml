@@ -27,7 +27,7 @@ services:
       - ttr_dev
 
   proxy:
-    image: caddy:2.7.6
+    image: ghcr.io/targetthisrole/targetthisrole-proxy:dev
     restart: unless-stopped
     ports:
       - "80:80"
@@ -36,7 +36,6 @@ services:
       CADDY_EMAIL: ${CADDY_EMAIL}
       APP_DOMAIN: ${APP_DOMAIN}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

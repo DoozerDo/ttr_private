@@ -19,6 +19,8 @@ jobs:
             dockerfile: infra/docker/web.Dockerfile
           - name: api
             dockerfile: infra/docker/api.Dockerfile
+          - name: proxy
+            dockerfile: infra/docker/proxy.Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
