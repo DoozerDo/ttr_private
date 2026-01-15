@@ -334,6 +334,12 @@ export function AppShell({ children, userEmail }: AppShellProps) {
                 Dev health
               </span>
             ) : null}
+            <Link
+              href={settingsRoute.href}
+              className="rounded-full border border-white/20 px-4 py-1 text-sm font-semibold text-slate-100 transition hover:bg-slate-900/40"
+            >
+              Settings
+            </Link>
             <div className="relative" ref={menuRef}>
               <button
                 type="button"

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Target This Role",
-  description: "Dashboard and authentication for Target This Role",
+  description: "Settings and authentication for Target This Role",
 };
 
 export default function RootLayout({

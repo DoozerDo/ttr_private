@@ -39,7 +39,7 @@ export const JOURNEY_NAV_STEPS: JourneyStep[] = navigationRoutes.map((route) => 
   label: route.label,
 }));
 
-const DEFAULT_STEP_ID: JourneyStepId = JOURNEY_NAV_STEPS[0]?.id ?? ("dashboard" as JourneyStepId);
+const DEFAULT_STEP_ID: JourneyStepId = JOURNEY_NAV_STEPS[0]?.id ?? ("baselines" as JourneyStepId);
 
 const PATHNAME_TO_STEP_MAP: Record<string, JourneyStepId> = navigationRoutes.reduce<
   Record<string, JourneyStepId>
