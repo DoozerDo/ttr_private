@@ -22,6 +22,8 @@ import {
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
+import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
+import { useAutoGenerateThreshold } from "../lib/settings";
 
 type LatestAnalysis = {
   baselineId: string;
@@ -36,6 +38,33 @@ type LatestAnalysis = {
   // Optional, because API payloads often include these even if the UI does not always use them.
   assessmentId?: string | null;
   score?: number | null;
+};
+
+const resolveStoredFitScore = (record: StoredAnalysisRecord) => {
+  if (typeof record.fitScore === "number") return record.fitScore;
+  if (typeof record.analysis.score === "number") return record.analysis.score;
+  if (typeof record.analysis.overallScore === "number") return record.analysis.overallScore;
+  if (typeof record.analysis.overall_score === "number") return record.analysis.overall_score;
+  return null;
+};
+
+const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis => {
+  const fitScore = resolveStoredFitScore(record);
+  const verdict =
+    record.verdict ??
+    (typeof record.analysis.verdict === "string" ? record.analysis.verdict : undefined);
+  return {
+    baselineId: record.baselineId ?? "",
+    baselineVersionId: record.baselineVersionId ?? null,
+    jobId: record.jobId ?? "",
+    overallScore: fitScore ?? undefined,
+    score: fitScore,
+    note: record.summary ?? record.analysis.summary ?? undefined,
+    verdict,
+    jobTitle: record.jobTitle ?? undefined,
+    company: record.company ?? undefined,
+    assessmentId: record.analysis.assessmentId ?? undefined,
+  };
 };
 
 type VerdictDefinition = {
@@ -53,6 +82,7 @@ type NextStepArgs = {
   verdict?: string | null;
   hasAnalysis: boolean;
   hasResume: boolean;
+  autoGenerateThreshold: number;
 };
 
 const debugUiEnabled =
@@ -96,9 +126,11 @@ const getNextSteps = ({
   verdict,
   hasAnalysis,
   hasResume,
+  autoGenerateThreshold,
 }: NextStepArgs): NextStep[] => {
   const verdictInfo = formatVerdict(verdict);
-  const needsMoreInsight = score === null || score === undefined || score < 92;
+  const needsMoreInsight =
+    score === null || score === undefined || score < autoGenerateThreshold;
   const steps: NextStep[] = [];
 
   steps.push({
@@ -125,7 +157,7 @@ const getNextSteps = ({
   steps.push({
     title: "Generate a resume",
     description: needsMoreInsight
-      ? "Once your fit score hits 92+, export a resume tailored to this opportunity."
+      ? `Once your fit score hits ${autoGenerateThreshold}+, export a resume tailored to this opportunity.`
       : hasResume
         ? "Download or share the resume you already generated."
         : "One tap generation is available; export and share with confidence.",
@@ -151,6 +183,8 @@ export default function ResultsPage() {
   const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(
     null,
   );
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+  const [autoGenerateThreshold] = useAutoGenerateThreshold();
 
   const resumeWarningFlags = (resumeResponse?.compliance_flags ?? []).filter(
     (flag: { severity?: string | null }) => (flag?.severity ?? "warn").toLowerCase() !== "block",
@@ -224,19 +258,19 @@ export default function ResultsPage() {
 
   const oneTapEligible = useMemo(() => {
     if (latestScore === null) return false;
-    return latestScore >= 92;
-  }, [latestScore]);
+    return latestScore >= autoGenerateThreshold;
+  }, [latestScore, autoGenerateThreshold]);
 
   const qualityBadge = useMemo(() => {
     if (latestScore === null) return null;
-    const optimized = latestScore >= 92;
+    const optimized = latestScore >= autoGenerateThreshold;
     return {
       label: optimized ? "Optimized" : "Draft",
       toneClass: optimized
         ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
         : "border-amber-300/40 bg-amber-500/10 text-amber-200",
     };
-  }, [latestScore]);
+  }, [autoGenerateThreshold, latestScore]);
 
   const nextSteps = useMemo(() => {
     return getNextSteps({
@@ -244,8 +278,9 @@ export default function ResultsPage() {
       verdict: latest?.verdict ?? null,
       hasAnalysis: !!latest,
       hasResume: !!resumeResponse,
+      autoGenerateThreshold,
     });
-  }, [latest, latestScore, resumeResponse]);
+  }, [autoGenerateThreshold, latest, latestScore, resumeResponse]);
 
   const debugMode = debugUiEnabled;
 
@@ -317,12 +352,26 @@ export default function ResultsPage() {
       setBaselineId(data.baselineId ?? "");
       setJobId(data.jobId ?? "");
       setAnalysisSource("latest");
+      setRestoredAt(null);
     } catch (e: any) {
       setError(e?.message || "Failed to load analysis");
     } finally {
       setLoadingLatest(false);
     }
   }
+
+  useEffect(() => {
+    if (analysisSource !== "manual" || baselineId || jobId || latest) return;
+
+    const stored = readLastAnalysis();
+    if (!stored) return;
+
+    setLatest(mapStoredAnalysisToLatest(stored));
+    setBaselineId(stored.baselineId ?? "");
+    setJobId(stored.jobId ?? "");
+    setRestoredAt(stored.savedAt);
+    setAnalysisSource("latest");
+  }, [analysisSource, baselineId, jobId, latest]);
 
   async function generateResume(oneTap = false) {
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
@@ -550,6 +599,12 @@ export default function ResultsPage() {
 
             {latest?.note ? <p className="text-sm text-slate-400">{latest.note}</p> : null}
 
+            {restoredAt ? (
+              <p className="text-xs text-slate-400">
+                Restored from your last browser session: {new Date(restoredAt).toLocaleString()}
+              </p>
+            ) : null}
+
             {!latest ? (
               <EmptyState
                 title="No analysis yet"
@@ -567,16 +622,9 @@ export default function ResultsPage() {
               />
             ) : null}
 
-            <div className="flex flex-wrap items-center gap-3">
-              <FormButton
-                variant="ghost"
-                onClick={() => router.push(fitReviewPath)}
-                disabled={!latest?.jobId}
-              >
-                Open Fit Review
-              </FormButton>
-              <p className="text-xs text-slate-400">Review the latest match details in Fit Review.</p>
-            </div>
+            <p className="text-xs text-slate-400">
+              Review the latest match details in Fit Review using the CTA above.
+            </p>
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -603,7 +651,7 @@ export default function ResultsPage() {
               >
                 {loading
                   ? "Generating..."
-                  : latestScore !== null && latestScore >= 92
+                  : latestScore !== null && latestScore >= autoGenerateThreshold
                     ? "Generate resume"
                     : "Generate draft resume"}
               </FormButton>
@@ -616,11 +664,13 @@ export default function ResultsPage() {
                   readyForResume
                     ? oneTapEligible
                       ? "Generate immediately with compliance checks"
-                      : "Requires fit score of at least 92"
+                      : `Requires fit score of at least ${autoGenerateThreshold}`
                     : "Load the latest analysis before using one tap generate"
                 }
               >
-                {loading ? "Checking..." : "One tap generate (>=92 fit score)"}
+                {loading
+                  ? "Checking..."
+                  : `One tap generate (>=${autoGenerateThreshold} fit score)`}
               </FormButton>
             </div>
 
@@ -645,13 +695,13 @@ export default function ResultsPage() {
             <div className="space-y-2 text-sm text-slate-300">
               {oneTapEligible ? (
                 <p>
-                  One tap generation is enabled when your fit score reaches 92 and the latest analysis
+                  One tap generation is enabled when your fit score reaches {autoGenerateThreshold} and the latest analysis
                   is ready. Manual generation remains available while you fine-tune your match.
                 </p>
               ) : (
                 <div className="space-y-3">
                   <p>
-                    Your score is below 92. Follow these steps to reach the threshold:
+                    Your score is below {autoGenerateThreshold}. Follow these steps to reach the threshold:
                   </p>
                   <ol className="space-y-2 pl-4 text-slate-300">
                     <li>Open Fit Review to inspect the verdict and confirmed gaps.</li>
@@ -661,13 +711,6 @@ export default function ResultsPage() {
                     <li>Re-run the analysis to confirm the baseline still reflects the role.</li>
                   </ol>
                   <p>Manual generation stays available while you move through those steps.</p>
-                  <FormButton
-                    variant="ghost"
-                    onClick={() => router.push(fitReviewPath)}
-                    disabled={!latest?.jobId}
-                  >
-                    Open Fit Review
-                  </FormButton>
                 </div>
               )}
             </div>

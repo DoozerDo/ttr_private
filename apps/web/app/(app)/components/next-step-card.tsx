@@ -5,39 +5,26 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { ttrComponents } from "../ui/ttrStyles";
-import type { StoredPayload } from "../lib/session";
-
-const STORAGE_KEY = "ttr:lastAnalysis";
-
-function safeParse(payload: string | null): StoredPayload | null {
-  if (!payload) return null;
-
-  try {
-    const parsed = JSON.parse(payload) as StoredPayload;
-
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.result || typeof parsed.result.score !== "number") return null;
-    if (!parsed.savedAt || typeof parsed.savedAt !== "string") return null;
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
+import {
+  LAST_ANALYSIS_STORAGE_KEY,
+  readLastAnalysis,
+  type StoredAnalysisRecord,
+} from "../lib/session";
 
 export function NextStepCard() {
-  const [stored, setStored] = useState<StoredPayload | null>(null);
+  const [stored, setStored] = useState<StoredAnalysisRecord | null>(null);
 
   useEffect(() => {
-    const read = () => {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      setStored(safeParse(raw));
+    const refresh = () => {
+      setStored(readLastAnalysis());
     };
 
-    read();
+    refresh();
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) read();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === LAST_ANALYSIS_STORAGE_KEY) {
+        refresh();
+      }
     };
 
     window.addEventListener("storage", onStorage);
@@ -56,7 +43,7 @@ export function NextStepCard() {
     }
   }, [stored?.savedAt]);
 
-  const hasLastAnalysis = Boolean(stored?.result && typeof stored.result.score === "number");
+  const hasLastAnalysis = stored?.fitScore !== null && stored?.fitScore !== undefined;
 
   return (
     <div
@@ -115,8 +102,8 @@ export function NextStepCard() {
             <Link href="/analyze" style={ttrComponents.quietButton}>
               Run another Analyze
             </Link>
-            <Link href="/baseline" style={ttrComponents.quietButton}>
-              Baseline
+            <Link href="/analyze" style={ttrComponents.quietButton}>
+              Reality Check
             </Link>
           </>
         )}

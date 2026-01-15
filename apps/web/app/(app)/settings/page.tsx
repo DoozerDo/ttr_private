@@ -1,7 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { PageHeader } from "@/components/PageHeader";
 import { useEntitlements } from "@/src/lib/entitlements";
+import {
+  DEFAULT_AUTO_GENERATE_THRESHOLD,
+  useAutoGenerateThreshold,
+} from "../lib/settings";
 import { ttrComponents } from "../ui/ttrStyles";
 
 const NOT_AVAILABLE = "Not available";
@@ -74,6 +80,21 @@ export default function SettingsPage() {
   ];
 
   const sectionStyle = { ...ttrComponents.basePanel, flex: "none", minWidth: 0 };
+  const [autoGenerateThreshold, updateAutoGenerateThreshold] = useAutoGenerateThreshold();
+  const [thresholdInput, setThresholdInput] = useState(String(autoGenerateThreshold));
+
+  useEffect(() => {
+    setThresholdInput(String(autoGenerateThreshold));
+  }, [autoGenerateThreshold]);
+
+  const applyThreshold = () => {
+    const parsed = Number.parseInt(thresholdInput, 10);
+    if (Number.isNaN(parsed)) {
+      updateAutoGenerateThreshold(DEFAULT_AUTO_GENERATE_THRESHOLD);
+      return;
+    }
+    updateAutoGenerateThreshold(parsed);
+  };
 
   return (
     <div className="space-y-6">
@@ -100,6 +121,42 @@ export default function SettingsPage() {
           <p className="text-sm text-slate-300">Current subscription and entitlement flags.</p>
         </div>
         <div className="space-y-3">{renderRows(planRows)}</div>
+      </section>
+
+      <section style={sectionStyle} className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-amber-400">Preferences</p>
+          <h2 className="text-xl font-semibold text-slate-100">Preferences</h2>
+          <p className="text-sm text-slate-300">Client-only flags that you can update in this browser.</p>
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
+              Auto generate threshold
+            </label>
+            <input
+              type="number"
+              step={1}
+              min={50}
+              max={100}
+              value={thresholdInput}
+              onChange={(event) => setThresholdInput(event.target.value)}
+              onBlur={() => void applyThreshold()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  applyThreshold();
+                  (event.target as HTMLInputElement).blur();
+                }
+              }}
+              style={{ ...ttrComponents.input, maxWidth: 160 }}
+              aria-describedby="auto-generate-threshold-helper"
+            />
+            <p id="auto-generate-threshold-helper" className="text-sm text-slate-400">
+              Resume and cover letter one tap generate triggers at or above this score.
+            </p>
+          </div>
+        </div>
       </section>
 
       <section style={sectionStyle} className="space-y-4">

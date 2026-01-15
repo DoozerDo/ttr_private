@@ -8,13 +8,17 @@ import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
 import { JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
 import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
+import {
+  readLastAnalysis,
+  type StoredAnalysisRecord,
+} from "@/app/(app)/lib/session";
 
 const isDev = process.env.NODE_ENV === "development";
 
 type StoredContext = {
   hasBaseline: boolean;
   hasJob: boolean;
-  lastAnalysis: unknown | null;
+  lastAnalysis: StoredAnalysisRecord | null;
 };
 
 const getStoredContext = (): StoredContext => {
@@ -22,22 +26,16 @@ const getStoredContext = (): StoredContext => {
     return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
 
-  try {
-    const payload = sessionStorage.getItem("ttr:lastAnalysis");
-    if (!payload) {
-      return { hasBaseline: false, hasJob: false, lastAnalysis: null };
-    }
-
-    const parsed = JSON.parse(payload) as { result?: { baselineId?: string; jobId?: string } };
-    return {
-      hasBaseline: Boolean(parsed?.result?.baselineId),
-      hasJob: Boolean(parsed?.result?.jobId),
-      lastAnalysis: parsed,
-    };
-  } catch (error) {
-    console.error("Unable to read stored session", error);
+  const stored = readLastAnalysis();
+  if (!stored) {
     return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
+
+  return {
+    hasBaseline: Boolean(stored.baselineId),
+    hasJob: Boolean(stored.jobId),
+    lastAnalysis: stored,
+  };
 };
 
 const disabledMessages: Record<string, string> = {

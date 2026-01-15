@@ -6,9 +6,11 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 
 import { ttrComponents } from "../ui/ttrStyles";
-import type { StoredPayload } from "../lib/session";
-
-const STORAGE_KEY = "ttr:lastAnalysis";
+import {
+  LAST_ANALYSIS_STORAGE_KEY,
+  readLastAnalysis,
+  type StoredAnalysisRecord,
+} from "../lib/session";
 
 function fitLabel(score: number) {
   if (score >= 90) return "Strong fit";
@@ -17,42 +19,32 @@ function fitLabel(score: number) {
   return "Weak fit";
 }
 
-function safeParse(payload: string | null): StoredPayload | null {
-  if (!payload) return null;
-
-  try {
-    const parsed = JSON.parse(payload) as StoredPayload;
-
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.result || typeof parsed.result.score !== "number") return null;
-    if (!parsed.savedAt || typeof parsed.savedAt !== "string") return null;
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 export function LastAnalysisCard() {
-  const [stored, setStored] = useState<StoredPayload | null>(null);
+  const [stored, setStored] = useState<StoredAnalysisRecord | null>(null);
 
   useEffect(() => {
-    const read = () => {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      setStored(safeParse(raw));
+    const refresh = () => {
+      setStored(readLastAnalysis());
     };
 
-    read();
+    refresh();
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) read();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === LAST_ANALYSIS_STORAGE_KEY) {
+        refresh();
+      }
     };
 
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const score = stored?.result?.score ?? null;
+  const score =
+    stored?.fitScore ??
+    stored?.analysis?.score ??
+    stored?.analysis?.overallScore ??
+    stored?.analysis?.overall_score ??
+    null;
 
   const lastUpdated = useMemo(() => {
     if (!stored?.savedAt) return null;
@@ -157,9 +149,9 @@ export function LastAnalysisCard() {
             Last updated: {lastUpdated || "Unknown"}
           </div>
 
-          {stored.result.baselineId ? (
+          {stored.baselineId ? (
             <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-              Baseline: {stored.result.baselineId}
+              Baseline: {stored.baselineId}
             </div>
           ) : null}
         </div>
