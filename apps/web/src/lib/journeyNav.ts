@@ -1,4 +1,4 @@
-import { RouteConfig, settingsRoute, sidebarRoutes } from "@/src/navigation/routes";
+import { RouteConfig, sidebarRoutes } from "@/src/navigation/routes";
 
 export type JourneyStepId = RouteConfig["id"];
 
@@ -21,7 +21,7 @@ export type JourneyNavState = {
   completedStepIds: JourneyStepId[];
 };
 
-const baseNavigationRoutes = [...sidebarRoutes, settingsRoute];
+const baseNavigationRoutes = [...sidebarRoutes];
 
 const navigationRoutes = (() => {
   const seenIds = new Set<RouteConfig["id"]>();
@@ -48,19 +48,13 @@ const PATHNAME_TO_STEP_MAP: Record<string, JourneyStepId> = navigationRoutes.red
   return acc;
 }, {});
 
-const normalizePathname = (pathname?: string) => {
-  if (!pathname || pathname === "/") {
-    return "/";
-  }
-
-  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-};
-
 export function getStepIdForPathname(pathname?: string): JourneyStepId | null {
-  const normalized = normalizePathname(pathname);
-  if (!normalized) {
-    return null;
-  }
+  const normalized =
+    !pathname || pathname === "/"
+      ? "/"
+      : pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
 
   // `/` should only match the root entry.
   if (normalized === "/") {
@@ -79,44 +73,35 @@ export function getStepIdForPathname(pathname?: string): JourneyStepId | null {
 
 export type ResolveJourneyNavStateInput = {
   currentPathname?: string;
-  unlockedStepIds?: JourneyStepId[];
   completedStepIds?: JourneyStepId[];
   activeStepId?: JourneyStepId;
 };
 
 export function resolveJourneyNavState(input: ResolveJourneyNavStateInput): JourneyNavState {
-  const { unlockedStepIds = [], completedStepIds = [], activeStepId: explicitActiveStepId } = input;
+  const { currentPathname, completedStepIds = [], activeStepId: explicitActiveStepId } = input;
 
-  const unlockedSet = new Set(unlockedStepIds);
-  const completedSet = new Set(completedStepIds);
-
-  const candidateActive =
-    (explicitActiveStepId && JOURNEY_NAV_STEPS.some((step) => step.id === explicitActiveStepId)
+  const candidateFromPath = getStepIdForPathname(currentPathname) ?? DEFAULT_STEP_ID;
+  const desiredActive =
+    explicitActiveStepId && JOURNEY_NAV_STEPS.some((step) => step.id === explicitActiveStepId)
       ? explicitActiveStepId
-      : getStepIdForPathname(input.currentPathname)) ?? DEFAULT_STEP_ID;
+      : candidateFromPath;
+  const activeStepId = JOURNEY_NAV_STEPS.some((step) => step.id === desiredActive)
+    ? desiredActive
+    : DEFAULT_STEP_ID;
 
-  const activeStepId = candidateActive ?? DEFAULT_STEP_ID;
-  const activeIndex = JOURNEY_NAV_STEPS.findIndex((step) => step.id === activeStepId);
+  const normalizedCompleted = completedStepIds.filter((id): id is JourneyStepId => typeof id === "string");
+  const completedSet = new Set(normalizedCompleted);
 
-  const steps = JOURNEY_NAV_STEPS.map((step, index) => {
-    let state: JourneyStepState = JourneyStepState.Locked;
-
-    if (index === activeIndex) {
-      state = JourneyStepState.Active;
-    } else if (index < activeIndex) {
-      state = completedSet.has(step.id)
-        ? JourneyStepState.Completed
-        : unlockedSet.has(step.id)
-        ? JourneyStepState.Available
-        : JourneyStepState.Locked;
-    } else {
-      state = unlockedSet.has(step.id) ? JourneyStepState.Available : JourneyStepState.Locked;
+  const steps = JOURNEY_NAV_STEPS.map((step) => {
+    if (step.id === activeStepId) {
+      return { ...step, state: JourneyStepState.Active };
     }
 
-    return {
-      ...step,
-      state,
-    };
+    if (completedSet.has(step.id)) {
+      return { ...step, state: JourneyStepState.Completed };
+    }
+
+    return { ...step, state: JourneyStepState.Available };
   });
 
   return {
@@ -134,7 +119,6 @@ export function resolveJourneyNavStateFromPathname(pathname?: string): JourneyNa
   return resolveJourneyNavState({
     currentPathname: pathname,
     activeStepId,
-    unlockedStepIds: [activeStepId],
     completedStepIds: [],
   });
 }

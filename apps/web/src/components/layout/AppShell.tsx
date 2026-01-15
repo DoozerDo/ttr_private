@@ -7,11 +7,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
 import { JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
-import {
-  inferAndSyncJourneyCompletions,
-  resolveJourneyNavStateFromAppState,
-  useJourneyNavAppState,
-} from "@/src/lib/journeyNavStore";
+import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -148,20 +144,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
-
-    // Use cheap real signals to drive the journey completion state.
-    // This avoids hunting for events across the app.
-    const resolved = resolveJourneyNavStateFromAppState(pathname, journeyAppState);
-
-    inferAndSyncJourneyCompletions({
-      pathname,
-      steps: resolved.steps,
-      hasBaseline: Boolean(baselinesOk),
-      hasJob: Boolean(jobsOk),
-      lastAnalysis: stored.lastAnalysis,
-      appState: journeyAppState,
-    });
-  }, [pathname, journeyAppState]);
+  }, [pathname]);
 
   useEffect(() => {
     refreshContext();
