@@ -20,13 +20,6 @@ const sidebarNavRoutes: RouteConfig[] = [
     subtext: "Upload a baseline to begin targeting a role",
   },
   {
-    id: "jobs",
-    label: "Job Description Library",
-    href: "/jobs",
-    requiresAuth: true,
-    subtext: "Upload a job description you wish to target",
-  },
-  {
     id: "analyze",
     label: "Analyze",
     href: "/analyze",

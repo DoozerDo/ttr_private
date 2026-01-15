@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   JourneyNavState,
@@ -11,6 +11,7 @@ import {
   resolveJourneyNavStateFromPathname,
 } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
+import { routeLookup } from "@/src/navigation/routes";
 
 export const JOURNEY_NAV_V1_ENABLED =
   process.env.NEXT_PUBLIC_JOURNEY_NAV_V1_ENABLED === "true" ||
@@ -93,14 +94,13 @@ export function JourneyNavV1({
 }: JourneyNavV1Props) {
   const shouldReduceMotion = useReducedMotion();
   const pathname = usePathname() ?? "/";
+  const router = useRouter();
   const pathActiveStepId = resolveJourneyNavStateFromPathname(pathname).activeStepId;
   const { activeOverrideStepId, setActiveOverride } = useJourneyNavAppState();
-  const [isTyping, setIsTyping] = useState(false);
 
   const [rippling, setRippling] = useState(false);
   const rippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveStepIdRef = useRef<JourneyStepId | null>(null);
   const prevPathnameRef = useRef<string | null>(null);
@@ -117,33 +117,6 @@ export function JourneyNavV1({
       : state.steps.length === 1
       ? 100
       : clamp((activeIndex / denominator) * 100, 0, 100);
-
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.matches("input, textarea, [contenteditable='true']") || target.isContentEditable)
-      ) {
-        setIsTyping(true);
-        if (typingTimerRef.current) {
-          clearTimeout(typingTimerRef.current);
-        }
-        typingTimerRef.current = setTimeout(() => {
-          setIsTyping(false);
-          typingTimerRef.current = null;
-        }, 2000);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeydown);
-    return () => {
-      window.removeEventListener("keydown", handleKeydown);
-      if (typingTimerRef.current) {
-        clearTimeout(typingTimerRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (impactTimerRef.current) {
@@ -241,7 +214,7 @@ export function JourneyNavV1({
     }, IMPACT_DURATION_MS);
   };
 
-  const shouldPulse = !shouldReduceMotion && !isTyping && !isImpacting;
+  const shouldPulse = !shouldReduceMotion && !isImpacting;
 
   const handleStepClick = (stepId: JourneyStepId) => {
     if (!onStepClick) return;
@@ -266,8 +239,10 @@ export function JourneyNavV1({
             const isActive = step.id === pathActiveStepId;
             const isCompleted = step.state === JourneyStepState.Completed;
             const isLocked = step.state === JourneyStepState.Locked;
-            const isClickable = isCompleted && Boolean(onStepClick);
             const showPulse = shouldPulse && isActive;
+            const route = routeLookup.get(step.id);
+            const routeHref = route?.href;
+            const canNavigate = Boolean(routeHref && !isLocked);
 
             const nodeClass = [
               "journey-nav-step-button",
@@ -285,19 +260,8 @@ export function JourneyNavV1({
               .filter(Boolean)
               .join(" ");
 
-            return (
-              <button
-                key={step.id}
-                type="button"
-                className={nodeClass}
-                aria-current={isActive ? "step" : undefined}
-                aria-disabled={isLocked}
-                onClick={() => {
-                  if (isClickable) handleStepClick(step.id);
-                }}
-                disabled={isLocked}
-                title={isLocked ? LOCKED_TOOLTIP : undefined}
-              >
+            const stepContent = (
+              <>
                 <span className={iconAreaClass}>
                   {showPulse ? <span className="journey-nav-target-pulse" aria-hidden /> : null}
                   {isActive ? (
@@ -312,6 +276,47 @@ export function JourneyNavV1({
                   </span>
                 </span>
                 <span className="journey-nav-step-label">{step.label}</span>
+              </>
+            );
+
+            const handleNavigation = () => {
+              if (!canNavigate || !routeHref) return;
+              router.push(routeHref);
+            };
+
+            const handleClick = () => {
+              handleNavigation();
+              if (isCompleted && Boolean(onStepClick)) {
+                handleStepClick(step.id);
+              }
+            };
+
+            const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+              if (!canNavigate) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                handleNavigation();
+                if (isCompleted && Boolean(onStepClick)) {
+                  handleStepClick(step.id);
+                }
+              }
+            };
+
+            return (
+              <button
+                key={step.id}
+                type="button"
+                className={nodeClass}
+                aria-current={isActive ? "step" : undefined}
+                aria-disabled={isLocked}
+                onClick={handleClick}
+                onKeyDown={handleKeyDown}
+                disabled={isLocked}
+                title={isLocked ? LOCKED_TOOLTIP : undefined}
+                role={canNavigate ? "link" : undefined}
+                tabIndex={canNavigate ? 0 : undefined}
+              >
+                {stepContent}
               </button>
             );
           })}

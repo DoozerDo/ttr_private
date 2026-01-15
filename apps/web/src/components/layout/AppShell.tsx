@@ -258,14 +258,8 @@ export function AppShell({ children, userEmail }: AppShellProps) {
       if (step.state !== JourneyStepState.Completed) return;
 
       journeyAppState.setActiveOverride(stepId);
-
-      // Route mapping: prefer the route table if ids line up
-      const route = navRoutes.find((r) => r.id === stepId);
-      if (route?.href) {
-        router.push(route.href);
-      }
     },
-    [journeyNavState.steps, journeyAppState, navRoutes, router],
+    [journeyNavState.steps, journeyAppState],
   );
 
   return (

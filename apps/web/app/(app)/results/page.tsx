@@ -21,11 +21,6 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
-import {
-  RealityCheckDto,
-  RealityCheckOutcome,
-  getRealityCheck,
-} from "@/lib/realityCheck";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 type LatestAnalysis = {
@@ -166,10 +161,6 @@ export default function ResultsPage() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [skipNote, setSkipNote] = useState<string | null>(null);
-  const [realityCheck, setRealityCheck] = useState<RealityCheckDto | null>(null);
-  const [realityCheckError, setRealityCheckError] = useState<string | null>(null);
-  const [realityCheckLoading, setRealityCheckLoading] = useState(false);
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
@@ -265,26 +256,6 @@ export default function ResultsPage() {
     return "Load latest analysis to populate the score and unlock one tap export.";
   }, [analysisSource, jobId, latest, loadingLatest]);
 
-  const analysisIndicatesGap = useMemo(() => {
-    if (latestScore === null) return false;
-    return latestScore < 92;
-  }, [latestScore]);
-
-  const showRealityCheckCard = true;
-
-  const runRealityCheckPath = useMemo(() => {
-    if (!jobId || !baselineId) return "/reality-check";
-    return `/reality-check/run?jobId=${encodeURIComponent(jobId)}&baselineId=${encodeURIComponent(
-      baselineId,
-    )}`;
-  }, [baselineId, jobId]);
-
-  const baselineUpdatePath = useMemo(() => {
-    if (!jobId || !baselineId) return "/reality-check";
-    return `/reality-check?jobId=${encodeURIComponent(jobId)}&baselineId=${encodeURIComponent(
-      baselineId,
-    )}`;
-  }, [baselineId, jobId]);
 
   async function loadLatest() {
     if (loadingLatest) return;
@@ -493,58 +464,6 @@ export default function ResultsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const storedNote = window.sessionStorage.getItem("ttr:realityCheckSkipNote");
-    if (storedNote) {
-      setSkipNote(storedNote);
-      window.sessionStorage.removeItem("ttr:realityCheckSkipNote");
-      return;
-    }
-
-    if (searchParams.get("realityCheckSkipped")) {
-      setSkipNote("You skipped the Reality Check update flow. Consider reviewing suggested updates later.");
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!jobId || !baselineId) {
-      setRealityCheck(null);
-      setRealityCheckError(null);
-      setRealityCheckLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadRealityCheck = async () => {
-      setRealityCheckLoading(true);
-      setRealityCheckError(null);
-      try {
-        const existing = await getRealityCheck(jobId, baselineId);
-        if (!cancelled) {
-          setRealityCheck(existing);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const message = err instanceof Error ? err.message : "Unable to load Reality Check";
-          setRealityCheckError(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setRealityCheckLoading(false);
-        }
-      }
-    };
-
-    void loadRealityCheck();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId, baselineId]);
-
   return (
     <PageShell>
       <div className="space-y-6">
@@ -552,95 +471,6 @@ export default function ResultsPage() {
           title="Results"
           description="Generate resumes, review the latest analysis, and export artifacts for any job."
         />
-
-        {skipNote ? (
-          <Alert intent="info">
-            <p>{skipNote}</p>
-          </Alert>
-        ) : null}
-
-        {showRealityCheckCard ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Reality Check
-                </p>
-                <h2 className="text-lg font-semibold text-slate-100">Baseline health</h2>
-              </div>
-              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                {realityCheckLoading
-                  ? "Checking..."
-                  : realityCheck
-                    ? realityCheck.outcome.replace("_", " ")
-                    : "Not run"}
-              </span>
-            </div>
-
-            <div className="space-y-2 text-sm text-slate-300">
-              {!baselineId ? (
-                <p>
-                  Upload or select a baseline so Reality Check can confirm the document still mirrors
-                  this role before you generate outputs.
-                </p>
-              ) : realityCheck ? (
-                realityCheck.outcome === RealityCheckOutcome.UPDATE_RECOMMENDED ? (
-                  <p>
-                    Reality Check detected drift in baseline content. Review the suggested updates
-                    before generating artifacts.
-                  </p>
-                ) : (
-                  <p>
-                    Reality Check confirmed the baseline accurately reflects this job. Lean on Fit
-                    Review insights when building your next moves.
-                  </p>
-                )
-              ) : analysisIndicatesGap ? (
-                <p>
-                  Fit Review surfaced new gaps, so Reality Check can help verify the baseline still
-                  matches the job before you share outputs.
-                </p>
-              ) : (
-                <p>
-                  Reality Check has not been run for the current baseline/job pair. Run it now to
-                  validate baseline accuracy against reality.
-                </p>
-              )}
-            </div>
-
-            {realityCheckError ? (
-              <Alert intent="error" title="Reality Check">
-                <p>{realityCheckError}</p>
-              </Alert>
-            ) : null}
-
-            <div className="flex flex-wrap gap-3">
-              {!baselineId ? (
-                <FormButton onClick={() => router.push("/baseline")}>Go to Baselines</FormButton>
-              ) : realityCheck ? (
-                realityCheck.outcome === RealityCheckOutcome.UPDATE_RECOMMENDED ? (
-                  <>
-                    <FormButton onClick={() => router.push(baselineUpdatePath)}>
-                      Review suggested baseline updates
-                    </FormButton>
-                    <FormButton variant="secondary" onClick={() => router.push(runRealityCheckPath)}>
-                      Rerun Reality Check
-                    </FormButton>
-                  </>
-                ) : (
-                  <>
-                    <FormButton onClick={() => router.push(fitReviewPath)}>View Fit Review</FormButton>
-                    <FormButton variant="secondary" onClick={() => router.push("/applications")}>
-                      Back to Job Tracker
-                    </FormButton>
-                  </>
-                )
-              ) : (
-                <FormButton onClick={() => router.push(runRealityCheckPath)}>Run Reality Check</FormButton>
-              )}
-            </div>
-          </section>
-        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
