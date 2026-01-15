@@ -110,14 +110,12 @@ INSERT INTO "admin_users" ("userId") VALUES ('doug@ttr.com');
 DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
 
 
-
 DO Notes: 
-ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@159.203.110.143
-
-Not sure what this is: $env:USERPROFILE\.ssh\id_ed25519_targetthisrole -C "targetthisrole-dev"
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@142.93.64.250
 
 
-Terraform plan -var-file="terraform.dev.tfvars"
+Terraform Notes: 
+Terraform plan -var-file="terraform.dev.tfvars" 142.93.64.250
 
 ## Manual Testing – Search Sets UI
 1. Create a search set via `/search-sets` using the Source section (select Greenhouse, enter a URL, adjust max listings) and confirm the Create button stays disabled until all validations pass.
