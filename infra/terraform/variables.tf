@@ -67,3 +67,35 @@ variable "reserved_ip" {
   type        = string
   description = "Reserved IPv4 address to assign to the droplet"
 }
+
+variable "app_domain" {
+  description = "Public domain for the app (e.g. app.dev.targetthisrole.ai)"
+  type        = string
+}
+
+variable "caddy_email" {
+  description = "Email used by Caddy/Let's Encrypt"
+  type        = string
+}
+
+variable "ghcr_username" {
+  description = "GHCR username for docker login"
+  type        = string
+}
+
+variable "ghcr_token" {
+  description = "GHCR token (PAT) for docker login"
+  type        = string
+  sensitive   = true
+}
+
+variable "ssh_private_key_path" {
+  description = "Path to private key used by Terraform provisioners (local machine path)"
+  type        = string
+}
+
+variable "db_password" {
+  description = "DigitalOcean managed Postgres password for user doadmin"
+  type        = string
+  sensitive   = true
+}

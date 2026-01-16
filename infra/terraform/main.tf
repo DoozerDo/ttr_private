@@ -88,3 +88,51 @@ resource "digitalocean_firewall" "app" {
   }
 }
 
+resource "null_resource" "app_bootstrap" {
+  depends_on = [
+    digitalocean_droplet.app,
+    digitalocean_reserved_ip_assignment.app_ip
+  ]
+
+  # Re-run if these inputs change
+  triggers = {
+    droplet_id    = digitalocean_droplet.app.id
+    app_domain    = var.app_domain
+    caddy_email   = var.caddy_email
+    postgres_host = digitalocean_database_cluster.postgres.host
+    postgres_port = tostring(digitalocean_database_cluster.postgres.port)
+  }
+
+  connection {
+    type        = "ssh"
+    user        = "root"
+    host        = var.reserved_ip
+    private_key = file(var.ssh_private_key_path)
+  }
+
+  provisioner "file" {
+    source      = "${path.root}/../docker/docker-compose.dev.yml"
+    destination = "/opt/targetthisrole/docker-compose.yml"
+  }
+
+  provisioner "file" {
+    content = templatefile("${path.module}/app.env.tftpl", {
+      app_domain    = var.app_domain
+      caddy_email   = var.caddy_email
+      postgres_host = digitalocean_database_cluster.postgres.host
+      postgres_port = digitalocean_database_cluster.postgres.port
+      db_password   = var.db_password
+    })
+    destination = "/opt/targetthisrole/.env"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "cd /opt/targetthisrole",
+      "docker login ghcr.io -u ${var.ghcr_username} -p ${var.ghcr_token}",
+      "docker compose --env-file .env -f docker-compose.yml pull",
+      "docker compose --env-file .env -f docker-compose.yml up -d",
+      "docker ps"
+    ]
+  }
+}

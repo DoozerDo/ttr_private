@@ -40,3 +40,39 @@ On the droplet, run exactly:
 
 systemctl enable docker
 systemctl is-enabled docker
+
+
+Step 7 — Add a single “one command to recover” script
+This avoids retyping long compose commands later.
+On the droplet, run exactly:
+
+cat >/opt/targetthisrole/up.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cd /opt/targetthisrole
+docker compose --env-file .env -f docker-compose.yml up -d
+EOF
+chmod +x /opt/targetthisrole/up.sh
+ls -l /opt/targetthisrole/up.sh
+
+Results: /opt/targetthisrole/up.sh
+
+
+Step 8 — Prove reboot safety (without actually rebooting)
+We’ll do a simulated “boot recovery”:
+  stop the stack
+  run your up.sh
+  confirm containers return
+
+On the droplet, run exactly:
+
+cd /opt/targetthisrole
+docker compose --env-file .env -f docker-compose.yml down
+/opt/targetthisrole/up.sh
+docker ps
+
+
+Step 9 — Make sure swap survives a reboot (final check without reboot)
+On the droplet, run exactly:
+
+grep -n '/swapfile' /etc/fstab

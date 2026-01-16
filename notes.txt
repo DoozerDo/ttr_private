@@ -111,7 +111,7 @@ DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
 
 
 DO Notes: 
-ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@64.225.53.196
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@134.209.37.54
 
 Setup Steps: 
 1. 
@@ -148,6 +148,8 @@ Contents:
 5.
 docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml pull
 
+6.
+docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml up -d
 
 
 Terraform Notes: 
