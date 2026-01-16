@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { forwardAuthRequest } from "../helpers";
 
+export const runtime = "nodejs";
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
   const upstreamRes = await forwardAuthRequest("/auth/login", body);
-
   const data = await upstreamRes.clone().json().catch(() => null);
 
   const token: string | undefined =
