@@ -16,6 +16,19 @@ import { formatDateTime } from "@/lib/format-date";
 import { BaselinePolicyEditor } from "./baseline-policy-editor";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
+function isNextRedirectError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  if (!("digest" in error)) {
+    return false;
+  }
+
+  const digest = (error as { digest?: string }).digest;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
 function computeBaseUrl({
   protocol,
   host,
@@ -93,6 +106,10 @@ async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
     const data = (await response.json()) as BaselineDto;
     return { baseline: data, error: null, notFound: false };
   } catch (error) {
+    if (isNextRedirectError(error)) {
+      throw error;
+    }
+
     console.error("Failed to fetch baseline", error);
     const message =
       error instanceof Error ? error.message : "Unable to load baseline.";
@@ -119,6 +136,10 @@ async function fetchBaselineVersions(
 
     return (await response.json()) as BaselineVersionDto[];
   } catch (error) {
+    if (isNextRedirectError(error)) {
+      throw error;
+    }
+
     console.error("Failed to fetch baseline versions", error);
     return null;
   }

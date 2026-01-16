@@ -1,163 +1,269 @@
-diff --git a/apps/api/src/auth/auth.controller.spec.ts b/apps/api/src/auth/auth.controller.spec.ts
-index 79c7adf26ea0a5f3a66c3165fe4b8d2992127a00..7cbc8f6c398ef9f560896cb6092948501fd7118b 100644
---- a/apps/api/src/auth/auth.controller.spec.ts
-+++ b/apps/api/src/auth/auth.controller.spec.ts
-@@ -8,43 +8,84 @@ describe('AuthController', () => {
-   let controller: AuthController;
-   let authService: jest.Mocked<AuthService>;
+diff --git a/apps/web/app/(app)/baseline/[id]/page.tsx b/apps/web/app/(app)/baseline/[id]/page.tsx
+index d91692fd718ae71db9ba54e2f2cbb9637bd1874e..b8c59900d28906b7fb2122d18cf24f49fc2080d4 100644
+--- a/apps/web/app/(app)/baseline/[id]/page.tsx
++++ b/apps/web/app/(app)/baseline/[id]/page.tsx
+@@ -1,43 +1,56 @@
+ import Link from "next/link";
+ import { cookies, headers } from "next/headers";
+ import { notFound, redirect } from "next/navigation";
  
-   beforeEach(async () => {
-     const module: TestingModule = await Test.createTestingModule({
-       controllers: [AuthController],
-       providers: [
-         {
-           provide: AuthService,
-           useValue: {
-             register: jest.fn(),
-             login: jest.fn(),
-           },
-         },
-       ],
-     }).compile();
+ import { Alert } from "@/components/Alert";
+ import { EmptyState } from "@/components/EmptyState";
+ import { RetryButton } from "@/components/RetryButton";
+ import { AUTH_COOKIE_NAME } from "@/lib/auth";
  
-     controller = module.get<AuthController>(AuthController);
-     authService = module.get(AuthService);
-   });
+ import type {
+   BaselineDto,
+   BaselineSectionDto,
+   BaselineVersionDto,
+ } from "@/lib/baselines";
+ import { formatDateTime } from "@/lib/format-date";
+ import { BaselinePolicyEditor } from "./baseline-policy-editor";
+ import { getBaselineDetailsHref } from "@/src/navigation/routes";
  
-   it('handles registration', async () => {
-     const dto: RegisterDto = { email: 'test@example.com', password: 'Password123' };
-     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
-     authService.register.mockResolvedValue(response);
-+    const res = { cookie: jest.fn() };
- 
--    const result = await controller.register(dto);
-+    const result = await controller.register(dto, res as any);
- 
-     expect(authService.register).toHaveBeenCalledWith(dto);
-+    expect(res.cookie).toHaveBeenCalledWith(
-+      'ttr_token',
-+      response.accessToken,
-+      expect.objectContaining({
-+        httpOnly: true,
-+        secure: true,
-+        sameSite: 'lax',
-+        path: '/',
-+      }),
-+    );
-     expect(result).toEqual(response);
-   });
- 
-   it('handles login', async () => {
-     const dto: LoginDto = { email: 'test@example.com', password: 'Password123' };
-     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
-     authService.login.mockResolvedValue(response);
-+    const res = { cookie: jest.fn() };
- 
--    const result = await controller.login(dto);
-+    const result = await controller.login(dto, res as any);
- 
-     expect(authService.login).toHaveBeenCalledWith(dto);
-+    expect(res.cookie).toHaveBeenCalledWith(
-+      'ttr_token',
-+      response.accessToken,
-+      expect.objectContaining({
-+        httpOnly: true,
-+        secure: true,
-+        sameSite: 'lax',
-+        path: '/',
-+      }),
-+    );
-     expect(result).toEqual(response);
-   });
-+
-+  it('handles logout', () => {
-+    const res = { cookie: jest.fn() };
-+
-+    const result = controller.logout(res as any);
-+
-+    expect(res.cookie).toHaveBeenCalledWith(
-+      'ttr_token',
-+      '',
-+      expect.objectContaining({
-+        httpOnly: true,
-+        secure: true,
-+        sameSite: 'lax',
-+        path: '/',
-+        maxAge: 0,
-+      }),
-+    );
-+    expect(result).toEqual({ ok: true });
-+  });
- });
-diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
-index 36e0fefe62267550825b373aa1752ed5c635c1a3..8cbad3ce6f58afe5ebfdae6675a8fd08b3a4f39f 100644
---- a/apps/api/src/auth/auth.controller.ts
-+++ b/apps/api/src/auth/auth.controller.ts
-@@ -1,27 +1,62 @@
--import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
-+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
-+import type { Response } from 'express';
- import { AuthService } from './auth.service';
- import { LoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import type { AuthUserDto } from './dto/auth-response.dto';
- 
-+const AUTH_COOKIE_NAME = 'ttr_token';
-+const AUTH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-+
- @Controller('auth')
- export class AuthController {
-   constructor(private readonly authService: AuthService) {}
- 
-   @Post('register')
--  register(@Body() payload: RegisterDto) {
--    return this.authService.register(payload);
-+  async register(
-+    @Body() payload: RegisterDto,
-+    @Res({ passthrough: true }) res: Response,
-+  ) {
-+    const response = await this.authService.register(payload);
-+    if (response.accessToken) {
-+      this.setAuthCookie(res, response.accessToken);
-+    }
-+    return response;
-   }
- 
-   @Post('login')
--  login(@Body() payload: LoginDto) {
--    return this.authService.login(payload);
-+  async login(@Body() payload: LoginDto, @Res({ passthrough: true }) res: Response) {
-+    const response = await this.authService.login(payload);
-+    this.setAuthCookie(res, response.accessToken);
-+    return response;
++function isNextRedirectError(error: unknown) {
++  if (!error || typeof error !== "object") {
++    return false;
 +  }
 +
-+  @Post('logout')
-+  logout(@Res({ passthrough: true }) res: Response) {
-+    res.cookie(AUTH_COOKIE_NAME, '', {
-+      httpOnly: true,
-+      secure: true,
-+      sameSite: 'lax',
-+      path: '/',
-+      maxAge: 0,
-+    });
-+    return { ok: true };
++  if (!("digest" in error)) {
++    return false;
++  }
++
++  const digest = (error as { digest?: string }).digest;
++  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
++}
++
+ function computeBaseUrl({
+   protocol,
+   host,
+   fallbackBase,
+ }: {
+   protocol: string;
+   host: string | null;
+   fallbackBase: string | undefined;
+ }) {
+   if (fallbackBase && fallbackBase.trim().length > 0) {
+     return fallbackBase;
    }
  
-   @UseGuards(AuthGuard('jwt'))
-   @Get('me')
-   me(@Req() request: { user?: AuthUserDto }) {
-     return { user: request.user };
+   if (host) {
+     const url = new URL("http://localhost:3000");
+     url.protocol = protocol.endsWith(":") ? protocol : `${protocol}:`;
+     url.host = host;
+     return url.toString().replace(/\/$/, "");
    }
-+
-+  private setAuthCookie(res: Response, accessToken: string) {
-+    res.cookie(AUTH_COOKIE_NAME, accessToken, {
-+      httpOnly: true,
-+      secure: true,
-+      sameSite: 'lax',
-+      path: '/',
-+      maxAge: AUTH_COOKIE_MAX_AGE_MS,
-+    });
-+  }
+ 
+   return "http://localhost:3000";
  }
+ 
+ async function buildInternalApiUrl(path: string) {
+   const headerList = await headers();
+@@ -71,76 +84,84 @@ type BaselineFetchResult = {
+ 
+ async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
+   try {
+     const response = await fetch(
+       await buildInternalApiUrl(`/api/baselines/${id}`),
+       await buildInternalFetchOptions(),
+     );
+ 
+     if (response.status === 401 || response.status === 403) {
+       redirect("/auth/login");
+     }
+ 
+     if (response.status === 404) {
+       return { baseline: null, error: null, notFound: true };
+     }
+ 
+     if (!response.ok) {
+       const errorText = await response.text().catch(() => "");
+       const message = errorText || "Unable to load baseline.";
+       return { baseline: null, error: message, notFound: false };
+     }
+ 
+     const data = (await response.json()) as BaselineDto;
+     return { baseline: data, error: null, notFound: false };
+   } catch (error) {
++    if (isNextRedirectError(error)) {
++      throw error;
++    }
++
+     console.error("Failed to fetch baseline", error);
+     const message =
+       error instanceof Error ? error.message : "Unable to load baseline.";
+     return { baseline: null, error: message, notFound: false };
+   }
+ }
+ 
+ async function fetchBaselineVersions(
+   id: string,
+ ): Promise<BaselineVersionDto[] | null> {
+   try {
+     const response = await fetch(
+       await buildInternalApiUrl(`/api/baselines/${id}/versions`),
+       await buildInternalFetchOptions(),
+     );
+ 
+     if (response.status === 401 || response.status === 403) {
+       redirect("/auth/login");
+     }
+ 
+     if (!response.ok) {
+       return null;
+     }
+ 
+     return (await response.json()) as BaselineVersionDto[];
+   } catch (error) {
++    if (isNextRedirectError(error)) {
++      throw error;
++    }
++
+     console.error("Failed to fetch baseline versions", error);
+     return null;
+   }
+ }
+ 
+ const friendlyTitles: Record<string, string> = {
+   SUMMARY: "Summary",
+   EXPERIENCE: "Experience",
+   PROJECT: "Projects / Programs",
+   SKILLS: "Skills",
+   EDUCATION: "Education",
+   OTHER: "Other",
+   RAW: "Raw",
+ };
+ 
+ type GroupedSections = Record<string, BaselineSectionDto[]>;
+ 
+ const displayOrder = [
+   "SUMMARY",
+   "EXPERIENCE",
+   "PROJECT",
+   "SKILLS",
+   "EDUCATION",
+   "OTHER",
+   "RAW",
+diff --git a/apps/web/app/(app)/baseline/page.tsx b/apps/web/app/(app)/baseline/page.tsx
+index 9dc637b0209b1483a95d142eae05da5e1c0fed31..be7f7f6660f1d760514a54db8128b15b086b1940 100644
+--- a/apps/web/app/(app)/baseline/page.tsx
++++ b/apps/web/app/(app)/baseline/page.tsx
+@@ -18,50 +18,63 @@ async function buildInternalApiUrl(path: string) {
+   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
+ 
+   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+ 
+   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
+ }
+ 
+ async function buildInternalFetchOptions(): Promise<RequestInit> {
+   const headerList = await headers();
+   const cookieHeader = headerList.get("cookie");
+ 
+   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
+ 
+   return {
+     cache: "no-store",
+     credentials: "include",
+     headers: headersInit,
+   };
+ }
+ 
+ type BaselineFetchResult = {
+   baselines: BaselineDto[];
+   error: string | null;
+ };
+ 
++function isNextRedirectError(error: unknown) {
++  if (!error || typeof error !== "object") {
++    return false;
++  }
++
++  if (!("digest" in error)) {
++    return false;
++  }
++
++  const digest = (error as { digest?: string }).digest;
++  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
++}
++
+ const instructionSteps = [
+   {
+     title: "Step 1: Upload your baseline resume.",
+     detail:
+       "Use a current resume that reflects your real experience. Do not upload a job specific version.",
+   },
+   {
+     title: "Step 2: Confirm your baseline appears in the library.",
+     detail: "You can keep multiple baselines later, but start with one.",
+   },
+   {
+     title: "Step 3: Go to Analyze.",
+     detail: "Paste a job description and run Analyze to generate your CX Fit Score.",
+   },
+ ];
+ 
+ const instructionPanelStyle: CSSProperties = {
+   ...ttrComponents.basePanel,
+   flex: "0 0 auto",
+   minWidth: 0,
+   padding: 24,
+ };
+ 
+ const instructionStepsContainerStyle: CSSProperties = {
+   display: "flex",
+@@ -89,50 +102,54 @@ const instructionNoteStyle: CSSProperties = {
+   padding: "12px 14px",
+   marginTop: 16,
+ };
+ 
+ async function fetchBaselines(): Promise<BaselineFetchResult> {
+   try {
+     const res = await fetch(
+       await buildInternalApiUrl("/api/baselines"),
+       await buildInternalFetchOptions(),
+     );
+ 
+     if (res.status === 401) {
+       redirect("/auth/login");
+     }
+ 
+     if (!res.ok) {
+       const message = (await res.text()) || "Unable to load baselines";
+       throw new Error(message);
+     }
+ 
+     return {
+       baselines: (await res.json()) as BaselineDto[],
+       error: null,
+     };
+   } catch (error) {
++    if (isNextRedirectError(error)) {
++      throw error;
++    }
++
+     console.error("Failed to fetch baselines", error);
+     const message = error instanceof Error ? error.message : "Unable to load baselines.";
+     return {
+       baselines: [],
+       error: message,
+     };
+   }
+ }
+ 
+ export default async function BaselinePage() {
+   const cookieStore = await cookies();
+   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+ 
+   if (!token) {
+     redirect("/auth/login");
+   }
+ 
+   const { baselines, error: baselineFetchError } = await fetchBaselines();
+ 
+   return (
+     <InstrumentPanelShell
+       kicker="WELCOME TO TTR"
+       title="Target this role with clarity."
+       subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
+     >
