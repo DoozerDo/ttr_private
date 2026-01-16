@@ -1,269 +1,37 @@
-diff --git a/apps/web/app/(app)/baseline/[id]/page.tsx b/apps/web/app/(app)/baseline/[id]/page.tsx
-index d91692fd718ae71db9ba54e2f2cbb9637bd1874e..b8c59900d28906b7fb2122d18cf24f49fc2080d4 100644
---- a/apps/web/app/(app)/baseline/[id]/page.tsx
-+++ b/apps/web/app/(app)/baseline/[id]/page.tsx
-@@ -1,43 +1,56 @@
- import Link from "next/link";
- import { cookies, headers } from "next/headers";
- import { notFound, redirect } from "next/navigation";
+diff --git a/apps/web/app/api/auth/login/route.ts b/apps/web/app/api/auth/login/route.ts
+index 28f04c8b28083e55dfd04fd09c62011ec6d6ceaf..5bb13e4b682b6672c0024a4ed02ae7285ed54458 100644
+--- a/apps/web/app/api/auth/login/route.ts
++++ b/apps/web/app/api/auth/login/route.ts
+@@ -1,30 +1,9 @@
+-import { NextRequest, NextResponse } from "next/server";
++import { NextRequest } from "next/server";
+ import { forwardAuthRequest } from "../helpers";
  
- import { Alert } from "@/components/Alert";
- import { EmptyState } from "@/components/EmptyState";
- import { RetryButton } from "@/components/RetryButton";
- import { AUTH_COOKIE_NAME } from "@/lib/auth";
+ export const runtime = "nodejs";
  
- import type {
-   BaselineDto,
-   BaselineSectionDto,
-   BaselineVersionDto,
- } from "@/lib/baselines";
- import { formatDateTime } from "@/lib/format-date";
- import { BaselinePolicyEditor } from "./baseline-policy-editor";
- import { getBaselineDetailsHref } from "@/src/navigation/routes";
- 
-+function isNextRedirectError(error: unknown) {
-+  if (!error || typeof error !== "object") {
-+    return false;
-+  }
-+
-+  if (!("digest" in error)) {
-+    return false;
-+  }
-+
-+  const digest = (error as { digest?: string }).digest;
-+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
-+}
-+
- function computeBaseUrl({
-   protocol,
-   host,
-   fallbackBase,
- }: {
-   protocol: string;
-   host: string | null;
-   fallbackBase: string | undefined;
- }) {
-   if (fallbackBase && fallbackBase.trim().length > 0) {
-     return fallbackBase;
-   }
- 
-   if (host) {
-     const url = new URL("http://localhost:3000");
-     url.protocol = protocol.endsWith(":") ? protocol : `${protocol}:`;
-     url.host = host;
-     return url.toString().replace(/\/$/, "");
-   }
- 
-   return "http://localhost:3000";
+ export async function POST(req: NextRequest) {
+   const body = await req.json();
+-
+-  const upstreamRes = await forwardAuthRequest("/auth/login", body);
+-  const data = await upstreamRes.clone().json().catch(() => null);
+-
+-  const token: string | undefined =
+-    data?.accessToken ?? data?.data?.accessToken ?? data?.token;
+-
+-  const res = NextResponse.json(data, {
+-    status: upstreamRes.status,
+-  });
+-
+-  if (token) {
+-    res.cookies.set("ttr_token", token, {
+-      httpOnly: true,
+-      secure: true,
+-      sameSite: "lax",
+-      path: "/",
+-      maxAge: 60 * 60 * 24 * 7,
+-    });
+-  }
+-
+-  return res;
++  return forwardAuthRequest("/auth/login", body);
  }
- 
- async function buildInternalApiUrl(path: string) {
-   const headerList = await headers();
-@@ -71,76 +84,84 @@ type BaselineFetchResult = {
- 
- async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
-   try {
-     const response = await fetch(
-       await buildInternalApiUrl(`/api/baselines/${id}`),
-       await buildInternalFetchOptions(),
-     );
- 
-     if (response.status === 401 || response.status === 403) {
-       redirect("/auth/login");
-     }
- 
-     if (response.status === 404) {
-       return { baseline: null, error: null, notFound: true };
-     }
- 
-     if (!response.ok) {
-       const errorText = await response.text().catch(() => "");
-       const message = errorText || "Unable to load baseline.";
-       return { baseline: null, error: message, notFound: false };
-     }
- 
-     const data = (await response.json()) as BaselineDto;
-     return { baseline: data, error: null, notFound: false };
-   } catch (error) {
-+    if (isNextRedirectError(error)) {
-+      throw error;
-+    }
-+
-     console.error("Failed to fetch baseline", error);
-     const message =
-       error instanceof Error ? error.message : "Unable to load baseline.";
-     return { baseline: null, error: message, notFound: false };
-   }
- }
- 
- async function fetchBaselineVersions(
-   id: string,
- ): Promise<BaselineVersionDto[] | null> {
-   try {
-     const response = await fetch(
-       await buildInternalApiUrl(`/api/baselines/${id}/versions`),
-       await buildInternalFetchOptions(),
-     );
- 
-     if (response.status === 401 || response.status === 403) {
-       redirect("/auth/login");
-     }
- 
-     if (!response.ok) {
-       return null;
-     }
- 
-     return (await response.json()) as BaselineVersionDto[];
-   } catch (error) {
-+    if (isNextRedirectError(error)) {
-+      throw error;
-+    }
-+
-     console.error("Failed to fetch baseline versions", error);
-     return null;
-   }
- }
- 
- const friendlyTitles: Record<string, string> = {
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
-   OTHER: "Other",
-   RAW: "Raw",
- };
- 
- type GroupedSections = Record<string, BaselineSectionDto[]>;
- 
- const displayOrder = [
-   "SUMMARY",
-   "EXPERIENCE",
-   "PROJECT",
-   "SKILLS",
-   "EDUCATION",
-   "OTHER",
-   "RAW",
-diff --git a/apps/web/app/(app)/baseline/page.tsx b/apps/web/app/(app)/baseline/page.tsx
-index 9dc637b0209b1483a95d142eae05da5e1c0fed31..be7f7f6660f1d760514a54db8128b15b086b1940 100644
---- a/apps/web/app/(app)/baseline/page.tsx
-+++ b/apps/web/app/(app)/baseline/page.tsx
-@@ -18,50 +18,63 @@ async function buildInternalApiUrl(path: string) {
-   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
- 
-   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
- 
-   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
- }
- 
- async function buildInternalFetchOptions(): Promise<RequestInit> {
-   const headerList = await headers();
-   const cookieHeader = headerList.get("cookie");
- 
-   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
- 
-   return {
-     cache: "no-store",
-     credentials: "include",
-     headers: headersInit,
-   };
- }
- 
- type BaselineFetchResult = {
-   baselines: BaselineDto[];
-   error: string | null;
- };
- 
-+function isNextRedirectError(error: unknown) {
-+  if (!error || typeof error !== "object") {
-+    return false;
-+  }
-+
-+  if (!("digest" in error)) {
-+    return false;
-+  }
-+
-+  const digest = (error as { digest?: string }).digest;
-+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
-+}
-+
- const instructionSteps = [
-   {
-     title: "Step 1: Upload your baseline resume.",
-     detail:
-       "Use a current resume that reflects your real experience. Do not upload a job specific version.",
-   },
-   {
-     title: "Step 2: Confirm your baseline appears in the library.",
-     detail: "You can keep multiple baselines later, but start with one.",
-   },
-   {
-     title: "Step 3: Go to Analyze.",
-     detail: "Paste a job description and run Analyze to generate your CX Fit Score.",
-   },
- ];
- 
- const instructionPanelStyle: CSSProperties = {
-   ...ttrComponents.basePanel,
-   flex: "0 0 auto",
-   minWidth: 0,
-   padding: 24,
- };
- 
- const instructionStepsContainerStyle: CSSProperties = {
-   display: "flex",
-@@ -89,50 +102,54 @@ const instructionNoteStyle: CSSProperties = {
-   padding: "12px 14px",
-   marginTop: 16,
- };
- 
- async function fetchBaselines(): Promise<BaselineFetchResult> {
-   try {
-     const res = await fetch(
-       await buildInternalApiUrl("/api/baselines"),
-       await buildInternalFetchOptions(),
-     );
- 
-     if (res.status === 401) {
-       redirect("/auth/login");
-     }
- 
-     if (!res.ok) {
-       const message = (await res.text()) || "Unable to load baselines";
-       throw new Error(message);
-     }
- 
-     return {
-       baselines: (await res.json()) as BaselineDto[],
-       error: null,
-     };
-   } catch (error) {
-+    if (isNextRedirectError(error)) {
-+      throw error;
-+    }
-+
-     console.error("Failed to fetch baselines", error);
-     const message = error instanceof Error ? error.message : "Unable to load baselines.";
-     return {
-       baselines: [],
-       error: message,
-     };
-   }
- }
- 
- export default async function BaselinePage() {
-   const cookieStore = await cookies();
-   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
- 
-   if (!token) {
-     redirect("/auth/login");
-   }
- 
-   const { baselines, error: baselineFetchError } = await fetchBaselines();
- 
-   return (
-     <InstrumentPanelShell
-       kicker="WELCOME TO TTR"
-       title="Target this role with clarity."
-       subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
-     >
