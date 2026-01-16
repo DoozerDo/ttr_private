@@ -51,8 +51,8 @@ export function JourneyNavV1({
     state.steps.length === 0
       ? 0
       : state.steps.length === 1
-      ? 100
-      : clamp((activeIndex / denominator) * 100, 0, 100);
+        ? 100
+        : clamp((activeIndex / denominator) * 100, 0, 100);
 
   useEffect(() => {
     if (!state.steps.length) {
