@@ -21,7 +21,6 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
-import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
 import { useAutoGenerateThreshold } from "../lib/settings";
 
@@ -34,8 +33,6 @@ type LatestAnalysis = {
   verdict?: string | null;
   jobTitle?: string | null;
   company?: string | null;
-
-  // Optional, because API payloads often include these even if the UI does not always use them.
   assessmentId?: string | null;
   score?: number | null;
 };
@@ -44,7 +41,8 @@ const resolveStoredFitScore = (record: StoredAnalysisRecord) => {
   if (typeof record.fitScore === "number") return record.fitScore;
   if (typeof record.analysis.score === "number") return record.analysis.score;
   if (typeof record.analysis.overallScore === "number") return record.analysis.overallScore;
-  if (typeof record.analysis.overall_score === "number") return record.analysis.overall_score;
+  // legacy payload support
+  if (typeof (record.analysis as any).overall_score === "number") return (record.analysis as any).overall_score;
   return null;
 };
 
@@ -59,11 +57,11 @@ const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis
     jobId: record.jobId ?? "",
     overallScore: fitScore ?? undefined,
     score: fitScore,
-    note: record.summary ?? record.analysis.summary ?? undefined,
+    note: record.summary ?? (record.analysis as any).summary ?? undefined,
     verdict,
     jobTitle: record.jobTitle ?? undefined,
     company: record.company ?? undefined,
-    assessmentId: record.analysis.assessmentId ?? undefined,
+    assessmentId: (record.analysis as any).assessmentId ?? undefined,
   };
 };
 
@@ -143,7 +141,7 @@ const getNextSteps = ({
   steps.push({
     title: "Practice with Interview Toolkit",
     description:
-      "Pair Fit Review insights with the Interview Toolkit or a guided session to tackle the most impactful gaps.",
+      "Pair Fit Review insights with the Interview Toolkit to tackle the most impactful gaps.",
   });
 
   if (needsMoreInsight) {
@@ -157,14 +155,134 @@ const getNextSteps = ({
   steps.push({
     title: "Generate a resume",
     description: needsMoreInsight
-      ? `Once your fit score hits ${autoGenerateThreshold}+, export a resume tailored to this opportunity.`
+      ? `Once your fit score hits ${autoGenerateThreshold} or higher, export a resume tailored to this opportunity.`
       : hasResume
         ? "Download or share the resume you already generated."
-        : "One tap generation is available; export and share with confidence.",
+        : "One tap export is available. Generate and share with confidence.",
   });
 
   return steps;
 };
+
+type AnyObject = Record<string, unknown>;
+
+function stripInternalKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripInternalKeys);
+
+  if (value && typeof value === "object") {
+    const obj = value as AnyObject;
+    const out: AnyObject = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const key = k.toLowerCase();
+
+      const looksInternal =
+        key.includes("audit") ||
+        key.includes("hash") ||
+        key === "jobid" ||
+        key === "baselineid" ||
+        key === "baselineversionid" ||
+        key.endsWith("_id") ||
+        key === "id";
+
+      if (looksInternal) continue;
+
+      out[k] = stripInternalKeys(v);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function coercePreviewText(payload: unknown): string | null {
+  const p = payload as AnyObject | null;
+
+  const candidates = [
+    "previewText",
+    "preview_text",
+    "text",
+    "rawText",
+    "raw_text",
+    "content",
+  ];
+
+  for (const key of candidates) {
+    const v = p?.[key];
+    if (typeof v === "string" && v.trim().length > 0) return v;
+  }
+
+  return null;
+}
+
+function safeJsonPreview(payload: unknown): string {
+  try {
+    const stripped = stripInternalKeys(payload);
+    return JSON.stringify(stripped, null, 2);
+  } catch {
+    return "Preview unavailable";
+  }
+}
+
+type ResumeSectionLike = {
+  type?: string | null;
+  title?: string | null;
+  content?: unknown;
+  text?: unknown;
+  lines?: unknown;
+  bullets?: unknown;
+};
+
+function stringsOnly(arr: unknown): string[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function extractSectionText(section: ResumeSectionLike): string {
+  const candidates: unknown[] = [section.content, section.text];
+
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim().length) return c.trim();
+  }
+
+  const lines = stringsOnly(section.lines);
+  if (lines.length) return lines.join("\n");
+
+  const bullets = stringsOnly(section.bullets);
+  if (bullets.length) return bullets.map((b) => `• ${b}`).join("\n");
+
+  return "";
+}
+
+function extractBestResumeText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as Record<string, unknown>;
+
+  try {
+    // @ts-ignore - coercePreviewText may vary in shape
+    const direct = typeof coercePreviewText === "function" ? coercePreviewText(payload) : null;
+    if (typeof direct === "string" && direct.trim().length) return direct.trim();
+  } catch {
+    /* ignore */
+  }
+
+  const sectionsRaw = obj["sections"];
+  if (!Array.isArray(sectionsRaw)) return null;
+
+  const sections = sectionsRaw as ResumeSectionLike[];
+
+  const rawSection =
+    sections.find((s) => (s.type ?? "").toString().toUpperCase() === "RAW") ??
+    sections.find((s) => (s.title ?? "").toString().toUpperCase() === "RAW");
+
+  const picked = rawSection ?? sections[0];
+  if (!picked) return null;
+
+  const text = extractSectionText(picked);
+  return text.length ? text : null;
+}
 
 export default function ResultsPage() {
   const [baselineId, setBaselineId] = useState<string>("");
@@ -265,7 +383,7 @@ export default function ResultsPage() {
     if (latestScore === null) return null;
     const optimized = latestScore >= autoGenerateThreshold;
     return {
-      label: optimized ? "Optimized" : "Draft",
+      label: optimized ? "Ready" : "Draft",
       toneClass: optimized
         ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
         : "border-amber-300/40 bg-amber-500/10 text-amber-200",
@@ -291,6 +409,12 @@ export default function ResultsPage() {
     return "Load latest analysis to populate the score and unlock one tap export.";
   }, [analysisSource, jobId, latest, loadingLatest]);
 
+  const resumePreviewText = useMemo(() => {
+    if (!resumeResponse) return "";
+    const direct = extractBestResumeText(resumeResponse);
+    if (direct) return direct;
+    return safeJsonPreview(resumeResponse);
+  }, [resumeResponse]);
 
   async function loadLatest() {
     if (loadingLatest) return;
@@ -376,7 +500,7 @@ export default function ResultsPage() {
   async function generateResume(oneTap = false) {
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      setResumeError("Load the latest analysis before exporting a resume.");
+      setResumeError("Load the latest analysis before generating a resume.");
       return;
     }
 
@@ -410,7 +534,6 @@ export default function ResultsPage() {
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
-
         if (compliance) {
           setResumeComplianceError(compliance);
           return;
@@ -446,7 +569,7 @@ export default function ResultsPage() {
   async function exportResume(format: "docx" | "pdf") {
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      setResumeError("Load the latest analysis before generating a resume.");
+      setResumeError("Load the latest analysis before exporting a resume.");
       return;
     }
 
@@ -479,7 +602,6 @@ export default function ResultsPage() {
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
-
         if (compliance) {
           setResumeComplianceError(compliance);
           return;
@@ -506,11 +628,9 @@ export default function ResultsPage() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const job = params.get("jobId");
-    if (job) {
-      setManualJobId(job);
-    }
+    const job = searchParams?.get("jobId");
+    if (job) setManualJobId(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -634,7 +754,11 @@ export default function ResultsPage() {
                   Generate resume
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">Output</h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  This generates a resume draft. Cover letter generation is handled in the Cover Letter flow.
+                </p>
               </div>
+
               {qualityBadge ? (
                 <span
                   className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
@@ -649,11 +773,7 @@ export default function ResultsPage() {
                 onClick={() => void generateResume(false)}
                 disabled={!readyForResume || loading}
               >
-                {loading
-                  ? "Generating..."
-                  : latestScore !== null && latestScore >= autoGenerateThreshold
-                    ? "Generate resume"
-                    : "Generate draft resume"}
+                {loading ? "Generating..." : "Generate draft resume"}
               </FormButton>
 
               <FormButton
@@ -663,61 +783,48 @@ export default function ResultsPage() {
                 title={
                   readyForResume
                     ? oneTapEligible
-                      ? "Generate immediately with compliance checks"
+                      ? "Generate an export-ready resume based on the latest analysis"
                       : `Requires fit score of at least ${autoGenerateThreshold}`
-                    : "Load the latest analysis before using one tap generate"
+                    : "Load the latest analysis before using one tap"
                 }
               >
-                {loading
-                  ? "Checking..."
-                  : `One tap generate (>=${autoGenerateThreshold} fit score)`}
+                One tap export (optimized resumes)
               </FormButton>
             </div>
 
             <div className="flex flex-wrap gap-3">
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportResume("docx")}
-                  disabled={!readyForResume || !oneTapEligible || !!exporting}
-                >
-                  {exporting === "docx" ? "Downloading..." : "Download DOCX"}
-                </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => void exportResume("docx")}
+                disabled={!readyForResume || !oneTapEligible || !!exporting}
+              >
+                {exporting === "docx" ? "Downloading..." : "Download DOCX"}
+              </FormButton>
 
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void exportResume("pdf")}
-                  disabled={!readyForResume || !oneTapEligible || !!exporting}
-                >
-                  {exporting === "pdf" ? "Downloading..." : "Download PDF"}
-                </FormButton>
+              <FormButton
+                variant="secondary"
+                onClick={() => void exportResume("pdf")}
+                disabled={!readyForResume || !oneTapEligible || !!exporting}
+              >
+                {exporting === "pdf" ? "Downloading..." : "Download PDF"}
+              </FormButton>
             </div>
 
             <div className="space-y-2 text-sm text-slate-300">
               {oneTapEligible ? (
                 <p>
-                  One tap generation is enabled when your fit score reaches {autoGenerateThreshold} and the latest analysis
-                  is ready. Manual generation remains available while you fine-tune your match.
+                  Your fit score meets the export threshold. Review the draft below and download when ready.
                 </p>
               ) : (
-                <div className="space-y-3">
-                  <p>
-                    Your score is below {autoGenerateThreshold}. Follow these steps to reach the threshold:
-                  </p>
-                  <ol className="space-y-2 pl-4 text-slate-300">
-                    <li>Open Fit Review to inspect the verdict and confirmed gaps.</li>
-                    <li>
-                      Address the gaps with Interview Toolkit, a practice session, or other prep work.
-                    </li>
-                    <li>Re-run the analysis to confirm the baseline still reflects the role.</li>
-                  </ol>
-                  <p>Manual generation stays available while you move through those steps.</p>
-                </div>
+                <p>
+                  Your score is below {autoGenerateThreshold}. You can generate and review a draft now. Downloads unlock once you reach the export threshold.
+                </p>
               )}
             </div>
 
             {resumeTierGateError ? (
               <p className="text-sm text-amber-300">
-                {resumeTierGateError.message ?? "Resume generation is limited by your current plan."}{" "}
+                {resumeTierGateError.message ?? "Resume export is limited by your current plan."}{" "}
                 <Link href="/pricing" className="font-semibold text-white underline">
                   View plans
                 </Link>
@@ -743,19 +850,39 @@ export default function ResultsPage() {
                     intent="warning"
                   />
                 ) : null}
-                <pre className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200">
-                  {JSON.stringify(resumeResponse, null, 2)}
-                </pre>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Resume draft preview
+                  </p>
+                  <p className="mt-1 text-sm text-slate-300">
+                    Resume draft ready. Review below, then download when available.
+                  </p>
+
+                  <div className="mt-3 flex justify-end">
+                    <FormButton
+                      variant="secondary"
+                      onClick={() => {
+                        const text = resumePreviewText || "";
+                        if (!text) return;
+                        void navigator.clipboard.writeText(text);
+                      }}
+                      disabled={!resumePreviewText}
+                    >
+                      Copy resume text
+                    </FormButton>
+                  </div>
+
+                  <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
+                    {resumePreviewText}
+                  </pre>
+                </div>
               </>
             ) : (
               <EmptyState
                 title="No resume generated yet"
-                body="Generate a draft to view the payload."
-                cta={
-                  <FormButton onClick={() => void generateResume(false)} disabled={!readyForResume || loading}>
-                    Generate draft resume
-                  </FormButton>
-                }
+                body="Generate a draft to preview it here."
+                cta={null}
                 className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
               />
             )}
@@ -783,11 +910,6 @@ export default function ResultsPage() {
                     placeholder="Baseline ID"
                     readOnly={analysisSource === "latest"}
                   />
-                  {analysisSource === "latest" ? (
-                    <p className="text-[11px] text-slate-400">
-                      Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis, so this field cannot be edited while it is selected.
-                    </p>
-                  ) : null}
                 </div>
 
                 <div>
@@ -800,28 +922,6 @@ export default function ResultsPage() {
                     placeholder="Job ID"
                   />
                 </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
-                {analysisSource === "latest" ? (
-                  <>
-                    <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      Latest analysis
-                    </strong>
-                    <p className="mt-1">
-                      Loaded from job {latest?.jobId ?? "unknown"} and baseline {latest?.baselineId ?? "unknown"}. Resume generation uses baseline version {latest?.baselineVersionId ?? "unknown"} from the latest analysis. Modify the job above and load the latest analysis again to target a different baseline.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <strong className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      Manual selection
-                    </strong>
-                    <p className="mt-1">
-                      Edit the baseline/job IDs to reuse a specific analysis. Loading the latest will overwrite the values you entered.
-                    </p>
-                  </>
-                )}
               </div>
 
               {!baselineId ? (

@@ -39,37 +39,51 @@ export const JOURNEY_NAV_STEPS: JourneyStep[] = navigationRoutes.map((route) => 
   label: route.label,
 }));
 
-const DEFAULT_STEP_ID: JourneyStepId = JOURNEY_NAV_STEPS[0]?.id ?? ("baselines" as JourneyStepId);
+const DEFAULT_STEP_ID: JourneyStepId =
+  JOURNEY_NAV_STEPS[0]?.id ?? ("baselines" as JourneyStepId);
 
-const PATHNAME_TO_STEP_MAP: Record<string, JourneyStepId> = navigationRoutes.reduce<
-  Record<string, JourneyStepId>
->((acc, route) => {
-  acc[route.href] = route.id;
-  return acc;
-}, {});
+const PATHNAME_TO_STEP_MAP: Record<string, JourneyStepId> =
+  navigationRoutes.reduce<Record<string, JourneyStepId>>((acc, route) => {
+    acc[route.href] = route.id;
+    return acc;
+  }, {});
+
+function normalizePathname(pathname?: string): string {
+  if (!pathname || pathname === "/") return "/";
+  if (pathname.length > 1 && pathname.endsWith("/")) return pathname.slice(0, -1);
+  return pathname;
+}
 
 export function getStepIdForPathname(pathname?: string): JourneyStepId | null {
-  const normalized =
-    !pathname || pathname === "/"
-      ? "/"
-      : pathname.endsWith("/")
-      ? pathname.slice(0, -1)
-      : pathname;
+  const normalized = normalizePathname(pathname);
 
   // `/` should only match the root entry.
   if (normalized === "/") {
     return PATHNAME_TO_STEP_MAP["/"] ?? null;
   }
 
+  // Prefer the most specific match (longest prefix) to avoid accidental collisions.
+  // Example: if `/jobs` and `/jobs/new` both exist, `/jobs/new` should win.
+  let bestMatch: { prefixLen: number; stepId: JourneyStepId } | null = null;
+
   for (const [prefix, stepId] of Object.entries(PATHNAME_TO_STEP_MAP)) {
-    if (prefix === "/") continue;
-    if (normalized === prefix || normalized.startsWith(`${prefix}/`)) {
-      return stepId;
+    if (!prefix || prefix === "/") continue;
+
+    const normalizedPrefix = normalizePathname(prefix);
+
+    if (
+      normalized === normalizedPrefix ||
+      normalized.startsWith(`${normalizedPrefix}/`)
+    ) {
+      const prefixLen = normalizedPrefix.length;
+      if (!bestMatch || prefixLen > bestMatch.prefixLen) {
+        bestMatch = { prefixLen, stepId };
+      }
     }
   }
 
-  return null;
-};
+  return bestMatch?.stepId ?? null;
+}
 
 export type ResolveJourneyNavStateInput = {
   currentPathname?: string;
@@ -77,19 +91,31 @@ export type ResolveJourneyNavStateInput = {
   activeStepId?: JourneyStepId;
 };
 
-export function resolveJourneyNavState(input: ResolveJourneyNavStateInput): JourneyNavState {
-  const { currentPathname, completedStepIds = [], activeStepId: explicitActiveStepId } = input;
+export function resolveJourneyNavState(
+  input: ResolveJourneyNavStateInput
+): JourneyNavState {
+  const { currentPathname, completedStepIds = [], activeStepId: explicitActiveStepId } =
+    input;
 
-  const candidateFromPath = getStepIdForPathname(currentPathname) ?? DEFAULT_STEP_ID;
+  // Route always wins. If pathname resolves to a known step, that is the ONLY active step.
+  // Explicit active override is only respected when pathname is unknown (eg non-journey routes).
+  const fromPath = getStepIdForPathname(currentPathname);
+  const fallbackFromPathOrDefault = fromPath ?? DEFAULT_STEP_ID;
+
   const desiredActive =
-    explicitActiveStepId && JOURNEY_NAV_STEPS.some((step) => step.id === explicitActiveStepId)
+    fromPath ??
+    (explicitActiveStepId &&
+    JOURNEY_NAV_STEPS.some((step) => step.id === explicitActiveStepId)
       ? explicitActiveStepId
-      : candidateFromPath;
+      : fallbackFromPathOrDefault);
+
   const activeStepId = JOURNEY_NAV_STEPS.some((step) => step.id === desiredActive)
     ? desiredActive
     : DEFAULT_STEP_ID;
 
-  const normalizedCompleted = completedStepIds.filter((id): id is JourneyStepId => typeof id === "string");
+  const normalizedCompleted = completedStepIds.filter(
+    (id): id is JourneyStepId => typeof id === "string"
+  );
   const completedSet = new Set(normalizedCompleted);
 
   const steps = JOURNEY_NAV_STEPS.map((step) => {
@@ -108,17 +134,14 @@ export function resolveJourneyNavState(input: ResolveJourneyNavStateInput): Jour
     steps,
     activeStepId,
     completedStepIds: JOURNEY_NAV_STEPS.filter((step) => completedSet.has(step.id)).map(
-      (step) => step.id,
+      (step) => step.id
     ),
   };
 }
 
 export function resolveJourneyNavStateFromPathname(pathname?: string): JourneyNavState {
-  const activeStepId = getStepIdForPathname(pathname) ?? DEFAULT_STEP_ID;
-
   return resolveJourneyNavState({
     currentPathname: pathname,
-    activeStepId,
     completedStepIds: [],
   });
 }

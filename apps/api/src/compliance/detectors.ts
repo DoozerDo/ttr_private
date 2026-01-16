@@ -121,6 +121,7 @@ const ROLE_ALLOWLIST = new Set([
   'this role',
   'the role',
   'the position',
+  'the position',
 ]);
 
 const ROLE_KEYWORDS = [
@@ -157,9 +158,66 @@ const ROLE_KEYWORDS = [
 ];
 
 const ROLE_KEYWORD_PATTERN = new RegExp(
-  `\\b(?:${ROLE_KEYWORDS.map((keyword) => keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
+  `\\b(?:${ROLE_KEYWORDS
+    .map((keyword) => keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')})\\b`,
   'i',
 );
+
+// Header delimiters used for detecting "header-like" fragments when scanning text.
+const HEADER_DELIMITERS = new Set<string>([':', '-', '–', '—', '|', '/', '@']);
+
+function hasSentenceTerminatorBeforeIndex(text: string, index: number): boolean {
+  let cursor = index - 1;
+  while (cursor >= 0) {
+    const char = text[cursor];
+    if (char === '\n' || char === '\r' || char === ' ' || char === '\t') {
+      cursor -= 1;
+      continue;
+    }
+    return /[.!?]/.test(char);
+  }
+  return false;
+}
+
+function isLikelyHeaderStart(text: string, index: number): boolean {
+  if (index <= 0) return true;
+  let cursor = index - 1;
+
+  while (cursor >= 0) {
+    const char = text[cursor];
+
+    if (char === '\n' || char === '\r') {
+      if (hasSentenceTerminatorBeforeIndex(text, cursor)) {
+        return false;
+      }
+      return true;
+    }
+
+    if (char === ' ' || char === '\t') {
+      cursor -= 1;
+      continue;
+    }
+
+    return HEADER_DELIMITERS.has(char);
+  }
+
+  return true;
+}
+
+function matchesBaselineAllowlistSuffix(
+  normalized: string,
+  allowedTokens: Set<string>,
+): boolean {
+  if (!normalized || !allowedTokens.size) return false;
+  for (const token of allowedTokens) {
+    if (!token) continue;
+    if (normalized === token) return true;
+    if (token && normalized.startsWith(`${token} `)) return true;
+    if (token && normalized.endsWith(` ${token}`)) return true;
+  }
+  return false;
+}
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -251,7 +309,9 @@ const SPELLED_NUMBER_WORDS: Record<string, number> = {
 };
 const SPELLED_ONES_PATTERN = 'one|two|three|four|five|six|seven|eight|nine';
 const SPELLED_NUMBER_PATTERN = new RegExp(
-  `\\b(?:${Object.keys(SPELLED_NUMBER_WORDS).join('|')})(?:[ -](?:${SPELLED_ONES_PATTERN}))?\\b`,
+  `\\b(?:${Object.keys(SPELLED_NUMBER_WORDS).join(
+    '|',
+  )})(?:[ -](?:${SPELLED_ONES_PATTERN}))?\\b`,
   'gi',
 );
 const METRIC_PERCENT_SUFFIX_PATTERN = /^\s*(?:percent(?:age)?|%)\b/i;
@@ -349,7 +409,8 @@ function extractCompanyFromHeaderLine(line: string): string | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
-  const fieldMatch = /\b(?:company|employer|organization)\s*[:\-–]\s*(.+)$/i.exec(trimmed);
+  const fieldMatch =
+    /\b(?:company|employer|organization)\s*[:\-–]\s*(.+)$/i.exec(trimmed);
   if (fieldMatch) {
     const candidate = fieldMatch[1].trim();
     if (looksLikeCompanyName(candidate)) {
@@ -545,7 +606,10 @@ export function collectMetricCandidatesFromSections(
       if (!normalized) continue;
 
       const contextStart = Math.max(0, match.index - METRIC_CONTEXT_WINDOW);
-      const contextEnd = Math.min(text.length, match.index + original.length + METRIC_CONTEXT_WINDOW);
+      const contextEnd = Math.min(
+        text.length,
+        match.index + original.length + METRIC_CONTEXT_WINDOW,
+      );
       const context = text.slice(contextStart, contextEnd).toLowerCase();
 
       candidates.push({
@@ -572,23 +636,25 @@ export function collectMetricCandidatesFromSections(
 
       if (!normalizedValue) continue;
 
-      const contextStart = Math.max(
-        0,
-        spelledMatch.index - METRIC_CONTEXT_WINDOW,
-      );
+      const contextStart = Math.max(0, spelledMatch.index - METRIC_CONTEXT_WINDOW);
       const context = text
         .slice(
           contextStart,
-          Math.min(text.length, spelledMatch.index + spelledMatch[0].length + METRIC_CONTEXT_WINDOW),
+          Math.min(
+            text.length,
+            spelledMatch.index +
+              spelledMatch[0].length +
+              METRIC_CONTEXT_WINDOW,
+          ),
         )
         .toLowerCase();
 
       candidates.push({
         normalized: normalizedValue,
         original: normalizeCandidate(
-        normalizedValue.endsWith('%')
-          ? `${spelledMatch[0]} ${percentMatch?.[0] ?? ''}`.trim()
-          : spelledMatch[0],
+          normalizedValue.endsWith('%')
+            ? `${spelledMatch[0]} ${percentMatch?.[0] ?? ''}`.trim()
+            : spelledMatch[0],
         ),
         context,
       });
@@ -604,15 +670,23 @@ function hasMetricContext(context: string): boolean {
 
 function isIgnoredMetricCandidate(candidate: MetricCandidate): boolean {
   if (METRIC_YEAR_PATTERN.test(candidate.normalized)) return true;
-  if (METRIC_DATE_PATTERNS.some((pattern) => pattern.test(candidate.context))) return true;
-  if (METRIC_IGNORE_CONTEXT_PATTERNS.some((pattern) => pattern.test(candidate.context))) return true;
+  if (METRIC_DATE_PATTERNS.some((pattern) => pattern.test(candidate.context)))
+    return true;
+  if (
+    METRIC_IGNORE_CONTEXT_PATTERNS.some((pattern) =>
+      pattern.test(candidate.context),
+    )
+  )
+    return true;
   if (METRIC_PHONE_PATTERN.test(candidate.context)) return true;
   if (METRIC_EMAIL_PATTERN.test(candidate.context)) return true;
   return false;
 }
 
 export function detectInventedMetric(payload: DetectorPayload): ComplianceFlag[] {
-  const generatedCandidates = collectMetricCandidatesFromSections(payload.generatedSections);
+  const generatedCandidates = collectMetricCandidatesFromSections(
+    payload.generatedSections,
+  );
   if (!generatedCandidates.length) return [];
 
   const baselineSet = payload.baselineAllowlist?.allowedMetricTokens?.length
@@ -679,6 +753,10 @@ export function extractRoleCandidatesFromText(text: string): string[] {
   ROLE_GENERAL_PATTERN.lastIndex = 0;
   while ((match = ROLE_GENERAL_PATTERN.exec(text))) {
     const candidate = match[0];
+    const startIndex = typeof match.index === 'number' ? match.index : 0;
+    if (!isLikelyHeaderStart(text, startIndex)) {
+      continue;
+    }
     if (containsRoleKeyword(candidate)) {
       matches.add(candidate);
     }
@@ -700,8 +778,21 @@ function isCompanyAllowlisted(normalized: string, original: string): boolean {
   return false;
 }
 
-function isRoleAllowlisted(normalized: string, _original?: string): boolean {
-  return ROLE_ALLOWLIST.has(normalized);
+function buildRoleAllowlist(
+  baselineTokens: Iterable<string>,
+): (normalized: string, _original: string) => boolean {
+  const baselineSet = new Set<string>();
+  for (const token of baselineTokens) {
+    if (token) {
+      baselineSet.add(token);
+    }
+  }
+
+  return (normalized: string) => {
+    if (ROLE_ALLOWLIST.has(normalized)) return true;
+    if (baselineSet.has(normalized)) return true;
+    return false;
+  };
 }
 
 function detectInventedEntity(options: {
@@ -713,10 +804,13 @@ function detectInventedEntity(options: {
   code: ComplianceFlagCode;
   message: (token: string) => string;
   normalizer?: (value: string) => string;
-  baselineTokenExtractor?: (sections: ComplianceTextSection[] | null | undefined) => string[];
+  baselineTokenExtractor?: (
+    sections: ComplianceTextSection[] | null | undefined,
+  ) => string[];
   baselineAllowlist?: string[];
   confidence?: number;
   confidenceFactory?: (token: string) => number;
+  baselineSuffixAllowlist?: boolean;
 }): ComplianceFlag[] {
   const normalizer = options.normalizer ?? normalizeTokenForComparison;
 
@@ -729,6 +823,10 @@ function detectInventedEntity(options: {
 
   const allowedNormalized = new Set<string>();
   const precomputed = options.baselineAllowlist ?? [];
+  const baselineSuffixSet =
+    options.baselineSuffixAllowlist && precomputed.length
+      ? new Set(precomputed.filter(Boolean))
+      : null;
 
   if (precomputed.length) {
     for (const token of precomputed) {
@@ -739,7 +837,9 @@ function detectInventedEntity(options: {
   } else {
     const baselineCandidates = new Map<string, string>();
     if (options.baselineTokenExtractor) {
-      for (const candidate of options.baselineTokenExtractor(options.baselineSections)) {
+      for (const candidate of options.baselineTokenExtractor(
+        options.baselineSections,
+      )) {
         addCandidate(baselineCandidates, candidate, normalizer);
       }
     }
@@ -771,6 +871,12 @@ function detectInventedEntity(options: {
 
   for (const [normalized, original] of generated.entries()) {
     if (allowedNormalized.has(normalized)) continue;
+    if (
+      baselineSuffixSet &&
+      matchesBaselineAllowlistSuffix(normalized, baselineSuffixSet)
+    ) {
+      continue;
+    }
     if (options.allowlist(normalized, original)) continue;
 
     const confidence =
@@ -809,20 +915,23 @@ export function detectInventedCompany(payload: DetectorPayload): ComplianceFlag[
 }
 
 export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
-  const baselineSectionsForRoles = (payload.baselineSections ?? []).filter((section) =>
-    shouldUseForRoleDetection(section.sectionType),
+  const baselineSectionsForRoles = (payload.baselineSections ?? []).filter(
+    (section) => shouldUseForRoleDetection(section.sectionType),
   );
+
+  const baselineRoleTokens = payload.baselineAllowlist?.allowedRoles ?? [];
 
   return detectInventedEntity({
     baselineSections: baselineSectionsForRoles,
     generatedSections: payload.generatedSections,
     allowedJobValues: payload.job?.title ? [payload.job.title] : [],
     candidateExtractor: extractRoleCandidatesFromText,
-    allowlist: isRoleAllowlisted,
+    allowlist: buildRoleAllowlist(baselineRoleTokens),
     code: ComplianceFlagCode.INVENTED_ROLE,
     message: (token) =>
       `Detected invented role or title "${token}". Describe roles you have actually held or the job you are applying to.`,
-    baselineAllowlist: payload.baselineAllowlist?.allowedRoles ?? [],
+    baselineAllowlist: baselineRoleTokens,
+    baselineSuffixAllowlist: true,
     confidence: 0.95,
   });
 }
@@ -878,7 +987,9 @@ export function computeTechnologyConfidence(token: string): number {
 }
 
 export function detectFictionalTechnology(payload: DetectorPayload): ComplianceFlag[] {
-  const generatedTokens = collectTechnologyTokensFromSections(payload.generatedSections);
+  const generatedTokens = collectTechnologyTokensFromSections(
+    payload.generatedSections,
+  );
   if (!generatedTokens.size) return [];
 
   const baselineTokenSet = payload.baselineAllowlist?.allowedTechnologies?.length

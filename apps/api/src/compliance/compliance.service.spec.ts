@@ -277,6 +277,50 @@ describe('ComplianceService', () => {
       );
     });
 
+    it('ignores prose fragments that mention a baseline title with common lead-ins', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-baseline-fragment',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-baseline-fragment',
+        baselineSections: [
+          { title: 'Experience', content: 'Served as Senior Manager focusing on CX.' },
+        ],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'confidence. Experience Senior Manager with deep customer success experience.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
+    it('still blocks clearly invented titles even when prose lead-ins exist', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-invented-role',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-invented-role',
+        baselineSections: [{ title: 'Experience', content: 'Served as Software Engineer.' }],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Experience VP of Galactic Support overseeing interplanetary missions.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(true);
+      expect(result.complianceFlags.map((flag) => flag.code)).toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
     it('treats punctuation, suffix, and mixed-case variants of baseline companies as the same', async () => {
       const result = await service.validateAndAudit({
         action: ComplianceAction.RESUME_EXPORT,

@@ -15,6 +15,7 @@ import type { InterviewQuestion } from "@/lib/interviews";
 import {
   LAST_ANALYSIS_STORAGE_KEY,
   readLastAnalysis,
+  type AnalysisResult,
   type StoredAnalysisRecord,
 } from "../lib/session";
 import { InstrumentShell } from "../ui/InstrumentShell";
@@ -49,6 +50,39 @@ type FitAssessment = {
   complianceFlags?: string[] | Array<{ code?: string; message?: string }>;
   compliance_flags?: Array<{ code?: string; message?: string }>;
 };
+
+function parseTimestamp(value?: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function getAssessmentCreatedTimestamp(a: FitAssessment | null | undefined): string | null {
+  if (!a) return null;
+  const anyA = a as unknown as {
+    createdAt?: string;
+    created_at?: string;
+    createdTimestamp?: string;
+    createdISO?: string;
+    updatedAt?: string;
+    updated_at?: string;
+  };
+  const v =
+    anyA.createdAt ??
+    anyA.created_at ??
+    anyA.createdTimestamp ??
+    anyA.createdISO ??
+    anyA.updatedAt ??
+    anyA.updated_at ??
+    null;
+  return typeof v === "string" ? v : null;
+}
+
+function getAssessmentScore(assessment?: FitAssessment | AnalysisResult | null): number | null {
+  if (!assessment) return null;
+  if (typeof assessment.overallScore === "number") return assessment.overallScore;
+  if (typeof assessment.score === "number") return assessment.score;
+  return null;
+}
 
 const MAX_GAPS_TO_SHOW = 3;
 const MAX_QUESTIONS_PER_GAP = 5;
@@ -103,7 +137,20 @@ function normalizeDimensions(data?: FitAssessment | null): FitDimensionScores {
   return {};
 }
 
-function normalizeComplianceFlags(flags?: FitAssessment["complianceFlags"]): string[] {
+function isFitAssessment(
+  value: FitAssessment | AnalysisResult | null | undefined,
+): value is FitAssessment {
+  if (!value || typeof value !== "object") return false;
+  return (
+    "baselineVersionId" in value ||
+    "dimensionScores" in value ||
+    "breakdown" in value
+  );
+}
+
+function normalizeComplianceFlags(
+  flags?: string[] | ComplianceFlagLike[] | undefined,
+): string[] {
   if (!flags) return [];
   if (Array.isArray(flags) && typeof flags[0] === "string") return flags as string[];
 
@@ -114,6 +161,26 @@ function normalizeComplianceFlags(flags?: FitAssessment["complianceFlags"]): str
   }
 
   return [];
+}
+
+type ComplianceFlagLike = { code?: string; message?: string };
+
+function getComplianceFlagsInput(
+  value: unknown,
+): string[] | ComplianceFlagLike[] | undefined {
+  if (!value) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  if (value.every((item) => typeof item === "string")) {
+    return value as string[];
+  }
+  if (
+    value.every(
+      (item) => item && typeof item === "object" && ("code" in item || "message" in item),
+    )
+  ) {
+    return value as ComplianceFlagLike[];
+  }
+  return undefined;
 }
 
 const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
@@ -197,7 +264,7 @@ const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
             color: "rgba(187,247,208,0.8)",
           }}
         >
-          Fit score
+          CX Fit Score
         </span>
       </div>
     </div>
@@ -234,15 +301,80 @@ export default function FitReviewClient() {
   }, []);
 
   const resolvedJobId = jobId || storedAnalysis?.jobId || "";
-
-  const dimensionScores = normalizeDimensions(assessment);
-  const complianceFlags = normalizeComplianceFlags(
-    assessment?.complianceFlags ?? assessment?.compliance_flags,
+  const normalizedResolvedJobId = resolvedJobId.trim();
+  const storedSavedTimestamp = useMemo(
+    () => parseTimestamp(storedAnalysis?.savedAt ?? null),
+    [storedAnalysis?.savedAt],
   );
-  const fitScore =
-    assessment?.overallScore ??
-    assessment?.score ??
-    (typeof assessment?.overallScore === "number" ? assessment.overallScore : 0);
+  const remoteCreatedTimestamp = useMemo(
+    () => parseTimestamp(getAssessmentCreatedTimestamp(assessment)),
+    [assessment],
+  );
+  const storedJobMatchesResolved =
+    Boolean(normalizedResolvedJobId && storedAnalysis?.jobId?.trim() === normalizedResolvedJobId);
+  const displayAssessment = useMemo(() => {
+    if (storedJobMatchesResolved && storedAnalysis?.analysis) {
+      if (storedSavedTimestamp >= remoteCreatedTimestamp) {
+        return storedAnalysis.analysis;
+      }
+    }
+
+    if (
+      assessment &&
+      normalizedResolvedJobId &&
+      assessment.jobId?.trim() === normalizedResolvedJobId
+    ) {
+      return assessment;
+    }
+
+    if (storedJobMatchesResolved && storedAnalysis?.analysis) {
+      return storedAnalysis.analysis;
+    }
+
+    return assessment ?? storedAnalysis?.analysis ?? null;
+  }, [
+    assessment,
+    normalizedResolvedJobId,
+    remoteCreatedTimestamp,
+    storedAnalysis?.analysis,
+    storedJobMatchesResolved,
+    storedSavedTimestamp,
+  ]);
+  const dimensionScores = useMemo(() => {
+    if (isFitAssessment(displayAssessment)) {
+      return normalizeDimensions(displayAssessment);
+    }
+    return {};
+  }, [displayAssessment]);
+  const rawComplianceFlags =
+    (displayAssessment as any)?.complianceFlags ??
+    (displayAssessment as any)?.compliance_flags;
+  const complianceFlags = normalizeComplianceFlags(
+    getComplianceFlagsInput(rawComplianceFlags),
+  );
+  const displayFitScore = getAssessmentScore(displayAssessment);
+  const displayBaselineId =
+    displayAssessment?.baselineId ?? assessment?.baselineId ?? storedAnalysis?.baselineId;
+  const summaryText = displayAssessment?.summary ?? null;
+  const interviewAssessment = useMemo(
+    () =>
+      assessment &&
+      assessment.jobId &&
+      assessment.baselineId &&
+      assessment.baselineVersionId
+        ? assessment
+        : displayAssessment,
+    [assessment, displayAssessment],
+  );
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV === "development" &&
+      normalizedResolvedJobId &&
+      displayFitScore !== null
+    ) {
+      console.debug("[FitReview dev] jobId", normalizedResolvedJobId, "score", displayFitScore);
+    }
+  }, [normalizedResolvedJobId, displayFitScore]);
 
   useEffect(() => {
     if (!resolvedJobId) return;
@@ -331,12 +463,13 @@ export default function FitReviewClient() {
   }, [resolvedJobId]);
 
   const handleStartInterview = async () => {
-    if (!assessment?.jobId || !assessment?.baselineId) {
+    const source = interviewAssessment;
+    if (!source?.jobId || !source?.baselineId) {
       setStartError("Missing job or baseline context for this assessment.");
       return;
     }
 
-    if (!assessment?.baselineVersionId) {
+    if (!source?.baselineVersionId) {
       setStartError("Missing baseline version for this assessment.");
       return;
     }
@@ -349,9 +482,9 @@ export default function FitReviewClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId: assessment.jobId,
-          baselineId: assessment.baselineId,
-          baselineVersionId: assessment.baselineVersionId,
+          jobId: source.jobId,
+          baselineId: source.baselineId,
+          baselineVersionId: source.baselineVersionId,
         }),
       });
 
@@ -381,12 +514,12 @@ export default function FitReviewClient() {
 
   const gapLabels = useMemo(() => {
     const candidateGaps =
-      assessment?.gaps ?? studyPacket?.fitSnapshot?.gaps ?? storedAnalysis?.analysis?.gaps ?? [];
+      displayAssessment?.gaps ?? studyPacket?.fitSnapshot?.gaps ?? storedAnalysis?.analysis?.gaps ?? [];
     if (!Array.isArray(candidateGaps)) return [];
     return candidateGaps
       .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
       .slice(0, MAX_GAPS_TO_SHOW);
-  }, [assessment?.gaps, studyPacket?.fitSnapshot?.gaps, storedAnalysis?.analysis?.gaps]);
+  }, [displayAssessment?.gaps, studyPacket?.fitSnapshot?.gaps, storedAnalysis?.analysis?.gaps]);
 
   const questionGroups = useMemo((): QuestionGroup[] => {
     if (!studyPacket?.questions || gapLabels.length === 0) return [];
@@ -405,8 +538,8 @@ export default function FitReviewClient() {
       .filter((group) => group.questions.length > 0);
   }, [gapLabels, studyPacket?.questions]);
 
-  const hasAnalysis = Boolean(assessment || storedAnalysis?.analysis || studyPacket?.fitSnapshot);
-  const displayJobId = assessment?.jobId ?? resolvedJobId;
+  const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis || studyPacket?.fitSnapshot);
+  const displayJobId = displayAssessment?.jobId ?? resolvedJobId;
 
   const dimensionEntries = Object.entries(DIMENSION_LABELS).map(([key, label]) => {
     const value = dimensionScores[key as keyof FitDimensionScores] ?? null;
@@ -452,7 +585,7 @@ export default function FitReviewClient() {
               />
 
               <div style={{ position: "relative", display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
-                <ScoreRing score={fitScore ?? 0} loading={loading} />
+                <ScoreRing score={displayFitScore ?? 0} loading={loading} />
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -460,18 +593,36 @@ export default function FitReviewClient() {
                     <h2 style={ttrTypography.h2}>Fit summary</h2>
                   </div>
 
-                  <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
-                    {assessment?.summary || "View the latest compatibility score and signals for this role."}
-                  </p>
+                  {summaryText ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          letterSpacing: 2.5,
+                          textTransform: "uppercase",
+                          color: "rgba(226,232,240,0.55)",
+                        }}
+                      >
+                        Signal coverage
+                      </span>
+                      <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
+                        {summaryText}
+                      </p>
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
+                      View the latest compatibility score and signals for this role.
+                    </p>
+                  )}
 
-                  {assessment?.baselineId ? (
+                  {displayBaselineId ? (
                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                      Baseline: {assessment.baselineId}
+                      Baseline: {displayBaselineId}
                     </div>
                   ) : null}
 
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-                  {!error && !loading && !assessment ? (
+                  {!error && !loading && !displayAssessment ? (
                     <div style={ttrComponents.warningBox}>Run an analysis first to view Fit Review.</div>
                   ) : null}
                 </div>
@@ -494,9 +645,9 @@ export default function FitReviewClient() {
                   onClick={handleStartInterview}
                   disabled={
                     starting ||
-                    !assessment?.jobId ||
-                    !assessment?.baselineId ||
-                    !assessment?.baselineVersionId
+                    !interviewAssessment?.jobId ||
+                    !interviewAssessment?.baselineId ||
+                    !interviewAssessment?.baselineVersionId
                   }
                   style={{
                     ...ttrComponents.primaryButton,
@@ -573,8 +724,8 @@ export default function FitReviewClient() {
                     Strengths
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {assessment?.strengths?.length ? (
-                      assessment.strengths.map((item, index) => (
+                    {displayAssessment?.strengths?.length ? (
+                      displayAssessment.strengths.map((item, index) => (
                         <span key={`${item}-${index}`} style={ttrComponents.chip}>
                           {item}
                         </span>
@@ -592,8 +743,8 @@ export default function FitReviewClient() {
                     Gaps
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {assessment?.gaps?.length ? (
-                      assessment.gaps.map((item, index) => (
+                    {displayAssessment?.gaps?.length ? (
+                      displayAssessment.gaps.map((item, index) => (
                         <span
                           key={`${item}-${index}`}
                           style={{
