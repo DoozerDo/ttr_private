@@ -12,6 +12,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       CORS_ORIGIN: ${CORS_ORIGIN}
       APP_VERSION: ${APP_VERSION:-dev}
+      TYPEORM_SYNCHRONIZE: "true"
     networks:
       - ttr_dev
 
