@@ -49,14 +49,14 @@ const ArrowOverlay = ({ onImpact, shouldReduceMotion }: ArrowOverlayProps) => {
     <svg viewBox="0 0 40 40" role="presentation" aria-hidden="true">
       <path
         d="M4 20h22"
-        stroke="#fde68a"
+        stroke="var(--signal-burnt-orange)"
         strokeWidth="2.4"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M26 13l12 7-12 7"
-        stroke="#fbbf24"
+        stroke="var(--signal-burnt-orange)"
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -264,6 +264,13 @@ export function JourneyNavV1({
               <>
                 <span className={iconAreaClass}>
                   {showPulse ? <span className="journey-nav-target-pulse" aria-hidden /> : null}
+                  {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
+                  {isCompleted && !isActive ? (
+                    <span className="journey-nav-complete-dot" aria-hidden />
+                  ) : null}
+                  <span className="journey-nav-icon-target" aria-hidden>
+                    {isActive ? <span className="journey-nav-icon-center" /> : null}
+                  </span>
                   {isActive ? (
                     <ArrowOverlay
                       key={pathActiveStepId}
@@ -271,9 +278,6 @@ export function JourneyNavV1({
                       shouldReduceMotion={!!shouldReduceMotion}
                     />
                   ) : null}
-                  <span className="journey-nav-icon-target" aria-hidden>
-                    {isActive ? <span className="journey-nav-icon-center" /> : null}
-                  </span>
                 </span>
                 <span className="journey-nav-step-label">{step.label}</span>
               </>
@@ -362,12 +366,11 @@ export function JourneyNavV1({
 
       <style jsx>{`
         .journey-nav-root {
-          background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.7));
-          border: 1px solid rgba(148, 163, 184, 0.4);
-          border-radius: 1rem;
-          padding: 1.25rem;
-          box-shadow: 0 10px 35px rgba(2, 6, 23, 0.65);
-          backdrop-filter: blur(14px);
+          background: linear-gradient(180deg, var(--surface-secondary) 0%, rgba(3, 5, 9, 0.95) 100%);
+          border-radius: 1.5rem;
+          border: 1px solid var(--metal-edge-outer);
+          padding: 1.5rem;
+          box-shadow: inset 0 1px 0 var(--metal-edge-highlight), 0 18px 45px rgba(1, 1, 1, 0.65);
         }
 
         .journey-nav-inner {
@@ -377,7 +380,7 @@ export function JourneyNavV1({
         .journey-nav-line,
         .journey-nav-line-progress {
           position: absolute;
-          left: 1rem;
+          left: 1.5rem;
           top: 50%;
           height: 2px;
           border-radius: 999px;
@@ -386,14 +389,39 @@ export function JourneyNavV1({
         }
 
         .journey-nav-line {
-          right: 1rem;
-          background: linear-gradient(90deg, rgba(55, 65, 81, 0.6), rgba(15, 23, 42, 0.2));
+          right: 1.5rem;
+          background: linear-gradient(
+            90deg,
+            rgba(10, 12, 17, 0.9),
+            rgba(43, 47, 57, 0.96),
+            rgba(10, 12, 17, 0.85)
+          );
         }
 
         .journey-nav-line-progress {
           right: auto;
+          width: 0;
           transition: width 0.18s ease-out;
-          background: linear-gradient(90deg, #c084fc, #8b5cf6 65%);
+          z-index: 2;
+          background: linear-gradient(
+            90deg,
+            rgba(21, 26, 33, 0.9),
+            rgba(194, 77, 12, 0.9),
+            rgba(14, 17, 24, 0.85)
+          );
+          box-shadow: 0 0 18px rgba(194, 77, 12, 0.55);
+        }
+
+        .journey-nav-line-progress::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: 999px;
+          background: radial-gradient(circle, rgba(194, 77, 12, 0.35), rgba(194, 77, 12, 0));
+          opacity: 0.6;
+          filter: blur(8px);
+          pointer-events: none;
+          z-index: 1;
         }
 
         .journey-nav-step-grid {
@@ -412,8 +440,8 @@ export function JourneyNavV1({
           flex: 1;
           flex-direction: column;
           align-items: center;
-          gap: 0.4rem;
-          color: rgba(226, 232, 240, 0.9);
+          gap: 0.35rem;
+          color: var(--text-muted-secondary);
           font-size: 0.75rem;
           letter-spacing: 0.05em;
           text-transform: uppercase;
@@ -424,21 +452,21 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-button:focus-visible {
-          outline: 2px solid rgba(99, 102, 241, 0.8);
+          outline: 2px solid rgba(194, 77, 12, 0.8);
           outline-offset: 4px;
         }
 
         .journey-nav-step-locked {
-          color: rgba(148, 163, 184, 0.6);
+          color: var(--text-muted-tertiary);
           cursor: not-allowed;
         }
 
         .journey-nav-step-active {
-          color: #f8fafc;
+          color: var(--text-muted-primary);
         }
 
         .journey-nav-step-completed {
-          color: rgba(164, 202, 254, 0.9);
+          color: var(--text-muted-secondary);
         }
 
         .journey-nav-step-impact .journey-nav-icon-area {
@@ -458,63 +486,74 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {
-          box-shadow: 0 12px 30px rgba(148, 163, 184, 0.25),
-            inset 0 0 12px rgba(226, 232, 240, 0.25);
+          box-shadow: 0 12px 30px rgba(2, 5, 12, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.08);
         }
 
         .journey-nav-icon-area {
           position: relative;
-          width: 56px;
-          height: 56px;
+          width: 64px;
+          height: 64px;
           border-radius: 999px;
           display: flex;
           align-items: center;
           justify-content: center;
           background: radial-gradient(
-            circle,
-            rgba(15, 23, 42, 0.95) 0%,
-            rgba(15, 23, 42, 0.95) 32%,
-            rgba(79, 70, 229, 0.2) 33%,
-            rgba(79, 70, 229, 0.2) 46%,
-            rgba(30, 41, 59, 0.85) 47%,
-            rgba(30, 41, 59, 0.85) 100%
+            circle at 30% 30%,
+            rgba(255, 255, 255, 0.08),
+            rgba(8, 10, 15, 0.96) 65%
           );
-          border: 2px solid rgba(99, 102, 241, 0.35);
-          box-shadow: inset 0 0 12px rgba(15, 23, 42, 0.85),
-            inset 0 8px 20px rgba(15, 23, 42, 0.8), 0 8px 32px rgba(2, 6, 23, 0.75);
+          border: 2px solid var(--metal-edge-outer);
+          box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.05),
+            inset 0 -6px 18px rgba(0, 0, 0, 0.8), 0 9px 28px rgba(0, 0, 0, 0.65);
+          overflow: visible;
           --journey-nav-target-translate: 0px;
           transform: translateY(var(--journey-nav-target-translate)) scale(1);
           transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
             background 0.18s ease;
-          overflow: visible;
+          pointer-events: none;
         }
 
+        .journey-nav-icon-area::before,
         .journey-nav-icon-area::after {
           content: "";
           position: absolute;
-          inset: 8px;
           border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.15);
           pointer-events: none;
+          z-index: 2;
+        }
+
+        .journey-nav-icon-area::before {
+          inset: 11%;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .journey-nav-icon-area::after {
+          inset: 24%;
+          border: 1px solid rgba(255, 255, 255, 0.04);
+          opacity: 0.55;
         }
 
         .journey-nav-target-pulse {
           position: absolute;
           inset: -6px;
           border-radius: 999px;
-          background: radial-gradient(circle, rgba(129, 140, 248, 0.5), rgba(99, 102, 241, 0));
+          background: radial-gradient(
+            circle,
+            rgba(194, 77, 12, 0.35),
+            rgba(194, 77, 12, 0)
+          );
           pointer-events: none;
           z-index: 0;
-          animation: journey-nav-target-pulse 2.5s ease-in-out infinite;
+          animation: journey-nav-target-pulse 3.4s ease-in-out infinite;
         }
 
         @keyframes journey-nav-target-pulse {
           0% {
             transform: scale(1);
-            opacity: 0.6;
+            opacity: 0.4;
           }
-          45% {
-            transform: scale(1.12);
+          60% {
+            transform: scale(1.08);
             opacity: 0;
           }
           100% {
@@ -540,50 +579,64 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-active .journey-nav-icon-area {
-          border-color: #c4b5fd;
-          box-shadow: 0 0 25px rgba(129, 140, 248, 0.45),
-            inset 0 0 20px rgba(129, 140, 248, 0.35);
-          --journey-nav-target-translate: -1px;
-          background: radial-gradient(
-            circle,
-            rgba(255, 255, 255, 0.95) 0%,
-            rgba(255, 255, 255, 0.95) 10%,
-            rgba(251, 191, 36, 0.95) 11%,
-            rgba(251, 191, 36, 0.95) 20%,
-            rgba(192, 132, 252, 0.95) 21%,
-            rgba(192, 132, 252, 0.95) 30%,
-            rgba(129, 140, 248, 0.9) 31%,
-            rgba(129, 140, 248, 0.9) 45%,
-            rgba(15, 23, 42, 0.95) 46%,
-            rgba(15, 23, 42, 0.95) 100%
-          );
+          border-color: rgba(194, 77, 12, 0.9);
+          box-shadow: 0 0 22px rgba(194, 77, 12, 0.45),
+            inset 0 2px 8px rgba(255, 255, 255, 0.1), inset 0 -6px 12px rgba(0, 0, 0, 0.7);
+          pointer-events: none;
         }
 
         .journey-nav-step-completed .journey-nav-icon-area {
-          background: radial-gradient(
-            circle,
-            rgba(226, 232, 240, 0.9) 0%,
-            rgba(226, 232, 240, 0.9) 10%,
-            rgba(148, 163, 184, 0.45) 10%,
-            rgba(148, 163, 184, 0.45) 28%,
-            rgba(99, 102, 241, 0.4) 28%,
-            rgba(99, 102, 241, 0.4) 48%,
-            rgba(15, 23, 42, 0.9) 49%,
-            rgba(15, 23, 42, 0.9) 100%
-          );
-          box-shadow: inset 0 0 14px rgba(8, 11, 21, 0.8), 0 6px 18px rgba(2, 6, 23, 0.6);
+          box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.9), 0 6px 18px rgba(0, 0, 0, 0.5),
+            0 0 12px rgba(194, 77, 12, 0.3);
         }
 
         .journey-nav-step-locked .journey-nav-icon-area {
           background: radial-gradient(
-            circle,
-            rgba(148, 163, 184, 0.45) 0%,
-            rgba(148, 163, 184, 0.45) 28%,
-            rgba(30, 41, 59, 0.85) 29%,
-            rgba(30, 41, 59, 0.85) 100%
+            circle at 30% 30%,
+            rgba(255, 255, 255, 0.04),
+            rgba(16, 18, 26, 0.9)
           );
           border-color: rgba(148, 163, 184, 0.35);
-          box-shadow: inset 0 0 10px rgba(15, 23, 42, 0.8);
+          box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+        }
+
+        .journey-nav-radar-sweep {
+          position: absolute;
+          inset: 12%;
+          border-radius: 999px;
+          background: conic-gradient(
+            from 140deg,
+            rgba(194, 77, 12, 0.08),
+            rgba(194, 77, 12, 0.65) 30%,
+            rgba(194, 77, 12, 0.1) 65%,
+            transparent 100%
+          );
+          animation: radar-rotate 6.4s linear infinite;
+          opacity: 0.9;
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        @keyframes radar-rotate {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        .journey-nav-complete-dot {
+          position: absolute;
+          width: 10px;
+          height: 10px;
+          border-radius: 999px;
+          background: var(--signal-burnt-orange);
+          bottom: 6px;
+          right: 8px;
+          box-shadow: 0 0 12px rgba(194, 77, 12, 0.65);
+          pointer-events: none;
+          z-index: 3;
         }
 
         .journey-nav-icon-target {
@@ -594,16 +647,16 @@ export function JourneyNavV1({
           height: 100%;
           position: relative;
           pointer-events: none;
-          z-index: 1;
+          z-index: 3;
         }
 
         .journey-nav-icon-center {
-          width: 8px;
-          height: 8px;
+          width: 10px;
+          height: 10px;
           border-radius: 999px;
-          background: linear-gradient(135deg, #f3e8ff, #c084fc);
-          box-shadow: 0 0 8px rgba(192, 132, 252, 0.7);
-          z-index: 2;
+          background: var(--signal-burnt-orange);
+          box-shadow: 0 0 8px rgba(194, 77, 12, 0.75);
+          z-index: 4;
         }
 
         .journey-nav-arrow-overlay {
@@ -612,7 +665,7 @@ export function JourneyNavV1({
           display: grid;
           place-items: center;
           pointer-events: none;
-          z-index: 3;
+          z-index: 5;
         }
 
         .journey-nav-arrow-overlay svg {
@@ -624,6 +677,7 @@ export function JourneyNavV1({
           font-size: 0.65rem;
           line-height: 1;
           text-align: center;
+          color: var(--text-muted-primary);
         }
 
         .journey-nav-arrow-wrapper {
@@ -652,17 +706,22 @@ export function JourneyNavV1({
           position: absolute;
           width: 64%;
           height: 3px;
-          background: linear-gradient(90deg, rgba(192, 132, 252, 0.25), rgba(99, 102, 241, 0.85));
+          background: rgba(194, 77, 12, 0.65);
+          box-shadow: 0 0 8px rgba(194, 77, 12, 0.55);
           left: -10%;
         }
 
         .journey-nav-arrow-head {
           width: 24px;
           height: 8px;
-          background: linear-gradient(90deg, #c084fc, #8b5cf6);
+          background: linear-gradient(
+            90deg,
+            rgba(255, 143, 62, 0.95),
+            rgba(194, 77, 12, 0.95)
+          );
           clip-path: polygon(0 0, 100% 50%, 0 100%);
           display: inline-block;
-          box-shadow: 0 0 12px rgba(192, 132, 252, 0.65);
+          box-shadow: 0 0 12px rgba(194, 77, 12, 0.6);
           transform-origin: center;
         }
 
@@ -672,8 +731,8 @@ export function JourneyNavV1({
           height: 16px;
           right: 12px;
           border-radius: 999px 0 0 999px;
-          background: linear-gradient(90deg, rgba(129, 140, 248, 0), rgba(129, 140, 248, 0.5));
-          box-shadow: inset 0 0 4px rgba(99, 102, 241, 0.7);
+          background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(194, 77, 12, 0.5));
+          box-shadow: inset 0 0 4px rgba(194, 77, 12, 0.35);
         }
       `}</style>
     </nav>
