@@ -1,8 +1,8 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useReducedMotion } from "framer-motion";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 
 import {
   JourneyNavState,
@@ -10,7 +10,6 @@ import {
   JourneyStepState,
   resolveJourneyNavStateFromPathname,
 } from "@/src/lib/journeyNav";
-import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import { routeLookup } from "@/src/navigation/routes";
 
 export const JOURNEY_NAV_V1_ENABLED =
@@ -27,64 +26,8 @@ type JourneyNavV1Props = {
 };
 
 const LOCKED_TOOLTIP = "Locked until previous steps are completed.";
-const IMPACT_DURATION_MS = 140;
-const ARROW_DURATION_MS = 320;
-const TARGET_ARROW_FLY_DURATION_MS = 420;
-
-type ArrowFlight = {
-  key: number;
-  startPercent: number;
-  endPercent: number;
-};
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-type ArrowOverlayProps = {
-  onImpact: () => void;
-  shouldReduceMotion: boolean;
-};
-
-const ArrowOverlay = ({ onImpact, shouldReduceMotion }: ArrowOverlayProps) => {
-  const arrowContent = (
-    <svg viewBox="0 0 40 40" role="presentation" aria-hidden="true">
-      <path
-        d="M4 20h22"
-        stroke="var(--signal-burnt-orange)"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M26 13l12 7-12 7"
-        stroke="var(--signal-burnt-orange)"
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-
-  if (shouldReduceMotion) {
-    return (
-      <div className="journey-nav-arrow-overlay" aria-hidden>
-        {arrowContent}
-      </div>
-    );
-  }
-
-  return (
-    <motion.div
-      className="journey-nav-arrow-overlay"
-      initial={{ translateX: -40, translateY: -10, rotate: -12, opacity: 0 }}
-      animate={{ translateX: 0, translateY: 0, rotate: 0, opacity: 1 }}
-      transition={{ duration: TARGET_ARROW_FLY_DURATION_MS / 1000, ease: "easeOut" }}
-      onAnimationComplete={onImpact}
-      aria-hidden
-    >
-      {arrowContent}
-    </motion.div>
-  );
-};
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
 
 export function JourneyNavV1({
   state,
@@ -95,18 +38,11 @@ export function JourneyNavV1({
   const shouldReduceMotion = useReducedMotion();
   const pathname = usePathname() ?? "/";
   const router = useRouter();
+
+  // Active step is route-driven.
   const pathActiveStepId = resolveJourneyNavStateFromPathname(pathname).activeStepId;
-  const { activeOverrideStepId, setActiveOverride } = useJourneyNavAppState();
 
-  const [rippling, setRippling] = useState(false);
-  const rippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const impactTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveStepIdRef = useRef<JourneyStepId | null>(null);
-  const prevPathnameRef = useRef<string | null>(null);
-  const [isImpacting, setIsImpacting] = useState(false);
-  const arrowKeyRef = useRef(0);
-  const [arrowFlight, setArrowFlight] = useState<ArrowFlight | null>(null);
 
   const denominator = Math.max(state.steps.length - 1, 1);
   const rawActiveIndex = state.steps.findIndex((step) => step.id === pathActiveStepId);
@@ -117,54 +53,6 @@ export function JourneyNavV1({
       : state.steps.length === 1
       ? 100
       : clamp((activeIndex / denominator) * 100, 0, 100);
-
-  useEffect(() => {
-    if (impactTimerRef.current) {
-      clearTimeout(impactTimerRef.current);
-    }
-    return () => {
-      if (impactTimerRef.current) {
-        clearTimeout(impactTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (
-      prevPathnameRef.current &&
-      prevPathnameRef.current !== pathname &&
-      activeOverrideStepId !== null
-    ) {
-      setActiveOverride(null);
-    }
-    prevPathnameRef.current = pathname;
-  }, [activeOverrideStepId, pathname, setActiveOverride]);
-
-  const triggerRipple = () => {
-    if (shouldReduceMotion) return;
-    setRippling(true);
-    if (rippleTimerRef.current) {
-      clearTimeout(rippleTimerRef.current);
-    }
-    rippleTimerRef.current = setTimeout(() => {
-      setRippling(false);
-      rippleTimerRef.current = null;
-    }, 420);
-  };
-
-  useEffect(() => {
-    if (shouldReduceMotion) {
-      setRippling(false);
-    }
-  }, [shouldReduceMotion]);
-
-  useEffect(() => {
-    return () => {
-      if (rippleTimerRef.current) {
-        clearTimeout(rippleTimerRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!state.steps.length) {
@@ -180,41 +68,12 @@ export function JourneyNavV1({
     prevActiveStepIdRef.current = pathActiveStepId;
 
     const isForward = previousIndex >= 0 && currentIndex > previousIndex;
-
-    if (isForward && !shouldReduceMotion && state.steps.length > 1) {
-      const startPercent = clamp((previousIndex / denominator) * 100 - 3, 0, 100);
-      const endPercent = clamp((currentIndex / denominator) * 100, 0, 100);
-      arrowKeyRef.current += 1;
-      setArrowFlight({ key: arrowKeyRef.current, startPercent, endPercent });
-      setIsImpacting(false);
-      return;
-    }
-
-    if (shouldReduceMotion && isForward) {
+    if (isForward) {
       onActiveStepAdvanced?.();
     }
-  }, [
-    denominator,
-    onActiveStepAdvanced,
-    pathActiveStepId,
-    shouldReduceMotion,
-    state.steps,
-    state.steps.length,
-  ]);
+  }, [onActiveStepAdvanced, pathActiveStepId, state.steps]);
 
-  const handleArrowComplete = () => {
-    setArrowFlight(null);
-    setIsImpacting(true);
-    if (impactTimerRef.current) {
-      clearTimeout(impactTimerRef.current);
-    }
-    impactTimerRef.current = setTimeout(() => {
-      setIsImpacting(false);
-      onActiveStepAdvanced?.();
-    }, IMPACT_DURATION_MS);
-  };
-
-  const shouldPulse = !shouldReduceMotion && !isImpacting;
+  const shouldPulse = !shouldReduceMotion;
 
   const handleStepClick = (stepId: JourneyStepId) => {
     if (!onStepClick) return;
@@ -226,151 +85,125 @@ export function JourneyNavV1({
       aria-label={ariaLabel ?? "Current journey progress"}
       className="journey-nav-root relative w-full"
     >
-      <div className="journey-nav-inner relative">
-        <span className="journey-nav-line" aria-hidden />
-        <span
-          className="journey-nav-line-progress"
-          style={{ width: `${progressPercent}%` }}
-          aria-hidden
-        />
+      <div key={pathname} className="journey-nav-clip-shell">
+        <div className="journey-nav-inner relative">
+          <span className="journey-nav-line" aria-hidden />
+          <span
+            className="journey-nav-line-progress"
+            style={{ width: `${progressPercent}%` }}
+            aria-hidden
+          />
 
-        <div className="journey-nav-step-grid">
-          {state.steps.map((step) => {
-            const isActive = step.id === pathActiveStepId;
-            const isCompleted = step.state === JourneyStepState.Completed;
-            const isLocked = step.state === JourneyStepState.Locked;
-            const showPulse = shouldPulse && isActive;
-            const route = routeLookup.get(step.id);
-            const routeHref = route?.href;
-            const canNavigate = Boolean(routeHref && !isLocked);
+          <div className="journey-nav-step-grid">
+            {state.steps.map((step) => {
+              const isActive = step.id === pathActiveStepId;
+              const isCompleted = step.state === JourneyStepState.Completed;
+              const isLocked = step.state === JourneyStepState.Locked;
+              const showPulse = shouldPulse && isActive;
 
-            const nodeClass = [
-              "journey-nav-step-button",
-              isActive ? "journey-nav-step-active" : "",
-              isCompleted ? "journey-nav-step-completed" : "",
-              isLocked ? "journey-nav-step-locked" : "",
-              isActive && isImpacting ? "journey-nav-step-impact" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            const iconAreaClass = [
-              "journey-nav-icon-area",
-              isActive && rippling ? "journey-nav-icon-area--ripple" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
+              const route = routeLookup.get(step.id);
+              const routeHref = route?.href;
+              const canNavigate = Boolean(routeHref && !isLocked);
 
-            const stepContent = (
-              <>
-                <span className={iconAreaClass}>
-                  {showPulse ? <span className="journey-nav-target-pulse" aria-hidden /> : null}
-                  {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
-                  {isCompleted && !isActive ? (
-                    <span className="journey-nav-complete-dot" aria-hidden />
-                  ) : null}
-                  <span className="journey-nav-icon-target" aria-hidden>
-                    {isActive ? <span className="journey-nav-icon-center" /> : null}
+              const nodeClass = [
+                "journey-nav-step-button",
+                isActive ? "journey-nav-step-active" : "",
+                isCompleted ? "journey-nav-step-completed" : "",
+                isLocked ? "journey-nav-step-locked" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+
+              const stepContent = (
+                <>
+                  <span className="journey-nav-icon-area">
+                    {showPulse ? (
+                      <span className="journey-nav-target-pulse" aria-hidden />
+                    ) : null}
+
+                    {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
+
+                    <span className="journey-nav-icon-target" aria-hidden>
+                      {isActive ? <span className="journey-nav-icon-center" /> : null}
+                    </span>
                   </span>
-                  {isActive ? (
-                    <ArrowOverlay
-                      key={pathActiveStepId}
-                      onImpact={triggerRipple}
-                      shouldReduceMotion={!!shouldReduceMotion}
-                    />
-                  ) : null}
-                </span>
-                <span className="journey-nav-step-label">{step.label}</span>
-              </>
-            );
 
-            const handleNavigation = () => {
-              if (!canNavigate || !routeHref) return;
-              router.push(routeHref);
-            };
+                  <span className="journey-nav-step-label">{step.label}</span>
+                </>
+              );
 
-            const handleClick = () => {
-              handleNavigation();
-              if (isCompleted && Boolean(onStepClick)) {
-                handleStepClick(step.id);
-              }
-            };
+              const handleNavigation = () => {
+                if (!canNavigate || !routeHref) return;
+                router.push(routeHref);
+              };
 
-            const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-              if (!canNavigate) return;
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
+              const handleClick = () => {
                 handleNavigation();
                 if (isCompleted && Boolean(onStepClick)) {
                   handleStepClick(step.id);
                 }
-              }
-            };
+              };
 
-            return (
-              <button
-                key={step.id}
-                type="button"
-                className={nodeClass}
-                aria-current={isActive ? "step" : undefined}
-                aria-disabled={isLocked}
-                onClick={handleClick}
-                onKeyDown={handleKeyDown}
-                disabled={isLocked}
-                title={isLocked ? LOCKED_TOOLTIP : undefined}
-                role={canNavigate ? "link" : undefined}
-                tabIndex={canNavigate ? 0 : undefined}
-              >
-                {stepContent}
-              </button>
-            );
-          })}
-        </div>
+              const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+                if (!canNavigate) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handleNavigation();
+                  if (isCompleted && Boolean(onStepClick)) {
+                    handleStepClick(step.id);
+                  }
+                }
+              };
 
-        <div className="journey-nav-arrow-wrapper" aria-hidden>
-          <AnimatePresence>
-            {arrowFlight && (
-              <motion.span
-                key={arrowFlight.key}
-                className="journey-nav-arrow"
-                initial={{
-                  left: `${arrowFlight.startPercent}%`,
-                  opacity: 1,
-                }}
-                animate={{
-                  left: `${arrowFlight.endPercent}%`,
-                  opacity: [1, 1, 0],
-                  scale: [1, 1.04, 1],
-                }}
-                transition={{
-                  left: { duration: ARROW_DURATION_MS / 1000, ease: "easeOut" },
-                  opacity: {
-                    duration: 0.12,
-                    delay: ARROW_DURATION_MS / 1000 + 0.15,
-                  },
-                  scale: {
-                    duration: 0.18,
-                    delay: ARROW_DURATION_MS / 1000,
-                    ease: "easeOut",
-                  },
-                }}
-                onAnimationComplete={handleArrowComplete}
-              >
-                <span className="journey-nav-arrow-shaft" />
-                <span className="journey-nav-arrow-head" />
-                <span className="journey-nav-arrow-fletching" />
-              </motion.span>
-            )}
-          </AnimatePresence>
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={nodeClass}
+                  aria-current={isActive ? "step" : undefined}
+                  aria-disabled={isLocked}
+                  onClick={handleClick}
+                  onKeyDown={handleKeyDown}
+                  disabled={isLocked}
+                  title={isLocked ? LOCKED_TOOLTIP : undefined}
+                  role={canNavigate ? "link" : undefined}
+                  tabIndex={canNavigate ? 0 : -1}
+                >
+                  {stepContent}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       <style jsx>{`
         .journey-nav-root {
-          background: linear-gradient(180deg, var(--surface-secondary) 0%, rgba(3, 5, 9, 0.95) 100%);
+          background: var(--surface-secondary);
+          background-image: none;
           border-radius: 1.5rem;
           border: 1px solid var(--metal-edge-outer);
+          padding: 0;
+          box-shadow: inset 0 1px 0 var(--metal-edge-highlight),
+            0 18px 45px rgba(1, 1, 1, 0.65);
+        }
+
+        .journey-nav-root::before,
+        .journey-nav-root::after {
+          content: none;
+        }
+
+        .journey-nav-clip-shell {
+          position: relative;
+          overflow: hidden;
+          isolation: isolate;
+          border-radius: inherit;
           padding: 1.5rem;
-          box-shadow: inset 0 1px 0 var(--metal-edge-highlight), 0 18px 45px rgba(1, 1, 1, 0.65);
+          background: linear-gradient(
+            180deg,
+            var(--surface-secondary) 0%,
+            rgba(3, 5, 9, 0.95) 100%
+          );
         }
 
         .journey-nav-inner {
@@ -469,24 +302,9 @@ export function JourneyNavV1({
           color: var(--text-muted-secondary);
         }
 
-        .journey-nav-step-impact .journey-nav-icon-area {
-          animation: impact-pulse ${IMPACT_DURATION_MS}ms ease-out;
-        }
-
-        @keyframes impact-pulse {
-          0% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.08);
-          }
-          100% {
-            transform: scale(1);
-          }
-        }
-
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {
-          box-shadow: 0 12px 30px rgba(2, 5, 12, 0.45), inset 0 0 12px rgba(255, 255, 255, 0.08);
+          box-shadow: 0 12px 30px rgba(2, 5, 12, 0.45),
+            inset 0 0 12px rgba(255, 255, 255, 0.08);
         }
 
         .journey-nav-icon-area {
@@ -504,7 +322,8 @@ export function JourneyNavV1({
           );
           border: 2px solid var(--metal-edge-outer);
           box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.05),
-            inset 0 -6px 18px rgba(0, 0, 0, 0.8), 0 9px 28px rgba(0, 0, 0, 0.65);
+            inset 0 -6px 18px rgba(0, 0, 0, 0.8),
+            0 9px 28px rgba(0, 0, 0, 0.65);
           overflow: visible;
           --journey-nav-target-translate: 0px;
           transform: translateY(var(--journey-nav-target-translate)) scale(1);
@@ -562,31 +381,17 @@ export function JourneyNavV1({
           }
         }
 
-        .journey-nav-icon-area--ripple {
-          animation: journey-nav-target-ripple 0.42s ease-out both;
-        }
-
-        @keyframes journey-nav-target-ripple {
-          0% {
-            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
-          }
-          60% {
-            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1.06);
-          }
-          100% {
-            transform: translateY(var(--journey-nav-target-translate, 0px)) scale(1);
-          }
-        }
-
         .journey-nav-step-active .journey-nav-icon-area {
           border-color: rgba(194, 77, 12, 0.9);
           box-shadow: 0 0 22px rgba(194, 77, 12, 0.45),
-            inset 0 2px 8px rgba(255, 255, 255, 0.1), inset 0 -6px 12px rgba(0, 0, 0, 0.7);
+            inset 0 2px 8px rgba(255, 255, 255, 0.1),
+            inset 0 -6px 12px rgba(0, 0, 0, 0.7);
           pointer-events: none;
         }
 
         .journey-nav-step-completed .journey-nav-icon-area {
-          box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.9), 0 6px 18px rgba(0, 0, 0, 0.5),
+          box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.9),
+            0 6px 18px rgba(0, 0, 0, 0.5),
             0 0 12px rgba(194, 77, 12, 0.3);
         }
 
@@ -626,19 +431,6 @@ export function JourneyNavV1({
           }
         }
 
-        .journey-nav-complete-dot {
-          position: absolute;
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
-          background: var(--signal-burnt-orange);
-          bottom: 6px;
-          right: 8px;
-          box-shadow: 0 0 12px rgba(194, 77, 12, 0.65);
-          pointer-events: none;
-          z-index: 3;
-        }
-
         .journey-nav-icon-target {
           display: inline-flex;
           align-items: center;
@@ -659,80 +451,11 @@ export function JourneyNavV1({
           z-index: 4;
         }
 
-        .journey-nav-arrow-overlay {
-          position: absolute;
-          inset: 0;
-          display: grid;
-          place-items: center;
-          pointer-events: none;
-          z-index: 5;
-        }
-
-        .journey-nav-arrow-overlay svg {
-          width: 32px;
-          height: 32px;
-        }
-
         .journey-nav-step-label {
           font-size: 0.65rem;
           line-height: 1;
           text-align: center;
           color: var(--text-muted-primary);
-        }
-
-        .journey-nav-arrow-wrapper {
-          position: absolute;
-          left: 0;
-          right: 0;
-          top: 50%;
-          pointer-events: none;
-          height: 0;
-        }
-
-        .journey-nav-arrow {
-          position: absolute;
-          transform: translate(-50%, -50%);
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          opacity: 0;
-          pointer-events: none;
-          z-index: 30;
-        }
-
-        .journey-nav-arrow-shaft {
-          position: absolute;
-          width: 64%;
-          height: 3px;
-          background: rgba(194, 77, 12, 0.65);
-          box-shadow: 0 0 8px rgba(194, 77, 12, 0.55);
-          left: -10%;
-        }
-
-        .journey-nav-arrow-head {
-          width: 24px;
-          height: 8px;
-          background: linear-gradient(
-            90deg,
-            rgba(255, 143, 62, 0.95),
-            rgba(194, 77, 12, 0.95)
-          );
-          clip-path: polygon(0 0, 100% 50%, 0 100%);
-          display: inline-block;
-          box-shadow: 0 0 12px rgba(194, 77, 12, 0.6);
-          transform-origin: center;
-        }
-
-        .journey-nav-arrow-fletching {
-          position: absolute;
-          width: 10px;
-          height: 16px;
-          right: 12px;
-          border-radius: 999px 0 0 999px;
-          background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(194, 77, 12, 0.5));
-          box-shadow: inset 0 0 4px rgba(194, 77, 12, 0.35);
         }
       `}</style>
     </nav>
