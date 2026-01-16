@@ -10,35 +10,15 @@ import type { BaselineDto } from "@/lib/baselines";
 import type { JobDto } from "@/lib/jobs";
 import { InstrumentShell } from "../ui/InstrumentShell";
 import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
-import type { AnalysisResult, StoredPayload } from "../lib/session";
-import { normalizeAnalysisResult, saveLastAnalysis } from "../lib/session";
+import type { AnalysisResult, JobSourceType, StoredAnalysisRecord } from "../lib/session";
+import {
+  normalizeAnalysisResult,
+  readLastAnalysis as readStoredAnalysis,
+  saveLastAnalysis,
+} from "../lib/session";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
 type ApiStatus = "unknown" | "online" | "offline";
-
-type StoredState = {
-  payload: StoredPayload | null;
-  error: string | null;
-};
-
-const STORAGE_KEY = "ttr:lastAnalysis";
-
-function readLastAnalysis(): StoredState {
-  if (typeof window === "undefined") return { payload: null, error: null };
-
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return { payload: null, error: null };
-
-    const parsed = JSON.parse(raw) as StoredPayload;
-    if (!parsed?.result) return { payload: null, error: null };
-
-    return { payload: parsed, error: null };
-  } catch (error) {
-    console.error("Unable to load last analysis", error);
-    return { payload: null, error: "We could not restore your last analysis." };
-  }
-}
 
 const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
   const radius = 72;
@@ -170,8 +150,6 @@ export default function AnalyzePage() {
 
   const [animatedScore, setAnimatedScore] = useState(0);
   const [showRaw, setShowRaw] = useState(false);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
-
   const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
   const router = useRouter();
 
@@ -324,17 +302,11 @@ export default function AnalyzePage() {
   }, []);
 
   useEffect(() => {
-    const { payload, error: restoreIssue } = readLastAnalysis();
-    if (!payload && !restoreIssue) return;
+    const stored = readStoredAnalysis();
+    if (!stored) return;
 
-    if (restoreIssue) {
-      setRestoreError(restoreIssue);
-    }
-
-    if (payload?.result) {
-      setResult(payload.result);
-      setRestoredAt(payload.savedAt);
-    }
+    setResult(stored.analysis);
+    setRestoredAt(stored.savedAt);
   }, []);
 
   const handleAnalyze = async () => {
@@ -401,8 +373,45 @@ export default function AnalyzePage() {
       setRestoredAt(null);
       markJourneyStepCompleted("analyze");
 
-      const payload: StoredPayload = { result: data, savedAt: new Date().toISOString() };
-      saveLastAnalysis(payload);
+      const storedAt = new Date().toISOString();
+      const selectedJob = jobs.find((job) => job.id === resolvedJobId);
+      const isSavedJob = Boolean(resolvedJobId && hasSelectedJob);
+      const jobSourceType: JobSourceType = isSavedJob
+        ? selectedJob &&
+          (selectedJob.jdIngestionMethod === "URL" || Boolean(selectedJob.sourceUrl))
+          ? "url"
+          : "saved"
+        : "pasted";
+      const jobSourceUrl = selectedJob?.sourceUrl ?? null;
+      const fitScore =
+        typeof data.score === "number"
+          ? data.score
+          : typeof data.fit_score === "number"
+            ? data.fit_score
+            : typeof data.overallScore === "number"
+              ? data.overallScore
+              : typeof data.overall_score === "number"
+                ? data.overall_score
+                : null;
+
+      const record: StoredAnalysisRecord = {
+        savedAt: storedAt,
+        analysis: data,
+        baselineId: baselineId || undefined,
+        baselineVersionId: baselineVersionId || undefined,
+        jobId: resolvedJobId || undefined,
+        jobTitle: selectedJob?.title ?? null,
+        company: selectedJob?.company ?? null,
+        jobSource: {
+          type: jobSourceType,
+          url: jobSourceUrl,
+        },
+        fitScore,
+        summary: typeof data.summary === "string" ? data.summary : undefined,
+        verdict: typeof data.verdict === "string" ? data.verdict : undefined,
+      };
+
+      saveLastAnalysis(record);
 
       if (data.jobId) {
         router.push(`/results?jobId=${data.jobId}`);
@@ -591,7 +600,6 @@ export default function AnalyzePage() {
             </div>
 
             {error && <div style={ttrComponents.dangerBox}>{error}</div>}
-            {restoreError && <div style={ttrComponents.dangerBox}>{restoreError}</div>}
 
             <button
               type="button"

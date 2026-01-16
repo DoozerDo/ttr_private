@@ -3,6 +3,17 @@
 :root {
   --background: #808080;
   --foreground: #171717;
+  --surface-primary: #06080e;
+  --surface-secondary: #0b1018;
+  --text-muted-primary: #f4f6fa;
+  --text-muted-secondary: #cfd6e0;
+  --text-muted-tertiary: #94a0b1;
+  --signal-burnt-orange: #c2470c;
+  --metal-edge-outer: #05060b;
+  --metal-edge-inner: #313741;
+  --metal-edge-highlight: rgba(255, 255, 255, 0.08);
+  --page-border-dark: #0a0d14;
+  --page-border-light: #2f343f;
 }
 
 @theme inline {
@@ -10,6 +21,17 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-text-muted-primary: var(--text-muted-primary);
+  --color-text-muted-secondary: var(--text-muted-secondary);
+  --color-text-muted-tertiary: var(--text-muted-tertiary);
+  --color-signal-burnt-orange: var(--signal-burnt-orange);
+  --color-metal-edge-outer: var(--metal-edge-outer);
+  --color-metal-edge-inner: var(--metal-edge-inner);
+  --color-metal-edge-highlight: var(--metal-edge-highlight);
+  --color-page-border-dark: var(--page-border-dark);
+  --color-page-border-light: var(--page-border-light);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,4 +45,46 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.metal-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 1px solid var(--metal-edge-outer);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.metal-frame::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid var(--metal-edge-inner);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.metal-frame::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  height: 2px;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.14),
+    rgba(255, 255, 255, 0.02)
+  );
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.metal-frame > * {
+  position: relative;
+  z-index: 3;
 }

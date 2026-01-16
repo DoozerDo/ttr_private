@@ -7,18 +7,18 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
 import { JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
+import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import {
-  inferAndSyncJourneyCompletions,
-  resolveJourneyNavStateFromAppState,
-  useJourneyNavAppState,
-} from "@/src/lib/journeyNavStore";
+  readLastAnalysis,
+  type StoredAnalysisRecord,
+} from "@/app/(app)/lib/session";
 
 const isDev = process.env.NODE_ENV === "development";
 
 type StoredContext = {
   hasBaseline: boolean;
   hasJob: boolean;
-  lastAnalysis: unknown | null;
+  lastAnalysis: StoredAnalysisRecord | null;
 };
 
 const getStoredContext = (): StoredContext => {
@@ -26,22 +26,16 @@ const getStoredContext = (): StoredContext => {
     return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
 
-  try {
-    const payload = sessionStorage.getItem("ttr:lastAnalysis");
-    if (!payload) {
-      return { hasBaseline: false, hasJob: false, lastAnalysis: null };
-    }
-
-    const parsed = JSON.parse(payload) as { result?: { baselineId?: string; jobId?: string } };
-    return {
-      hasBaseline: Boolean(parsed?.result?.baselineId),
-      hasJob: Boolean(parsed?.result?.jobId),
-      lastAnalysis: parsed,
-    };
-  } catch (error) {
-    console.error("Unable to read stored session", error);
+  const stored = readLastAnalysis();
+  if (!stored) {
     return { hasBaseline: false, hasJob: false, lastAnalysis: null };
   }
+
+  return {
+    hasBaseline: Boolean(stored.baselineId),
+    hasJob: Boolean(stored.jobId),
+    lastAnalysis: stored,
+  };
 };
 
 const disabledMessages: Record<string, string> = {
@@ -148,20 +142,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
-
-    // Use cheap real signals to drive the journey completion state.
-    // This avoids hunting for events across the app.
-    const resolved = resolveJourneyNavStateFromAppState(pathname, journeyAppState);
-
-    inferAndSyncJourneyCompletions({
-      pathname,
-      steps: resolved.steps,
-      hasBaseline: Boolean(baselinesOk),
-      hasJob: Boolean(jobsOk),
-      lastAnalysis: stored.lastAnalysis,
-      appState: journeyAppState,
-    });
-  }, [pathname, journeyAppState]);
+  }, [pathname]);
 
   useEffect(() => {
     refreshContext();
@@ -275,14 +256,8 @@ export function AppShell({ children, userEmail }: AppShellProps) {
       if (step.state !== JourneyStepState.Completed) return;
 
       journeyAppState.setActiveOverride(stepId);
-
-      // Route mapping: prefer the route table if ids line up
-      const route = navRoutes.find((r) => r.id === stepId);
-      if (route?.href) {
-        router.push(route.href);
-      }
     },
-    [journeyNavState.steps, journeyAppState, navRoutes, router],
+    [journeyNavState.steps, journeyAppState],
   );
 
   return (
@@ -351,6 +326,12 @@ export function AppShell({ children, userEmail }: AppShellProps) {
                 Dev health
               </span>
             ) : null}
+            <Link
+              href={settingsRoute.href}
+              className="rounded-full border border-white/20 px-4 py-1 text-sm font-semibold text-slate-100 transition hover:bg-slate-900/40"
+            >
+              Settings
+            </Link>
             <div className="relative" ref={menuRef}>
               <button
                 type="button"

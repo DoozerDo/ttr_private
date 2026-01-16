@@ -13,25 +13,11 @@ export type RouteConfig = {
 
 const sidebarNavRoutes: RouteConfig[] = [
   {
-    id: "dashboard",
-    label: "Dashboard",
-    href: "/",
-    requiresAuth: true,
-    subtext: "Settings",
-  },
-  {
     id: "baselines",
     label: "Baseline Library",
     href: "/baseline",
     requiresAuth: true,
     subtext: "Upload a baseline to begin targeting a role",
-  },
-  {
-    id: "jobs",
-    label: "Job Description Library",
-    href: "/jobs",
-    requiresAuth: true,
-    subtext: "Upload a job description you wish to target",
   },
   {
     id: "analyze",
@@ -90,7 +76,7 @@ const baseRoutes: RouteConfig[] = [...sidebarNavRoutes, ...hiddenRoutes];
 
 const settingsRoute: RouteConfig = {
   id: "settings",
-  label: "Account Settings",
+  label: "Settings",
   href: "/settings",
   requiresAuth: true,
   showInSidebar: false,
