@@ -1,153 +1,163 @@
-diff --git a/.github/workflows/build-dev-images.yml b/.github/workflows/build-dev-images.yml
-index 1b5a2068db9827abf1bbabe20950bb210a86a13e..ffee394928c2ed86b5535796b821f6ff4521bf01 100644
---- a/.github/workflows/build-dev-images.yml
-+++ b/.github/workflows/build-dev-images.yml
-@@ -1,44 +1,46 @@
- name: Build and push dev images
+diff --git a/apps/api/src/auth/auth.controller.spec.ts b/apps/api/src/auth/auth.controller.spec.ts
+index 79c7adf26ea0a5f3a66c3165fe4b8d2992127a00..7cbc8f6c398ef9f560896cb6092948501fd7118b 100644
+--- a/apps/api/src/auth/auth.controller.spec.ts
++++ b/apps/api/src/auth/auth.controller.spec.ts
+@@ -8,43 +8,84 @@ describe('AuthController', () => {
+   let controller: AuthController;
+   let authService: jest.Mocked<AuthService>;
  
- on:
-   push:
-     branches:
-       - do-setup
+   beforeEach(async () => {
+     const module: TestingModule = await Test.createTestingModule({
+       controllers: [AuthController],
+       providers: [
+         {
+           provide: AuthService,
+           useValue: {
+             register: jest.fn(),
+             login: jest.fn(),
+           },
+         },
+       ],
+     }).compile();
  
- permissions:
-   contents: read
-   packages: write
+     controller = module.get<AuthController>(AuthController);
+     authService = module.get(AuthService);
+   });
  
- jobs:
-   build:
-     runs-on: ubuntu-latest
-     strategy:
-       matrix:
-         include:
-           - name: web
-             dockerfile: infra/docker/web.Dockerfile
-           - name: api
-             dockerfile: infra/docker/api.Dockerfile
-+          - name: proxy
-+            dockerfile: infra/docker/proxy.Dockerfile
-     steps:
-       - name: Checkout
-         uses: actions/checkout@v4
+   it('handles registration', async () => {
+     const dto: RegisterDto = { email: 'test@example.com', password: 'Password123' };
+     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
+     authService.register.mockResolvedValue(response);
++    const res = { cookie: jest.fn() };
  
-       - name: Set up Docker Buildx
-         uses: docker/setup-buildx-action@v3
+-    const result = await controller.register(dto);
++    const result = await controller.register(dto, res as any);
  
-       - name: Login to GHCR
-         uses: docker/login-action@v3
-         with:
-           registry: ghcr.io
-           username: ${{ github.actor }}
-           password: ${{ secrets.GHCR_PAT || github.token }}
+     expect(authService.register).toHaveBeenCalledWith(dto);
++    expect(res.cookie).toHaveBeenCalledWith(
++      'ttr_token',
++      response.accessToken,
++      expect.objectContaining({
++        httpOnly: true,
++        secure: true,
++        sameSite: 'lax',
++        path: '/',
++      }),
++    );
+     expect(result).toEqual(response);
+   });
  
-       - name: Build and push
-         uses: docker/build-push-action@v5
-         with:
-           context: .
-           file: ${{ matrix.dockerfile }}
-           push: true
-           tags: |
-             ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:dev
-             ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:${{ github.sha }}
-diff --git a/infra/docker/docker-compose.dev.yml b/infra/docker/docker-compose.dev.yml
-index b0c76b255318768de60113e929b8e2b37c08f956..bf8850a97f1f46fa4f8d9cd08f8376c9a24cc3c6 100644
---- a/infra/docker/docker-compose.dev.yml
-+++ b/infra/docker/docker-compose.dev.yml
-@@ -5,50 +5,49 @@ services:
-   web:
-     image: ghcr.io/targetthisrole/targetthisrole-web:dev
-     restart: unless-stopped
-     environment:
-       NODE_ENV: development
-       API_BASE_URL: http://api:3001
-       NEXT_PUBLIC_API_BASE_URL: ""
-     depends_on:
-       - api
-     networks:
-       - ttr_dev
+   it('handles login', async () => {
+     const dto: LoginDto = { email: 'test@example.com', password: 'Password123' };
+     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
+     authService.login.mockResolvedValue(response);
++    const res = { cookie: jest.fn() };
  
-   api:
-     image: ghcr.io/targetthisrole/targetthisrole-api:dev
-     restart: unless-stopped
-     environment:
-       NODE_ENV: production
-       PORT: 3001
-       DATABASE_URL: ${DATABASE_URL}
-       CORS_ORIGIN: ${CORS_ORIGIN}
-       APP_VERSION: ${APP_VERSION:-dev}
-     networks:
-       - ttr_dev
+-    const result = await controller.login(dto);
++    const result = await controller.login(dto, res as any);
  
-   proxy:
--    image: caddy:2.7.6
-+    image: ghcr.io/targetthisrole/targetthisrole-proxy:dev
-     restart: unless-stopped
-     ports:
-       - "80:80"
-       - "443:443"
-     environment:
-       CADDY_EMAIL: ${CADDY_EMAIL}
-       APP_DOMAIN: ${APP_DOMAIN}
-     volumes:
--      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-       - caddy_data:/data
-       - caddy_config:/config
-     depends_on:
-       - web
-       - api
-     networks:
-       - ttr_dev
- 
- volumes:
-   caddy_data:
-   caddy_config:
- 
- networks:
-   ttr_dev:
-     driver: bridge
-diff --git a/infra/docker/proxy.Dockerfile b/infra/docker/proxy.Dockerfile
-new file mode 100644
-index 0000000000000000000000000000000000000000..355aeff3ee75677392e703eb2b239fe0841771e6
---- /dev/null
-+++ b/infra/docker/proxy.Dockerfile
-@@ -0,0 +1,3 @@
-+FROM caddy:2.7.6
+     expect(authService.login).toHaveBeenCalledWith(dto);
++    expect(res.cookie).toHaveBeenCalledWith(
++      'ttr_token',
++      response.accessToken,
++      expect.objectContaining({
++        httpOnly: true,
++        secure: true,
++        sameSite: 'lax',
++        path: '/',
++      }),
++    );
+     expect(result).toEqual(response);
+   });
 +
-+COPY infra/docker/Caddyfile /etc/caddy/Caddyfile
-diff --git a/infra/terraform/cloud-init.yaml.tftpl b/infra/terraform/cloud-init.yaml.tftpl
-index 9d10fce617b7deeefc9c891d9c1fe8dee9d87284..e3880c6c972b6483009154dadb25360f2795f777 100644
---- a/infra/terraform/cloud-init.yaml.tftpl
-+++ b/infra/terraform/cloud-init.yaml.tftpl
-@@ -1,9 +1,31 @@
- #cloud-config
-+network:
-+  config: disabled
- package_update: true
- packages:
-   - docker.io
-   - docker-compose-plugin
-+  - python3
- runcmd:
-   - systemctl enable --now docker
--  - usermod -aG docker ubuntu
-   - mkdir -p /opt/targetthisrole
-+  - |
-+    bash -lc 'set -euo pipefail
-+    if ! docker compose version >/dev/null 2>&1; then
-+      apt-get update -y
-+      apt-get install -y docker-compose-plugin
-+    fi
-+    if ! docker compose version >/dev/null 2>&1; then
-+      mkdir -p /usr/local/lib/docker/cli-plugins
-+      python3 - <<'"'"'PY'"'"'
-+import pathlib
-+import urllib.request
++  it('handles logout', () => {
++    const res = { cookie: jest.fn() };
 +
-+target = pathlib.Path("/usr/local/lib/docker/cli-plugins/docker-compose")
-+url = "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64"
-+with urllib.request.urlopen(url) as response, target.open("wb") as output:
-+    output.write(response.read())
-+PY
-+      chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-+    fi
-+    docker compose version'
++    const result = controller.logout(res as any);
++
++    expect(res.cookie).toHaveBeenCalledWith(
++      'ttr_token',
++      '',
++      expect.objectContaining({
++        httpOnly: true,
++        secure: true,
++        sameSite: 'lax',
++        path: '/',
++        maxAge: 0,
++      }),
++    );
++    expect(result).toEqual({ ok: true });
++  });
+ });
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+index 36e0fefe62267550825b373aa1752ed5c635c1a3..8cbad3ce6f58afe5ebfdae6675a8fd08b3a4f39f 100644
+--- a/apps/api/src/auth/auth.controller.ts
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -1,27 +1,62 @@
+-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
++import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
++import type { Response } from 'express';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import type { AuthUserDto } from './dto/auth-response.dto';
+ 
++const AUTH_COOKIE_NAME = 'ttr_token';
++const AUTH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
++
+ @Controller('auth')
+ export class AuthController {
+   constructor(private readonly authService: AuthService) {}
+ 
+   @Post('register')
+-  register(@Body() payload: RegisterDto) {
+-    return this.authService.register(payload);
++  async register(
++    @Body() payload: RegisterDto,
++    @Res({ passthrough: true }) res: Response,
++  ) {
++    const response = await this.authService.register(payload);
++    if (response.accessToken) {
++      this.setAuthCookie(res, response.accessToken);
++    }
++    return response;
+   }
+ 
+   @Post('login')
+-  login(@Body() payload: LoginDto) {
+-    return this.authService.login(payload);
++  async login(@Body() payload: LoginDto, @Res({ passthrough: true }) res: Response) {
++    const response = await this.authService.login(payload);
++    this.setAuthCookie(res, response.accessToken);
++    return response;
++  }
++
++  @Post('logout')
++  logout(@Res({ passthrough: true }) res: Response) {
++    res.cookie(AUTH_COOKIE_NAME, '', {
++      httpOnly: true,
++      secure: true,
++      sameSite: 'lax',
++      path: '/',
++      maxAge: 0,
++    });
++    return { ok: true };
+   }
+ 
+   @UseGuards(AuthGuard('jwt'))
+   @Get('me')
+   me(@Req() request: { user?: AuthUserDto }) {
+     return { user: request.user };
+   }
++
++  private setAuthCookie(res: Response, accessToken: string) {
++    res.cookie(AUTH_COOKIE_NAME, accessToken, {
++      httpOnly: true,
++      secure: true,
++      sameSite: 'lax',
++      path: '/',
++      maxAge: AUTH_COOKIE_MAX_AGE_MS,
++    });
++  }
+ }
