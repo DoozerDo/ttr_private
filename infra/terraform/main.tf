@@ -9,6 +9,9 @@ resource "digitalocean_database_cluster" "postgres" {
   size       = var.db_size
   region     = var.region
   node_count = 1
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "digitalocean_database_db" "app" {
