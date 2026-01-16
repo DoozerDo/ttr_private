@@ -1,0 +1,41 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+
+runcmd:
+  # --- install docker ---
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable docker
+  - systemctl start docker
+
+  # --- add swap (2G) ---
+  - fallocate -l 2G /swapfile
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+  # --- app directory ---
+  - mkdir -p /opt/targetthisrole
+  - chmod 755 /opt/targetthisrole
+
+  # --- recovery script ---
+  - |
+    cat >/opt/targetthisrole/up.sh <<'EOF'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd /opt/targetthisrole
+    docker compose --env-file .env -f docker-compose.yml up -d
+    EOF
+  - chmod +x /opt/targetthisrole/up.sh
+  # --- placeholder files for Terraform provisioners ---
+  - touch /opt/targetthisrole/.env
+  - touch /opt/targetthisrole/docker-compose.yml
+  - chmod 600 /opt/targetthisrole/.env
+  - chmod 644 /opt/targetthisrole/docker-compose.yml

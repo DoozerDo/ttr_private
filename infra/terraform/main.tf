@@ -22,13 +22,20 @@ resource "digitalocean_database_user" "api_user" {
 }
 
 resource "digitalocean_droplet" "app" {
-  name   = var.droplet_name
-  region = var.region
-  size   = var.droplet_size
-  image  = "ubuntu-22-04-x64"
+  name       = var.droplet_name
+  region     = var.region
+  size       = var.droplet_size
+  image      = "ubuntu-22-04-x64"
+  tags       = ["targetthisrole", "dev"]
+  monitoring = true
 
   ssh_keys  = var.ssh_key_fingerprints
-  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {})
+  user_data = file("${path.module}/cloud-init.yaml")
+}
+
+resource "digitalocean_reserved_ip_assignment" "app_ip" {
+  ip_address = var.reserved_ip
+  droplet_id = digitalocean_droplet.app.id
 }
 
 resource "digitalocean_database_firewall" "postgres" {
@@ -80,3 +87,4 @@ resource "digitalocean_firewall" "app" {
     destination_addresses = ["0.0.0.0/0", "::/0"]
   }
 }
+

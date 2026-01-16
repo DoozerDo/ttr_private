@@ -1,31 +1,29 @@
 #cloud-config
-network:
-  config: disabled
-package_update: true
-packages:
-  - docker.io
-  - docker-compose-plugin
-  - python3
 runcmd:
-  - systemctl enable --now docker
-  - mkdir -p /opt/targetthisrole
   - |
-    bash -lc 'set -euo pipefail
-    if ! docker compose version >/dev/null 2>&1; then
-      apt-get update -y
-      apt-get install -y docker-compose-plugin
-    fi
-    if ! docker compose version >/dev/null 2>&1; then
-      mkdir -p /usr/local/lib/docker/cli-plugins
-      python3 - <<'"'"'PY'"'"'
-import pathlib
-import urllib.request
+      bash -lc 'set -euo pipefail
 
-target = pathlib.Path("/usr/local/lib/docker/cli-plugins/docker-compose")
-url = "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64"
-with urllib.request.urlopen(url) as response, target.open("wb") as output:
-    output.write(response.read())
-PY
+      # DNS helper (DO image tries this too, but resolv.conf write can warn)
+      mkdir -p /etc/systemd/resolved.conf.d
+      cat >/etc/systemd/resolved.conf.d/DigitalOcean.conf <<EOF
+      [Resolve]
+      DNS=67.207.67.2 67.207.67.3
+      EOF
+      systemctl try-reload-or-restart systemd-resolved || true
+
+      apt-get update -y
+      apt-get install -y docker.io python3 curl
+
+      systemctl enable --now docker
+
+      # Install Docker Compose v2 as a CLI plugin (reliable on jammy)
+      mkdir -p /usr/local/lib/docker/cli-plugins
+      curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+        https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64
       chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-    fi
-    docker compose version'
+
+      docker --version
+      docker compose version
+
+      mkdir -p /opt/targetthisrole
+      '

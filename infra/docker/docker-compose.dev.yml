@@ -1,19 +1,8 @@
-# docker-compose.dev.yml: “server runtime for dev environment (DigitalOcean)”
-version: "3.9"
+# docker-compose.yml (DigitalOcean runtime)
+# Uses GHCR images + Caddy reverse proxy in the proxy container.
+# Browser talks to the API via https://app.dev.../api (same origin as the web app).
 
 services:
-  web:
-    image: ghcr.io/targetthisrole/targetthisrole-web:dev
-    restart: unless-stopped
-    environment:
-      NODE_ENV: development
-      API_BASE_URL: http://api:3001
-      NEXT_PUBLIC_API_BASE_URL: ""
-    depends_on:
-      - api
-    networks:
-      - ttr_dev
-
   api:
     image: ghcr.io/targetthisrole/targetthisrole-api:dev
     restart: unless-stopped
@@ -23,6 +12,20 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       CORS_ORIGIN: ${CORS_ORIGIN}
       APP_VERSION: ${APP_VERSION:-dev}
+    networks:
+      - ttr_dev
+
+  web:
+    image: ghcr.io/targetthisrole/targetthisrole-web:dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:3001
+      # IMPORTANT: your proxy strips /api before forwarding to api:3001
+      # so the browser must call the API through the proxy path:
+      NEXT_PUBLIC_API_BASE_URL: https://${APP_DOMAIN}/api
+    depends_on:
+      - api
     networks:
       - ttr_dev
 

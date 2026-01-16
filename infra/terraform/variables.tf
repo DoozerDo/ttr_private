@@ -62,3 +62,8 @@ variable "db_version" {
   type        = string
   default     = "15"
 }
+
+variable "reserved_ip" {
+  type        = string
+  description = "Reserved IPv4 address to assign to the droplet"
+}

@@ -1,0 +1,42 @@
+echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+tail -n 3 /etc/fstab
+
+mount -a
+swapon --show
+
+cd /opt/targetthisrole
+docker ps
+docker compose --env-file .env -f docker-compose.yml config
+
+
+Step 5 — Save a “diagnostic bundle” file on the droplet (one command)
+This gives you a single file you can paste/share later, and it makes future debugging painless.
+On the droplet, run exactly:
+
+bash -lc 'OUT=/opt/targetthisrole/diag.txt; {
+  echo "=== DATE ==="; date;
+  echo;
+  echo "=== UPTIME ==="; uptime;
+  echo;
+  echo "=== MEMORY ==="; free -m;
+  echo;
+  echo "=== SWAP ==="; swapon --show;
+  echo;
+  echo "=== DISK ==="; df -h / /opt;
+  echo;
+  echo "=== DNS ==="; getent hosts app.dev.targetthisrole.ai || true;
+  echo;
+  echo "=== DOCKER VERSION ==="; docker version --format "{{.Server.Version}}" 2>/dev/null || docker version || true;
+  echo;
+  echo "=== DOCKER PS ==="; docker ps;
+  echo;
+  echo "=== COMPOSE CONFIG (RESOLVED) ==="; docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml config;
+} > "$OUT"; echo "WROTE $OUT"; wc -l "$OUT"'
+
+
+Step 6 — Make the stack start on reboot (automation-lite)
+We’ll use Docker’s native restart policy (you already have restart: unless-stopped), but we need to ensure Docker starts on boot.
+On the droplet, run exactly:
+
+systemctl enable docker
+systemctl is-enabled docker

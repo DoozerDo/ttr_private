@@ -111,11 +111,47 @@ DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
 
 
 DO Notes: 
-ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@142.93.64.250
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@64.225.53.196
+
+Setup Steps: 
+1. 
+mkdir -p /opt/targetthisrole
+ls -ld /opt/targetthisrole
+scp -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" `
+  infra\docker\docker-compose.dev.yml `
+  root@64.225.53.196:/opt/targetthisrole/docker-compose.yml
+
+2. 
+docker login ghcr.io -u dotf
+
+3. 
+read -s -p "DO DB password: " PW; echo
+python3 -c "import urllib.parse; print('DATABASE_URL=postgresql://doadmin:%s@targetthisrole-dev-db-do-user-31851939-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require' % urllib.parse.quote('''$PW''', safe=''))"
+unset PW
+
+4. 
+nano /opt/targetthisrole/.env
+Contents: 
+    # --- app ---
+    APP_VERSION=dev
+
+    # --- database ---
+    DATABASE_URL=postgresql://doadmin:REPLACE_ME@targetthisrole-dev-db-do-user-31851939-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+
+    # --- CORS / web ---
+    CORS_ORIGIN=http://64.225.53.196
+
+    # --- Caddy / reverse proxy ---
+    CADDY_EMAIL=do@targetthisrole.ai
+    APP_DOMAIN=64.225.53.196
+
+5.
+docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml pull
+
 
 
 Terraform Notes: 
-Terraform plan -var-file="terraform.dev.tfvars" 142.93.64.250
+Terraform plan -var-file="terraform.dev.tfvars"
 
 ## Manual Testing – Search Sets UI
 1. Create a search set via `/search-sets` using the Source section (select Greenhouse, enter a URL, adjust max listings) and confirm the Create button stays disabled until all validations pass.
