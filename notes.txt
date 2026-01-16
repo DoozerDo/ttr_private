@@ -155,8 +155,18 @@ DO DropLet Update Notes:
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
 cd /opt/targetthisrole
 docker compose --env-file .env -f docker-compose.yml pull
-docker compose --env-file .env -f docker-compose.yml run --rm api npm run migration:run
+docker compose --env-file .env -f docker-compose.yml up -d --force-recreate
+
+
+If you want migrations:
+
+ssh root@167.99.126.94
+cd /opt/targetthisrole
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml up -d --force-recreate api
+docker compose --env-file .env -f docker-compose.yml exec -T api npm run migration:run
 docker compose --env-file .env -f docker-compose.yml up -d
+
 
 
 Terraform Notes: 
