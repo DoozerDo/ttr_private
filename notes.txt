@@ -110,8 +110,8 @@ INSERT INTO "admin_users" ("userId") VALUES ('doug@ttr.com');
 DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
 
 
-DO Notes: 
-ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@134.209.37.54
+DO Setup Notes: 
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
 
 Setup Steps: 
 1. 
@@ -150,6 +150,13 @@ docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker
 
 6.
 docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml up -d
+
+DO DropLet Update Notes: 
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
+cd /opt/targetthisrole
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml run --rm api npm run migration:run
+docker compose --env-file .env -f docker-compose.yml up -d
 
 
 Terraform Notes: 
