@@ -18,6 +18,7 @@ import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
+import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -50,11 +51,11 @@ export class ResumeService {
   }
 
   private ensureOneTapAllowed(assessment?: FitAssessment | null) {
-    if (!assessment || assessment.overallScore < 92) {
+    if (!assessment || assessment.overallScore < AUTO_GENERATE_THRESHOLD) {
       throw new UnprocessableEntityException({
         error: {
           code: 'fit_score_too_low',
-          message: 'One tap resume generation requires fit score >= 92.',
+          message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
           details: { last_score: assessment?.overallScore ?? null },
         },
       });
@@ -244,7 +245,10 @@ export class ResumeService {
       });
     }
 
-    const quality = latestAssessment && latestAssessment.overallScore >= 92 ? 'optimized' : 'draft';
+    const quality =
+      latestAssessment && latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
+        ? 'optimized'
+        : 'draft';
 
     return {
       ok: true,

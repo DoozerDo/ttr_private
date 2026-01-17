@@ -9,6 +9,14 @@ function shouldBypassTier() {
 
 const ALLOWED_FORMATS = new Set(["docx", "pdf"]);
 
+async function parseJsonBody(req: NextRequest) {
+  try {
+    return await req.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   const baseUrl = getApiBaseUrl();
   const auth = requireAuthToken(req);
@@ -25,10 +33,8 @@ export async function POST(req: NextRequest) {
   }
   const format = rawFormat ? droppedFormat : "docx";
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const body = await parseJsonBody(req);
+  if (body === null) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
@@ -37,8 +43,7 @@ export async function POST(req: NextRequest) {
     "Content-Type": "application/json",
   };
 
-  const bypass = shouldBypassTier();
-  if (bypass) {
+  if (shouldBypassTier()) {
     headers["X-TTR-Beta-Bypass"] = "true";
     headers["X-TTR-BYPASS"] = "true";
     headers["X-TTR-BYPASS-TIER"] = "true";

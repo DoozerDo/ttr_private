@@ -2,6 +2,7 @@ import { BadRequestException, UnprocessableEntityException } from '@nestjs/commo
 import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { ResumeService } from './resume.service';
 
 const mockBaseline = {
@@ -104,12 +105,24 @@ describe('ResumeService', () => {
     oneTap: true,
   };
 
-  it('rejects one-tap generation when fit score is below 92', async () => {
-    const { service } = buildService(91);
+  it('rejects one-tap generation when fit score is below the threshold', async () => {
+    const { service } = buildService(AUTO_GENERATE_THRESHOLD - 1);
 
     await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
       UnprocessableEntityException,
     );
+  });
+
+  it('includes the threshold in the rejection response', async () => {
+    const { service } = buildService(AUTO_GENERATE_THRESHOLD - 2);
+
+    await expect(service.generateResume('user-1', request)).rejects.toMatchObject({
+      response: {
+        error: {
+          message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
+        },
+      },
+    });
   });
 
   it('requires a baselineVersionId for generation', async () => {
@@ -120,8 +133,8 @@ describe('ResumeService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('allows one-tap generation when fit score is at least 92', async () => {
-    const { service } = buildService(92);
+  it('allows one-tap generation when fit score is at least the threshold', async () => {
+    const { service } = buildService(AUTO_GENERATE_THRESHOLD);
 
     const result = await service.generateResume('user-1', request);
 
@@ -129,16 +142,16 @@ describe('ResumeService', () => {
     expect(result.sections).toHaveLength(1);
   });
 
-  it('returns draft quality when fit score is below 92', async () => {
-    const { service } = buildService(90);
+  it('returns draft quality when fit score is below the threshold', async () => {
+    const { service } = buildService(AUTO_GENERATE_THRESHOLD - 4);
 
     const result = await service.generateResume('user-1', { ...request, oneTap: false });
 
     expect(result.quality).toBe('draft');
   });
 
-  it('returns optimized quality when fit score is at least 92', async () => {
-    const { service } = buildService(94);
+  it('returns optimized quality when fit score is at least the threshold', async () => {
+    const { service } = buildService(AUTO_GENERATE_THRESHOLD + 2);
 
     const result = await service.generateResume('user-1', { ...request, oneTap: false });
 
