@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - do-newsetup
+      - do-setupv2
 
 permissions:
   contents: read
