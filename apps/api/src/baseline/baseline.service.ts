@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
@@ -21,8 +20,6 @@ import { BaselineParserService, ParsedSection } from './baseline-parser.service'
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
-
-const BASELINE_LIMIT = 5;
 
 export type FileMetadata = {
   originalname: string;
@@ -86,20 +83,6 @@ export class BaselineService {
     private readonly baselineTextExtractor: BaselineTextExtractor,
     private readonly baselineParser: BaselineParserService,
   ) {}
-
-  private async enforceBaselineLimit(manager: EntityManager, userId: string) {
-    const count = await manager.count(Baseline, { where: { userId } });
-
-    if (count >= BASELINE_LIMIT) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'limit_reached',
-          entity: 'baseline',
-          limit: BASELINE_LIMIT,
-        },
-      });
-    }
-  }
 
   private sanitizeSectionContent(content?: string | null) {
     if (!content) {
@@ -277,8 +260,6 @@ export class BaselineService {
             file,
           );
         }
-
-        await this.enforceBaselineLimit(manager, userId);
 
         return this.createBaselineRecord(
           manager,

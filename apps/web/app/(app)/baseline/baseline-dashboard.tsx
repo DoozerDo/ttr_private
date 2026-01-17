@@ -45,10 +45,11 @@ export function BaselineDashboard({
     null,
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const refreshBaselines = async () => {
-    const latest = await listBaselines();
+  const refreshBaselines = async (includeArchived = showArchived) => {
+    const latest = await listBaselines(includeArchived);
     setBaselines(latest);
   };
 
@@ -111,8 +112,8 @@ export function BaselineDashboard({
         const filtered = previous.filter((entry) => entry.id !== baselineRecord.id);
         return [baselineRecord, ...filtered];
       });
-    try {
-      await refreshBaselines();
+      try {
+        await refreshBaselines(showArchived);
       } catch (refreshError) {
         console.error("Unable to refresh baselines after upload", refreshError);
       }
@@ -145,9 +146,24 @@ export function BaselineDashboard({
     setIsRefreshing(true);
 
     try {
-      await refreshBaselines();
+      await refreshBaselines(showArchived);
     } catch (refreshError: any) {
       setError(refreshError?.message || "Unable to refresh baselines");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleShowArchivedToggle = async () => {
+    const nextShowArchived = !showArchived;
+    setShowArchived(nextShowArchived);
+    setError(null);
+    setIsRefreshing(true);
+
+    try {
+      await refreshBaselines(nextShowArchived);
+    } catch (toggleError: any) {
+      setError(toggleError?.message || "Unable to load archived baselines");
     } finally {
       setIsRefreshing(false);
     }
@@ -163,7 +179,7 @@ export function BaselineDashboard({
       } else {
         await restoreBaseline(baseline.id);
       }
-      await refreshBaselines();
+      await refreshBaselines(showArchived);
     } catch (statusError: any) {
       setError(statusError?.message || "Unable to update baseline status");
     } finally {
@@ -248,6 +264,14 @@ export function BaselineDashboard({
     fontSize: 11,
     letterSpacing: 0.5,
     textTransform: "uppercase",
+    color: "rgba(226,232,240,0.75)",
+  };
+
+  const toggleLabelStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
     color: "rgba(226,232,240,0.75)",
   };
 
@@ -407,58 +431,65 @@ export function BaselineDashboard({
           gap: 16,
         }}
       >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <p style={ttrTypography.subtleLabel}>Library</p>
+            <h2 style={sectionTitleStyle}>Your baselines</h2>
+            <p style={bodyTextStyle}>Latest uploads appear first.</p>
+          </div>
+
           <div
             style={{
               display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              gap: 14,
+              alignItems: "center",
+              gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <p style={ttrTypography.subtleLabel}>BASELINES</p>
-              <h2 style={sectionTitleStyle}>Baselines</h2>
-              <p style={bodyTextStyle}>
-                Upload and manage your baseline resumes. These are your source of truth for scoring
-                and tailoring.
-              </p>
-            </div>
-
-            <div
+            <label style={toggleLabelStyle}>
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={handleShowArchivedToggle}
+                disabled={isRefreshing || isUploading}
+                style={{ cursor: "pointer" }}
+              />
+              Show archived
+            </label>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isUploading || isRefreshing}
+              onMouseEnter={(e) => {
+                if (isUploading || isRefreshing) return;
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow =
+                  "0 18px 28px rgba(0,0,0,0.35)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow =
+                  "0 12px 22px rgba(0,0,0,0.25)";
+              }}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
+                ...secondaryButtonStyle,
+                opacity: isUploading || isRefreshing ? 0.7 : 1,
+                cursor:
+                  isUploading || isRefreshing ? "not-allowed" : "pointer",
               }}
             >
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={isUploading || isRefreshing}
-                onMouseEnter={(e) => {
-                  if (isUploading || isRefreshing) return;
-                  e.currentTarget.style.transform = "translateY(-1px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 18px 28px rgba(0,0,0,0.35)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 12px 22px rgba(0,0,0,0.25)";
-                }}
-                style={{
-                  ...secondaryButtonStyle,
-                  opacity: isUploading || isRefreshing ? 0.7 : 1,
-                  cursor:
-                    isUploading || isRefreshing ? "not-allowed" : "pointer",
-                }}
-              >
-                Refresh
-              </button>
-            </div>
+              Refresh
+            </button>
           </div>
+        </div>
 
         {initialFetchError ? (
           <Alert intent="error" title="Unable to load baselines">

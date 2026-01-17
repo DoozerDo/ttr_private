@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/PageHeader";
 import { useEntitlements } from "@/src/lib/entitlements";
-import { useAutoGenerateThreshold } from "../lib/settings";
-import { AUTO_GENERATE_THRESHOLD } from "../../../../config/autoGenerateThreshold";
+import {
+  DEFAULT_AUTO_GENERATE_THRESHOLD,
+  useAutoGenerateThreshold,
+} from "../lib/settings";
 import { ttrComponents } from "../ui/ttrStyles";
 
 const NOT_AVAILABLE = "Not available";
@@ -88,7 +90,7 @@ export default function SettingsPage() {
   const applyThreshold = () => {
     const parsed = Number.parseInt(thresholdInput, 10);
     if (Number.isNaN(parsed)) {
-    updateAutoGenerateThreshold(AUTO_GENERATE_THRESHOLD);
+      updateAutoGenerateThreshold(DEFAULT_AUTO_GENERATE_THRESHOLD);
       return;
     }
     updateAutoGenerateThreshold(parsed);

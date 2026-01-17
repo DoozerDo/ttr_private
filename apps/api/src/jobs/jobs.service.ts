@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isIP } from 'node:net';
 import { Repository } from 'typeorm';
@@ -41,7 +36,6 @@ const MAX_DESCRIPTION_LENGTH = 100000;
 const MAX_HTML_BYTES = 1_000_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 4;
-const JOB_LIMIT = 5;
 
 @Injectable()
 export class JobsService {
@@ -131,8 +125,6 @@ export class JobsService {
     const sourceExternalId = payload.sourceExternalId?.trim() || null;
     const canonicalUrl = payload.canonicalUrl?.trim() || null;
     const dedupeHash = payload.dedupeHash?.trim() || null;
-
-    await this.enforceJobLimit(userId);
 
     const job = this.jobRepository.create({
       userId,
@@ -226,20 +218,6 @@ export class JobsService {
       throw new BadRequestException(
         'Job description must be between 1,000 and 100,000 characters.',
       );
-    }
-  }
-
-  private async enforceJobLimit(userId: string) {
-    const count = await this.jobRepository.count({ where: { userId } });
-
-    if (count >= JOB_LIMIT) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'limit_reached',
-          entity: 'job',
-          limit: JOB_LIMIT,
-        },
-      });
     }
   }
 
