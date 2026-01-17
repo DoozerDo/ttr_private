@@ -40,6 +40,19 @@ type BaselineFetchResult = {
   error: string | null;
 };
 
+function isNextRedirectError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  if (!("digest" in error)) {
+    return false;
+  }
+
+  const digest = (error as { digest?: string }).digest;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
 const instructionSteps = [
   {
     title: "Step 1: Upload your baseline resume.",
@@ -111,6 +124,10 @@ async function fetchBaselines(): Promise<BaselineFetchResult> {
       error: null,
     };
   } catch (error) {
+    if (isNextRedirectError(error)) {
+      throw error;
+    }
+
     console.error("Failed to fetch baselines", error);
     const message = error instanceof Error ? error.message : "Unable to load baselines.";
     return {

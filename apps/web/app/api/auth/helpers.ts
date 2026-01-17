@@ -25,13 +25,30 @@ function buildErrorMessage(message: unknown): string {
   return "Authentication failed";
 }
 
-export function setAuthCookie(response: NextResponse, token: string): void {
+function isSecureRequest(req?: NextRequest): boolean {
+  if (!req) {
+    return process.env.NODE_ENV === "production";
+  }
+
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  if (forwardedProto) {
+    return forwardedProto.split(",")[0]?.trim() === "https";
+  }
+
+  return req.nextUrl?.protocol === "https:";
+}
+
+export function setAuthCookie(
+  response: NextResponse,
+  token: string,
+  req?: NextRequest,
+): void {
   response.cookies.set({
     name: AUTH_COOKIE_NAME,
     value: token,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(req),
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
   });
@@ -92,6 +109,7 @@ export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
 }
 
 export async function forwardAuthRequest(
+  req: NextRequest,
   endpoint: string,
   body: Record<string, unknown>,
 ) {
@@ -117,7 +135,7 @@ export async function forwardAuthRequest(
     return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
   }
 
-type AuthApiResponse = {
+  type AuthApiResponse = {
     token?: string;
     accessToken?: string;
     data?: {
@@ -138,7 +156,10 @@ type AuthApiResponse = {
 
   if (!apiResponse.ok) {
     const errorMessage = buildErrorMessage(data?.message);
-    return NextResponse.json({ error: errorMessage }, { status: apiResponse.status });
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: apiResponse.status },
+    );
   }
 
   const response = NextResponse.json({ user: data?.user ?? null });
@@ -151,7 +172,7 @@ type AuthApiResponse = {
     "";
 
   if (token) {
-    setAuthCookie(response, token);
+    setAuthCookie(response, token, req);
   }
 
   return response;

@@ -30,10 +30,21 @@ describe('AuthController', () => {
     const dto: RegisterDto = { email: 'test@example.com', password: 'Password123' };
     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
     authService.register.mockResolvedValue(response);
+    const res = { cookie: jest.fn() };
 
-    const result = await controller.register(dto);
+    const result = await controller.register(dto, res as any);
 
     expect(authService.register).toHaveBeenCalledWith(dto);
+    expect(res.cookie).toHaveBeenCalledWith(
+      'ttr_token',
+      response.accessToken,
+      expect.objectContaining({
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+      }),
+    );
     expect(result).toEqual(response);
   });
 
@@ -41,10 +52,40 @@ describe('AuthController', () => {
     const dto: LoginDto = { email: 'test@example.com', password: 'Password123' };
     const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
     authService.login.mockResolvedValue(response);
+    const res = { cookie: jest.fn() };
 
-    const result = await controller.login(dto);
+    const result = await controller.login(dto, res as any);
 
     expect(authService.login).toHaveBeenCalledWith(dto);
+    expect(res.cookie).toHaveBeenCalledWith(
+      'ttr_token',
+      response.accessToken,
+      expect.objectContaining({
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+      }),
+    );
     expect(result).toEqual(response);
+  });
+
+  it('handles logout', () => {
+    const res = { cookie: jest.fn() };
+
+    const result = controller.logout(res as any);
+
+    expect(res.cookie).toHaveBeenCalledWith(
+      'ttr_token',
+      '',
+      expect.objectContaining({
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 0,
+      }),
+    );
+    expect(result).toEqual({ ok: true });
   });
 });

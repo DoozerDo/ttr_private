@@ -100,6 +100,91 @@ LIMIT 10;
 SELECT "id", "userId"
 FROM resume_drafts;
 
+SELECT * FROM admin_users LIMIT 10;
+SELECT * FROM users LIMIT 10;
+
+
+INSERT INTO "admin_users" ("userId", "role") VALUES ('97eb16bd-97bf-4610-a64b-3fef39b2579b', 'admin');
+INSERT INTO "admin_users" ("userId") VALUES ('doug@ttr.com');
+
+DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
+
+
+DO Setup Notes: 
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
+
+Setup Steps: 
+1. 
+mkdir -p /opt/targetthisrole
+ls -ld /opt/targetthisrole
+scp -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" `
+  infra\docker\docker-compose.dev.yml `
+  root@64.225.53.196:/opt/targetthisrole/docker-compose.yml
+
+2. 
+docker login ghcr.io -u dotf
+
+3. 
+read -s -p "DO DB password: " PW; echo
+python3 -c "import urllib.parse; print('DATABASE_URL=postgresql://doadmin:%s@targetthisrole-dev-db-do-user-31851939-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require' % urllib.parse.quote('''$PW''', safe=''))"
+unset PW
+
+4. 
+nano /opt/targetthisrole/.env
+Contents: 
+    # --- app ---
+    APP_VERSION=dev
+
+    # --- database ---
+    DATABASE_URL=postgresql://doadmin:REPLACE_ME@targetthisrole-dev-db-do-user-31851939-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+
+    # --- CORS / web ---
+    CORS_ORIGIN=http://64.225.53.196
+
+    # --- Caddy / reverse proxy ---
+    CADDY_EMAIL=do@targetthisrole.ai
+    APP_DOMAIN=64.225.53.196
+
+5.
+docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml pull
+
+6.
+docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml up -d
+
+DO DropLet Update Notes: 
+ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
+cd /opt/targetthisrole
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml up -d --force-recreate
+docker compose --env-file .env -f docker-compose.yml ps
+docker compose --env-file .env -f docker-compose.yml images
+
+If you want migrations: FUCK MIGRATIONS 
+ssh root@167.99.126.94
+###cd /opt/targetthisrole
+###docker compose --env-file .env -f docker-compose.yml pull
+###docker compose --env-file .env -f docker-compose.yml up -d --force-recreate api
+###docker compose --env-file .env -f docker-compose.yml exec -T api npm run migration:run
+###docker compose --env-file .env -f docker-compose.yml up -d
+###docker compose --env-file .env -f docker-compose.yml ps
+
+DO Docker Logs:
+docker compose --env-file .env -f docker-compose.yml logs -f --timestamps
+docker compose --env-file .env -f docker-compose.yml logs -n 80 api
+
+Terraform Notes: 
+Terraform plan -var-file="terraform.dev.tfvars"
+
 ## Manual Testing – Search Sets UI
 1. Create a search set via `/search-sets` using the Source section (select Greenhouse, enter a URL, adjust max listings) and confirm the Create button stays disabled until all validations pass.
 2. Open the run page, pick a baseline, execute the run, then confirm the Source Snapshot card populates with provider metadata, ingest counts, and the results list shows the new score ring/verdict layout; use the Re-run button to refresh the snapshot.
+
+DO Disk Space Management: 
+df -h
+docker compose down
+docker system prune -af
+docker volume prune -f
+df -h
+
+
+TempPass123!

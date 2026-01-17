@@ -1,9 +1,29 @@
 #cloud-config
-package_update: true
-packages:
-  - docker.io
-  - docker-compose-plugin
 runcmd:
-  - systemctl enable --now docker
-  - usermod -aG docker ubuntu
-  - mkdir -p /opt/targetthisrole
+  - |
+      bash -lc 'set -euo pipefail
+
+      # DNS helper (DO image tries this too, but resolv.conf write can warn)
+      mkdir -p /etc/systemd/resolved.conf.d
+      cat >/etc/systemd/resolved.conf.d/DigitalOcean.conf <<EOF
+      [Resolve]
+      DNS=67.207.67.2 67.207.67.3
+      EOF
+      systemctl try-reload-or-restart systemd-resolved || true
+
+      apt-get update -y
+      apt-get install -y docker.io python3 curl
+
+      systemctl enable --now docker
+
+      # Install Docker Compose v2 as a CLI plugin (reliable on jammy)
+      mkdir -p /usr/local/lib/docker/cli-plugins
+      curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+        https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64
+      chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+      docker --version
+      docker compose version
+
+      mkdir -p /opt/targetthisrole
+      '
