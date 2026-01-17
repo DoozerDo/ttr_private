@@ -157,7 +157,7 @@ cd /opt/targetthisrole
 docker compose --env-file .env -f docker-compose.yml pull
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate
 docker compose --env-file .env -f docker-compose.yml ps
-
+docker compose --env-file .env -f docker-compose.yml images
 
 If you want migrations: FUCK MIGRATIONS 
 

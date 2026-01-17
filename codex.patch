@@ -1,207 +1,88 @@
-diff --git a/apps/web/app/api/auth/helpers.ts b/apps/web/app/api/auth/helpers.ts
-index f69279dbbb75bbb0742d563b5608948c885722d6..7fe2c5d09fdc46b6472212c9a8fed425d28cb0c9 100644
---- a/apps/web/app/api/auth/helpers.ts
-+++ b/apps/web/app/api/auth/helpers.ts
-@@ -3,57 +3,74 @@ import { NextRequest, NextResponse } from "next/server";
- import { AUTH_COOKIE_NAME } from "@/lib/auth";
+diff --git a/apps/api/src/auth/jwt.strategy.ts b/apps/api/src/auth/jwt.strategy.ts
+index e5bb7772a78ccd5cc3731e36721c54a337201712..b2761205833db50dbb19c58ebb399729cf0187d2 100644
+--- a/apps/api/src/auth/jwt.strategy.ts
++++ b/apps/api/src/auth/jwt.strategy.ts
+@@ -1,51 +1,82 @@
+ import { Injectable, UnauthorizedException } from '@nestjs/common';
+ import { ConfigService } from '@nestjs/config';
+ import { PassportStrategy } from '@nestjs/passport';
+ import { ExtractJwt, Strategy } from 'passport-jwt';
+ import { UsersService } from '../users/users.service';
+ import { getEntitlementsForTier } from '../features/feature-gates';
+ import type { AuthUserDto } from './dto/auth-response.dto';
++import type { Request } from 'express';
  
- function getApiBaseUrl() {
-   const serverBaseUrl = process.env.API_BASE_URL;
-   const clientBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+ type JwtPayload = {
+   sub: string;
+   email: string;
+   subscriptionTier?: string;
+ };
  
-   return serverBaseUrl ?? clientBaseUrl ?? null;
- }
- 
- export function getAuthCookieName(): string {
-   return AUTH_COOKIE_NAME;
- }
- 
- function buildErrorMessage(message: unknown): string {
-   if (typeof message === "string") {
-     return message;
-   }
- 
-   if (Array.isArray(message)) {
-     return message.join(", ");
-   }
- 
-   return "Authentication failed";
- }
- 
--export function setAuthCookie(response: NextResponse, token: string): void {
-+function isSecureRequest(req?: NextRequest): boolean {
++const AUTH_COOKIE_NAME = 'ttr_token';
++
++function extractTokenFromCookie(req: Request | undefined | null): string | null {
 +  if (!req) {
-+    return process.env.NODE_ENV === "production";
++    return null;
 +  }
 +
-+  const forwardedProto = req.headers.get("x-forwarded-proto");
-+  if (forwardedProto) {
-+    return forwardedProto.split(",")[0]?.trim() === "https";
++  const cookieHeader = req.headers?.cookie;
++  if (!cookieHeader) {
++    return null;
 +  }
 +
-+  return req.nextUrl?.protocol === "https:";
++  const parts = cookieHeader.split(';');
++  for (const part of parts) {
++    const trimmed = part.trim();
++    if (!trimmed) continue;
++    const separatorIndex = trimmed.indexOf('=');
++    if (separatorIndex <= 0) continue;
++    const name = trimmed.slice(0, separatorIndex).trim();
++    if (name !== AUTH_COOKIE_NAME) continue;
++    const value = trimmed.slice(separatorIndex + 1);
++    return value ? decodeURIComponent(value) : null;
++  }
++
++  return null;
 +}
 +
-+export function setAuthCookie(
-+  response: NextResponse,
-+  token: string,
-+  req?: NextRequest,
-+): void {
-   response.cookies.set({
-     name: AUTH_COOKIE_NAME,
-     value: token,
-     httpOnly: true,
-     sameSite: "lax",
--    secure: process.env.NODE_ENV === "production",
-+    secure: isSecureRequest(req),
-     path: "/",
-     maxAge: 60 * 60 * 24 * 7,
-   });
- }
+ @Injectable()
+ export class JwtStrategy extends PassportStrategy(Strategy) {
+   constructor(
+     configService: ConfigService,
+     private readonly usersService: UsersService,
+   ) {
+     const jwtSecret = configService.get<string>('JWT_SECRET');
  
- export function clearAuthCookie(response: NextResponse): void {
-   response.cookies.set({
-     name: AUTH_COOKIE_NAME,
-     value: "",
-     path: "/",
-     httpOnly: true,
-     maxAge: 0,
-   });
- }
+     if (!jwtSecret) {
+       // Fail fast if misconfigured instead of letting it be undefined
+       throw new Error('JWT_SECRET is not configured');
+     }
  
- export type RequireAuthTokenSuccess = {
-   token: string;
-   error?: never;
- };
- 
- export type RequireAuthTokenFailure = {
-   token?: never;
-   error: NextResponse;
- };
- 
-@@ -70,89 +87,93 @@ function extractBearerToken(authHeader: string | null): string {
-     ? authHeader.slice("Bearer ".length).trim()
-     : "";
- }
- 
- export function requireAuthToken(req: NextRequest): RequireAuthTokenResult {
-   const headerToken = extractBearerToken(
-     req.headers.get("authorization") ?? req.headers.get("Authorization"),
-   );
- 
-   const cookieToken = req.cookies.get(AUTH_COOKIE_NAME)?.value ?? "";
-   const token = headerToken || cookieToken;
- 
-   if (!token) {
-     return {
-       error: NextResponse.json(
-         { error: "Missing Authorization token" },
-         { status: 401 },
-       ),
-     };
-   }
- 
-   return { token };
- }
- 
- export async function forwardAuthRequest(
-+  req: NextRequest,
-   endpoint: string,
-   body: Record<string, unknown>,
- ) {
-   const baseUrl = getApiBaseUrl();
- 
-   if (!baseUrl) {
-     return NextResponse.json(
-       { error: "API base URL is not configured" },
-       { status: 500 },
-     );
-   }
- 
-   let apiResponse: Response;
- 
-   try {
-     apiResponse = await fetch(`${baseUrl}${endpoint}`, {
-       method: "POST",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify(body),
+     super({
+-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
++      jwtFromRequest: ExtractJwt.fromExtractors([
++        ExtractJwt.fromAuthHeaderAsBearerToken(),
++        extractTokenFromCookie,
++      ]),
+       ignoreExpiration: false,
+       secretOrKey: jwtSecret,
      });
-   } catch (error) {
-     console.error("Auth request failed", error);
-     return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
    }
  
--type AuthApiResponse = {
-+  type AuthApiResponse = {
-     token?: string;
-     accessToken?: string;
-     data?: {
-       token?: string;
-       accessToken?: string;
+   async validate(payload: JwtPayload): Promise<AuthUserDto> {
+     const user = await this.usersService.findById(payload.sub);
+ 
+     if (!user) {
+       throw new UnauthorizedException('User not found');
+     }
+ 
+     const entitlements = getEntitlementsForTier(user.subscriptionTier);
+ 
+     const { passwordHash, ...sanitizedUser } = user;
+ 
+     return {
+       ...sanitizedUser,
+       entitlements,
      };
-     user?: unknown;
-     message?: unknown;
-   } | null;
- 
-   let data: AuthApiResponse = null;
- 
-   try {
-     data = await apiResponse.json();
-   } catch (error) {
-     console.error("Failed to parse auth response", error);
    }
- 
-   if (!apiResponse.ok) {
-     const errorMessage = buildErrorMessage(data?.message);
--    return NextResponse.json({ error: errorMessage }, { status: apiResponse.status });
-+    return NextResponse.json(
-+      { error: errorMessage },
-+      { status: apiResponse.status },
-+    );
-   }
- 
-   const response = NextResponse.json({ user: data?.user ?? null });
- 
-   const token =
-     data?.accessToken ??
-     data?.token ??
-     data?.data?.token ??
-     data?.data?.accessToken ??
-     "";
- 
-   if (token) {
--    setAuthCookie(response, token);
-+    setAuthCookie(response, token, req);
-   }
- 
-   return response;
- }
-diff --git a/apps/web/app/api/auth/login/route.ts b/apps/web/app/api/auth/login/route.ts
-index 5bb13e4b682b6672c0024a4ed02ae7285ed54458..d574a27288af7a6313efc6b7f8bc69c164278ca1 100644
---- a/apps/web/app/api/auth/login/route.ts
-+++ b/apps/web/app/api/auth/login/route.ts
-@@ -1,9 +1,9 @@
- import { NextRequest } from "next/server";
- import { forwardAuthRequest } from "../helpers";
- 
- export const runtime = "nodejs";
- 
- export async function POST(req: NextRequest) {
-   const body = await req.json();
--  return forwardAuthRequest("/auth/login", body);
-+  return forwardAuthRequest(req, "/auth/login", body);
- }
-diff --git a/apps/web/app/api/auth/register/route.ts b/apps/web/app/api/auth/register/route.ts
-index eb9acb284f2e60432cef7f29474b01673c3cf3f7..b7cf5629d873e248b2aec6199317129c2bddea23 100644
---- a/apps/web/app/api/auth/register/route.ts
-+++ b/apps/web/app/api/auth/register/route.ts
-@@ -1,6 +1,7 @@
-+import { NextRequest } from "next/server";
- import { forwardAuthRequest } from "../helpers";
- 
--export async function POST(request: Request) {
-+export async function POST(request: NextRequest) {
-   const payload = await request.json();
--  return forwardAuthRequest("/auth/register", payload);
-+  return forwardAuthRequest(request, "/auth/register", payload);
  }
