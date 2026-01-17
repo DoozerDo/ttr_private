@@ -180,6 +180,12 @@ Terraform plan -var-file="terraform.dev.tfvars"
 1. Create a search set via `/search-sets` using the Source section (select Greenhouse, enter a URL, adjust max listings) and confirm the Create button stays disabled until all validations pass.
 2. Open the run page, pick a baseline, execute the run, then confirm the Source Snapshot card populates with provider metadata, ingest counts, and the results list shows the new score ring/verdict layout; use the Re-run button to refresh the snapshot.
 
+DO Disk Space Management: 
+df -h
+docker compose down
+docker system prune -af
+docker volume prune -f
+df -h
 
 
 TempPass123!
