@@ -1,6 +1,7 @@
+import { NextRequest } from "next/server";
 import { forwardAuthRequest } from "../helpers";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const payload = await request.json();
-  return forwardAuthRequest("/auth/register", payload);
+  return forwardAuthRequest(request, "/auth/register", payload);
 }
