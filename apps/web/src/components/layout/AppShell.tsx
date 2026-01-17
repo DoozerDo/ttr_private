@@ -7,11 +7,11 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { RouteConfig, sidebarRoutes, settingsRoute } from "@/src/navigation/routes";
 import { JourneyStepId, JourneyStepState } from "@/src/lib/journeyNav";
-import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import {
-  readLastAnalysis,
-  type StoredAnalysisRecord,
-} from "@/app/(app)/lib/session";
+  resolveJourneyNavStateFromAppState,
+  useJourneyNavAppState,
+} from "@/src/lib/journeyNavStore";
+import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -142,7 +142,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
-  }, [pathname]);
+  }, []);
 
   useEffect(() => {
     refreshContext();
@@ -252,7 +252,6 @@ export function AppShell({ children, userEmail }: AppShellProps) {
       const step = journeyNavState.steps.find((s) => s.id === stepId);
       if (!step) return;
 
-      // Only allow navigation to completed steps for review
       if (step.state !== JourneyStepState.Completed) return;
 
       journeyAppState.setActiveOverride(stepId);
@@ -285,9 +284,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
               <Link
                 key={route.id}
                 href={route.href}
-                onClick={() => {
-                  setMenuOpen(false);
-                }}
+                onClick={() => setMenuOpen(false)}
                 className={`${baseClasses} ${isActive ? activeClasses : enabledClasses} ${
                   isDisabled ? disabledClasses : ""
                 }`}
@@ -301,9 +298,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
                     {route.subtext}
                   </span>
                 ) : null}
-                {disabledReason ? (
-                  <span className={disabledLabelClasses}>{disabledReason}</span>
-                ) : null}
+                {disabledReason ? <span className={disabledLabelClasses}>{disabledReason}</span> : null}
               </Link>
             );
           })}
@@ -363,22 +358,22 @@ export function AppShell({ children, userEmail }: AppShellProps) {
                   >
                     {loggingOut ? "Logging out" : "Logout"}
                   </button>
-                  {logoutError ? (
-                    <p className="mt-2 text-xs text-red-400">{logoutError}</p>
-                  ) : null}
+                  {logoutError ? <p className="mt-2 text-xs text-red-400">{logoutError}</p> : null}
                 </div>
               ) : null}
             </div>
           </div>
         </header>
 
-        {JOURNEY_NAV_V1_ENABLED ? (
-          <div className="sticky top-16 z-10 border-b border-white/10 bg-slate-950/80 px-6 py-3">
-            <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
-          </div>
-        ) : null}
+        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">
+          {JOURNEY_NAV_V1_ENABLED ? (
+            <div className="mb-6 border-b border-white/10 bg-slate-950/60 px-0 py-3">
+              <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
+            </div>
+          ) : null}
 
-        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">{children}</main>
+          {children}
+        </main>
       </div>
     </div>
   );

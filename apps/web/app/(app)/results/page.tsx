@@ -41,7 +41,6 @@ const resolveStoredFitScore = (record: StoredAnalysisRecord) => {
   if (typeof record.fitScore === "number") return record.fitScore;
   if (typeof record.analysis.score === "number") return record.analysis.score;
   if (typeof record.analysis.overallScore === "number") return record.analysis.overallScore;
-  // legacy payload support
   if (typeof (record.analysis as any).overall_score === "number") return (record.analysis as any).overall_score;
   return null;
 };
@@ -81,6 +80,53 @@ type NextStepArgs = {
   hasAnalysis: boolean;
   hasResume: boolean;
   autoGenerateThreshold: number;
+};
+
+type DocumentType = "resume" | "cover-letter";
+
+type DocumentState = {
+  response: unknown;
+  error: string | null;
+  tierGateError: TierGateError | null;
+  complianceError: ParsedComplianceError | null;
+};
+
+type DocumentConfig = {
+  label: string;
+  pluralLabel: string;
+  capitalizedLabel: string;
+  generatePath: string;
+  exportPath: string;
+  previewTitle: string;
+  copyButtonLabel: string;
+};
+
+const createDocumentState = (): DocumentState => ({
+  response: null,
+  error: null,
+  tierGateError: null,
+  complianceError: null,
+});
+
+const DOCUMENT_CONFIG: Record<DocumentType, DocumentConfig> = {
+  resume: {
+    label: "resume",
+    pluralLabel: "resumes",
+    capitalizedLabel: "Resume",
+    generatePath: "/api/resume",
+    exportPath: "/api/resume/export",
+    previewTitle: "Resume draft preview",
+    copyButtonLabel: "Copy resume text",
+  },
+  "cover-letter": {
+    label: "cover letter",
+    pluralLabel: "cover letters",
+    capitalizedLabel: "Cover letter",
+    generatePath: "/api/cover-letters",
+    exportPath: "/api/cover-letters/export",
+    previewTitle: "Cover letter draft preview",
+    copyButtonLabel: "Copy cover letter text",
+  },
 };
 
 const debugUiEnabled =
@@ -197,14 +243,7 @@ function stripInternalKeys(value: unknown): unknown {
 function coercePreviewText(payload: unknown): string | null {
   const p = payload as AnyObject | null;
 
-  const candidates = [
-    "previewText",
-    "preview_text",
-    "text",
-    "rawText",
-    "raw_text",
-    "content",
-  ];
+  const candidates = ["previewText", "preview_text", "text", "rawText", "raw_text", "content"];
 
   for (const key of candidates) {
     const v = p?.[key];
@@ -261,7 +300,6 @@ function extractBestResumeText(payload: unknown): string | null {
   const obj = payload as Record<string, unknown>;
 
   try {
-    // @ts-ignore - coercePreviewText may vary in shape
     const direct = typeof coercePreviewText === "function" ? coercePreviewText(payload) : null;
     if (typeof direct === "string" && direct.trim().length) return direct.trim();
   } catch {
@@ -288,49 +326,88 @@ export default function ResultsPage() {
   const [baselineId, setBaselineId] = useState<string>("");
   const [jobId, setJobId] = useState<string>("");
   const [latest, setLatest] = useState<LatestAnalysis | null>(null);
-  const [resumeResponse, setResumeResponse] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingLatest, setLoadingLatest] = useState(false);
-  const [exporting, setExporting] = useState<"docx" | "pdf" | null>(null);
+  const [exportState, setExportState] = useState<
+    { docType: DocumentType; format: "docx" | "pdf" } | null
+  >(null);
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
-  const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumeTierGateError, setResumeTierGateError] = useState<TierGateError | null>(null);
-  const [resumeComplianceError, setResumeComplianceError] = useState<ParsedComplianceError | null>(
-    null,
-  );
+  const [documents, setDocuments] = useState<Record<DocumentType, DocumentState>>({
+    resume: createDocumentState(),
+    "cover-letter": createDocumentState(),
+  });
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
 
-  const resumeWarningFlags = (resumeResponse?.compliance_flags ?? []).filter(
-    (flag: { severity?: string | null }) => (flag?.severity ?? "warn").toLowerCase() !== "block",
-  );
-  const resumeAuditId = resumeResponse?.audit_id;
-  const resumeBaselineHash =
-    resumeResponse?.baseline_version_hash ?? resumeResponse?.baselineVersionHash ?? null;
+  const updateDocumentState = (type: DocumentType, updates: Partial<DocumentState>) => {
+    setDocuments((prev) => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        ...updates,
+      },
+    }));
+  };
+
+  const clearDocumentErrors = () => {
+    setDocuments((prev) => ({
+      resume: {
+        ...prev.resume,
+        error: null,
+        tierGateError: null,
+        complianceError: null,
+      },
+      "cover-letter": {
+        ...prev["cover-letter"],
+        error: null,
+        tierGateError: null,
+        complianceError: null,
+      },
+    }));
+  };
 
   const router = useRouter();
   const searchParams = useSearchParams();
+  const documentType: DocumentType =
+    searchParams?.get("documentType") === "cover-letter" ? "cover-letter" : "resume";
+  const documentConfig = DOCUMENT_CONFIG[documentType];
+  const currentDocumentState = documents[documentType];
+
+  const documentResponse = (currentDocumentState.response as AnyObject | null) ?? null;
+
+  const rawFlags = Array.isArray(documentResponse?.compliance_flags)
+    ? (documentResponse?.compliance_flags as unknown[])
+    : [];
+
+  const documentWarningFlags = rawFlags.filter((flag) => {
+    const severity = ((flag as AnyObject | null)?.severity as string | null | undefined) ?? "warn";
+    return severity.toLowerCase() !== "block";
+  });
+
+  const documentAuditId =
+    (documentResponse?.audit_id as string | undefined) || undefined;
+
+  const documentBaselineHash =
+    (documentResponse?.baseline_version_hash as string | undefined) ||
+    (documentResponse?.baselineVersionHash as string | undefined) ||
+    undefined;
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
     setAnalysisSource("manual");
-    setResumeError(null);
-    setResumeTierGateError(null);
-    setResumeComplianceError(null);
+    clearDocumentErrors();
   };
 
   const setManualJobId = (value: string) => {
     setJobId(value);
     setAnalysisSource("manual");
-    setResumeError(null);
-    setResumeTierGateError(null);
-    setResumeComplianceError(null);
+    clearDocumentErrors();
   };
 
-  const getResumePayload = () => {
+  const getDocumentPayload = () => {
     const jobIdValue = latest?.jobId?.trim() ?? "";
     const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
     return { jobId: jobIdValue, baselineVersionId: baselineVersionIdValue };
@@ -370,7 +447,7 @@ export default function ResultsPage() {
     return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
   }, [jobId, latest?.jobId]);
 
-  const readyForResume = useMemo(() => {
+  const readyForDocument = useMemo(() => {
     return analysisSource === "latest" && !!latest?.jobId && !!latest?.baselineVersionId;
   }, [analysisSource, latest?.baselineVersionId, latest?.jobId]);
 
@@ -395,10 +472,10 @@ export default function ResultsPage() {
       score: latestScore,
       verdict: latest?.verdict ?? null,
       hasAnalysis: !!latest,
-      hasResume: !!resumeResponse,
+      hasResume: !!documents.resume.response,
       autoGenerateThreshold,
     });
-  }, [autoGenerateThreshold, latest, latestScore, resumeResponse]);
+  }, [autoGenerateThreshold, documents.resume.response, latest, latestScore]);
 
   const debugMode = debugUiEnabled;
 
@@ -409,12 +486,12 @@ export default function ResultsPage() {
     return "Load latest analysis to populate the score and unlock one tap export.";
   }, [analysisSource, jobId, latest, loadingLatest]);
 
-  const resumePreviewText = useMemo(() => {
-    if (!resumeResponse) return "";
-    const direct = extractBestResumeText(resumeResponse);
+  const documentPreviewText = useMemo(() => {
+    if (!currentDocumentState.response) return "";
+    const direct = extractBestResumeText(currentDocumentState.response);
     if (direct) return direct;
-    return safeJsonPreview(resumeResponse);
-  }, [resumeResponse]);
+    return safeJsonPreview(currentDocumentState.response);
+  }, [currentDocumentState.response]);
 
   async function loadLatest() {
     if (loadingLatest) return;
@@ -441,9 +518,7 @@ export default function ResultsPage() {
     setLatest(null);
     setComplianceError(null);
     setTierGateError(null);
-    setResumeError(null);
-    setResumeTierGateError(null);
-    setResumeComplianceError(null);
+    clearDocumentErrors();
 
     try {
       if (!latestEndpoint) throw new Error("Job ID is required.");
@@ -497,21 +572,27 @@ export default function ResultsPage() {
     setAnalysisSource("latest");
   }, [analysisSource, baselineId, jobId, latest]);
 
-  async function generateResume(oneTap = false) {
-    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
+  async function generateDocument(oneTap = false) {
+    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      setResumeError("Load the latest analysis before generating a resume.");
+      updateDocumentState(documentType, {
+        error: `Load the latest analysis before generating a ${documentConfig.label}.`,
+      });
       return;
     }
 
     setLoading(true);
-    setResumeError(null);
-    setResumeTierGateError(null);
-    setResumeComplianceError(null);
-    setResumeResponse(null);
+    updateDocumentState(documentType, {
+      error: null,
+      tierGateError: null,
+      complianceError: null,
+      response: null,
+    });
+
+    const downloadName = documentConfig.label.replace(" ", "-");
 
     try {
-      const res = await fetch("/api/resume", {
+      const res = await fetch(documentConfig.generatePath, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -529,17 +610,20 @@ export default function ResultsPage() {
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          setResumeTierGateError(tierGate);
+          updateDocumentState(documentType, { tierGateError: tierGate });
           return;
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
-          setResumeComplianceError(compliance);
+          updateDocumentState(documentType, { complianceError: compliance });
           return;
         }
 
-        const message = formatErrorMessage(payload, "Resume generation failed");
+        const message = formatErrorMessage(
+          payload,
+          `${documentConfig.capitalizedLabel} generation failed`,
+        );
         throw new Error(message);
       }
 
@@ -547,67 +631,78 @@ export default function ResultsPage() {
 
       if (contentType.includes("application/json")) {
         const json = await res.json();
-        setResumeResponse(json);
+        updateDocumentState(documentType, { response: json });
       } else {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "resume";
+        a.download = downloadName;
         document.body.appendChild(a);
         a.click();
         a.remove();
         window.URL.revokeObjectURL(url);
       }
     } catch (e: any) {
-      setResumeError(e?.message || "Resume generation failed");
+      updateDocumentState(documentType, {
+        error: e?.message ?? `${documentConfig.capitalizedLabel} generation failed`,
+      });
     } finally {
       setLoading(false);
     }
   }
 
-  async function exportResume(format: "docx" | "pdf") {
-    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getResumePayload();
+  async function exportDocument(format: "docx" | "pdf") {
+    const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      setResumeError("Load the latest analysis before exporting a resume.");
+      updateDocumentState(documentType, {
+        error: `Load the latest analysis before exporting a ${documentConfig.label}.`,
+      });
       return;
     }
 
-    setExporting(format);
-    setResumeError(null);
-    setResumeTierGateError(null);
-    setResumeComplianceError(null);
+    setExportState({ docType: documentType, format });
+    updateDocumentState(documentType, {
+      error: null,
+      tierGateError: null,
+      complianceError: null,
+    });
+
+    const downloadName = documentConfig.label.replace(" ", "-");
 
     try {
-      const res = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const res = await fetch(
+        `${documentConfig.exportPath}?format=${encodeURIComponent(format)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            baselineId,
+            baselineVersionId: resumeBaselineVersionId,
+            jobId: resumeJobId,
+            oneTap: true,
+          }),
         },
-        body: JSON.stringify({
-          baselineId,
-          baselineVersionId: resumeBaselineVersionId,
-          jobId: resumeJobId,
-          oneTap: true,
-        }),
-      });
+      );
 
       if (!res.ok) {
         const payload = await readResponsePayload(res);
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          setResumeTierGateError(tierGate);
+          updateDocumentState(documentType, { tierGateError: tierGate });
           return;
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
-          setResumeComplianceError(compliance);
+          updateDocumentState(documentType, { complianceError: compliance });
           return;
         }
 
-        const message = formatErrorMessage(payload, "Resume export failed");
+        const message = formatErrorMessage(payload, `${documentConfig.capitalizedLabel} export failed`);
         throw new Error(message);
       }
 
@@ -615,15 +710,17 @@ export default function ResultsPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `resume.${format}`;
+      a.download = `${downloadName}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setResumeError(e?.message || "Resume export failed");
+      updateDocumentState(documentType, {
+        error: e?.message ?? `${documentConfig.capitalizedLabel} export failed`,
+      });
     } finally {
-      setExporting(null);
+      setExportState(null);
     }
   }
 
@@ -638,7 +735,7 @@ export default function ResultsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Results"
-          description="Generate resumes, review the latest analysis, and export artifacts for any job."
+          description="Generate resumes and cover letters, review the latest analysis, and export artifacts for any job."
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -751,11 +848,13 @@ export default function ResultsPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Generate resume
+                  Generate {documentConfig.capitalizedLabel}
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">Output</h2>
                 <p className="mt-1 text-sm text-slate-400">
-                  This generates a resume draft. Cover letter generation is handled in the Cover Letter flow.
+                  {documentType === "resume"
+                    ? "This generates a resume draft. Cover letter generation is handled in the Cover Letter flow."
+                    : "This generates a cover letter draft. Resume generation is handled in the resume flow."}
                 </p>
               </div>
 
@@ -770,117 +869,134 @@ export default function ResultsPage() {
 
             <div className="flex flex-wrap gap-3">
               <FormButton
-                onClick={() => void generateResume(false)}
-                disabled={!readyForResume || loading}
+                onClick={() => void generateDocument(false)}
+                disabled={!readyForDocument || loading}
               >
-                {loading ? "Generating..." : "Generate draft resume"}
+                {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
               </FormButton>
 
               <FormButton
                 variant="secondary"
-                onClick={() => void generateResume(true)}
-                disabled={!readyForResume || !oneTapEligible || loading}
+                onClick={() => void generateDocument(true)}
+                disabled={!readyForDocument || !oneTapEligible || loading}
                 title={
-                  readyForResume
+                  readyForDocument
                     ? oneTapEligible
-                      ? "Generate an export-ready resume based on the latest analysis"
+                      ? `Generate an export-ready ${documentConfig.label} based on the latest analysis`
                       : `Requires fit score of at least ${autoGenerateThreshold}`
                     : "Load the latest analysis before using one tap"
                 }
               >
-                One tap export (optimized resumes)
+                One tap export (optimized {documentConfig.pluralLabel})
               </FormButton>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <FormButton
                 variant="secondary"
-                onClick={() => void exportResume("docx")}
-                disabled={!readyForResume || !oneTapEligible || !!exporting}
+                onClick={() => void exportDocument("docx")}
+                disabled={
+                  !readyForDocument ||
+                  !oneTapEligible ||
+                  (exportState?.docType === documentType && exportState.format === "docx")
+                }
               >
-                {exporting === "docx" ? "Downloading..." : "Download DOCX"}
+                {exportState?.docType === documentType && exportState.format === "docx"
+                  ? "Downloading..."
+                  : "Download DOCX"}
               </FormButton>
 
               <FormButton
                 variant="secondary"
-                onClick={() => void exportResume("pdf")}
-                disabled={!readyForResume || !oneTapEligible || !!exporting}
+                onClick={() => void exportDocument("pdf")}
+                disabled={
+                  !readyForDocument ||
+                  !oneTapEligible ||
+                  (exportState?.docType === documentType && exportState.format === "pdf")
+                }
               >
-                {exporting === "pdf" ? "Downloading..." : "Download PDF"}
+                {exportState?.docType === documentType && exportState.format === "pdf"
+                  ? "Downloading..."
+                  : "Download PDF"}
               </FormButton>
             </div>
 
             <div className="space-y-2 text-sm text-slate-300">
               {oneTapEligible ? (
                 <p>
-                  Your fit score meets the export threshold. Review the draft below and download when ready.
+                  Your fit score meets the export threshold. Review the draft below and download this{" "}
+                  {documentConfig.label} when ready.
                 </p>
               ) : (
                 <p>
-                  Your score is below {autoGenerateThreshold}. You can generate and review a draft now. Downloads unlock once you reach the export threshold.
+                  Your score is below {autoGenerateThreshold}. You can generate and review a draft now.
+                  Downloads unlock once you reach the export threshold for this {documentConfig.label}.
                 </p>
               )}
             </div>
 
-            {resumeTierGateError ? (
+            {currentDocumentState.tierGateError ? (
               <p className="text-sm text-amber-300">
-                {resumeTierGateError.message ?? "Resume export is limited by your current plan."}{" "}
+                {currentDocumentState.tierGateError.message ??
+                  `${documentConfig.capitalizedLabel} export is limited by your current plan.`}{" "}
                 <Link href="/pricing" className="font-semibold text-white underline">
                   View plans
                 </Link>
                 .
               </p>
             ) : null}
-            {resumeComplianceError ? <ComplianceViolationPanel error={resumeComplianceError} /> : null}
-            {resumeError ? (
-              <Alert intent="error" title="Unable to generate resume">
-                {resumeError}
+            {currentDocumentState.complianceError ? (
+              <ComplianceViolationPanel error={currentDocumentState.complianceError} />
+            ) : null}
+            {currentDocumentState.error ? (
+              <Alert intent="error" title={`Unable to generate ${documentConfig.capitalizedLabel}`}>
+                {currentDocumentState.error}
               </Alert>
             ) : null}
 
-            {resumeResponse ? (
+            {currentDocumentState.response ? (
               <>
-                {resumeWarningFlags.length ? (
+                {documentWarningFlags.length ? (
                   <ComplianceFlagPanel
                     title="Compliance warnings"
-                    description="Resume generated with compliance notices."
-                    flags={resumeWarningFlags}
-                    auditId={resumeAuditId}
-                    baselineVersionHash={resumeBaselineHash}
+                    description={`${documentConfig.capitalizedLabel} generated with compliance notices.`}
+                    flags={documentWarningFlags as any}
+                    auditId={documentAuditId}
+                    baselineVersionHash={documentBaselineHash}
                     intent="warning"
                   />
                 ) : null}
 
                 <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Resume draft preview
+                    {documentConfig.previewTitle}
                   </p>
                   <p className="mt-1 text-sm text-slate-300">
-                    Resume draft ready. Review below, then download when available.
+                    {documentConfig.capitalizedLabel} draft ready. Review below, then download when available.
                   </p>
 
                   <div className="mt-3 flex justify-end">
                     <FormButton
                       variant="secondary"
                       onClick={() => {
-                        const text = resumePreviewText || "";
+                        const text = documentPreviewText || "";
                         if (!text) return;
                         void navigator.clipboard.writeText(text);
                       }}
-                      disabled={!resumePreviewText}
+                      disabled={!documentPreviewText}
                     >
-                      Copy resume text
+                      {documentConfig.copyButtonLabel}
                     </FormButton>
                   </div>
 
                   <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
-                    {resumePreviewText}
+                    {documentPreviewText}
                   </pre>
                 </div>
               </>
             ) : (
               <EmptyState
-                title="No resume generated yet"
+                title={`No ${documentConfig.label} generated yet`}
                 body="Generate a draft to preview it here."
                 cta={null}
                 className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
