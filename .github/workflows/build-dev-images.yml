@@ -3,8 +3,7 @@ name: Build and push dev images
 on:
   push:
     branches:
-      - do-newsetup
-      - do-setupv2
+      - develop
 
 permissions:
   contents: read
