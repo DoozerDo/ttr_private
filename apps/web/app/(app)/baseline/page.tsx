@@ -6,8 +6,9 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
-import { ttrComponents, ttrColors, ttrTypography } from "../ui/ttrStyles";
+import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
 import type { CSSProperties } from "react";
+import { JobsHub } from "./_components/JobsHub";
 
 export const dynamic = "force-dynamic";
 
@@ -40,54 +41,11 @@ type BaselineFetchResult = {
   error: string | null;
 };
 
-const instructionSteps = [
-  {
-    title: "Step 1: Upload your baseline resume.",
-    detail:
-      "Use a current resume that reflects your real experience. Do not upload a job specific version.",
-  },
-  {
-    title: "Step 2: Confirm your baseline appears in the library.",
-    detail: "You can keep multiple baselines later, but start with one.",
-  },
-  {
-    title: "Step 3: Go to Analyze.",
-    detail: "Paste a job description and run Analyze to generate your CX Fit Score.",
-  },
-];
-
-const instructionPanelStyle: CSSProperties = {
-  ...ttrComponents.basePanel,
-  flex: "0 0 auto",
-  minWidth: 0,
-  padding: 24,
-};
-
-const instructionStepsContainerStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  marginTop: 20,
-};
-
-const instructionStepTitleStyle: CSSProperties = {
+const onboardingTextStyle: CSSProperties = {
   ...ttrTypography.paragraph,
-  color: ttrColors.textPrimary,
-  fontWeight: 700,
+  color: "rgba(226,232,240,0.85)",
   margin: 0,
-};
-
-const instructionStepDetailStyle: CSSProperties = {
-  ...ttrTypography.paragraph,
-  margin: 0,
-};
-
-const instructionNoteStyle: CSSProperties = {
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.08)",
-  background: "rgba(15,23,42,0.8)",
-  padding: "12px 14px",
-  marginTop: 16,
+  lineHeight: 1.5,
 };
 
 async function fetchBaselines(): Promise<BaselineFetchResult> {
@@ -136,81 +94,55 @@ export default async function BaselinePage() {
       title="Target this role with clarity."
       subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
     >
-      <div className="space-y-6">
-        <section style={instructionPanelStyle}>
+        <div className="space-y-6">
           <div className="space-y-3">
-            <h1 style={ttrTypography.h1}>Baseline Library</h1>
-            <p style={ttrTypography.paragraph}>
-              A baseline is the resume you trust most. TTR uses it as your source of truth, then compares it against a job description to generate your CX Fit Score and tailored outputs.
+            <p style={onboardingTextStyle}>
+              A baseline is the resume you trust most. TTR uses it as your source of truth, then
+              compares it against a job description to generate your CX Fit Score and tailored outputs.
+            </p>
+            <p style={onboardingTextStyle}>
+              Upload a baseline, keep it updated, and pair it against the roles you care about to see
+              how the scores and outputs evolve.
             </p>
           </div>
 
-          <div style={instructionStepsContainerStyle}>
-            {instructionSteps.map((step) => (
-              <div key={step.title} className="space-y-1">
-                <p style={instructionStepTitleStyle}>{step.title}</p>
-                <p style={instructionStepDetailStyle}>{step.detail}</p>
-              </div>
-            ))}
-          </div>
-
-          <div style={instructionNoteStyle}>
-            <p
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <section style={ttrComponents.basePanel}>
+            <div
               style={{
-                ...ttrTypography.paragraph,
-                color: ttrColors.textPrimary,
-                fontWeight: 700,
-                margin: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                marginBottom: 18,
               }}
             >
-              Notes:
-            </p>
-            <p
-              style={{
-                ...ttrTypography.paragraph,
-                color: ttrColors.textSecondary,
-                margin: 0,
-                marginTop: 6,
-              }}
-            >
-              Your baseline is stored in your library for future runs. Job descriptions are temporary and stay in your browser unless you clear them.
-            </p>
-          </div>
-        </section>
-
-        <section style={ttrComponents.basePanel}>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              marginBottom: 18,
-            }}
-          >
-            <span style={ttrTypography.subtleLabel}>Your data</span>
-            <h2 style={ttrTypography.h2}>Uploaded baselines</h2>
-            <p style={ttrTypography.bodyMuted}>
-              Upload and manage your locked rAcsumAc baselines. These are used as the
-              source of truth when analyzing role fit.
-            </p>
-          </div>
-
-          {baselineFetchError ? (
-            <div className="space-y-3">
-              <Alert intent="error" title="Unable to load baselines">
-                <p>{baselineFetchError}</p>
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <RetryButton label="Try again" />
-                </div>
-              </Alert>
+              <p style={ttrTypography.bodyMuted}>
+                Upload and manage your baseline resumes. These are your source of truth for scoring
+                and tailoring.
+              </p>
             </div>
-          ) : null}
 
-          <BaselineDashboard
-            initialBaselines={baselines}
-            initialFetchError={baselineFetchError}
-          />
-        </section>
+            {baselineFetchError ? (
+              <div className="space-y-3">
+                <Alert intent="error" title="Unable to load baselines">
+                  <p>{baselineFetchError}</p>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <RetryButton label="Try again" />
+                  </div>
+                </Alert>
+              </div>
+            ) : null}
+
+            <BaselineDashboard
+              initialBaselines={baselines}
+              initialFetchError={baselineFetchError}
+            />
+          </section>
+
+          <div className="space-y-6">
+            <JobsHub />
+          </div>
+        </div>
       </div>
     </InstrumentPanelShell>
   );

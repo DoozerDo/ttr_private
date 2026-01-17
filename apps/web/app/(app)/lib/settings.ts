@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { AUTO_GENERATE_THRESHOLD } from "./autoGenerateThreshold";
 
 const SETTINGS_STORAGE_KEY = "ttr.settings.v1";
-export const DEFAULT_AUTO_GENERATE_THRESHOLD = 92;
 const MIN_AUTO_GENERATE_THRESHOLD = 50;
 const MAX_AUTO_GENERATE_THRESHOLD = 100;
 
@@ -18,18 +18,18 @@ function normalizeThreshold(value: unknown): number {
       return rounded;
     }
   }
-  return DEFAULT_AUTO_GENERATE_THRESHOLD;
+  return AUTO_GENERATE_THRESHOLD;
 }
 
 function readSettingsFromStorage(): AppSettings {
   if (!isWindowAvailable()) {
-    return { autoGenerateThreshold: DEFAULT_AUTO_GENERATE_THRESHOLD };
+    return { autoGenerateThreshold: AUTO_GENERATE_THRESHOLD };
   }
 
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) {
-      return { autoGenerateThreshold: DEFAULT_AUTO_GENERATE_THRESHOLD };
+      return { autoGenerateThreshold: AUTO_GENERATE_THRESHOLD };
     }
 
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
@@ -37,7 +37,7 @@ function readSettingsFromStorage(): AppSettings {
       autoGenerateThreshold: normalizeThreshold(parsed?.autoGenerateThreshold),
     };
   } catch {
-    return { autoGenerateThreshold: DEFAULT_AUTO_GENERATE_THRESHOLD };
+    return { autoGenerateThreshold: AUTO_GENERATE_THRESHOLD };
   }
 }
 
