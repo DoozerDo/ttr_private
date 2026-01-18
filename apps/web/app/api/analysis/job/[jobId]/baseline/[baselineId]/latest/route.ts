@@ -3,7 +3,7 @@ import {
   getApiBaseUrl,
   relayApiResponse,
   requireAuthToken,
-} from "../../../../baselines/helpers";
+} from "../../../../../../baselines/helpers";
 
 export const runtime = "nodejs";
 

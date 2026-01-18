@@ -16,7 +16,10 @@ type DimensionScoreValue = number | string | null | undefined;
 type FitResultPayload = {
   score?: number | null;
   verdict?: string | null;
-  dimensionScores?: Record<string, DimensionScoreValue> | DimensionScoreValue[] | null;
+  dimensionScores?:
+    | Record<string, DimensionScoreValue>
+    | DimensionScoreValue[]
+    | null;
   complianceFlags?: unknown[] | null;
   [key: string]: unknown;
 };
@@ -64,6 +67,12 @@ const extractErrorMessage = (payload: unknown): string | null => {
   return null;
 };
 
+const extractCreatedAtString = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const createdAt = (payload as Record<string, unknown>).createdAt;
+  return typeof createdAt === "string" && createdAt.trim().length ? createdAt : null;
+};
+
 export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
@@ -90,19 +99,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const flagList = useMemo(() => {
     const flags = result?.complianceFlags;
     if (!Array.isArray(flags)) return [];
-    return flags.map((flag) =>
-      typeof flag === "string" ? flag : JSON.stringify(flag),
-    );
+    return flags.map((flag) => (typeof flag === "string" ? flag : JSON.stringify(flag)));
   }, [result]);
 
   const runAssessment = async () => {
-    if (
-      !baselineId ||
-      !jobId ||
-      isRunningRef.current ||
-      isLoadingLatestRef.current
-    )
-      return;
+    if (!baselineId || !jobId || isRunningRef.current || isLoadingLatestRef.current) return;
 
     setIsRunning(true);
     setError(null);
@@ -119,16 +120,15 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const payload = await response.json();
       if (!response.ok) {
-        const message =
-          extractErrorMessage(payload) ?? "Unable to run fit assessment.";
+        const message = extractErrorMessage(payload) ?? "Unable to run fit assessment.";
         throw new Error(message);
       }
 
       setResult(payload as FitResultPayload);
-      setLastRunAt(
-        (payload as Record<string, unknown>)?.createdAt ??
-          new Date().toISOString(),
-      );
+
+      const createdAt = extractCreatedAtString(payload);
+      setLastRunAt(createdAt ?? new Date().toISOString());
+
       setSuccessMessage("Assessment complete");
     } catch (runError: any) {
       setError(runError?.message ?? "Unable to run fit assessment right now.");
@@ -138,13 +138,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   };
 
   const loadLatest = useCallback(async () => {
-    if (
-      !baselineId ||
-      !jobId ||
-      isRunningRef.current ||
-      isLoadingLatestRef.current
-    )
-      return;
+    if (!baselineId || !jobId || isRunningRef.current || isLoadingLatestRef.current) return;
 
     setIsLoadingLatest(true);
     setError(null);
@@ -152,9 +146,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
     try {
       const response = await fetch(
-        `/api/analysis/job/${encodeURIComponent(
-          jobId,
-        )}/baseline/${encodeURIComponent(baselineId)}/latest`,
+        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
+          baselineId,
+        )}/latest`,
         {
           cache: "no-store",
         },
@@ -162,13 +156,15 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const payload = await response.json();
       if (!response.ok) {
-        const message =
-          extractErrorMessage(payload) ?? "Unable to load latest assessment.";
+        const message = extractErrorMessage(payload) ?? "Unable to load latest assessment.";
         throw new Error(message);
       }
 
       setResult(payload as FitResultPayload);
-      setLastRunAt((payload as Record<string, unknown>)?.createdAt ?? null);
+
+      const createdAt = extractCreatedAtString(payload);
+      setLastRunAt(createdAt);
+
       setSuccessMessage("Latest assessment loaded");
     } catch (loadError: any) {
       setError(loadError?.message ?? "Unable to load the latest assessment.");
@@ -223,8 +219,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       <div className="space-y-1 text-sm text-slate-200">
         <p>
-          Baseline:{" "}
-          <span className="font-semibold">{baselineStatus}</span>
+          Baseline: <span className="font-semibold">{baselineStatus}</span>
           {baselineId ? ` (${baselineId})` : null}
         </p>
         <p>
@@ -234,15 +229,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <FormButton
-          onClick={runAssessment}
-          disabled={
-            !baselineId ||
-            !jobId ||
-            isRunning ||
-            isLoadingLatest
-          }
-        >
+        <FormButton onClick={runAssessment} disabled={!baselineId || !jobId || isRunning || isLoadingLatest}>
           {isRunning ? "Running..." : "Run Fit Assessment"}
         </FormButton>
         <FormButton
@@ -250,12 +237,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           onClick={() => {
             void loadLatest();
           }}
-          disabled={
-            !baselineId ||
-            !jobId ||
-            isLoadingLatest ||
-            isRunning
-          }
+          disabled={!baselineId || !jobId || isLoadingLatest || isRunning}
         >
           {isLoadingLatest ? "Loading latest..." : "Load latest for job"}
         </FormButton>
@@ -276,26 +258,18 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       {showResult ? (
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200">
           <div className="flex items-baseline justify-between">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-              Results
-            </p>
-            <span className="text-xs text-slate-400">
-              {result?.verdict ?? "Verdict pending"}
-            </span>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Results</p>
+            <span className="text-xs text-slate-400">{result?.verdict ?? "Verdict pending"}</span>
           </div>
           {formattedLastRun ? (
-            <p className="text-xs text-slate-400">
-              Last run: {formattedLastRun}
-            </p>
+            <p className="text-xs text-slate-400">Last run: {formattedLastRun}</p>
           ) : null}
           <p className="text-3xl font-semibold text-white">
             {typeof result?.score === "number" ? result.score.toFixed(1) : "n/a"}
           </p>
           {dimensionEntries.length ? (
             <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                Dimension scores
-              </p>
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Dimension scores</p>
               <div className="grid gap-1 text-xs text-slate-300">
                 {dimensionEntries.map(([label, value]) => (
                   <p key={`${label}-${String(value)}`}>
@@ -307,9 +281,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           ) : null}
           {flagList.length ? (
             <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                Compliance flags
-              </p>
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Compliance flags</p>
               <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
                 {flagList.map((flag, index) => (
                   <li key={`flag-${index}`}>{flag}</li>
