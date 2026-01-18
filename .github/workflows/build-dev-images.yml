@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - develop
-      - salvage-cover-baseline
 
 permissions:
   contents: read
