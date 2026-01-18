@@ -1138,16 +1138,7 @@ export class AnalysisService {
     }));
   }
 
-  async getLatestAssessment(userId: string, jobId: string) {
-    const assessment = await this.fitAssessmentRepository.findOne({
-      where: { userId, jobId },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (!assessment) {
-      throw new NotFoundException('Fit assessment not found');
-    }
-
+  private async buildLatestAssessmentPayload(assessment: FitAssessment) {
     const summary = this.buildSummaryFromTerms(
       assessment.strengths ?? [],
       assessment.gaps ?? [],
@@ -1180,6 +1171,36 @@ export class AnalysisService {
       summary,
       createdAt: assessment.createdAt,
     };
+  }
+
+  async getLatestAssessment(userId: string, jobId: string) {
+    const assessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, jobId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!assessment) {
+      throw new NotFoundException('Fit assessment not found');
+    }
+
+    return this.buildLatestAssessmentPayload(assessment);
+  }
+
+  async getLatestAssessmentForBaseline(
+    userId: string,
+    jobId: string,
+    baselineId: string,
+  ) {
+    const assessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, jobId, baselineId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!assessment) {
+      throw new NotFoundException('Fit assessment not found');
+    }
+
+    return this.buildLatestAssessmentPayload(assessment);
   }
 }
 

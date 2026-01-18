@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
@@ -69,6 +69,18 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
+  const [lastRunAt, setLastRunAt] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const isRunningRef = useRef(isRunning);
+  const isLoadingLatestRef = useRef(isLoadingLatest);
+
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  useEffect(() => {
+    isLoadingLatestRef.current = isLoadingLatest;
+  }, [isLoadingLatest]);
 
   const dimensionEntries = useMemo(
     () => (result ? formatDimensionEntries(result) : []),
@@ -84,9 +96,18 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   }, [result]);
 
   const runAssessment = async () => {
-    if (!baselineId || !jobId || isRunning) return;
+    if (
+      !baselineId ||
+      !jobId ||
+      isRunningRef.current ||
+      isLoadingLatestRef.current
+    )
+      return;
+
     setIsRunning(true);
     setError(null);
+    setSuccessMessage(null);
+
     try {
       const response = await fetch("/api/analysis/run", {
         method: "POST",
@@ -104,6 +125,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       }
 
       setResult(payload as FitResultPayload);
+      setLastRunAt(
+        (payload as Record<string, unknown>)?.createdAt ??
+          new Date().toISOString(),
+      );
+      setSuccessMessage("Assessment complete");
     } catch (runError: any) {
       setError(runError?.message ?? "Unable to run fit assessment right now.");
     } finally {
@@ -111,13 +137,24 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     }
   };
 
-  const loadLatest = async () => {
-    if (!jobId || isLoadingLatest) return;
+  const loadLatest = useCallback(async () => {
+    if (
+      !baselineId ||
+      !jobId ||
+      isRunningRef.current ||
+      isLoadingLatestRef.current
+    )
+      return;
+
     setIsLoadingLatest(true);
     setError(null);
+    setSuccessMessage(null);
+
     try {
       const response = await fetch(
-        `/api/analysis/job/${encodeURIComponent(jobId)}/latest`,
+        `/api/analysis/job/${encodeURIComponent(
+          jobId,
+        )}/baseline/${encodeURIComponent(baselineId)}/latest`,
         {
           cache: "no-store",
         },
@@ -131,16 +168,36 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       }
 
       setResult(payload as FitResultPayload);
+      setLastRunAt((payload as Record<string, unknown>)?.createdAt ?? null);
+      setSuccessMessage("Latest assessment loaded");
     } catch (loadError: any) {
       setError(loadError?.message ?? "Unable to load the latest assessment.");
     } finally {
       setIsLoadingLatest(false);
     }
-  };
+  }, [baselineId, jobId]);
+
+  useEffect(() => {
+    if (!baselineId || !jobId) {
+      setResult(null);
+      setLastRunAt(null);
+      setSuccessMessage(null);
+      setError(null);
+      return;
+    }
+
+    void loadLatest();
+  }, [baselineId, jobId, loadLatest]);
 
   const baselineStatus = baselineId ? "Selected" : "Not selected";
   const jobStatus = jobId ? "Selected" : "Not selected";
   const showResult = Boolean(result);
+  const formattedLastRun = useMemo(() => {
+    if (!lastRunAt) return null;
+    const parsed = new Date(lastRunAt);
+    if (Number.isNaN(parsed.getTime())) return lastRunAt;
+    return parsed.toLocaleString();
+  }, [lastRunAt]);
 
   return (
     <section
@@ -179,18 +236,36 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       <div className="flex flex-wrap gap-3">
         <FormButton
           onClick={runAssessment}
-          disabled={!baselineId || !jobId || isRunning}
+          disabled={
+            !baselineId ||
+            !jobId ||
+            isRunning ||
+            isLoadingLatest
+          }
         >
           {isRunning ? "Running..." : "Run Fit Assessment"}
         </FormButton>
         <FormButton
           variant="secondary"
-          onClick={loadLatest}
-          disabled={!jobId || isLoadingLatest}
+          onClick={() => {
+            void loadLatest();
+          }}
+          disabled={
+            !baselineId ||
+            !jobId ||
+            isLoadingLatest ||
+            isRunning
+          }
         >
           {isLoadingLatest ? "Loading latest..." : "Load latest for job"}
         </FormButton>
       </div>
+
+      {successMessage ? (
+        <Alert intent="success">
+          <p className="text-sm text-current">{successMessage}</p>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert intent="error" title="Workspace runner">
@@ -208,6 +283,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
               {result?.verdict ?? "Verdict pending"}
             </span>
           </div>
+          {formattedLastRun ? (
+            <p className="text-xs text-slate-400">
+              Last run: {formattedLastRun}
+            </p>
+          ) : null}
           <p className="text-3xl font-semibold text-white">
             {typeof result?.score === "number" ? result.score.toFixed(1) : "n/a"}
           </p>

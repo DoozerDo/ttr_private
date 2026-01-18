@@ -104,4 +104,23 @@ export class AnalysisController {
 
     return this.analysisService.getLatestAssessment(userId, jobId);
   }
+
+  @Get('job/:jobId/baseline/:baselineId/latest')
+  async getLatestAssessmentForBaseline(
+    @Param('jobId') jobId: string,
+    @Param('baselineId') baselineId: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.getLatestAssessmentForBaseline(
+      userId,
+      jobId,
+      baselineId,
+    );
+  }
 }
