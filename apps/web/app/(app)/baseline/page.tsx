@@ -7,10 +7,12 @@ import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
-import type { CSSProperties } from "react";
 import { JobsHub } from "./_components/JobsHub";
+import { WorkspaceRunner } from "./_components/WorkspaceRunner";
+import type { CSSProperties } from "react";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 async function buildInternalApiUrl(path: string) {
   const headerList = await headers();
@@ -54,6 +56,19 @@ function isNextRedirectError(error: unknown) {
   return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
 }
 
+type SearchParamsShape = Record<string, string | string[] | undefined>;
+
+type BaselinePageProps = {
+  searchParams?: SearchParamsShape | Promise<SearchParamsShape>;
+};
+
+const resolveParam = (value: string | string[] | undefined): string | null => {
+  if (Array.isArray(value)) {
+    return value.length ? value[0] : null;
+  }
+  return value ?? null;
+};
+
 const onboardingTextStyle: CSSProperties = {
   ...ttrTypography.paragraph,
   color: "rgba(226,232,240,0.85)",
@@ -87,7 +102,8 @@ async function fetchBaselines(): Promise<BaselineFetchResult> {
     }
 
     console.error("Failed to fetch baselines", error);
-    const message = error instanceof Error ? error.message : "Unable to load baselines.";
+    const message =
+      error instanceof Error ? error.message : "Unable to load baselines.";
     return {
       baselines: [],
       error: message,
@@ -95,7 +111,12 @@ async function fetchBaselines(): Promise<BaselineFetchResult> {
   }
 }
 
-export default async function BaselinePage() {
+export default async function BaselinePage({ searchParams }: BaselinePageProps) {
+  const params = (await Promise.resolve(searchParams ?? {})) as SearchParamsShape;
+
+  const selectedBaselineId = resolveParam(params.baselineId);
+  const selectedJobId = resolveParam(params.jobId);
+
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
 
@@ -111,17 +132,17 @@ export default async function BaselinePage() {
       title="Target this role with clarity."
       subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
     >
-        <div className="space-y-6">
-          <div className="space-y-3">
-            <p style={onboardingTextStyle}>
-              A baseline is the resume you trust most. TTR uses it as your source of truth, then
-              compares it against a job description to generate your CX Fit Score and tailored outputs.
-            </p>
-            <p style={onboardingTextStyle}>
-              Upload a baseline, keep it updated, and pair it against the roles you care about to see
-              how the scores and outputs evolve.
-            </p>
-          </div>
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <p style={onboardingTextStyle}>
+            A baseline is the resume you trust most. TTR uses it as your source of truth, then
+            compares it against a job description to generate your CX Fit Score and tailored outputs.
+          </p>
+          <p style={onboardingTextStyle}>
+            Upload a baseline, keep it updated, and pair it against the roles you care about to see
+            how the scores and outputs evolve.
+          </p>
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <section style={ttrComponents.basePanel}>
@@ -153,13 +174,20 @@ export default async function BaselinePage() {
             <BaselineDashboard
               initialBaselines={baselines}
               initialFetchError={baselineFetchError}
+              selectedBaselineId={selectedBaselineId}
             />
           </section>
 
           <div className="space-y-6">
-            <JobsHub />
+            <JobsHub selectedJobId={selectedJobId} />
           </div>
         </div>
+
+        <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-xs text-slate-400">
+          debug baselineId={selectedBaselineId ?? "null"} jobId={selectedJobId ?? "null"}
+        </div>
+
+        <WorkspaceRunner baselineId={selectedBaselineId} jobId={selectedJobId} />
       </div>
     </InstrumentPanelShell>
   );

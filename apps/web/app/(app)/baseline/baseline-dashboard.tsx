@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
 import { useMemo, useRef, useState } from "react";
 
@@ -21,6 +22,7 @@ import { getBaselineDetailsHref } from "@/src/navigation/routes";
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
   initialFetchError?: string | null;
+  selectedBaselineId?: string | null;
 }
 
 const isBaselineUploadResponse = (
@@ -36,6 +38,7 @@ const isBaselineUploadResponse = (
 export function BaselineDashboard({
   initialBaselines,
   initialFetchError,
+  selectedBaselineId,
 }: BaselineDashboardProps) {
   const [baselines, setBaselines] = useState<BaselineDto[]>(initialBaselines);
   const [file, setFile] = useState<File | null>(null);
@@ -46,6 +49,19 @@ export function BaselineDashboard({
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  const setBaselineSelection = (baselineId: string) => {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("baselineId", baselineId);
+    const query = params.toString();
+    const base = pathname ?? "/baseline";
+    const target = query ? `${base}?${query}` : base;
+    router.push(target);
+    router.refresh();
+  };
 
   const refreshBaselines = async () => {
     const latest = await listBaselines();
@@ -495,39 +511,44 @@ export function BaselineDashboard({
               )
             ) : (
               <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                {sortedBaselines.map((baseline, index) => (
-                  <li
-                    key={baseline.id}
+            {sortedBaselines.map((baseline, index) => {
+              const isSelected = baseline.id === selectedBaselineId;
+
+              return (
+                <li
+                  key={baseline.id}
+                  style={{
+                    ...listItemStyle,
+                    borderTop:
+                      index === 0
+                        ? "none"
+                        : "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <div
                     style={{
-                      ...listItemStyle,
-                      borderTop:
-                        index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      minWidth: 220,
                     }}
                   >
                     <div
                       style={{
                         display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                        minWidth: 220,
+                        alignItems: "center",
+                        gap: 8,
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <p style={filenameStyle}>{baseline.originalFilename}</p>
-                        {baseline.status === "ARCHIVED" ? (
-                          <span style={archivedBadgeStyle}>Archived</span>
-                        ) : null}
-                      </div>
-                      <p style={metaStyle}>
-                        Uploaded {formatDateTime(baseline.createdAt)}
-                      </p>
+                      <p style={filenameStyle}>{baseline.originalFilename}</p>
+                      {baseline.status === "ARCHIVED" ? (
+                        <span style={archivedBadgeStyle}>Archived</span>
+                      ) : null}
                     </div>
+                    <p style={metaStyle}>
+                      Uploaded {formatDateTime(baseline.createdAt)}
+                    </p>
+                  </div>
 
                     <div
                       style={{
@@ -536,27 +557,44 @@ export function BaselineDashboard({
                         gap: 8,
                       }}
                     >
-                      <Link href={getBaselineDetailsHref(baseline.id)} style={linkStyle}>
+                      <Link
+                        href={getBaselineDetailsHref(baseline.id)}
+                        style={linkStyle}
+                      >
                         View details
                       </Link>
                       <button
                         type="button"
-                        onClick={() => handleBaselineStatusUpdate(baseline)}
-                        disabled={isUploading || isRefreshing}
+                        onClick={() => setBaselineSelection(baseline.id)}
+                        disabled={isSelected}
                         style={{
                           ...statusActionButtonStyle,
-                          opacity: isUploading || isRefreshing ? 0.6 : 1,
-                          cursor:
-                            isUploading || isRefreshing
-                              ? "not-allowed"
-                              : "pointer",
+                          opacity: isSelected ? 0.6 : 1,
+                          cursor: isSelected ? "not-allowed" : "pointer",
+                          minWidth: 90,
                         }}
                       >
-                        {baseline.status === "ACTIVE" ? "Archive" : "Restore"}
+                        {isSelected ? "Selected" : "Select"}
                       </button>
-                    </div>
-                  </li>
-                ))}
+                    <button
+                      type="button"
+                      onClick={() => handleBaselineStatusUpdate(baseline)}
+                      disabled={isUploading || isRefreshing}
+                      style={{
+                        ...statusActionButtonStyle,
+                        opacity: isUploading || isRefreshing ? 0.6 : 1,
+                        cursor:
+                          isUploading || isRefreshing
+                            ? "not-allowed"
+                            : "pointer",
+                      }}
+                    >
+                      {baseline.status === "ACTIVE" ? "Archive" : "Restore"}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
               </ul>
             )}
           </div>

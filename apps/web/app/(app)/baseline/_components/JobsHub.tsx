@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { EmptyState } from "@/components/EmptyState";
@@ -34,7 +35,11 @@ function formatDate(dateIso?: string | null) {
   }
 }
 
-export function JobsHub() {
+interface JobsHubProps {
+  selectedJobId?: string | null;
+}
+
+export function JobsHub({ selectedJobId }: JobsHubProps) {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +66,19 @@ export function JobsHub() {
   }, [load]);
 
   const visibleJobs = jobs;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  const setJobSelection = (jobId: string) => {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("jobId", jobId);
+    const query = params.toString();
+    const base = pathname ?? "/baseline";
+    const target = query ? `${base}?${query}` : base;
+    router.push(target);
+    router.refresh();
+  };
 
   const onArchive = useCallback(
     async (jobId: string) => {
@@ -180,6 +198,7 @@ export function JobsHub() {
             {visibleJobs.map((job) => {
               const archived = isArchived(job);
               const isBusy = busyJobId === job.id;
+              const isSelected = job.id === selectedJobId;
 
               return (
                 <li key={job.id} className="px-6 py-4">
@@ -228,6 +247,13 @@ export function JobsHub() {
                       >
                         View details
                       </Link>
+                      <FormButton
+                        variant="ghost"
+                        onClick={() => setJobSelection(job.id)}
+                        disabled={isSelected}
+                      >
+                        {isSelected ? "Selected" : "Select"}
+                      </FormButton>
 
                       {archived ? (
                         <FormButton
