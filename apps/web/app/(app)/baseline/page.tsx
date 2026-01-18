@@ -41,7 +41,6 @@ type BaselineFetchResult = {
   error: string | null;
 };
 
-<<<<<<< HEAD
 function isNextRedirectError(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;
@@ -55,40 +54,7 @@ function isNextRedirectError(error: unknown) {
   return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
 }
 
-const instructionSteps = [
-  {
-    title: "Step 1: Upload your baseline resume.",
-    detail:
-      "Use a current resume that reflects your real experience. Do not upload a job specific version.",
-  },
-  {
-    title: "Step 2: Confirm your baseline appears in the library.",
-    detail: "You can keep multiple baselines later, but start with one.",
-  },
-  {
-    title: "Step 3: Go to Analyze.",
-    detail: "Paste a job description and run Analyze to generate your CX Fit Score.",
-  },
-];
-
-const instructionPanelStyle: CSSProperties = {
-  ...ttrComponents.basePanel,
-  flex: "0 0 auto",
-  minWidth: 0,
-  padding: 24,
-};
-
-const instructionStepsContainerStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-  marginTop: 20,
-};
-
-const instructionStepTitleStyle: CSSProperties = {
-=======
 const onboardingTextStyle: CSSProperties = {
->>>>>>> 8cc9213 (Cover and Baseline)
   ...ttrTypography.paragraph,
   color: "rgba(226,232,240,0.85)",
   margin: 0,

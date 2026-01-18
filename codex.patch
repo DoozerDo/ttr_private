@@ -1,88 +1,103 @@
-diff --git a/apps/api/src/auth/jwt.strategy.ts b/apps/api/src/auth/jwt.strategy.ts
-index e5bb7772a78ccd5cc3731e36721c54a337201712..b2761205833db50dbb19c58ebb399729cf0187d2 100644
---- a/apps/api/src/auth/jwt.strategy.ts
-+++ b/apps/api/src/auth/jwt.strategy.ts
-@@ -1,51 +1,82 @@
- import { Injectable, UnauthorizedException } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
- import { PassportStrategy } from '@nestjs/passport';
- import { ExtractJwt, Strategy } from 'passport-jwt';
- import { UsersService } from '../users/users.service';
- import { getEntitlementsForTier } from '../features/feature-gates';
- import type { AuthUserDto } from './dto/auth-response.dto';
-+import type { Request } from 'express';
+diff --git a/apps/web/app/(app)/baseline/page.tsx b/apps/web/app/(app)/baseline/page.tsx
+index 21122246333959a552b180aa284a6ee146fb9e51..620f9d7c46cce3cc4e0fb47154ed8eefaebbbaac 100644
+--- a/apps/web/app/(app)/baseline/page.tsx
++++ b/apps/web/app/(app)/baseline/page.tsx
+@@ -19,98 +19,64 @@ async function buildInternalApiUrl(path: string) {
+   const fallbackBase = process.env.NEXT_PUBLIC_BASE_URL;
  
- type JwtPayload = {
-   sub: string;
-   email: string;
-   subscriptionTier?: string;
+   const baseUrl = fallbackBase ?? (host ? `${protocol}://${host}` : null);
+ 
+   return new URL(path, baseUrl ?? "http://localhost:3000").toString();
+ }
+ 
+ async function buildInternalFetchOptions(): Promise<RequestInit> {
+   const headerList = await headers();
+   const cookieHeader = headerList.get("cookie");
+ 
+   const headersInit = cookieHeader ? { cookie: cookieHeader } : undefined;
+ 
+   return {
+     cache: "no-store",
+     credentials: "include",
+     headers: headersInit,
+   };
+ }
+ 
+ type BaselineFetchResult = {
+   baselines: BaselineDto[];
+   error: string | null;
  };
  
-+const AUTH_COOKIE_NAME = 'ttr_token';
-+
-+function extractTokenFromCookie(req: Request | undefined | null): string | null {
-+  if (!req) {
-+    return null;
-+  }
-+
-+  const cookieHeader = req.headers?.cookie;
-+  if (!cookieHeader) {
-+    return null;
-+  }
-+
-+  const parts = cookieHeader.split(';');
-+  for (const part of parts) {
-+    const trimmed = part.trim();
-+    if (!trimmed) continue;
-+    const separatorIndex = trimmed.indexOf('=');
-+    if (separatorIndex <= 0) continue;
-+    const name = trimmed.slice(0, separatorIndex).trim();
-+    if (name !== AUTH_COOKIE_NAME) continue;
-+    const value = trimmed.slice(separatorIndex + 1);
-+    return value ? decodeURIComponent(value) : null;
-+  }
-+
-+  return null;
-+}
-+
- @Injectable()
- export class JwtStrategy extends PassportStrategy(Strategy) {
-   constructor(
-     configService: ConfigService,
-     private readonly usersService: UsersService,
-   ) {
-     const jwtSecret = configService.get<string>('JWT_SECRET');
- 
-     if (!jwtSecret) {
-       // Fail fast if misconfigured instead of letting it be undefined
-       throw new Error('JWT_SECRET is not configured');
-     }
- 
-     super({
--      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-+      jwtFromRequest: ExtractJwt.fromExtractors([
-+        ExtractJwt.fromAuthHeaderAsBearerToken(),
-+        extractTokenFromCookie,
-+      ]),
-       ignoreExpiration: false,
-       secretOrKey: jwtSecret,
-     });
+-<<<<<<< HEAD
+ function isNextRedirectError(error: unknown) {
+   if (!error || typeof error !== "object") {
+     return false;
    }
  
-   async validate(payload: JwtPayload): Promise<AuthUserDto> {
-     const user = await this.usersService.findById(payload.sub);
+   if (!("digest" in error)) {
+     return false;
+   }
  
-     if (!user) {
-       throw new UnauthorizedException('User not found');
+   const digest = (error as { digest?: string }).digest;
+   return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+ }
+ 
+-const instructionSteps = [
+-  {
+-    title: "Step 1: Upload your baseline resume.",
+-    detail:
+-      "Use a current resume that reflects your real experience. Do not upload a job specific version.",
+-  },
+-  {
+-    title: "Step 2: Confirm your baseline appears in the library.",
+-    detail: "You can keep multiple baselines later, but start with one.",
+-  },
+-  {
+-    title: "Step 3: Go to Analyze.",
+-    detail: "Paste a job description and run Analyze to generate your CX Fit Score.",
+-  },
+-];
+-
+-const instructionPanelStyle: CSSProperties = {
+-  ...ttrComponents.basePanel,
+-  flex: "0 0 auto",
+-  minWidth: 0,
+-  padding: 24,
+-};
+-
+-const instructionStepsContainerStyle: CSSProperties = {
+-  display: "flex",
+-  flexDirection: "column",
+-  gap: 12,
+-  marginTop: 20,
+-};
+-
+-const instructionStepTitleStyle: CSSProperties = {
+-=======
+ const onboardingTextStyle: CSSProperties = {
+->>>>>>> 8cc9213 (Cover and Baseline)
+   ...ttrTypography.paragraph,
+   color: "rgba(226,232,240,0.85)",
+   margin: 0,
+   lineHeight: 1.5,
+ };
+ 
+ async function fetchBaselines(): Promise<BaselineFetchResult> {
+   try {
+     const res = await fetch(
+       await buildInternalApiUrl("/api/baselines"),
+       await buildInternalFetchOptions(),
+     );
+ 
+     if (res.status === 401) {
+       redirect("/auth/login");
      }
  
-     const entitlements = getEntitlementsForTier(user.subscriptionTier);
- 
-     const { passwordHash, ...sanitizedUser } = user;
+     if (!res.ok) {
+       const message = (await res.text()) || "Unable to load baselines";
+       throw new Error(message);
+     }
  
      return {
-       ...sanitizedUser,
-       entitlements,
-     };
-   }
- }
+       baselines: (await res.json()) as BaselineDto[],
+       error: null,
