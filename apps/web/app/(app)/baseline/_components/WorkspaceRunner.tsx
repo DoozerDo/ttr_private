@@ -1,15 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
-import { ttrTypography } from "@/app/(app)/ui/ttrStyles";
-import { InputCard } from "./InputCard";
-import {
-  getSelectionState,
-  subscribeSelection,
-} from "./selectionStore";
+import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 
 type WorkspaceRunnerProps = {
   baselineId: string | null;
@@ -21,11 +16,15 @@ type DimensionScoreValue = number | string | null | undefined;
 type FitResultPayload = {
   score?: number | null;
   verdict?: string | null;
-  dimensionScores?:
-    | Record<string, DimensionScoreValue>
-    | DimensionScoreValue[]
-    | null;
+  dimensionScores?: Record<string, DimensionScoreValue> | DimensionScoreValue[] | null;
   complianceFlags?: unknown[] | null;
+
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  assessedAt?: string | null;
+  runAt?: string | null;
+  timestamp?: string | null;
+
   [key: string]: unknown;
 };
 
@@ -68,33 +67,44 @@ const extractErrorMessage = (payload: unknown): string | null => {
       return candidate;
     }
   }
+  return null;
+};
+
+const pickTimestamp = (payload: FitResultPayload | null): string | null => {
+  if (!payload) return null;
+
+  const candidates = [
+    payload.assessedAt,
+    payload.runAt,
+    payload.createdAt,
+    payload.updatedAt,
+    payload.timestamp,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length) return candidate;
+  }
 
   return null;
 };
 
-const extractCreatedAtString = (payload: unknown): string | null => {
-  if (!payload || typeof payload !== "object") return null;
-  const createdAt = (payload as Record<string, unknown>).createdAt;
-  return typeof createdAt === "string" && createdAt.trim().length ? createdAt : null;
+const formatTimestamp = (value: string | null): string => {
+  if (!value) return "Not yet";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
 };
 
 export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [isRunning, setIsRunning] = useState(false);
-  const [isLoadingLatest, setIsLoadingLatest] = useState(false);
+  const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const isRunningRef = useRef(isRunning);
-  const isLoadingLatestRef = useRef(isLoadingLatest);
-
-  useEffect(() => {
-    isRunningRef.current = isRunning;
-  }, [isRunning]);
-
-  useEffect(() => {
-    isLoadingLatestRef.current = isLoadingLatest;
-  }, [isLoadingLatest]);
+  const [completeBanner, setCompleteBanner] = useState<string | null>(null);
 
   const dimensionEntries = useMemo(
     () => (result ? formatDimensionEntries(result) : []),
@@ -104,21 +114,43 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const flagList = useMemo(() => {
     const flags = result?.complianceFlags;
     if (!Array.isArray(flags)) return [];
-    return flags.map((flag) => (typeof flag === "string" ? flag : JSON.stringify(flag)));
+    return flags.map((flag) =>
+      typeof flag === "string" ? flag : (() => {
+        try {
+          return JSON.stringify(flag);
+        } catch {
+          return String(flag);
+        }
+      })(),
+    );
   }, [result]);
 
+  const canRun = Boolean(baselineId) && Boolean(jobId) && !isRunning;
+  const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
+  const showResult = Boolean(result);
+
+  const scoreValueText =
+    typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
+
+  const statusLine = useMemo(() => {
+    if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
+    if (!baselineId) return "Select a baseline to continue.";
+    if (!jobId) return "Select a job to continue.";
+    if (isRunning) return "Running compatibility score.";
+    if (result) return "Compatibility score ready.";
+    return "Ready to run compatibility scoring.";
+  }, [baselineId, jobId, isRunning, result]);
+
   const runAssessment = async () => {
-    if (!baselineId || !jobId || isRunningRef.current || isLoadingLatestRef.current) return;
+    if (!baselineId || !jobId || isRunning) return;
 
     setIsRunning(true);
     setError(null);
-    setSuccessMessage(null);
+    setCompleteBanner(null);
 
     try {
       const response = await fetch("/api/analysis/run", {
         method: "POST",
-        cache: "no-store",
-        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -126,145 +158,112 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       });
 
       const payload = await response.json();
+
       if (!response.ok) {
-        const message = extractErrorMessage(payload) ?? "Unable to run fit assessment.";
+        const message = extractErrorMessage(payload) ?? "Unable to run compatibility scoring.";
         throw new Error(message);
       }
 
-      setResult(payload as FitResultPayload);
+      const nextResult = payload as FitResultPayload;
+      setResult(nextResult);
 
-      const createdAt = extractCreatedAtString(payload);
-      setLastRunAt(createdAt ?? new Date().toISOString());
-
-      setSuccessMessage("Assessment complete");
+      const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
+      setLastRunAt(ts);
+      setCompleteBanner("Assessment complete");
     } catch (runError: any) {
-      setError(runError?.message ?? "Unable to run fit assessment right now.");
+      setError(runError?.message ?? "Unable to run compatibility scoring right now.");
     } finally {
       setIsRunning(false);
     }
   };
 
-  const loadLatest = useCallback(async () => {
-    if (!baselineId || !jobId || isRunningRef.current || isLoadingLatestRef.current) return;
+  const loadLastRun = async () => {
+    if (!baselineId || !jobId || isLoadingLastRun) return;
 
-    setIsLoadingLatest(true);
+    setIsLoadingLastRun(true);
     setError(null);
-    setSuccessMessage(null);
+    setCompleteBanner(null);
 
     try {
-      const response = await fetch(
-        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
-          baselineId,
-        )}/latest`,
-        {
-          cache: "no-store",
-          credentials: "include",
-        },
-      );
+      const url = new URL("/api/analysis/latest", window.location.origin);
+      url.searchParams.set("baselineId", baselineId);
+      url.searchParams.set("jobId", jobId);
 
+      const response = await fetch(url.toString(), { cache: "no-store" });
       const payload = await response.json();
+
       if (!response.ok) {
-        const message = extractErrorMessage(payload) ?? "Unable to load latest assessment.";
+        const message = extractErrorMessage(payload) ?? "Unable to load the last run.";
         throw new Error(message);
       }
 
-      setResult(payload as FitResultPayload);
+      const nextResult = payload as FitResultPayload;
+      setResult(nextResult);
 
-      const createdAt = extractCreatedAtString(payload);
-      setLastRunAt(createdAt);
-
-      setSuccessMessage("Latest assessment loaded");
+      const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
+      setLastRunAt(ts);
+      setCompleteBanner("Loaded last run");
     } catch (loadError: any) {
-      setError(loadError?.message ?? "Unable to load the latest assessment.");
+      setError(loadError?.message ?? "Unable to load the last run.");
     } finally {
-      setIsLoadingLatest(false);
+      setIsLoadingLastRun(false);
     }
-  }, [baselineId, jobId]);
-
-  useEffect(() => {
-    if (!baselineId || !jobId) {
-      setResult(null);
-      setLastRunAt(null);
-      setSuccessMessage(null);
-      setError(null);
-      return;
-    }
-
-    void loadLatest();
-  }, [baselineId, jobId, loadLatest]);
-
-  const baselineStatus = baselineId ? "Selected" : "Not selected";
-  const jobStatus = jobId ? "Selected" : "Not selected";
-  const selection = useSyncExternalStore(subscribeSelection, getSelectionState);
-  const baselineLabel =
-    baselineStatus === "Selected"
-      ? selection.baselineName ?? baselineId ?? "Selected"
-      : "Not selected";
-  const jobLabel =
-    jobStatus === "Selected"
-      ? selection.jobTitle ?? jobId ?? "Selected"
-      : "Not selected";
-  const showResult = Boolean(result);
-  const formattedLastRun = useMemo(() => {
-    if (!lastRunAt) return null;
-    const parsed = new Date(lastRunAt);
-    if (Number.isNaN(parsed.getTime())) return lastRunAt;
-    return parsed.toLocaleString();
-  }, [lastRunAt]);
+  };
 
   return (
-    <InputCard
-      kicker="SCORE"
-      title="Compatibility score"
-      description="Run a fit assessment once both a baseline and a job are selected."
+    <section
+      style={{
+        ...ttrComponents.basePanel,
+        padding: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }}
     >
-      <div>
-        <p
-          style={{
-            ...ttrTypography.subtleLabel,
-            letterSpacing: 1.5,
-          }}
-        >
-          Workspace runner
-        </p>
-        <h2 style={{ ...ttrTypography.h2, marginTop: 4 }}>Manage pairing</h2>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p style={{ ...ttrTypography.subtleLabel, letterSpacing: 1.5 }}>
+            Compatibility score
+          </p>
+          <h2 style={{ ...ttrTypography.h2, marginTop: 4, marginBottom: 0 }}>
+            Score this pairing
+          </h2>
+        </div>
+
+        <div className="text-right text-xs text-slate-400">
+          <div>Last run: {formatTimestamp(lastRunAt)}</div>
+          {completeBanner ? (
+            <div className="mt-1 inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
+              {completeBanner}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="space-y-1 text-sm text-slate-200">
-        <p>
-          Baseline: <span className="font-semibold">{baselineLabel}</span>
-        </p>
-        <p>
-          Job: <span className="font-semibold">{jobLabel}</span>
-        </p>
-      </div>
+      <p className="text-sm text-slate-300">{statusLine}</p>
 
-      <div className="flex flex-wrap gap-3">
-        <FormButton
-          onClick={runAssessment}
-          disabled={!baselineId || !jobId || isRunning || isLoadingLatest}
-        >
-          {isRunning ? "Running..." : "Run Fit Assessment"}
+      <div className="flex flex-wrap items-center gap-3">
+        <FormButton onClick={runAssessment} disabled={!canRun}>
+          {isRunning ? "Running..." : "Run compatibility score"}
         </FormButton>
-        <FormButton
-          variant="secondary"
-          onClick={() => {
-            void loadLatest();
-          }}
-          disabled={!baselineId || !jobId || isLoadingLatest || isRunning}
-        >
-          {isLoadingLatest ? "Loading latest..." : "Load latest for job"}
-        </FormButton>
-      </div>
 
-      {successMessage ? (
-        <Alert intent="success">
-          <p className="text-sm text-current">{successMessage}</p>
-        </Alert>
-      ) : null}
+        {showLoadLastRun ? (
+          <button
+            type="button"
+            onClick={() => {
+              void loadLastRun();
+            }}
+            disabled={isLoadingLastRun || isRunning}
+            className="text-xs font-semibold text-slate-300 underline decoration-white/10 underline-offset-4 hover:decoration-white/30 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Load last run"
+          >
+            {isLoadingLastRun ? "Loading last run..." : "Load last run"}
+          </button>
+        ) : null}
+      </div>
 
       {error ? (
-        <Alert intent="error" title="Workspace runner">
+        <Alert intent="error" title="Compatibility score">
           <p className="text-sm text-current">{error}</p>
         </Alert>
       ) : null}
@@ -272,43 +271,67 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       {showResult ? (
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200">
           <div className="flex items-baseline justify-between">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Results</p>
-            <span className="text-xs text-slate-400">{result?.verdict ?? "Verdict pending"}</span>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+              Result
+            </p>
+            <span className="text-xs text-slate-400">
+              {result?.verdict ?? "Verdict pending"}
+            </span>
           </div>
-          {formattedLastRun ? (
-            <p className="text-xs text-slate-400">Last run: {formattedLastRun}</p>
-          ) : null}
-          <p className="text-3xl font-semibold text-white">
-            {typeof result?.score === "number" ? result.score.toFixed(1) : "n/a"}
-          </p>
-          {dimensionEntries.length ? (
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Dimension scores</p>
-              <div className="grid gap-1 text-xs text-slate-300">
-                {dimensionEntries.map(([label, value]) => (
-                  <p key={`${label}-${String(value)}`}>
-                    {label}: {renderDimensionValue(value)}
+
+          <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
+
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-400">
+              Details are hidden by default.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setShowDetails((prev) => !prev)}
+              className="text-xs font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
+            >
+              {showDetails ? "Hide details" : "Show details"}
+            </button>
+          </div>
+
+          {showDetails ? (
+            <div className="space-y-3">
+              {dimensionEntries.length ? (
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                    Dimension scores
                   </p>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {flagList.length ? (
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Compliance flags</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
-                {flagList.map((flag, index) => (
-                  <li key={`flag-${index}`}>{flag}</li>
-                ))}
-              </ul>
+                  <div className="grid gap-1 text-xs text-slate-300">
+                    {dimensionEntries.map(([label, value], index) => (
+                      <p key={`${label}-${index}`}>
+                        {label}: {renderDimensionValue(value)}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {flagList.length ? (
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                    Compliance flags
+                  </p>
+                  <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
+                    {flagList.map((flag, index) => (
+                      <li key={`flag-${index}`}>{flag}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
       ) : (
         <p className="text-sm text-slate-400">
-          Run a baseline/job pairing to see fit assessment results here.
+          Run a fit assessment to see your compatibility score.
         </p>
       )}
-    </InputCard>
+    </section>
   );
 }

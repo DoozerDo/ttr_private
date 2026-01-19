@@ -51,5 +51,21 @@ describe("POST /api/analysis/run", () => {
     expect(payload.error).toMatch("Upstream returned non-JSON");
     expect(payload.snippet).toBe("<!DOCTYPE html>".slice(0, 200));
     expect(payload.status).toBe(502);
+    expect(response.headers.get("content-type")).toMatch(/application\/json/);
+  });
+
+  it("relays JSON success responses and keeps application/json header", async () => {
+    const payload = { score: 78 };
+    const jsonResponse = new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse)));
+
+    const response = await POST(createRequest("cookie-token"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/application\/json/);
+    await expect(response.json()).resolves.toEqual(payload);
   });
 });

@@ -22,14 +22,24 @@ export async function POST(req: NextRequest) {
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/analysis/run`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: await req.text(),
-  });
+  try {
+    const response = await fetch(`${baseUrl}/analysis/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: await req.text(),
+    });
 
-  return relayJsonResponse(response);
+    return relayJsonResponse(response);
+  } catch (error) {
+    console.error("Failed to run fit assessment", error);
+    return NextResponse.json(
+      {
+        error: "Unable to reach the fit assessment service",
+      },
+      { status: 502 },
+    );
+  }
 }
