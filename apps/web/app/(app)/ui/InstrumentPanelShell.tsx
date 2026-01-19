@@ -1,7 +1,7 @@
 // apps/web/app/ui/InstrumentPanelShell.tsx
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { ttrComponents, ttrLayout, ttrTypography } from "./ttrStyles";
 
@@ -13,6 +13,9 @@ type InstrumentPanelShellProps = {
   children: ReactNode;
   backHref?: string;
   backLabel?: string;
+  containerClassName?: string;
+  containerStyle?: CSSProperties;
+  contentWidth?: "default" | "wide";
 };
 
 export function InstrumentPanelShell({
@@ -23,10 +26,31 @@ export function InstrumentPanelShell({
   children,
   backHref,
   backLabel,
+  containerClassName,
+  containerStyle,
+  contentWidth = "default",
 }: InstrumentPanelShellProps) {
+  const baseContainerStyle = { ...ttrLayout.container };
+  if (contentWidth === "wide") {
+    baseContainerStyle.maxWidth = 1800;
+    baseContainerStyle.padding = "0";
+  }
+  const mergedContainerStyle = containerStyle
+    ? { ...baseContainerStyle, ...containerStyle }
+    : baseContainerStyle;
+  const widthClassName =
+    contentWidth === "wide"
+      ? "w-full max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8"
+      : "";
+  const combinedClassName = [widthClassName, containerClassName]
+    .filter(Boolean)
+    .join(" ");
   return (
     <main style={ttrLayout.shell}>
-      <div style={ttrLayout.container}>
+      <div
+        style={mergedContainerStyle}
+        className={combinedClassName ? combinedClassName : undefined}
+      >
         <header style={ttrComponents.headerCard}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>

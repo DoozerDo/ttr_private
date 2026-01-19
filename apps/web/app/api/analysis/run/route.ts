@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getApiBaseUrl,
-  relayApiResponse,
+  relayJsonResponse,
   requireAuthToken,
 } from "../../baselines/helpers";
 
@@ -31,5 +31,5 @@ export async function POST(req: NextRequest) {
     body: await req.text(),
   });
 
-  return relayApiResponse(response);
+  return relayJsonResponse(response);
 }

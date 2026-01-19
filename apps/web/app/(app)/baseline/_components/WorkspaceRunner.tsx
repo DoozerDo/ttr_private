@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
-import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
+import { ttrTypography } from "@/app/(app)/ui/ttrStyles";
+import { InputCard } from "./InputCard";
 
 type WorkspaceRunnerProps = {
   baselineId: string | null;
@@ -112,6 +113,8 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     try {
       const response = await fetch("/api/analysis/run", {
         method: "POST",
+        cache: "no-store",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -151,6 +154,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
         )}/latest`,
         {
           cache: "no-store",
+          credentials: "include",
         },
       );
 
@@ -196,14 +200,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   }, [lastRunAt]);
 
   return (
-    <section
-      style={{
-        ...ttrComponents.basePanel,
-        padding: 20,
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-      }}
+    <InputCard
+      kicker="SCORE"
+      title="Compatibility score"
+      description="Run a fit assessment once both a baseline and a job are selected."
     >
       <div>
         <p
@@ -229,7 +229,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <FormButton onClick={runAssessment} disabled={!baselineId || !jobId || isRunning || isLoadingLatest}>
+        <FormButton
+          onClick={runAssessment}
+          disabled={!baselineId || !jobId || isRunning || isLoadingLatest}
+        >
           {isRunning ? "Running..." : "Run Fit Assessment"}
         </FormButton>
         <FormButton
@@ -295,6 +298,6 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           Run a baseline/job pairing to see fit assessment results here.
         </p>
       )}
-    </section>
+    </InputCard>
   );
 }

@@ -2,22 +2,22 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import type { CSSProperties, FormEvent } from "react";
+import type { CSSProperties } from "react";
 import { useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
+import { FormButton } from "@/components/FormButton";
 import {
-  archiveBaseline,
   BaselineDto,
   BaselineUploadResponse,
   BaselineUploadStatus,
   listBaselines,
-  restoreBaseline,
 } from "@/lib/baselines";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
+import { InputCard } from "./_components/InputCard";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -115,11 +115,11 @@ export function BaselineDashboard({
       const baselineRecord = uploadResponse.baseline;
       const status =
         uploadResponse.uploadStatus ??
-        ({
+        (({
           isDuplicate: false,
           versionNumber: baselineRecord.version ?? 0,
           message: `Baseline uploaded as version ${baselineRecord.version ?? 0}.`,
-        } as BaselineUploadStatus);
+        } as BaselineUploadStatus));
 
       setUploadStatus(status);
 
@@ -127,8 +127,9 @@ export function BaselineDashboard({
         const filtered = previous.filter((entry) => entry.id !== baselineRecord.id);
         return [baselineRecord, ...filtered];
       });
-    try {
-      await refreshBaselines();
+
+      try {
+        await refreshBaselines();
       } catch (refreshError) {
         console.error("Unable to refresh baselines after upload", refreshError);
       }
@@ -145,17 +146,6 @@ export function BaselineDashboard({
     }
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!file) {
-      setError("Please choose a PDF or DOCX file to upload.");
-      return;
-    }
-
-    await uploadBaselineFile(file);
-  };
-
   const handleRefresh = async () => {
     setError(null);
     setIsRefreshing(true);
@@ -169,36 +159,9 @@ export function BaselineDashboard({
     }
   };
 
-  const handleBaselineStatusUpdate = async (baseline: BaselineDto) => {
-    setError(null);
-    setIsRefreshing(true);
-
-    try {
-      if (baseline.status === "ACTIVE") {
-        await archiveBaseline(baseline.id);
-      } else {
-        await restoreBaseline(baseline.id);
-      }
-      await refreshBaselines();
-    } catch (statusError: any) {
-      setError(statusError?.message || "Unable to update baseline status");
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const sectionTitleStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 700,
-    color: "#f8fafc",
-  };
-
-  const bodyTextStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 14,
-    lineHeight: 1.6,
-    color: "rgba(226,232,240,0.75)",
+  const triggerUploadClick = () => {
+    if (isUploading) return;
+    fileInputRef.current?.click();
   };
 
   const dividerStyle: CSSProperties = {
@@ -207,34 +170,18 @@ export function BaselineDashboard({
     margin: "14px 0",
   };
 
-  const hiddenFileInputStyle: CSSProperties = {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    padding: 0,
-    margin: -1,
-    border: 0,
-    overflow: "hidden",
-    clip: "rect(0 0 0 0)",
-  };
-
-  const uploadButtonWrapperStyle: CSSProperties = {
-    position: "relative",
-    display: "inline-flex",
-  };
-
   const fileInfoStyle: CSSProperties = {
     margin: 0,
     fontSize: 12,
     color: "rgba(226,232,240,0.65)",
   };
 
-  const secondaryButtonStyle: CSSProperties = {
+  const statusActionButtonStyle: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    padding: "10px 12px",
+    padding: "6px 10px",
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.12)",
     background: "rgba(255,255,255,0.05)",
@@ -245,12 +192,6 @@ export function BaselineDashboard({
     boxShadow: "0 12px 22px rgba(0,0,0,0.25)",
     transition: "transform 160ms ease, box-shadow 160ms ease",
     userSelect: "none",
-  };
-
-  const statusActionButtonStyle: CSSProperties = {
-    ...secondaryButtonStyle,
-    padding: "6px 10px",
-    fontSize: 12,
   };
 
   const archivedBadgeStyle: CSSProperties = {
@@ -301,306 +242,164 @@ export function BaselineDashboard({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <section
-        style={{
-          ...ttrComponents.basePanel,
-          padding: 18,
-          flex: "0 0 auto",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <p style={ttrTypography.subtleLabel}>Upload</p>
-          <h2 style={sectionTitleStyle}>Upload baseline</h2>
-          <p style={bodyTextStyle}>
-            Upload your resume as a PDF or DOCX. We will store it securely and
-            ingest its content for future tailoring.
-          </p>
-        </div>
-
-        <div style={dividerStyle} />
-
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    <InputCard
+      kicker="BASELINE"
+      title="Baseline"
+      description="Upload the resume you trust and keep it ready as your scoring anchor."
+      primaryAction={
+        <FormButton onClick={triggerUploadClick} disabled={isUploading}>
+          {isUploading ? "Uploading..." : "Add baseline"}
+        </FormButton>
+      }
+      secondaryAction={
+        <FormButton
+          variant="secondary"
+          onClick={handleRefresh}
+          disabled={isUploading || isRefreshing}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label
-              style={{ ...ttrComponents.fieldLabel, fontSize: 13 }}
-              htmlFor="baselineUpload"
-            >
-              Baseline file
-            </label>
-            <div style={uploadButtonWrapperStyle}>
-              <input
-                id="baselineUpload"
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={async (event) => {
-                  const selected = event.target.files?.[0] ?? null;
-                  setFile(selected);
-                  if (!selected) return;
-                  await uploadBaselineFile(selected);
-                }}
-                style={hiddenFileInputStyle}
-                disabled={isUploading}
-              />
-              <button
-                type="submit"
-                disabled={!uploadButtonEnabled}
-                onMouseEnter={(e) => {
-                  if (!uploadButtonEnabled) return;
-                  e.currentTarget.style.transform = "translateY(-1px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 18px 30px rgba(249,115,22,0.32)";
-                }}
-                onMouseLeave={(e) => {
-                  if (!uploadButtonEnabled) return;
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 15px 25px rgba(249,115,22,0.25)";
-                }}
-                style={{
-                  ...ttrComponents.primaryButton,
-                  width: "fit-content",
-                  padding: "12px 14px",
-                  fontSize: 13,
-                  opacity: uploadButtonEnabled ? 1 : 0.7,
-                  cursor: uploadButtonEnabled ? "pointer" : "not-allowed",
-                }}
-              >
-                {isUploading ? "Uploading..." : "Upload baseline"}
-              </button>
-              <label
-                htmlFor="baselineUpload"
-                aria-label="Choose baseline file"
-                tabIndex={canOpenFilePicker ? 0 : -1}
-                onKeyDown={(event) => {
-                  if (!canOpenFilePicker) return;
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    fileInputRef.current?.click();
-                  }
-                }}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  borderRadius: 12,
-                  cursor: canOpenFilePicker ? "pointer" : "default",
-                  pointerEvents: canOpenFilePicker ? "auto" : "none",
-                }}
-              />
-            </div>
-            {file ? (
-              <p style={fileInfoStyle}>Selected: {file.name}</p>
-            ) : null}
-          </div>
-
-          {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-          {uploadStatus ? (
-            <div
-              style={{
-                ...(uploadStatus.isDuplicate
-                  ? ttrComponents.warningBox
-                  : ttrComponents.successBox),
-                marginTop: 4,
-              }}
-            >
-              <p style={{ margin: 0, fontSize: 13 }}>{uploadStatus.message}</p>
-            </div>
-          ) : null}
-
-        </form>
-      </section>
-
-      <section
-        style={{
-          ...ttrComponents.basePanel,
-          padding: 18,
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
+          {isRefreshing ? "Refreshing" : "Refresh"}
+        </FormButton>
+      }
+    >
+      <input
+        id="baselineUpload"
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        onChange={async (event) => {
+          const selected = event.target.files?.[0] ?? null;
+          setFile(selected);
+          if (!selected) return;
+          await uploadBaselineFile(selected);
         }}
-      >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              gap: 14,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <p style={ttrTypography.subtleLabel}>BASELINES</p>
-              <h2 style={sectionTitleStyle}>Baselines</h2>
-              <p style={bodyTextStyle}>
-                Upload and manage your baseline resumes. These are your source of truth for scoring
-                and tailoring.
-              </p>
-            </div>
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          border: 0,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+        }}
+        disabled={isUploading}
+      />
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={isUploading || isRefreshing}
-                onMouseEnter={(e) => {
-                  if (isUploading || isRefreshing) return;
-                  e.currentTarget.style.transform = "translateY(-1px)";
-                  e.currentTarget.style.boxShadow =
-                    "0 18px 28px rgba(0,0,0,0.35)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow =
-                    "0 12px 22px rgba(0,0,0,0.25)";
-                }}
-                style={{
-                  ...secondaryButtonStyle,
-                  opacity: isUploading || isRefreshing ? 0.7 : 1,
-                  cursor:
-                    isUploading || isRefreshing ? "not-allowed" : "pointer",
-                }}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
+      <div className="space-y-3 text-sm text-slate-300">
+        <p style={{ margin: 0 }}>
+          Upload a PDF or DOCX, and we’ll keep it securely stored for future scoring.
+        </p>
+        {file ? <p style={fileInfoStyle}>Selected: {file.name}</p> : null}
+      </div>
 
-        {initialFetchError ? (
-          <Alert intent="error" title="Unable to load baselines">
-            <p className="text-sm text-current">{initialFetchError}</p>
-          </Alert>
-        ) : null}
-
+      {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
+      {uploadStatus ? (
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            overflow: "hidden",
+            ...(uploadStatus.isDuplicate
+              ? ttrComponents.warningBox
+              : ttrComponents.successBox),
+            marginTop: 4,
           }}
         >
-          <div style={dividerStyle} />
-          <div
+          <p style={{ margin: 0, fontSize: 13 }}>{uploadStatus.message}</p>
+        </div>
+      ) : null}
+
+      <div style={dividerStyle} />
+
+      {initialFetchError ? (
+        <Alert intent="error" title="Unable to load baselines">
+          <p className="text-sm text-current">{initialFetchError}</p>
+        </Alert>
+      ) : null}
+
+      {sortedBaselines.length === 0 ? (
+        initialFetchError ? null : (
+          <p
             style={{
-              overflowY: "auto",
-              maxHeight: "60vh",
+              margin: 0,
+              fontSize: 13,
+              color: "rgba(226,232,240,0.7)",
             }}
           >
-            {sortedBaselines.length === 0 ? (
-              initialFetchError ? null : (
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 13,
-                    color: "rgba(226,232,240,0.7)",
-                  }}
-                >
-                  No baselines uploaded yet.
-                </p>
-              )
-            ) : (
-              <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-            {sortedBaselines.map((baseline, index) => {
-              const isSelected = baseline.id === selectedBaselineId;
+            No baselines uploaded yet.
+          </p>
+        )
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+          {sortedBaselines.map((baseline, index) => {
+            const isSelected = baseline.id === selectedBaselineId;
 
-              return (
-                <li
-                  key={baseline.id}
+            return (
+              <li
+                key={baseline.id}
+                style={{
+                  ...listItemStyle,
+                  borderTop:
+                    index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                <div
                   style={{
-                    ...listItemStyle,
-                    borderTop:
-                      index === 0
-                        ? "none"
-                        : "1px solid rgba(255,255,255,0.06)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    minWidth: 0,
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                      minWidth: 220,
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
                     }}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <p style={filenameStyle}>{baseline.originalFilename}</p>
-                      {baseline.status === "ARCHIVED" ? (
-                        <span style={archivedBadgeStyle}>Archived</span>
-                      ) : null}
-                    </div>
-                    <p style={metaStyle}>
-                      Uploaded {formatDateTime(baseline.createdAt)}
+                    <p style={filenameStyle} className="truncate">
+                      {baseline.originalFilename}
                     </p>
+                    {baseline.status === "ARCHIVED" ? (
+                      <span style={archivedBadgeStyle}>Archived</span>
+                    ) : null}
                   </div>
+                  <p style={metaStyle}>
+                    Uploaded {formatDateTime(baseline.createdAt)}
+                  </p>
+                </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <Link
-                        href={getBaselineDetailsHref(baseline.id)}
-                        style={linkStyle}
-                      >
-                        View details
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => setBaselineSelection(baseline.id)}
-                        disabled={isSelected}
-                        style={{
-                          ...statusActionButtonStyle,
-                          opacity: isSelected ? 0.6 : 1,
-                          cursor: isSelected ? "not-allowed" : "pointer",
-                          minWidth: 90,
-                        }}
-                      >
-                        {isSelected ? "Selected" : "Select"}
-                      </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBaselineStatusUpdate(baseline)}
-                      disabled={isUploading || isRefreshing}
-                      style={{
-                        ...statusActionButtonStyle,
-                        opacity: isUploading || isRefreshing ? 0.6 : 1,
-                        cursor:
-                          isUploading || isRefreshing
-                            ? "not-allowed"
-                            : "pointer",
-                      }}
-                    >
-                      {baseline.status === "ACTIVE" ? "Archive" : "Restore"}
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-              </ul>
-            )}
-          </div>
-        </div>
-      </section>
-    </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <Link
+                    href={getBaselineDetailsHref(baseline.id)}
+                    style={linkStyle}
+                  >
+                    View details
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setBaselineSelection(baseline.id)}
+                    disabled={isSelected}
+                    style={{
+                      ...statusActionButtonStyle,
+                      opacity: isSelected ? 0.6 : 1,
+                      cursor: isSelected ? "not-allowed" : "pointer",
+                      minWidth: 90,
+                    }}
+                  >
+                    {isSelected ? "Selected" : "Select"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </InputCard>
   );
 }
-

@@ -1,12 +1,10 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { Alert } from "@/components/Alert";
-import { RetryButton } from "@/components/RetryButton";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
-import { ttrComponents, ttrTypography } from "../ui/ttrStyles";
+import { ttrTypography } from "../ui/ttrStyles";
 import { JobsHub } from "./_components/JobsHub";
 import { WorkspaceRunner } from "./_components/WorkspaceRunner";
 import type { CSSProperties } from "react";
@@ -131,63 +129,28 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
       kicker="WELCOME TO TTR"
       title="Target this role with clarity."
       subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
+      contentWidth="wide"
     >
       <div className="space-y-6">
-        <div className="space-y-3">
-          <p style={onboardingTextStyle}>
-            A baseline is the resume you trust most. TTR uses it as your source of truth, then
-            compares it against a job description to generate your CX Fit Score and tailored outputs.
-          </p>
-          <p style={onboardingTextStyle}>
-            Upload a baseline, keep it updated, and pair it against the roles you care about to see
-            how the scores and outputs evolve.
-          </p>
-        </div>
+        <p style={onboardingTextStyle}>
+          Compare your trusted baseline against a job description to surface a compatibility score.
+        </p>
 
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <section style={ttrComponents.basePanel}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                marginBottom: 18,
-              }}
-            >
-              <p style={ttrTypography.bodyMuted}>
-                Upload and manage your baseline resumes. These are your source of truth for scoring
-                and tailoring.
-              </p>
-            </div>
+        <div className="w-full max-w-7xl xl:max-w-7xl mx-auto grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <BaselineDashboard
+            initialBaselines={baselines}
+            initialFetchError={baselineFetchError}
+            selectedBaselineId={selectedBaselineId}
+          />
 
-            {baselineFetchError ? (
-              <div className="space-y-3">
-                <Alert intent="error" title="Unable to load baselines">
-                  <p>{baselineFetchError}</p>
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    <RetryButton label="Try again" />
-                  </div>
-                </Alert>
-              </div>
-            ) : null}
+          <JobsHub selectedJobId={selectedJobId} />
 
-            <BaselineDashboard
-              initialBaselines={baselines}
-              initialFetchError={baselineFetchError}
-              selectedBaselineId={selectedBaselineId}
-            />
-          </section>
-
-          <div className="space-y-6">
-            <JobsHub selectedJobId={selectedJobId} />
-          </div>
+          <WorkspaceRunner baselineId={selectedBaselineId} jobId={selectedJobId} />
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-xs text-slate-400">
           debug baselineId={selectedBaselineId ?? "null"} jobId={selectedJobId ?? "null"}
         </div>
-
-        <WorkspaceRunner baselineId={selectedBaselineId} jobId={selectedJobId} />
       </div>
     </InstrumentPanelShell>
   );
