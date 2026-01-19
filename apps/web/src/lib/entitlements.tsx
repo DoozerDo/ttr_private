@@ -1,11 +1,69 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import type { Entitlements, UserProfile } from "./entitlements-core";
+import type {
+  Entitlements,
+  SubscriptionTier,
+  UserProfile,
+} from "./entitlements-core";
 import { computeEffectiveEntitlements } from "./entitlements-core";
+
+type StructuredEntitlements = Entitlements & {
+  source: string;
+  isPro: boolean;
+};
+
+const defaultEntitlements: StructuredEntitlements = {
+  tier: "FREE",
+  effectiveTier: "FREE",
+  betaUnlockPro: false,
+  reasons: [],
+  isPro: false,
+  source: "real",
+};
+
+function isPaidTier(tier: SubscriptionTier): boolean {
+  return tier !== "FREE";
+}
+
+function resolveStructuredEntitlements(profile: UserProfile | null): StructuredEntitlements {
+  if (!profile) {
+    return { ...defaultEntitlements };
+  }
+
+  const baseEntitlements = computeEffectiveEntitlements(
+    profile.entitlements,
+    profile.subscriptionTier,
+  );
+  const rawEntitlements = profile.entitlements as Record<string, unknown> | undefined;
+
+  const source =
+    typeof rawEntitlements?.source === "string" ? rawEntitlements.source : "real";
+  const isPro =
+    typeof rawEntitlements?.isPro === "boolean"
+      ? rawEntitlements.isPro
+      : isPaidTier(baseEntitlements.effectiveTier);
+  const reasons = Array.isArray(baseEntitlements.reasons)
+    ? baseEntitlements.reasons.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    ...baseEntitlements,
+    isPro,
+    source,
+    reasons,
+  };
+}
 
 export type EntitlementsContextValue = {
   profile: UserProfile | null;
+  entitlements: StructuredEntitlements;
+  tier: SubscriptionTier;
+  effectiveTier: SubscriptionTier;
+  isPro: boolean;
+  betaUnlockPro: boolean;
+  reasons: string[];
+  source: string;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -43,7 +101,6 @@ export function EntitlementsProvider({
     setError(null);
 
     try {
-      // No API wiring yet. For now, normalize what we already have.
       setStateProfile((current) => {
         if (!current) return current;
 
@@ -65,9 +122,26 @@ export function EntitlementsProvider({
     }
   }, []);
 
+  const resolvedEntitlements = useMemo(
+    () => resolveStructuredEntitlements(stateProfile),
+    [stateProfile],
+  );
+
   const value = useMemo<EntitlementsContextValue>(() => {
-    return { profile: stateProfile, loading, error, refresh };
-  }, [stateProfile, loading, error, refresh]);
+    return {
+      profile: stateProfile,
+      entitlements: resolvedEntitlements,
+      tier: resolvedEntitlements.tier,
+      effectiveTier: resolvedEntitlements.effectiveTier,
+      isPro: resolvedEntitlements.isPro,
+      betaUnlockPro: resolvedEntitlements.betaUnlockPro,
+      reasons: resolvedEntitlements.reasons,
+      source: resolvedEntitlements.source,
+      loading,
+      error,
+      refresh,
+    };
+  }, [stateProfile, resolvedEntitlements, loading, error, refresh]);
 
   return <EntitlementsContext.Provider value={value}>{children}</EntitlementsContext.Provider>;
 }

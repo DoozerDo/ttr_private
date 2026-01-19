@@ -25,6 +25,8 @@ services:
       # IMPORTANT: your proxy strips /api before forwarding to api:3001
       # so the browser must call the API through the proxy path:
       NEXT_PUBLIC_API_BASE_URL: https://${APP_DOMAIN}/api
+      NEXT_PUBLIC_BETA_FORCE_PRO: "false"
+      BETA_FORCE_PRO: "true"
     depends_on:
       - api
     networks:

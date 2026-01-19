@@ -5,23 +5,10 @@ import { PageShell } from "@/components/PageShell";
 
 import { useEntitlements } from "@/src/lib/entitlements";
 
-function normalizeTierLabel(raw: unknown): string {
-  if (!raw || typeof raw !== "string") return "Free";
-  const t = raw.toLowerCase();
-
-  if (t === "free") return "Free";
-  if (t === "pro") return "Pro";
-  if (t === "team") return "Team";
-  if (t === "enterprise") return "Enterprise";
-
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
-
 export default function PricingPage() {
-  const { profile } = useEntitlements();
+  const { tier } = useEntitlements();
 
-  const effectiveTier = profile?.entitlements?.effectiveTier;
-  const activeLabel = normalizeTierLabel(effectiveTier);
+  const activeLabel = tier === "PRO" ? "Pro" : "Free";
 
   return (
     <PageShell>

@@ -45,6 +45,8 @@ services:
     environment:
       NEXT_PUBLIC_JOURNEY_NAV_V1_ENABLED: "true"
       NODE_ENV: development
+      NEXT_PUBLIC_BETA_FORCE_PRO: "false"
+      BETA_FORCE_PRO: "true"
     command: sh -c "npm install --include=optional --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0 --port 3000"
     volumes:
       - ../../apps/web:/usr/src/app
