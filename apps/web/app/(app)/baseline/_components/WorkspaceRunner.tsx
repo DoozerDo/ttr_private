@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { InputCard } from "./InputCard";
+import {
+  getSelectionState,
+  subscribeSelection,
+} from "./selectionStore";
 
 type WorkspaceRunnerProps = {
   baselineId: string | null;
@@ -191,6 +195,15 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
   const baselineStatus = baselineId ? "Selected" : "Not selected";
   const jobStatus = jobId ? "Selected" : "Not selected";
+  const selection = useSyncExternalStore(subscribeSelection, getSelectionState);
+  const baselineLabel =
+    baselineStatus === "Selected"
+      ? selection.baselineName ?? baselineId ?? "Selected"
+      : "Not selected";
+  const jobLabel =
+    jobStatus === "Selected"
+      ? selection.jobTitle ?? jobId ?? "Selected"
+      : "Not selected";
   const showResult = Boolean(result);
   const formattedLastRun = useMemo(() => {
     if (!lastRunAt) return null;
@@ -219,12 +232,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       <div className="space-y-1 text-sm text-slate-200">
         <p>
-          Baseline: <span className="font-semibold">{baselineStatus}</span>
-          {baselineId ? ` (${baselineId})` : null}
+          Baseline: <span className="font-semibold">{baselineLabel}</span>
         </p>
         <p>
-          Job: <span className="font-semibold">{jobStatus}</span>
-          {jobId ? ` (${jobId})` : null}
+          Job: <span className="font-semibold">{jobLabel}</span>
         </p>
       </div>
 

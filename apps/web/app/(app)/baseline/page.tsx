@@ -132,10 +132,6 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
       contentWidth="wide"
     >
       <div className="space-y-6">
-        <p style={onboardingTextStyle}>
-          Compare your trusted baseline against a job description to surface a compatibility score.
-        </p>
-
         <div className="w-full max-w-7xl xl:max-w-7xl mx-auto grid grid-cols-1 gap-6 lg:grid-cols-3">
           <BaselineDashboard
             initialBaselines={baselines}

@@ -11,6 +11,7 @@ import type { JobDto } from "@/lib/jobs";
 import { listJobs } from "@/lib/jobsClient";
 import { getJobDetailsHref } from "@/src/navigation/routes";
 import { InputCard } from "./InputCard";
+import { setJobTitle } from "./selectionStore";
 
 function isArchived(job: JobDto): boolean {
   const record = job as unknown as Record<string, unknown>;
@@ -58,6 +59,13 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
   }, [load]);
 
   const visibleJobs = useMemo(() => jobs.slice(0, 5), [jobs]);
+  const selectedJobName = useMemo(
+    () => visibleJobs.find((job) => job.id === selectedJobId)?.title ?? null,
+    [visibleJobs, selectedJobId],
+  );
+  useEffect(() => {
+    setJobTitle(selectedJobName);
+  }, [selectedJobName]);
 
   const setJobSelection = (jobId: string) => {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
@@ -107,6 +115,10 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
         <Alert intent="error" title="Jobs error">
           <p className="text-sm text-current">{error}</p>
         </Alert>
+      ) : null}
+
+      {selectedJobName ? (
+        <p className="text-xs text-slate-400">Selected: {selectedJobName}</p>
       ) : null}
 
       {isLoading ? (

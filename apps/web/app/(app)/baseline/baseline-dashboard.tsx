@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
@@ -18,6 +18,7 @@ import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { InputCard } from "./_components/InputCard";
+import { setBaselineName } from "./_components/selectionStore";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -76,6 +77,15 @@ export function BaselineDashboard({
       ),
     [baselines],
   );
+
+  const selectedBaselineName = useMemo(
+    () => sortedBaselines.find((baseline) => baseline.id === selectedBaselineId)?.originalFilename ?? null,
+    [sortedBaselines, selectedBaselineId],
+  );
+
+  useEffect(() => {
+    setBaselineName(selectedBaselineName);
+  }, [selectedBaselineName]);
   const uploadButtonEnabled = Boolean(file) && !isUploading;
   const canOpenFilePicker = !file && !isUploading;
 
@@ -291,6 +301,10 @@ export function BaselineDashboard({
         </p>
         {file ? <p style={fileInfoStyle}>Selected: {file.name}</p> : null}
       </div>
+
+      {selectedBaselineName ? (
+        <p className="text-xs text-slate-400">Selected: {selectedBaselineName}</p>
+      ) : null}
 
       {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
       {uploadStatus ? (
