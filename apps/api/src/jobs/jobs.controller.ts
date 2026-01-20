@@ -41,7 +41,7 @@ export class JobsController {
       throw new BadRequestException('Job description is required');
     }
 
-    return this.jobsService.createJob(userId, {
+    const result = await this.jobsService.createJob(userId, {
       title: body.title,
       company: body.company,
       rawDescription,
@@ -50,6 +50,11 @@ export class JobsController {
       requirements: body.requirements ?? undefined,
       jdIngestionMethod: body.jdIngestionMethod as JobIngestionMethod | undefined,
     });
+
+    return {
+      ...result.job,
+      warning: result.warning ?? undefined,
+    };
   }
 
   @Post('ingest')

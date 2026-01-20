@@ -34,6 +34,19 @@ export type IngestJobDescriptionResult = {
   rawDescription: string;
   responsibilities: string[];
   requirements: string[];
+  warning?: JobWarning | null;
+};
+
+export type JobWarning = {
+  status: number;
+  code: string;
+  message: string;
+  details?: string | null;
+};
+
+export type CreateJobResult = {
+  job: Job;
+  warning?: JobWarning;
 };
 
 const MIN_DESCRIPTION_LENGTH = 1000;
@@ -51,6 +64,8 @@ const FETCH_FAILURE_MESSAGE =
   'Unable to retrieve the job description from the provided URL.';
 const CONTENT_TYPE_ERROR =
   'Job description content must be served as HTML or plain text.';
+const NORMALIZATION_WARNING_MESSAGE =
+  'We could not fully parse this job description, but it was saved successfully.';
 
 @Injectable()
 export class JobsService {
@@ -76,38 +91,40 @@ export class JobsService {
       const html = await this.fetchHtml(sanitizedUrl);
       const extracted = this.normalizeRawDescription(extractTextFromHtml(html));
       this.validateDescriptionLength(extracted);
-      const normalized = normalizeJobDescription(extracted);
+      const normalizedOutcome = this.normalizeSafely(extracted);
       return {
         rawDescription: extracted,
-        responsibilities: normalized.responsibilities,
-        requirements: normalized.requirements,
+        responsibilities: normalizedOutcome.responsibilities,
+        requirements: normalizedOutcome.requirements,
+        warning: normalizedOutcome.warning,
       };
     }
 
     const normalizedText = this.normalizeRawDescription(pastedText!);
     this.validateDescriptionLength(normalizedText);
-    const normalized = normalizeJobDescription(normalizedText);
+    const normalizedOutcome = this.normalizeSafely(normalizedText);
 
     return {
       rawDescription: normalizedText,
-      responsibilities: normalized.responsibilities,
-      requirements: normalized.requirements,
+      responsibilities: normalizedOutcome.responsibilities,
+      requirements: normalizedOutcome.requirements,
+      warning: normalizedOutcome.warning,
     };
   }
 
-  async createJob(userId: string, payload: CreateJobInput) {
+  async createJob(userId: string, payload: CreateJobInput): Promise<CreateJobResult> {
     const rawDescription = this.normalizeRawDescription(payload.rawDescription);
     this.validateDescriptionLength(rawDescription);
 
-    const normalized = normalizeJobDescription(rawDescription);
+    const normalizedOutcome = this.normalizeSafely(rawDescription);
     const responsibilities =
       payload.responsibilities && payload.responsibilities.length > 0
         ? sanitizeListItems(payload.responsibilities)
-        : normalized.responsibilities;
+        : normalizedOutcome.responsibilities;
     const requirements =
       payload.requirements && payload.requirements.length > 0
         ? sanitizeListItems(payload.requirements)
-        : normalized.requirements;
+        : normalizedOutcome.requirements;
 
     const ingestionMethod =
       payload.jdIngestionMethod ?? JobIngestionMethod.PASTE;
@@ -159,7 +176,8 @@ export class JobsService {
       jdParsedAt: new Date(),
     });
 
-    return this.jobRepository.save(job);
+    const savedJob = await this.jobRepository.save(job);
+    return { job: savedJob, warning: normalizedOutcome.warning };
   }
 
   async listJobsForUser(userId: string, includeArchived = false) {
@@ -356,6 +374,37 @@ export class JobsService {
 
       return response;
     }
+  }
+
+  private normalizeSafely(rawDescription: string): {
+    responsibilities: string[];
+    requirements: string[];
+    warning?: JobWarning;
+  } {
+    try {
+      const normalized = normalizeJobDescription(rawDescription);
+      return {
+        responsibilities: normalized.responsibilities,
+        requirements: normalized.requirements,
+      };
+    } catch (error) {
+      console.error('Job normalization failed', error);
+      return {
+        responsibilities: [],
+        requirements: [],
+        warning: this.buildNormalizationWarning(error),
+      };
+    }
+  }
+
+  private buildNormalizationWarning(error: unknown): JobWarning {
+    const details = error instanceof Error ? error.message : null;
+    return {
+      status: 200,
+      code: 'normalization_failed',
+      message: NORMALIZATION_WARNING_MESSAGE,
+      details,
+    };
   }
 }
 

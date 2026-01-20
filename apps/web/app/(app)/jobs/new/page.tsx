@@ -5,7 +5,7 @@ import type { CSSProperties, FormEvent } from "react";
 import Link from "next/link";
 
 import { Alert } from "@/components/Alert";
-import type { JobDto } from "@/lib/jobs";
+import type { JobDto, JobWarning } from "@/lib/jobs";
 import { InstrumentPanelShell } from "@/app/(app)/ui/InstrumentPanelShell";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getJobDetailsHref } from "@/src/navigation/routes";
@@ -23,6 +23,7 @@ type IngestPreview = {
   rawDescription: string;
   responsibilities: string[];
   requirements: string[];
+  warning?: JobWarning | null;
 };
 
 type ApiError = {
@@ -81,6 +82,7 @@ export default function JobIngestionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<JobWarning | null>(null);
   const [detailsCopied, setDetailsCopied] = useState(false);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
@@ -152,6 +154,7 @@ export default function JobIngestionPage() {
     setIsPreviewing(true);
     setError(null);
     setSuccess(null);
+    setWarning(null);
 
     try {
       const response = await fetch("/api/jobs/ingest", {
@@ -174,11 +177,17 @@ export default function JobIngestionPage() {
         return null;
       }
 
-      if (shouldSet) {
-        setPreview(data as IngestPreview);
+      const previewData = (data as IngestPreview) ?? null;
+      if (!previewData) {
+        setWarning(null);
+        return null;
       }
+      if (shouldSet) {
+        setPreview(previewData);
+      }
+      setWarning(previewData.warning ?? null);
 
-      return data as IngestPreview;
+      return previewData;
     } catch {
       setError(createClientError("Unable to parse job description right now.", "preview_error"));
       return null;
@@ -214,12 +223,14 @@ export default function JobIngestionPage() {
     setPreview(null);
     setError(null);
     setSuccess(null);
+    setWarning(null);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setSuccess(null);
+    setWarning(null);
 
     let previewPayload = preview;
     const trimmedUrl = url.trim();
@@ -279,7 +290,9 @@ export default function JobIngestionPage() {
         return;
       }
 
-      setJobs((previous) => [data as JobDto, ...previous]);
+      const jobData = data as JobDto;
+      setJobs((previous) => [jobData, ...previous]);
+      setWarning(jobData.warning ?? null);
       resetForm();
       setSuccess("Job description saved. Ready to analyze fit.");
       markJourneyStepCompleted("jobs");
@@ -507,6 +520,35 @@ export default function JobIngestionPage() {
                   </button>
                 )}
               </details>
+            </Alert>
+          )}
+          {warning && (
+            <Alert intent="warning" title="Partial parsing">
+              <p style={{ margin: 0 }}>{warning.message}</p>
+              {warning.details ? (
+                <details
+                  style={{
+                    marginTop: 8,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: "rgba(226,232,240,0.7)",
+                  }}
+                >
+                  <summary>Details</summary>
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      whiteSpace: "pre-wrap",
+                      backgroundColor: "rgba(15,23,42,0.6)",
+                      padding: 8,
+                      borderRadius: 6,
+                    }}
+                  >
+                    {warning.details}
+                  </pre>
+                </details>
+              ) : null}
             </Alert>
           )}
           {success && <div style={ttrComponents.successBox}>{success}</div>}

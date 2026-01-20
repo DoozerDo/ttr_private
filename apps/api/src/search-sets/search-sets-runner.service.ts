@@ -642,7 +642,7 @@ export class SearchSetsRunnerService {
         canonicalUrl,
         dedupeHash,
       });
-      return { job: created, dedupeReason: null };
+      return { job: created.job, dedupeReason: null };
     } catch {
       return { job: null, dedupeReason: null };
     }

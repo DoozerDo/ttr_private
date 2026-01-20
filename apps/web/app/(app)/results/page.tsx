@@ -24,9 +24,27 @@ import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
 import { useAutoGenerateThreshold } from "../lib/settings";
 
+type FitDimensionScores = {
+  experienceAlignment?: number;
+  leadershipLevel?: number;
+  technicalPlatformFit?: number;
+  industryContext?: number;
+  strategicTacticalFit?: number;
+};
+
+type DimensionBreakdown = {
+  experience_alignment?: number;
+  leadership_level?: number;
+  technical_platform_fit?: number;
+  industry_context?: number;
+  strategic_vs_tactical?: number;
+};
+
 type LatestAnalysis = {
   baselineId: string;
+  baselineVersion?: number | null;
   baselineVersionId?: string | null;
+  baselineVersionHash?: string | null;
   jobId: string;
   overallScore?: number;
   note?: string;
@@ -35,6 +53,11 @@ type LatestAnalysis = {
   company?: string | null;
   assessmentId?: string | null;
   score?: number | null;
+  auditId?: string | null;
+  audit_id?: string | null;
+  dimensionScores?: FitDimensionScores | null;
+  expandedDimensionScores?: FitDimensionScores | null;
+  breakdown?: DimensionBreakdown | null;
 };
 
 const resolveStoredFitScore = (record: StoredAnalysisRecord) => {
@@ -50,9 +73,28 @@ const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis
   const verdict =
     record.verdict ??
     (typeof record.analysis.verdict === "string" ? record.analysis.verdict : undefined);
+  const analysisPayload = record.analysis as Record<string, unknown>;
+  const normalizedBaselineVersionHash =
+    typeof analysisPayload.baselineVersionHash === "string"
+      ? analysisPayload.baselineVersionHash
+      : typeof analysisPayload.baseline_version_hash === "string"
+        ? analysisPayload.baseline_version_hash
+        : undefined;
+  const normalizedAuditId =
+    typeof analysisPayload.auditId === "string"
+      ? analysisPayload.auditId
+      : typeof analysisPayload.audit_id === "string"
+        ? analysisPayload.audit_id
+        : undefined;
+
   return {
     baselineId: record.baselineId ?? "",
     baselineVersionId: record.baselineVersionId ?? null,
+    baselineVersion:
+      typeof analysisPayload.baselineVersion === "number"
+        ? analysisPayload.baselineVersion
+        : undefined,
+    baselineVersionHash: normalizedBaselineVersionHash,
     jobId: record.jobId ?? "",
     overallScore: fitScore ?? undefined,
     score: fitScore,
@@ -61,6 +103,11 @@ const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis
     jobTitle: record.jobTitle ?? undefined,
     company: record.company ?? undefined,
     assessmentId: (record.analysis as any).assessmentId ?? undefined,
+    auditId: normalizedAuditId,
+    audit_id: typeof analysisPayload.audit_id === "string" ? analysisPayload.audit_id : undefined,
+    dimensionScores: (analysisPayload.dimensionScores ??
+      analysisPayload.dimension_scores) as FitDimensionScores | undefined,
+    breakdown: analysisPayload.breakdown as DimensionBreakdown | undefined,
   };
 };
 
@@ -137,6 +184,12 @@ type ApiError = {
   auditId?: string;
 };
 
+type DocumentExportResult = {
+  success: boolean;
+  auditId?: string | null;
+  error?: ApiError | null;
+};
+
 const createClientError = (message: string, code = "validation_error"): ApiError => ({
   status: 400,
   code,
@@ -201,6 +254,14 @@ const DEFAULT_VERDICT: VerdictDefinition = {
   description: "Load an analysis to see how this role compares to your baseline.",
 };
 
+const DIMENSION_LABELS: Record<keyof FitDimensionScores, string> = {
+  experienceAlignment: "Experience alignment",
+  leadershipLevel: "Leadership level",
+  technicalPlatformFit: "Technical platform fit",
+  industryContext: "Industry & context",
+  strategicTacticalFit: "Strategic vs tactical",
+};
+
 const normalizeVerdictKey = (value?: string | null) =>
   value?.trim().replace(/[^A-Za-z0-9]/g, "_").toUpperCase() ?? "";
 
@@ -208,6 +269,39 @@ const formatVerdict = (verdict?: string | null): VerdictDefinition => {
   const key = normalizeVerdictKey(verdict);
   return VERDICT_DEFINITIONS[key] ?? DEFAULT_VERDICT;
 };
+
+function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionScores {
+  if (!data) return {};
+  if (data.dimensionScores) return data.dimensionScores;
+  if (data.breakdown) {
+    const breakdown = data.breakdown;
+    return {
+      experienceAlignment: breakdown.experience_alignment,
+      leadershipLevel: breakdown.leadership_level,
+      technicalPlatformFit: breakdown.technical_platform_fit,
+      industryContext: breakdown.industry_context,
+      strategicTacticalFit: breakdown.strategic_vs_tactical,
+    };
+  }
+
+  const fallback = data as Record<string, unknown>;
+  if (fallback.dimension_scores && typeof fallback.dimension_scores === "object") {
+    const scores = fallback.dimension_scores as Record<string, unknown>;
+    return {
+      experienceAlignment: typeof scores.experience_alignment === "number" ? scores.experience_alignment : undefined,
+      leadershipLevel: typeof scores.leadership_level === "number" ? scores.leadership_level : undefined,
+      technicalPlatformFit: typeof scores.technical_platform_fit === "number"
+        ? scores.technical_platform_fit
+        : undefined,
+      industryContext: typeof scores.industry_context === "number" ? scores.industry_context : undefined,
+      strategicTacticalFit: typeof scores.strategic_vs_tactical === "number"
+        ? scores.strategic_vs_tactical
+        : undefined,
+    };
+  }
+
+  return {};
+}
 
 const getNextSteps = ({
   score,
@@ -376,6 +470,11 @@ export default function ResultsPage() {
   const [exportState, setExportState] = useState<
     { docType: DocumentType; format: "docx" | "pdf" } | null
   >(null);
+  const [isExportingBoth, setIsExportingBoth] = useState(false);
+  const [exportBothError, setExportBothError] = useState<ApiError | null>(null);
+  const [exportBothSuccessAuditIds, setExportBothSuccessAuditIds] = useState<
+    { resume?: string | null; coverLetter?: string | null } | null
+  >(null);
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
@@ -539,6 +638,44 @@ export default function ResultsPage() {
     });
   }, [autoGenerateThreshold, documents.resume.response, latest, latestScore]);
 
+  const dimensionEntries = useMemo(() => {
+    const scores = normalizeDimensionScores(latest);
+    const keys = Object.keys(DIMENSION_LABELS) as Array<keyof FitDimensionScores>;
+    return keys.map((key) => ({
+      key,
+      label: DIMENSION_LABELS[key],
+      value: typeof scores[key] === "number" ? scores[key] : null,
+    }));
+  }, [latest]);
+
+  const latestAuditId = latest?.auditId ?? latest?.audit_id ?? null;
+  const baselineVersionIdentifier =
+    latest?.baselineVersionId ??
+    latest?.baselineVersionHash ??
+    (typeof latest?.baselineVersion === "number" ? `${latest.baselineVersion}` : null);
+  const jobIdentifier = latest?.jobTitle ?? latest?.jobId ?? null;
+
+  const exportBothSuccessDetails = exportBothSuccessAuditIds
+    ? {
+        message: "Resume and cover letter exported.",
+        resumeAuditId: exportBothSuccessAuditIds.resume ?? null,
+        coverLetterAuditId: exportBothSuccessAuditIds.coverLetter ?? null,
+      }
+    : null;
+
+  const exportBothErrorDetails = exportBothError
+    ? {
+        status: exportBothError.status ?? null,
+        code: exportBothError.code ?? null,
+        message: exportBothError.message ?? null,
+        details: exportBothError.details ?? null,
+        auditId: exportBothError.auditId ?? null,
+      }
+    : null;
+
+  const exportBothErrorJson = JSON.stringify(exportBothErrorDetails ?? {}, null, 2);
+  const exportBothSuccessJson = JSON.stringify(exportBothSuccessDetails ?? {}, null, 2);
+
   const debugMode = debugUiEnabled;
 
   const latestStatusMessage = useMemo(() => {
@@ -634,12 +771,16 @@ export default function ResultsPage() {
     setAnalysisSource("latest");
   }, [analysisSource, baselineId, jobId, latest]);
 
-  async function generateDocument(oneTap = false) {
+  async function generateDocument(
+    oneTap = false,
+    targetDocType: DocumentType = documentType,
+  ) {
+    const targetDocumentConfig = DOCUMENT_CONFIG[targetDocType];
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      updateDocumentState(documentType, {
+      updateDocumentState(targetDocType, {
         error: createClientError(
-          `Load the latest analysis before generating a ${documentConfig.label}.`,
+          `Load the latest analysis before generating a ${targetDocumentConfig.label}.`,
           "document_not_ready",
         ),
       });
@@ -647,17 +788,17 @@ export default function ResultsPage() {
     }
 
     setLoading(true);
-    updateDocumentState(documentType, {
+    updateDocumentState(targetDocType, {
       error: null,
       tierGateError: null,
       complianceError: null,
       response: null,
     });
 
-    const downloadName = documentConfig.label.replace(" ", "-");
+    const downloadName = targetDocumentConfig.label.replace(" ", "-");
 
     try {
-      const res = await fetch(documentConfig.generatePath, {
+      const res = await fetch(targetDocumentConfig.generatePath, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -675,22 +816,22 @@ export default function ResultsPage() {
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          updateDocumentState(documentType, { tierGateError: tierGate });
+          updateDocumentState(targetDocType, { tierGateError: tierGate });
           return;
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
-          updateDocumentState(documentType, { complianceError: compliance });
+          updateDocumentState(targetDocType, { complianceError: compliance });
           return;
         }
 
         const apiError = buildApiError(
           res,
           payload,
-          `${documentConfig.capitalizedLabel} generation failed`,
+          `${targetDocumentConfig.capitalizedLabel} generation failed`,
         );
-        updateDocumentState(documentType, { error: apiError });
+        updateDocumentState(targetDocType, { error: apiError });
         return;
       }
 
@@ -698,7 +839,7 @@ export default function ResultsPage() {
 
       if (contentType.includes("application/json")) {
         const json = await res.json();
-        updateDocumentState(documentType, { response: json });
+        updateDocumentState(targetDocType, { response: json });
       } else {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
@@ -711,9 +852,9 @@ export default function ResultsPage() {
         window.URL.revokeObjectURL(url);
       }
     } catch (e: any) {
-      updateDocumentState(documentType, {
+      updateDocumentState(targetDocType, {
         error: createClientError(
-          e?.message ?? `${documentConfig.capitalizedLabel} generation failed`,
+          e?.message ?? `${targetDocumentConfig.capitalizedLabel} generation failed`,
           "document_error",
         ),
       });
@@ -722,30 +863,33 @@ export default function ResultsPage() {
     }
   }
 
-  async function exportDocument(format: "docx" | "pdf") {
+  async function exportDocument(
+    format: "docx" | "pdf",
+    targetDocType: DocumentType = documentType,
+  ): Promise<DocumentExportResult> {
+    const targetDocumentConfig = DOCUMENT_CONFIG[targetDocType];
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
-      updateDocumentState(documentType, {
-        error: createClientError(
-          `Load the latest analysis before exporting a ${documentConfig.label}.`,
-          "document_not_ready",
-        ),
-      });
-      return;
+      const clientError = createClientError(
+        `Load the latest analysis before exporting a ${targetDocumentConfig.label}.`,
+        "document_not_ready",
+      );
+      updateDocumentState(targetDocType, { error: clientError });
+      return { success: false, error: clientError };
     }
 
-    setExportState({ docType: documentType, format });
-    updateDocumentState(documentType, {
+    setExportState({ docType: targetDocType, format });
+    updateDocumentState(targetDocType, {
       error: null,
       tierGateError: null,
       complianceError: null,
     });
 
-    const downloadName = documentConfig.label.replace(" ", "-");
+    const downloadName = targetDocumentConfig.label.replace(" ", "-");
 
     try {
       const res = await fetch(
-        `${documentConfig.exportPath}?format=${encodeURIComponent(format)}`,
+        `${targetDocumentConfig.exportPath}?format=${encodeURIComponent(format)}`,
         {
           method: "POST",
           headers: {
@@ -765,25 +909,26 @@ export default function ResultsPage() {
         const tierGate = parseTierGateError({ status: res.status, payload });
 
         if (tierGate) {
-          updateDocumentState(documentType, { tierGateError: tierGate });
-          return;
+          updateDocumentState(targetDocType, { tierGateError: tierGate });
+          return { success: false };
         }
 
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
-          updateDocumentState(documentType, { complianceError: compliance });
-          return;
+          updateDocumentState(targetDocType, { complianceError: compliance });
+          return { success: false };
         }
 
         const apiError = buildApiError(
           res,
           payload,
-          `${documentConfig.capitalizedLabel} export failed`,
+          `${targetDocumentConfig.capitalizedLabel} export failed`,
         );
-        updateDocumentState(documentType, { error: apiError });
-        return;
+        updateDocumentState(targetDocType, { error: apiError });
+        return { success: false, error: apiError };
       }
 
+      const auditId = res.headers.get("X-Compliance-Audit-Id") ?? null;
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -793,16 +938,49 @@ export default function ResultsPage() {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
+      return { success: true, auditId };
     } catch (e: any) {
-      updateDocumentState(documentType, {
-        error: createClientError(
-          e?.message ?? `${documentConfig.capitalizedLabel} export failed`,
-          "document_error",
-        ),
+      const clientError = createClientError(
+        e?.message ?? `${targetDocumentConfig.capitalizedLabel} export failed`,
+        "document_error",
+      );
+      updateDocumentState(targetDocType, {
+        error: clientError,
       });
+      return { success: false, error: clientError };
     } finally {
       setExportState(null);
     }
+  }
+
+  async function exportBothDocuments() {
+    if (isExportingBoth) return;
+    setExportBothError(null);
+    setExportBothSuccessAuditIds(null);
+    setIsExportingBoth(true);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    const resumeResult = await exportDocument("docx", "resume");
+    if (!resumeResult.success) {
+      setExportBothError(resumeResult.error ?? null);
+      setIsExportingBoth(false);
+      return;
+    }
+
+    const coverResult = await exportDocument("docx", "cover-letter");
+    if (!coverResult.success) {
+      setExportBothError(coverResult.error ?? null);
+      setIsExportingBoth(false);
+      return;
+    }
+
+    setExportBothSuccessAuditIds({
+      resume: resumeResult.auditId ?? null,
+      coverLetter: coverResult.auditId ?? null,
+    });
+    setIsExportingBoth(false);
   }
 
   useEffect(() => {
@@ -818,6 +996,194 @@ export default function ResultsPage() {
           title="Results"
           description="Generate resumes and cover letters, review the latest analysis, and export artifacts for any job."
         />
+
+        <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Demo summary
+              </p>
+              <h2 className="text-2xl font-semibold text-white">Key outputs</h2>
+            </div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Instant view</span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Fit score
+              </p>
+              <p className="text-4xl font-semibold text-white">
+                {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Verdict
+              </p>
+              <p className="text-lg font-semibold text-slate-100">{verdictInfo.label}</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Audit ID
+              </p>
+              <p className="text-sm text-slate-100">{latestAuditId ?? "Not available"}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Baseline version
+              </p>
+              <p className="text-sm text-slate-100">
+                {baselineVersionIdentifier ?? "Not available"}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Job identifier
+              </p>
+              <p className="text-sm text-slate-100">{jobIdentifier ?? "Not available"}</p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Dimension scores
+              </p>
+              <span className="text-xs text-slate-400">Condensed view</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {dimensionEntries.map((dimension) => (
+                <div
+                  key={dimension.key}
+                  className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                >
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                    {dimension.label}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-white">
+                    {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <FormButton
+              onClick={() => void generateDocument(false, "resume")}
+              disabled={!readyForDocument || loading || isExportingBoth}
+            >
+              {loading ? "Generating..." : "Generate Resume"}
+            </FormButton>
+            <FormButton
+              onClick={() => void generateDocument(false, "cover-letter")}
+              disabled={!readyForDocument || loading || isExportingBoth}
+            >
+              {loading ? "Generating..." : "Generate Cover Letter"}
+            </FormButton>
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportBothDocuments()}
+              disabled={!readyForDocument || !oneTapEligible || isExportingBoth || loading}
+            >
+              {isExportingBoth ? "Exporting..." : "Export Both"}
+            </FormButton>
+          </div>
+        </section>
+
+        {exportBothSuccessDetails ? (
+          <Alert intent="success" title="Resume and cover letter exported.">
+            <details
+              style={{
+                marginTop: 8,
+                cursor: "pointer",
+                fontSize: 12,
+                color: "rgba(226,232,240,0.7)",
+              }}
+            >
+              <summary>Copy details</summary>
+              <pre
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  whiteSpace: "pre-wrap",
+                  backgroundColor: "rgba(15,23,42,0.6)",
+                  padding: 8,
+                  borderRadius: 6,
+                }}
+              >
+                {exportBothSuccessJson}
+              </pre>
+              {hasClipboardAPI && (
+                <button
+                  type="button"
+                  onClick={() => copyTextToClipboard(exportBothSuccessJson)}
+                  className="mt-2"
+                  style={{
+                    border: "1px solid rgba(148,163,184,0.4)",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    backgroundColor: "transparent",
+                    color: "rgba(226,232,240,0.9)",
+                  }}
+                >
+                  Copy details
+                </button>
+              )}
+            </details>
+          </Alert>
+        ) : null}
+        {exportBothError ? (
+          <Alert intent="error" title="Unable to export documents">
+            <p className="text-sm text-slate-100" style={{ margin: 0 }}>
+              {exportBothError.message}
+            </p>
+            <details
+              style={{
+                marginTop: 8,
+                cursor: "pointer",
+                fontSize: 12,
+                color: "rgba(226,232,240,0.7)",
+              }}
+            >
+              <summary>Copy details</summary>
+              <pre
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  whiteSpace: "pre-wrap",
+                  backgroundColor: "rgba(15,23,42,0.6)",
+                  padding: 8,
+                  borderRadius: 6,
+                }}
+              >
+                {exportBothErrorJson}
+              </pre>
+              {hasClipboardAPI && (
+                <button
+                  type="button"
+                  onClick={() => copyTextToClipboard(exportBothErrorJson)}
+                  className="mt-2"
+                  style={{
+                    border: "1px solid rgba(148,163,184,0.4)",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    backgroundColor: "transparent",
+                    color: "rgba(226,232,240,0.9)",
+                  }}
+                >
+                  Copy details
+                </button>
+              )}
+            </details>
+          </Alert>
+        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
@@ -951,7 +1317,7 @@ export default function ResultsPage() {
             <div className="flex flex-wrap gap-3">
               <FormButton
                 onClick={() => void generateDocument(false)}
-                disabled={!readyForDocument || loading}
+                disabled={!readyForDocument || loading || isExportingBoth}
               >
                 {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
               </FormButton>
@@ -959,7 +1325,7 @@ export default function ResultsPage() {
               <FormButton
                 variant="secondary"
                 onClick={() => void generateDocument(true)}
-                disabled={!readyForDocument || !oneTapEligible || loading}
+                disabled={!readyForDocument || !oneTapEligible || loading || isExportingBoth}
                 title={
                   readyForDocument
                     ? oneTapEligible
@@ -979,7 +1345,8 @@ export default function ResultsPage() {
                 disabled={
                   !readyForDocument ||
                   !oneTapEligible ||
-                  (exportState?.docType === documentType && exportState.format === "docx")
+                  (exportState?.docType === documentType && exportState.format === "docx") ||
+                  isExportingBoth
                 }
               >
                 {exportState?.docType === documentType && exportState.format === "docx"
@@ -993,7 +1360,8 @@ export default function ResultsPage() {
                 disabled={
                   !readyForDocument ||
                   !oneTapEligible ||
-                  (exportState?.docType === documentType && exportState.format === "pdf")
+                  (exportState?.docType === documentType && exportState.format === "pdf") ||
+                  isExportingBoth
                 }
               >
                 {exportState?.docType === documentType && exportState.format === "pdf"
