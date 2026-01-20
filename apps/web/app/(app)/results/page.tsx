@@ -1136,6 +1136,9 @@ export default function ResultsPage() {
                 </button>
               )}
             </details>
+              Resume audit ID: {exportBothSuccessDetails.resumeAuditId ?? "Not available"}.
+              Cover letter audit ID: {exportBothSuccessDetails.coverLetterAuditId ?? "Not available"}.
+            </p>
           </Alert>
         ) : null}
         {exportBothError ? (
@@ -1182,6 +1185,9 @@ export default function ResultsPage() {
                 </button>
               )}
             </details>
+            <p className="mt-2 text-xs text-slate-400">
+              Audit ID: {exportBothError.auditId ?? "Not available"}
+            </p>
           </Alert>
         ) : null}
 

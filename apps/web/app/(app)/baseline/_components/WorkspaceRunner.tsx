@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
@@ -105,6 +106,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
+  const [latestResultIdentifiers, setLatestResultIdentifiers] = useState<{
+    jobId: string | null;
+    baselineId: string | null;
+  } | null>(null);
+  const router = useRouter();
 
   const dimensionEntries = useMemo(
     () => (result ? formatDimensionEntries(result) : []),
@@ -132,6 +138,14 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const scoreValueText =
     typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
 
+  const viewResultsHref = latestResultIdentifiers?.jobId
+    ? `/results?jobId=${encodeURIComponent(latestResultIdentifiers.jobId)}${
+        latestResultIdentifiers.baselineId
+          ? `&baselineId=${encodeURIComponent(latestResultIdentifiers.baselineId)}`
+          : ""
+      }`
+    : null;
+
   const statusLine = useMemo(() => {
     if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
     if (!baselineId) return "Select a baseline to continue.";
@@ -147,6 +161,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     setIsRunning(true);
     setError(null);
     setCompleteBanner(null);
+    setLatestResultIdentifiers(null);
 
     try {
       const response = await fetch("/api/analysis/run", {
@@ -166,12 +181,29 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
+      const resolvedJobId =
+        typeof nextResult.jobId === "string"
+          ? nextResult.jobId
+          : typeof jobId === "string"
+            ? jobId
+            : null;
+      const resolvedBaselineId =
+        typeof nextResult.baselineId === "string"
+          ? nextResult.baselineId
+          : typeof baselineId === "string"
+            ? baselineId
+            : null;
+      setLatestResultIdentifiers({
+        jobId: resolvedJobId,
+        baselineId: resolvedBaselineId,
+      });
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
       setCompleteBanner("Assessment complete");
     } catch (runError: any) {
       setError(runError?.message ?? "Unable to run compatibility scoring right now.");
+      setLatestResultIdentifiers(null);
     } finally {
       setIsRunning(false);
     }
@@ -199,12 +231,29 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
+      const resolvedJobId =
+        typeof nextResult.jobId === "string"
+          ? nextResult.jobId
+          : typeof jobId === "string"
+            ? jobId
+            : null;
+      const resolvedBaselineId =
+        typeof nextResult.baselineId === "string"
+          ? nextResult.baselineId
+          : typeof baselineId === "string"
+            ? baselineId
+            : null;
+      setLatestResultIdentifiers({
+        jobId: resolvedJobId,
+        baselineId: resolvedBaselineId,
+      });
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
       setCompleteBanner("Loaded last run");
     } catch (loadError: any) {
       setError(loadError?.message ?? "Unable to load the last run.");
+      setLatestResultIdentifiers(null);
     } finally {
       setIsLoadingLastRun(false);
     }
@@ -324,6 +373,13 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                   </ul>
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {viewResultsHref ? (
+            <div className="flex justify-end">
+              <FormButton onClick={() => router.push(viewResultsHref)} disabled={isRunning}>
+                View results
+              </FormButton>
             </div>
           ) : null}
         </div>
