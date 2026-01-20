@@ -29,6 +29,53 @@ type FitResultPayload = {
   [key: string]: unknown;
 };
 
+type RunIdentifierKey = "assessmentId" | "analysisId" | "fitScoreId";
+
+type RunIdentifier = {
+  key: RunIdentifierKey;
+  value: string;
+};
+
+type LatestResultIdentifiers = {
+  jobId: string | null;
+  baselineId: string | null;
+  runIdentifier: RunIdentifier;
+};
+
+const RUN_IDENTIFIER_PRIORITY: RunIdentifierKey[] = [
+  "assessmentId",
+  "analysisId",
+  "fitScoreId",
+];
+
+const pickRunIdentifier = (payload: FitResultPayload | null): RunIdentifier | null => {
+  if (!payload) return null;
+
+  for (const key of RUN_IDENTIFIER_PRIORITY) {
+    const candidate = payload[key];
+    if (typeof candidate === "string" && candidate.trim().length) {
+      return { key, value: candidate.trim() };
+    }
+  }
+
+  return null;
+};
+
+const buildLatestResultIdentifiers = (
+  payload: FitResultPayload | null,
+  jobId: string | null,
+  baselineId: string | null,
+): LatestResultIdentifiers | null => {
+  const runIdentifier = pickRunIdentifier(payload);
+  if (!runIdentifier) return null;
+
+  return {
+    jobId,
+    baselineId,
+    runIdentifier,
+  };
+};
+
 const formatDimensionEntries = (
   payload: FitResultPayload,
 ): [string, DimensionScoreValue][] => {
@@ -106,10 +153,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
-  const [latestResultIdentifiers, setLatestResultIdentifiers] = useState<{
-    jobId: string | null;
-    baselineId: string | null;
-  } | null>(null);
+  const [latestResultIdentifiers, setLatestResultIdentifiers] = useState<LatestResultIdentifiers | null>(null);
   const router = useRouter();
 
   const dimensionEntries = useMemo(
@@ -138,8 +182,14 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const scoreValueText =
     typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
 
-  const viewResultsHref = latestResultIdentifiers?.jobId
-    ? `/results?jobId=${encodeURIComponent(latestResultIdentifiers.jobId)}${
+  const viewResultsHref = latestResultIdentifiers?.runIdentifier
+    ? `/results?${latestResultIdentifiers.runIdentifier.key}=${encodeURIComponent(
+        latestResultIdentifiers.runIdentifier.value,
+      )}${
+        latestResultIdentifiers.jobId
+          ? `&jobId=${encodeURIComponent(latestResultIdentifiers.jobId)}`
+          : ""
+      }${
         latestResultIdentifiers.baselineId
           ? `&baselineId=${encodeURIComponent(latestResultIdentifiers.baselineId)}`
           : ""
@@ -193,10 +243,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           : typeof baselineId === "string"
             ? baselineId
             : null;
-      setLatestResultIdentifiers({
-        jobId: resolvedJobId,
-        baselineId: resolvedBaselineId,
-      });
+      setLatestResultIdentifiers(
+        buildLatestResultIdentifiers(nextResult, resolvedJobId, resolvedBaselineId),
+      );
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
@@ -243,10 +292,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           : typeof baselineId === "string"
             ? baselineId
             : null;
-      setLatestResultIdentifiers({
-        jobId: resolvedJobId,
-        baselineId: resolvedBaselineId,
-      });
+      setLatestResultIdentifiers(
+        buildLatestResultIdentifiers(nextResult, resolvedJobId, resolvedBaselineId),
+      );
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 
-export async function POST(
+async function handleRestoreRequest(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
@@ -23,7 +23,7 @@ export async function POST(
   }
 
   const response = await fetch(`${baseUrl}/jobs/${encodeURIComponent(id)}/restore`, {
-    method: "POST",
+    method: "PATCH",
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -32,3 +32,6 @@ export async function POST(
 
   return relayApiResponse(response);
 }
+
+export const POST = handleRestoreRequest;
+export const PATCH = handleRestoreRequest;

@@ -77,6 +77,20 @@ export class AnalysisController {
     return this.analysisService.getFitAssessments(userId, jobId);
   }
 
+  @Get('fit-assessments/:assessmentId')
+  async getFitAssessmentById(
+    @Param('assessmentId') assessmentId: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.analysisService.getFitAssessmentById(userId, assessmentId);
+  }
+
   @Get('fit-scores')
   async getFitScores(
     @Query('jobId') jobId: string | undefined,

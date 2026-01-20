@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -483,6 +483,7 @@ export default function ResultsPage() {
     "cover-letter": createDocumentState(),
   });
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
+  const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
 
   const updateDocumentState = (type: DocumentType, updates: Partial<DocumentState>) => {
@@ -495,7 +496,7 @@ export default function ResultsPage() {
     }));
   };
 
-  const clearDocumentErrors = () => {
+  const clearDocumentErrors = useCallback(() => {
     setDocuments((prev) => ({
       resume: {
         ...prev.resume,
@@ -510,7 +511,7 @@ export default function ResultsPage() {
         complianceError: null,
       },
     }));
-  };
+  }, []);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -518,6 +519,13 @@ export default function ResultsPage() {
     searchParams?.get("documentType") === "cover-letter" ? "cover-letter" : "resume";
   const documentConfig = DOCUMENT_CONFIG[documentType];
   const currentDocumentState = documents[documentType];
+  const runIdentifier = useMemo(() => {
+    const candidate =
+      searchParams?.get("assessmentId") ??
+      searchParams?.get("analysisId") ??
+      searchParams?.get("fitScoreId");
+    return candidate?.trim() ?? null;
+  }, [searchParams]);
   const hasClipboardAPI =
     typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
   const copyTextToClipboard = async (text: string) => {
@@ -692,6 +700,64 @@ export default function ResultsPage() {
     return safeJsonPreview(currentDocumentState.response);
   }, [currentDocumentState.response]);
 
+  const loadAssessmentById = useCallback(
+    async (assessmentId: string) => {
+      if (loadingLatest) return;
+      if (!assessmentId) {
+        setError("Assessment ID is required to load analysis.");
+        return;
+      }
+
+      setLoadingLatest(true);
+      setError(null);
+      setLatest(null);
+      setComplianceError(null);
+      setTierGateError(null);
+      clearDocumentErrors();
+
+      try {
+        const res = await fetch(
+          `/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}`,
+          { cache: "no-store" },
+        );
+
+        const payload = await readResponsePayload(res.clone());
+
+        if (!res.ok) {
+          const tierGate = parseTierGateError({ status: res.status, payload });
+          if (tierGate) {
+            setTierGateError(tierGate);
+            return;
+          }
+
+          const compliance = parseComplianceError({ status: res.status, payload });
+          if (compliance) {
+            setComplianceError(compliance);
+            return;
+          }
+
+          const message = formatErrorMessage(
+            payload,
+            "Unable to load the requested analysis.",
+          );
+          throw new Error(message);
+        }
+
+        const data: LatestAnalysis = await res.json();
+        setLatest(data);
+        setBaselineId(data.baselineId ?? "");
+        setJobId(data.jobId ?? "");
+        setAnalysisSource("latest");
+        setRestoredAt(null);
+      } catch (e: any) {
+        setError(e?.message || "Failed to load analysis");
+      } finally {
+        setLoadingLatest(false);
+      }
+    },
+    [loadingLatest, clearDocumentErrors],
+  );
+
   async function loadLatest() {
     if (loadingLatest) return;
     if (!jobId) {
@@ -759,6 +825,19 @@ export default function ResultsPage() {
   }
 
   useEffect(() => {
+    if (!runIdentifier) {
+      setLastLoadedRunIdentifier(null);
+      return;
+    }
+
+    if (runIdentifier === lastLoadedRunIdentifier) return;
+
+    setLastLoadedRunIdentifier(runIdentifier);
+    void loadAssessmentById(runIdentifier);
+  }, [loadAssessmentById, runIdentifier, lastLoadedRunIdentifier]);
+
+  useEffect(() => {
+    if (runIdentifier) return;
     if (analysisSource !== "manual" || baselineId || jobId || latest) return;
 
     const stored = readLastAnalysis();
@@ -769,7 +848,7 @@ export default function ResultsPage() {
     setJobId(stored.jobId ?? "");
     setRestoredAt(stored.savedAt);
     setAnalysisSource("latest");
-  }, [analysisSource, baselineId, jobId, latest]);
+  }, [analysisSource, baselineId, jobId, latest, runIdentifier]);
 
   async function generateDocument(
     oneTap = false,
@@ -1136,6 +1215,7 @@ export default function ResultsPage() {
                 </button>
               )}
             </details>
+            <p className="mt-2 text-xs text-slate-400">
               Resume audit ID: {exportBothSuccessDetails.resumeAuditId ?? "Not available"}.
               Cover letter audit ID: {exportBothSuccessDetails.coverLetterAuditId ?? "Not available"}.
             </p>

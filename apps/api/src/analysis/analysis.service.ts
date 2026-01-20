@@ -1323,6 +1323,18 @@ export class AnalysisService {
     return this.buildLatestAssessmentPayload(assessment);
   }
 
+  async getFitAssessmentById(userId: string, assessmentId: string) {
+    const assessment = await this.fitAssessmentRepository.findOne({
+      where: { id: assessmentId, userId },
+    });
+
+    if (!assessment) {
+      throw new NotFoundException('Fit assessment not found');
+    }
+
+    return this.buildLatestAssessmentPayload(assessment);
+  }
+
   async getLatestAssessmentForBaseline(
     userId: string,
     jobId: string,
