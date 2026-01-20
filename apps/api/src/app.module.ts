@@ -12,6 +12,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobsModule } from './jobs/jobs.module';
 import { CoverLettersModule } from './cover-letters/cover-letters.module';
+import { EmailModule } from './email/email.module';
 import { RealityCheckModule } from './reality-check/reality-check.module';
 import { ResumeModule } from './resume/resume.module';
 import { SearchSetsModule } from './search-sets/search-sets.module';
@@ -51,6 +52,7 @@ import { UsersModule } from './users/users.module';
     SearchSetsModule,
     ResumeModule,
     CoverLettersModule,
+    EmailModule,
     StarStoriesModule,
   ],
   controllers: [AppController],

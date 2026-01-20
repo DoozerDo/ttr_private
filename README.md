@@ -14,3 +14,11 @@ Here are some ideas to get you started:
 - 😄 Pronouns: ...
 - ⚡ Fun fact: ...
 -->
+
+## Email relay (API)
+
+- Create a `.env.dreamhost` file at the repo root (next to `/apps` and `/infra`). Use `.env.dreamhost.example` as a template.
+- Docker Compose loads it into the API container via `env_file:` in `infra/docker/docker-compose.*.yml`.
+- Required vars: `RELAY_URL`, `API_TOKEN` (optional: `MAIL_REPLY_TO`, defaults to `support@targetthisrole.ai`).
+- Dev-only test endpoint (when `NODE_ENV !== 'production'`, or when `ENABLE_INTERNAL_TEST_ROUTES=true`):
+  - `POST /internal/test-email` with body `{ "to": "declabs@hotmail.com" }`.

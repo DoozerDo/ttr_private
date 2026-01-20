@@ -23,10 +23,11 @@ services:
     restart: unless-stopped
     env_file:
       - ../../apps/api/.env.development.local
+      - ../../.env.dreamhost
     environment:
       NODE_ENV: development
       TYPEORM_SYNCHRONIZE: "true"
-    command: sh -c "npm ci && npm run start:dev"
+    command: sh -c "npm install --no-audit --no-fund && npm run start:dev"
     volumes:
       - ../../apps/api:/usr/src/app
       - /usr/src/app/node_modules
