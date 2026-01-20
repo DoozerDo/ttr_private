@@ -11,6 +11,7 @@ import {
   BaselineDto,
   BaselineUploadResponse,
   BaselineUploadStatus,
+  archiveBaseline,
   listBaselines,
 } from "@/lib/baselines";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
@@ -18,6 +19,7 @@ import { formatDateTime } from "@/lib/format-date";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 import { InputCard } from "./_components/InputCard";
+import { OverflowMenu } from "./_components/OverflowMenu";
 import { setBaselineName } from "./_components/selectionStore";
 
 interface BaselineDashboardProps {
@@ -48,8 +50,10 @@ export function BaselineDashboard({
   const [uploadStatus, setUploadStatus] = useState<BaselineUploadStatus | null>(
     null,
   );
+  const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -67,6 +71,26 @@ export function BaselineDashboard({
   const refreshBaselines = async () => {
     const latest = await listBaselines();
     setBaselines(latest);
+  };
+
+  const handleArchiveBaseline = async (baselineId: string) => {
+    if (archivingBaselineId === baselineId) return;
+    setError(null);
+    setArchivingBaselineId(baselineId);
+
+    try {
+      await archiveBaseline(baselineId);
+      setBaselines((previous) => previous.filter((entry) => entry.id !== baselineId));
+    } catch (archiveError: unknown) {
+      console.error("Unable to archive baseline", archiveError);
+      const message =
+        archiveError instanceof Error
+          ? archiveError.message
+          : "Unable to archive baseline right now.";
+      setError(message);
+    } finally {
+      setArchivingBaselineId(null);
+    }
   };
 
   const sortedBaselines = useMemo(
@@ -153,19 +177,6 @@ export function BaselineDashboard({
       setError("Unable to upload baseline right now.");
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    setError(null);
-    setIsRefreshing(true);
-
-    try {
-      await refreshBaselines();
-    } catch (refreshError: any) {
-      setError(refreshError?.message || "Unable to refresh baselines");
-    } finally {
-      setIsRefreshing(false);
     }
   };
 
@@ -259,15 +270,6 @@ export function BaselineDashboard({
       primaryAction={
         <FormButton onClick={triggerUploadClick} disabled={isUploading}>
           {isUploading ? "Uploading..." : "Add baseline"}
-        </FormButton>
-      }
-      secondaryAction={
-        <FormButton
-          variant="secondary"
-          onClick={handleRefresh}
-          disabled={isUploading || isRefreshing}
-        >
-          {isRefreshing ? "Refreshing" : "Refresh"}
         </FormButton>
       }
     >
@@ -408,6 +410,13 @@ export function BaselineDashboard({
                   >
                     {isSelected ? "Selected" : "Select"}
                   </button>
+                  {baseline.status !== "ARCHIVED" ? (
+                    <OverflowMenu
+                      onArchive={() => handleArchiveBaseline(baseline.id)}
+                      loading={archivingBaselineId === baseline.id}
+                      ariaLabel="Baseline overflow actions"
+                    />
+                  ) : null}
                 </div>
               </li>
             );

@@ -8,9 +8,10 @@ import { Alert } from "@/components/Alert";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import type { JobDto } from "@/lib/jobs";
-import { listJobs } from "@/lib/jobsClient";
+import { archiveJob, listJobs } from "@/lib/jobsClient";
 import { getJobDetailsHref } from "@/src/navigation/routes";
 import { InputCard } from "./InputCard";
+import { OverflowMenu } from "./OverflowMenu";
 import { setJobTitle } from "./selectionStore";
 
 function isArchived(job: JobDto): boolean {
@@ -35,7 +36,7 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [archivingJobId, setArchivingJobId] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -77,16 +78,23 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
     router.refresh();
   };
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
+  const handleArchiveJob = async (jobId: string) => {
+    if (archivingJobId === jobId) return;
     setError(null);
+    setArchivingJobId(jobId);
 
     try {
-      await load();
-    } catch (refreshError: any) {
-      setError(refreshError?.message || "Unable to refresh jobs");
+      await archiveJob(jobId);
+      setJobs((previous) => previous.filter((job) => job.id !== jobId));
+    } catch (archiveError: unknown) {
+      console.error("Unable to archive job", archiveError);
+      const message =
+        archiveError instanceof Error
+          ? archiveError.message
+          : "Unable to archive job right now.";
+      setError(message);
     } finally {
-      setIsRefreshing(false);
+      setArchivingJobId(null);
     }
   };
 
@@ -105,11 +113,6 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
       title="Job description"
       description="Add a job description to score against your baseline."
       primaryAction={addJobButton}
-      secondaryAction={
-        <FormButton variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
-          {isRefreshing ? "Refreshing" : "Refresh"}
-        </FormButton>
-      }
     >
       {error ? (
         <Alert intent="error" title="Jobs error">
@@ -168,19 +171,26 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
                       <Link
                         href={getJobDetailsHref(job.id)}
                         className="rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-white/50"
-                      >
-                        View details
-                      </Link>
-                      <FormButton
-                        variant="ghost"
-                        onClick={() => setJobSelection(job.id)}
-                        disabled={isSelected}
-                      >
-                        {isSelected ? "Selected" : "Select"}
-                      </FormButton>
-                    </div>
+                    >
+                      View details
+                    </Link>
+                    <FormButton
+                      variant="ghost"
+                      onClick={() => setJobSelection(job.id)}
+                      disabled={isSelected}
+                    >
+                      {isSelected ? "Selected" : "Select"}
+                    </FormButton>
+                    {!archived ? (
+                      <OverflowMenu
+                        onArchive={() => handleArchiveJob(job.id)}
+                        loading={archivingJobId === job.id}
+                        ariaLabel="Job overflow actions"
+                      />
+                    ) : null}
                   </div>
-                </li>
+                </div>
+              </li>
               );
             })}
           </ul>
