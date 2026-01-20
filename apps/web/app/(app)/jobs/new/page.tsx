@@ -25,6 +25,50 @@ type IngestPreview = {
   requirements: string[];
 };
 
+type ApiError = {
+  status: number;
+  code: string;
+  message: string;
+  details?: string;
+  auditId?: string;
+};
+
+const createClientError = (message: string, code = "validation_error"): ApiError => ({
+  status: 400,
+  code,
+  message,
+});
+
+const buildApiError = (status: number, data: unknown, fallback: string): ApiError => {
+  const payload = data && typeof data === "object" ? data as Record<string, unknown> : {};
+  const errorNode = (payload.error as Record<string, unknown>) ?? payload;
+  const code =
+    (errorNode?.code as string | undefined) ||
+    (payload.code as string | undefined) ||
+    (status === 401 ? "unauthorized" : "unknown_error");
+  const message =
+    (errorNode?.message as string | undefined) ||
+    (payload.message as string | undefined) ||
+    fallback;
+  const details =
+    (errorNode?.details as string | undefined) ||
+    (payload.details as string | undefined) ||
+    undefined;
+  const auditId =
+    (payload.audit_id as string | undefined) ||
+    (payload.auditId as string | undefined) ||
+    (errorNode?.audit_id as string | undefined) ||
+    (errorNode?.auditId as string | undefined);
+
+  return {
+    status,
+    code,
+    message,
+    details,
+    auditId,
+  };
+};
+
 export default function JobIngestionPage() {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [title, setTitle] = useState("");
@@ -35,8 +79,9 @@ export default function JobIngestionPage() {
   const [preview, setPreview] = useState<IngestPreview | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [detailsCopied, setDetailsCopied] = useState(false);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
 
@@ -90,6 +135,10 @@ export default function JobIngestionPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setDetailsCopied(false);
+  }, [error]);
+
   const resetForm = () => {
     setTitle("");
     setCompany("");
@@ -113,7 +162,7 @@ export default function JobIngestionPage() {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (response.status === 401) {
         window.location.href = "/auth/login";
@@ -121,8 +170,7 @@ export default function JobIngestionPage() {
       }
 
       if (!response.ok) {
-        const message = data?.message || data?.error || "Unable to parse job description";
-        setError(typeof message === "string" ? message : "Unable to parse job description");
+        setError(buildApiError(response.status, data, "Unable to parse job description"));
         return null;
       }
 
@@ -132,7 +180,7 @@ export default function JobIngestionPage() {
 
       return data as IngestPreview;
     } catch {
-      setError("Unable to parse job description right now.");
+      setError(createClientError("Unable to parse job description right now.", "preview_error"));
       return null;
     } finally {
       setIsPreviewing(false);
@@ -142,7 +190,9 @@ export default function JobIngestionPage() {
   const handlePreview = async () => {
     if (isUrlMode) {
       if (!url.trim()) {
-        setError("Please add a job description URL before previewing.");
+        setError(
+          createClientError("Please add a job description URL before previewing.", "preview_validation"),
+        );
         return;
       }
       await requestPreview({ url: url.trim() });
@@ -150,7 +200,9 @@ export default function JobIngestionPage() {
     }
 
     if (!rawDescription.trim()) {
-      setError("Please paste a job description before previewing.");
+      setError(
+        createClientError("Please paste a job description before previewing.", "preview_validation"),
+      );
       return;
     }
 
@@ -174,7 +226,7 @@ export default function JobIngestionPage() {
 
     if (isUrlMode) {
       if (!trimmedUrl) {
-        setError("Please add a job description URL before saving.");
+        setError(createClientError("Please add a job description URL before saving.", "submit_validation"));
         return;
       }
       if (!previewPayload) {
@@ -184,7 +236,7 @@ export default function JobIngestionPage() {
         }
       }
     } else if (!rawDescription.trim()) {
-      setError("Please paste a job description before saving.");
+      setError(createClientError("Please paste a job description before saving.", "submit_validation"));
       return;
     }
 
@@ -192,7 +244,7 @@ export default function JobIngestionPage() {
       isUrlMode ? previewPayload?.rawDescription ?? "" : previewPayload?.rawDescription ?? rawDescription;
 
     if (!finalRawDescription) {
-      setError("Please provide a job description before saving.");
+      setError(createClientError("Please provide a job description before saving.", "submit_validation"));
       return;
     }
 
@@ -215,7 +267,7 @@ export default function JobIngestionPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (response.status === 401) {
         window.location.href = "/auth/login";
@@ -223,8 +275,7 @@ export default function JobIngestionPage() {
       }
 
       if (!response.ok) {
-        const message = data?.message || data?.error || "Unable to save job";
-        setError(typeof message === "string" ? message : "Unable to save job");
+        setError(buildApiError(response.status, data, "Unable to save job"));
         return;
       }
 
@@ -233,9 +284,35 @@ export default function JobIngestionPage() {
       setSuccess("Job description saved. Ready to analyze fit.");
       markJourneyStepCompleted("jobs");
     } catch {
-      setError("Unable to save job right now.");
+      setError(createClientError("Unable to save job right now.", "submit_error"));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const errorDetailsText = error
+    ? JSON.stringify(
+        {
+          status: error.status,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          auditId: error.auditId,
+        },
+        null,
+        2,
+      ) ?? ""
+    : "";
+  const hasClipboardAPI =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const copyErrorDetails = async () => {
+    if (!hasClipboardAPI || !errorDetailsText) return;
+    try {
+      await navigator.clipboard.writeText(errorDetailsText);
+    } catch {
+      //
+    } finally {
+      setDetailsCopied(true);
     }
   };
 
@@ -377,7 +454,61 @@ export default function JobIngestionPage() {
                 : "Preview parse"}
           </button>
 
-          {error && <div style={ttrComponents.dangerBox}>{error}</div>}
+          {error && (
+            <Alert intent="error" title={`Job ingestion issue`}>
+              <p style={{ margin: 0 }}>{error.message}</p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  fontSize: 12,
+                  marginTop: 6,
+                  color: "rgba(226,232,240,0.8)",
+                }}
+              >
+                <span>Status: {error.status}</span>
+                <span>Code: {error.code}</span>
+                {error.auditId && <span>Audit ID: {error.auditId}</span>}
+              </div>
+              <details
+                style={{
+                  marginTop: 8,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "rgba(226,232,240,0.7)",
+                }}
+              >
+                <summary>Copy details</summary>
+                <pre
+                  style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    whiteSpace: "pre-wrap",
+                    backgroundColor: "rgba(15,23,42,0.6)",
+                    padding: 8,
+                    borderRadius: 6,
+                  }}
+                >
+                  {errorDetailsText}
+                </pre>
+                {hasClipboardAPI && (
+                  <button
+                    type="button"
+                    className="mt-2"
+                    onClick={copyErrorDetails}
+                    style={{
+                      ...ttrComponents.secondaryButton,
+                      padding: "6px 10px",
+                      fontSize: 12,
+                      marginTop: 8,
+                    }}
+                  >
+                    {detailsCopied ? "Copied" : "Copy details"}
+                  </button>
+                )}
+              </details>
+            </Alert>
+          )}
           {success && <div style={ttrComponents.successBox}>{success}</div>}
 
           {preview && (

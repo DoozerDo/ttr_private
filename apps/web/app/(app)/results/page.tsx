@@ -86,7 +86,7 @@ type DocumentType = "resume" | "cover-letter";
 
 type DocumentState = {
   response: unknown;
-  error: string | null;
+  error: ApiError | null;
   tierGateError: TierGateError | null;
   complianceError: ParsedComplianceError | null;
 };
@@ -127,6 +127,50 @@ const DOCUMENT_CONFIG: Record<DocumentType, DocumentConfig> = {
     previewTitle: "Cover letter draft preview",
     copyButtonLabel: "Copy cover letter text",
   },
+};
+
+type ApiError = {
+  status: number;
+  code: string;
+  message: string;
+  details?: string;
+  auditId?: string;
+};
+
+const createClientError = (message: string, code = "validation_error"): ApiError => ({
+  status: 400,
+  code,
+  message,
+});
+
+const buildApiError = (response: Response, data: unknown, fallback: string): ApiError => {
+  const payload = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const errorNode = (payload.error as Record<string, unknown>) ?? payload;
+  const code =
+    (errorNode?.code as string | undefined) ||
+    (payload.code as string | undefined) ||
+    (response.status === 401 ? "unauthorized" : "unknown_error");
+  const message =
+    (errorNode?.message as string | undefined) ||
+    (payload.message as string | undefined) ||
+    formatErrorMessage(data, fallback);
+  const details =
+    (errorNode?.details as string | undefined) ||
+    (payload.details as string | undefined) ||
+    undefined;
+  const auditId =
+    (payload.audit_id as string | undefined) ||
+    (payload.auditId as string | undefined) ||
+    (errorNode?.audit_id as string | undefined) ||
+    (errorNode?.auditId as string | undefined);
+
+  return {
+    status: response.status,
+    code,
+    message,
+    details,
+    auditId,
+  };
 };
 
 const debugUiEnabled =
@@ -375,6 +419,16 @@ export default function ResultsPage() {
     searchParams?.get("documentType") === "cover-letter" ? "cover-letter" : "resume";
   const documentConfig = DOCUMENT_CONFIG[documentType];
   const currentDocumentState = documents[documentType];
+  const hasClipboardAPI =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const copyTextToClipboard = async (text: string) => {
+    if (!hasClipboardAPI || !text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  };
 
   const documentResponse = (currentDocumentState.response as AnyObject | null) ?? null;
 
@@ -394,6 +448,14 @@ export default function ResultsPage() {
     (documentResponse?.baseline_version_hash as string | undefined) ||
     (documentResponse?.baselineVersionHash as string | undefined) ||
     undefined;
+
+  const currentErrorDetails = {
+    status: currentDocumentState.error?.status ?? null,
+    code: currentDocumentState.error?.code ?? null,
+    message: currentDocumentState.error?.message ?? null,
+    details: currentDocumentState.error?.details ?? null,
+    auditId: currentDocumentState.error?.auditId ?? null,
+  };
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
@@ -576,7 +638,10 @@ export default function ResultsPage() {
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
       updateDocumentState(documentType, {
-        error: `Load the latest analysis before generating a ${documentConfig.label}.`,
+        error: createClientError(
+          `Load the latest analysis before generating a ${documentConfig.label}.`,
+          "document_not_ready",
+        ),
       });
       return;
     }
@@ -620,11 +685,13 @@ export default function ResultsPage() {
           return;
         }
 
-        const message = formatErrorMessage(
+        const apiError = buildApiError(
+          res,
           payload,
           `${documentConfig.capitalizedLabel} generation failed`,
         );
-        throw new Error(message);
+        updateDocumentState(documentType, { error: apiError });
+        return;
       }
 
       const contentType = res.headers.get("content-type") || "";
@@ -645,7 +712,10 @@ export default function ResultsPage() {
       }
     } catch (e: any) {
       updateDocumentState(documentType, {
-        error: e?.message ?? `${documentConfig.capitalizedLabel} generation failed`,
+        error: createClientError(
+          e?.message ?? `${documentConfig.capitalizedLabel} generation failed`,
+          "document_error",
+        ),
       });
     } finally {
       setLoading(false);
@@ -656,7 +726,10 @@ export default function ResultsPage() {
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
       updateDocumentState(documentType, {
-        error: `Load the latest analysis before exporting a ${documentConfig.label}.`,
+        error: createClientError(
+          `Load the latest analysis before exporting a ${documentConfig.label}.`,
+          "document_not_ready",
+        ),
       });
       return;
     }
@@ -702,8 +775,13 @@ export default function ResultsPage() {
           return;
         }
 
-        const message = formatErrorMessage(payload, `${documentConfig.capitalizedLabel} export failed`);
-        throw new Error(message);
+        const apiError = buildApiError(
+          res,
+          payload,
+          `${documentConfig.capitalizedLabel} export failed`,
+        );
+        updateDocumentState(documentType, { error: apiError });
+        return;
       }
 
       const blob = await res.blob();
@@ -717,7 +795,10 @@ export default function ResultsPage() {
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
       updateDocumentState(documentType, {
-        error: e?.message ?? `${documentConfig.capitalizedLabel} export failed`,
+        error: createClientError(
+          e?.message ?? `${documentConfig.capitalizedLabel} export failed`,
+          "document_error",
+        ),
       });
     } finally {
       setExportState(null);
@@ -950,7 +1031,73 @@ export default function ResultsPage() {
             ) : null}
             {currentDocumentState.error ? (
               <Alert intent="error" title={`Unable to generate ${documentConfig.capitalizedLabel}`}>
-                {currentDocumentState.error}
+                <p style={{ margin: 0 }}>{currentDocumentState.error.message}</p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    fontSize: 12,
+                    marginTop: 6,
+                    color: "rgba(226,232,240,0.8)",
+                  }}
+                >
+                  <span>Status: {currentDocumentState.error.status}</span>
+                  <span>Code: {currentDocumentState.error.code}</span>
+                  {currentDocumentState.error.auditId && (
+                    <span>Audit ID: {currentDocumentState.error.auditId}</span>
+                  )}
+                </div>
+                <details
+                  style={{
+                    marginTop: 8,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: "rgba(226,232,240,0.7)",
+                  }}
+                >
+                  <summary>Copy details</summary>
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      whiteSpace: "pre-wrap",
+                      backgroundColor: "rgba(15,23,42,0.6)",
+                      padding: 8,
+                      borderRadius: 6,
+                    }}
+                  >
+                    {JSON.stringify(
+                      currentErrorDetails,
+                      null,
+                      2,
+                    )}
+                  </pre>
+                  {hasClipboardAPI && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        copyTextToClipboard(
+                          JSON.stringify(
+                            currentErrorDetails,
+                            null,
+                            2,
+                          ),
+                        )
+                      }
+                      className="mt-2"
+                      style={{
+                        border: "1px solid rgba(148,163,184,0.4)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        fontSize: 12,
+                        backgroundColor: "transparent",
+                        color: "rgba(226,232,240,0.9)",
+                      }}
+                    >
+                      Copy details
+                    </button>
+                  )}
+                </details>
               </Alert>
             ) : null}
 

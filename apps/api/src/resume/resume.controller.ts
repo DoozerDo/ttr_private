@@ -137,6 +137,10 @@ export class ResumeController {
     res.setHeader('Content-Type', file.contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     res.setHeader('Content-Length', String(file.buffer.byteLength));
+    res.setHeader('X-Compliance-Audit-Id', file.auditId);
+    if (file.baselineVersionHash) {
+      res.setHeader('X-Baseline-Version-Hash', file.baselineVersionHash);
+    }
     res.send(file.buffer);
   }
 }

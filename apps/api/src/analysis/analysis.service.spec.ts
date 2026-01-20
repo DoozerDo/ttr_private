@@ -86,7 +86,16 @@ describe('AnalysisService - fit scores contract', () => {
             validateAndAudit: jest.fn().mockResolvedValue({
               complianceFlags: [],
               blocked: false,
-              audit: { id: 'audit-1' },
+              audit: {
+                id: 'audit-1',
+                outputHash: '',
+                baselineVersionHash: 'hash',
+                baselineVersionId: 'bv-1',
+                action: ComplianceAction.FIT_SCORE,
+                actorId: 'user-1',
+                jobId: null,
+                createdAt: new Date().toISOString(),
+              },
             }),
           },
         },
@@ -221,6 +230,9 @@ describe('AnalysisService - fit scores contract', () => {
         }),
       }),
     );
+    expect(result.audit_id).toBe('audit-1');
+    expect(result.auditId).toBe('audit-1');
+    expect(result.baseline_version_hash).toBe('hash');
   });
 
   it('creates a compliance audit for fit score requests', async () => {

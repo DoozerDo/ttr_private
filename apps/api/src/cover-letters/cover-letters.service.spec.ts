@@ -115,6 +115,7 @@ describe('CoverLettersService', () => {
     });
 
     expect(second.closingTemplateKey).toBe('collaborative');
+    expect(second.audit_id).toBe('audit-1');
   });
 
   it('blocks invented metrics through compliance checks', async () => {

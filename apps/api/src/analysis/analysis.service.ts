@@ -53,6 +53,10 @@ export type AnalysisResult = {
   strengths: string[];
   gaps: string[];
   summary: string;
+  compliance_flags?: Array<{ code: string; message?: string }>;
+  audit_id?: string | null;
+  auditId?: string | null;
+  baseline_version_hash?: string | null;
 };
 
 type FitScoreJobInput = {
@@ -90,6 +94,7 @@ type FitScoreResponse = {
   gaps?: string[];
   compliance_flags?: Array<{ code: string; message?: string }>;
   audit_id?: string | null;
+  auditId?: string | null;
   assessmentId?: string;
   jobId?: string;
   baselineId?: string;
@@ -260,9 +265,16 @@ export class AnalysisService {
     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   }
 
-  private coerceComplianceFlags(flags: string[] | undefined | null) {
+  private coerceComplianceFlags(
+    flags?: ComplianceFlag[] | string[] | null,
+  ) {
     if (!flags?.length) return undefined;
-    return flags.map((flag) => ({ code: flag, message: flag }));
+    return flags.map((flag) => {
+      if (typeof flag === 'string') {
+        return { code: flag, message: flag };
+      }
+      return { code: flag.code, message: flag.message };
+    });
   }
 
   private mapComplianceStringsToFlags(
@@ -494,17 +506,19 @@ export class AnalysisService {
     }
 
     const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
+    const isIncludedSection = (section: BaselineSection) =>
+      section.includePolicy !== BaselineIncludePolicy.NEVER &&
+      (!selectedBlockIds || selectedBlockIds.includes(section.id));
     const includedSections =
       baseline.sections
-        ?.filter(
-          (section) =>
-            section.includePolicy !== BaselineIncludePolicy.NEVER &&
-            (!selectedBlockIds || selectedBlockIds.includes(section.id)),
-        )
+        ?.filter(isIncludedSection)
         .map((section) => ({
           type: section.sectionType ?? section.type,
           content: section.content,
         })) ?? [];
+
+    const complianceBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(includedSections);
 
     const baselineTextForDebug = includedSections.map((section) => section.content).join('\n');
     const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
@@ -576,6 +590,8 @@ export class AnalysisService {
     const rawText = jobPayload.rawDescription ?? '';
     const rawTextChars = getCharCount(rawText);
     const rawTextWords = countWords(rawText);
+
+    const normalizedJobDescription = this.complianceService.normalizeText(rawText);
 
     const hasNormalizedText = normalizedSegments.length > 0;
     const chosenTextSourceForScoring = hasNormalizedText
@@ -679,6 +695,10 @@ export class AnalysisService {
         }
       : undefined;
 
+    const generatedSectionsForCompliance = normalizedJobDescription
+      ? [{ title: 'Job Description', content: normalizedJobDescription }]
+      : undefined;
+
     let savedAssessment: FitAssessment | null = null;
 
     if (job) {
@@ -705,6 +725,8 @@ export class AnalysisService {
       baselineVersion,
       job: job ?? null,
       outputHash: inputsHash,
+      baselineSections: complianceBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
       extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
     });
 
@@ -734,7 +756,8 @@ export class AnalysisService {
       strengths: scoring.strengths,
       gaps: scoring.gaps,
       compliance_flags: this.coerceComplianceFlags(scoring.complianceFlags),
-      audit_id: savedAssessment?.id ?? null,
+      audit_id: compliance.audit.id,
+      auditId: compliance.audit.id,
       assessmentId: savedAssessment?.id,
       jobId: savedAssessment?.jobId,
       baselineId: savedAssessment?.baselineId,
@@ -780,17 +803,31 @@ export class AnalysisService {
       });
     }
 
-    const jobDescription = hasJobId
-      ? (await this.jobRepository.findOne({
-          where: { id: payload.jobId?.trim(), userId },
-        }))?.rawDescription
+    const includedSections =
+      baseline.sections?.filter(
+        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+      ) ?? [];
+
+    const complianceBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(includedSections);
+
+    const jobId = payload.jobId?.trim();
+    const job = jobId
+      ? await this.jobRepository.findOne({
+          where: { id: jobId, userId },
+        })
+      : null;
+    const jobDescription = job
+      ? job.rawDescription
       : payload.jobDescription?.trim();
 
     if (!jobDescription) {
       throw new NotFoundException('Job not found');
     }
 
-    const baselineText = this.buildBaselineText(baseline.sections ?? []);
+    const normalizedJobDescription = this.complianceService.normalizeText(jobDescription);
+
+    const baselineText = this.buildBaselineText(includedSections);
     const baselineKeywords = this.normalizeKeywords(baselineText);
     const jobKeywords = this.normalizeKeywords(jobDescription);
 
@@ -815,6 +852,32 @@ export class AnalysisService {
         ? 'No keywords found in the job description.'
         : `Matched ${matched} of ${total} key terms from the job description.`;
 
+    const generatedSectionsForCompliance = normalizedJobDescription
+      ? [{ title: 'Job Description', content: normalizedJobDescription }]
+      : undefined;
+
+    const outputHash = sha256(`${baseline.hash ?? ''}:${normalizedJobDescription}`);
+
+    const compliance = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.FIT_SCORE,
+      actorId: userId,
+      baselineVersion: { hash: baseline.hash } as BaselineVersion,
+      job,
+      outputHash,
+      baselineSections: complianceBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
+    });
+
+    if (compliance.blocked) {
+      throw new BadRequestException({
+        error: {
+          code: 'compliance_blocked',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: compliance.complianceFlags },
+        },
+      });
+    }
+
     return {
       ok: true,
       baselineId: baseline.id,
@@ -822,6 +885,11 @@ export class AnalysisService {
       strengths,
       gaps: gapList,
       summary,
+      compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
+      audit_id: compliance.audit.id,
+      auditId: compliance.audit.id,
+      baseline_version_hash:
+        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
     };
   }
 
@@ -870,10 +938,12 @@ export class AnalysisService {
         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
       ) ?? [];
 
+    const complianceBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(includedSections);
+
     const calibration = await this.getCalibration(userId);
 
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-
     const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
 
     const existing = await this.fitAssessmentRepository.findOne({
@@ -886,14 +956,29 @@ export class AnalysisService {
         existing.strengths ?? [],
         existing.gaps ?? [],
       );
-      await this.complianceService.validateAndAudit({
+      const compliance = await this.complianceService.validateAndAudit({
         action: ComplianceAction.FIT_SCORE,
         actorId: userId,
         baselineVersion: { hash: baseline.hash } as BaselineVersion,
         job,
         outputHash: inputsHash,
+        baselineSections: complianceBaselineSections,
+        generatedSections: summary
+          ? [{ title: 'Fit scoring summary', content: summary }]
+          : undefined,
         extraFlags: this.mapComplianceStringsToFlags(existing.complianceFlags),
       });
+
+      if (compliance.blocked) {
+        throw new BadRequestException({
+          error: {
+            code: 'compliance_blocked',
+            message: 'Compliance validation failed.',
+            details: { compliance_flags: compliance.complianceFlags },
+          },
+        });
+      }
+
       return {
         ok: true,
         assessmentId: existing.id,
@@ -909,6 +994,10 @@ export class AnalysisService {
         complianceFlags: existing.complianceFlags,
         summary,
         createdAt: existing.createdAt,
+        audit_id: compliance.audit.id,
+        auditId: compliance.audit.id,
+        baseline_version_hash:
+          compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
       };
     }
 
@@ -933,12 +1022,18 @@ export class AnalysisService {
       dimensionWeights,
     );
 
+    const generatedSectionsForCompliance = scoring.summary
+      ? [{ title: 'Fit scoring summary', content: scoring.summary }]
+      : undefined;
+
     const compliance = await this.complianceService.validateAndAudit({
       action: ComplianceAction.FIT_SCORE,
       actorId: userId,
       baselineVersion: { hash: baseline.hash } as BaselineVersion,
       job,
       outputHash: inputsHash,
+      baselineSections: complianceBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
       extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
     });
 
@@ -982,6 +1077,10 @@ export class AnalysisService {
       gaps: saved.gaps,
       complianceFlags: saved.complianceFlags,
       summary: scoring.summary,
+      audit_id: compliance.audit.id,
+      auditId: compliance.audit.id,
+      baseline_version_hash:
+        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
       createdAt: saved.createdAt,
     };
   }
@@ -1051,8 +1150,12 @@ export class AnalysisService {
         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
       ) ?? [];
 
+    const complianceBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(includedSections);
+
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
+    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
 
     const scoring = await this.fitScoringService.score(
       {
@@ -1075,6 +1178,36 @@ export class AnalysisService {
       },
       dimensionWeights,
     );
+
+    const additionsForCompliance = additions.map((addition, index) => ({
+      title: `Verified addition ${index + 1}`,
+      content: this.complianceService.normalizeText(addition),
+    }));
+
+    const generatedSectionsForCompliance = additionsForCompliance.length
+      ? additionsForCompliance
+      : undefined;
+
+    const compliance = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.FIT_SCORE,
+      actorId: userId,
+      baselineVersion: { hash: baseline.hash } as BaselineVersion,
+      job,
+      outputHash: inputsHash,
+      baselineSections: complianceBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
+      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
+    });
+
+    if (compliance.blocked) {
+      throw new BadRequestException({
+        error: {
+          code: 'compliance_blocked',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: compliance.complianceFlags },
+        },
+      });
+    }
 
     const linkedAssessment = await this.fitAssessmentRepository.findOne({
       where: { userId, jobId, baselineId },
@@ -1115,6 +1248,10 @@ export class AnalysisService {
       complianceFlags: scoring.complianceFlags,
       appliedAdditions: scoring.appliedAdditions,
       summary: scoring.summary,
+      audit_id: compliance.audit.id,
+      auditId: compliance.audit.id,
+      baseline_version_hash:
+        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
     };
   }
 

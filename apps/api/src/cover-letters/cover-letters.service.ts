@@ -214,6 +214,7 @@ export class CoverLettersService {
       ...savedCoverLetter,
       compliance_flags: complianceFlags,
       audit_id: audit.id,
+      auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
     };
   }

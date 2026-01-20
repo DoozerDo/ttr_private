@@ -39,12 +39,12 @@ const buildRepository = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
-const buildService = (
-  fitScore: number,
-  writingFlags: any[] = [],
-  baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
-  complianceOverride: Partial<ComplianceService> = {},
-) => {
+  const buildService = (
+    fitScore: number,
+    writingFlags: any[] = [],
+    baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
+    complianceOverride: Partial<ComplianceService> = {},
+  ) => {
   const baselineRepository = buildRepository({
     findOne: jest.fn().mockResolvedValue(mockBaseline),
   });
@@ -69,7 +69,16 @@ const buildService = (
     validateAndAudit: jest.fn().mockResolvedValue({
       complianceFlags: writingFlags,
       blocked: writingFlags.length > 0,
-      audit: { id: 'audit-1' },
+      audit: {
+        id: 'audit-1',
+        outputHash: '',
+        baselineVersionHash: baselineVersionOverride?.hash ?? 'hash-1',
+        baselineVersionId: baselineVersionOverride?.id ?? 'baseline-version-1',
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-1',
+        jobId: mockJob.id,
+        createdAt: new Date().toISOString(),
+      },
     }),
     ...complianceOverride,
   } as unknown as ComplianceService;
@@ -168,6 +177,8 @@ describe('ResumeService', () => {
     );
     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
     expect(exportResult.filename).toBe('resume.docx');
+    expect(exportResult.auditId).toBe('audit-1');
+    expect(exportResult.baselineVersionHash).toBe('hash-1');
   });
 
   it('blocks generation when baseline hash is missing', async () => {

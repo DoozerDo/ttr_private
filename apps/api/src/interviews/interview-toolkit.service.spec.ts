@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ComplianceService } from '../compliance/compliance.service';
+import { ComplianceAction } from '../compliance/compliance.types';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
 import { StarStory } from '../star-stories/star-story.entity';
@@ -46,7 +47,20 @@ describe('InterviewToolkitService', () => {
         {
           provide: ComplianceService,
           useValue: {
-            validateAndAudit: jest.fn().mockResolvedValue({ blocked: false, complianceFlags: [] }),
+            validateAndAudit: jest.fn().mockResolvedValue({
+              blocked: false,
+              complianceFlags: [],
+              audit: {
+                id: 'audit-1',
+                outputHash: '',
+                baselineVersionHash: 'hash-1',
+                baselineVersionId: 'bv-1',
+                action: ComplianceAction.FOLLOW_UP_GENERATION,
+                actorId: 'user-1',
+                jobId: 'job-2',
+                createdAt: new Date().toISOString(),
+              },
+            }),
           },
         },
       ],
@@ -147,6 +161,8 @@ describe('InterviewToolkitService', () => {
 
     expect(result.content).toContain('roadmap planning');
     expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
+    expect(result.auditId).toBe('audit-1');
+    expect(result.baselineVersionHash).toBe('hash-1');
   });
 
   it('requires a baseline version id for follow ups', async () => {

@@ -144,13 +144,17 @@ export class ApplicationsService {
     const baselineVersion = new BaselineVersion();
     baselineVersion.fileHash = 'applications_export';
 
-    await this.complianceService.validateAndAudit({
+    const compliance = await this.complianceService.validateAndAudit({
       action: ComplianceAction.APPLICATION_EXPORT,
       actorId: userId,
       baselineVersion,
       outputHash: createHash('sha256').update(csv).digest('hex'),
     });
 
-    return csv;
+    return {
+      csv,
+      auditId: compliance.audit.id,
+      baselineVersionHash: compliance.audit.baselineVersionHash,
+    };
   }
 }

@@ -43,6 +43,15 @@ const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 4;
 const JOB_LIMIT = 5;
 
+const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'text/plain']);
+const PRIVATE_NETWORK_URL_ERROR =
+  'Job URLs hosted on private networks are not allowed.';
+const FETCH_TIMEOUT_MESSAGE = 'Job description request timed out.';
+const FETCH_FAILURE_MESSAGE =
+  'Unable to retrieve the job description from the provided URL.';
+const CONTENT_TYPE_ERROR =
+  'Job description content must be served as HTML or plain text.';
+
 @Injectable()
 export class JobsService {
   constructor(
@@ -255,16 +264,12 @@ export class JobsService {
       throw new BadRequestException('Only http and https URLs are allowed.');
     }
 
-    const hostname = parsed.hostname.toLowerCase();
-    if (hostname === 'localhost' || hostname.endsWith('.local')) {
-      throw new BadRequestException('Private URLs are not allowed.');
-    }
-
-    const ipVersion = isIP(hostname);
-    if (ipVersion) {
-      if (isPrivateIp(hostname)) {
-        throw new BadRequestException('Private URLs are not allowed.');
-      }
+    const normalizedHostname = normalizeHostname(parsed.hostname);
+    if (
+      isLocalHostname(normalizedHostname) ||
+      isPrivateNetworkAddress(normalizedHostname)
+    ) {
+      throw new BadRequestException(PRIVATE_NETWORK_URL_ERROR);
     }
 
     return parsed.toString();
@@ -275,16 +280,13 @@ export class JobsService {
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     try {
-      const response = await fetchWithRedirects(url, {
-        redirectLimit: MAX_REDIRECTS,
-        signal: controller.signal,
-      });
+      const response = await this.fetchWithRedirects(url, controller.signal);
 
       if (response.status < 200 || response.status >= 300) {
-        throw new BadRequestException(
-          'Could not retrieve job description from URL.',
-        );
+        throw new BadRequestException(FETCH_FAILURE_MESSAGE);
       }
+
+      this.ensureAllowedContentType(response);
 
       const buffer = await response.arrayBuffer();
       if (buffer.byteLength > MAX_HTML_BYTES) {
@@ -296,50 +298,85 @@ export class JobsService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(
-        'Could not retrieve job description from URL.',
-      );
+
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || (error as any)?.name === 'AbortError')
+      ) {
+        throw new BadRequestException(FETCH_TIMEOUT_MESSAGE);
+      }
+
+      throw new BadRequestException(FETCH_FAILURE_MESSAGE);
     } finally {
       clearTimeout(timeout);
     }
   }
+
+  private ensureAllowedContentType(response: Response) {
+    const contentType = (response.headers.get('content-type') ?? '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+
+    if (!contentType || !ALLOWED_CONTENT_TYPES.has(contentType)) {
+      throw new BadRequestException(CONTENT_TYPE_ERROR);
+    }
+  }
+
+  private async fetchWithRedirects(
+    url: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    let currentUrl = url;
+    let redirects = 0;
+
+    while (true) {
+      const safeUrl = this.validateUrl(currentUrl);
+      const response = await fetch(safeUrl, {
+        redirect: 'manual',
+        signal,
+      });
+
+      const location =
+        response.status >= 300 &&
+        response.status < 400 &&
+        response.headers.get('location');
+
+      if (location) {
+        if (redirects >= MAX_REDIRECTS) {
+          throw new BadRequestException(
+            'Too many redirects while fetching URL.',
+          );
+        }
+
+        currentUrl = new URL(location, safeUrl).toString();
+        redirects += 1;
+        continue;
+      }
+
+      return response;
+    }
+  }
 }
 
-const fetchWithRedirects = async (
-  url: string,
-  options: { redirectLimit: number; signal: AbortSignal },
-) => {
-  let currentUrl = url;
-  let redirects = 0;
+const normalizeHostname = (hostname: string) =>
+  hostname.split('%')[0].toLowerCase();
 
-  while (true) {
-    const response = await fetch(currentUrl, {
-      redirect: 'manual',
-      signal: options.signal,
-    });
+const isLocalHostname = (hostname: string) =>
+  hostname === 'localhost' || hostname.endsWith('.local');
 
-    if (
-      response.status >= 300 &&
-      response.status < 400 &&
-      response.headers.get('location')
-    ) {
-      if (redirects >= options.redirectLimit) {
-        throw new BadRequestException('Too many redirects while fetching URL.');
-      }
-      const nextUrl = new URL(
-        response.headers.get('location')!,
-        currentUrl,
-      ).toString();
-      currentUrl = nextUrl;
-      redirects += 1;
-      continue;
-    }
-
-    return response;
+const isPrivateNetworkAddress = (hostname: string) => {
+  const ipVersion = isIP(hostname);
+  if (ipVersion === 4) {
+    return isPrivateIpv4(hostname);
   }
+  if (ipVersion === 6) {
+    return isPrivateIpv6(hostname);
+  }
+  return false;
 };
 
-const isPrivateIp = (ipAddress: string) => {
+const isPrivateIpv4 = (ipAddress: string) => {
   if (ipAddress.startsWith('10.')) return true;
   if (ipAddress.startsWith('127.')) return true;
   if (ipAddress.startsWith('169.254.')) return true;
@@ -350,5 +387,18 @@ const isPrivateIp = (ipAddress: string) => {
   if (first === 172 && second >= 16 && second <= 31) return true;
 
   return false;
+};
+
+const IPV6_LOOPBACKS = new Set(['::1', '0:0:0:0:0:0:0:1']);
+const IPV6_LINK_LOCAL_PREFIXES = ['fe8', 'fe9', 'fea', 'feb'];
+
+const isPrivateIpv6 = (ipAddress: string) => {
+  const normalized = ipAddress.toLowerCase();
+  if (IPV6_LOOPBACKS.has(normalized)) return true;
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+
+  return IPV6_LINK_LOCAL_PREFIXES.some((prefix) =>
+    normalized.startsWith(prefix),
+  );
 };
 

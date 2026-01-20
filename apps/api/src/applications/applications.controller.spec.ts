@@ -25,7 +25,11 @@ describe('ApplicationsController', () => {
       getApplicationForUser: jest.fn().mockResolvedValue({ id: 'app-1' }),
       updateApplication: jest.fn().mockResolvedValue({ id: 'app-1', stage: ApplicationStage.APPLIED }),
       deleteApplication: jest.fn().mockResolvedValue({ deleted: true, id: 'app-1' }),
-      exportApplicationsToCsv: jest.fn().mockResolvedValue('csv-data'),
+      exportApplicationsToCsv: jest.fn().mockResolvedValue({
+        csv: 'csv-data',
+        auditId: 'audit-id',
+        baselineVersionHash: 'hash-id',
+      }),
     }) as unknown as ApplicationsService;
 
   afterEach(() => {
@@ -102,7 +106,7 @@ describe('ApplicationsController', () => {
     const request = createMockRequest('user-1');
     const response = createMockResponse();
 
-    const result = await controller.exportApplications(request as any, response as any);
+    await controller.exportApplications(request as any, response as any);
 
     expect(service.exportApplicationsToCsv).toHaveBeenCalledWith('user-1');
     expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'text/csv');
@@ -111,6 +115,13 @@ describe('ApplicationsController', () => {
       'attachment; filename=\"applications.csv\"',
     );
     expect(response.send).toHaveBeenCalledWith('csv-data');
-    expect(result).toBe('csv-data');
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'X-Compliance-Audit-Id',
+      'audit-id',
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'X-Baseline-Version-Hash',
+      'hash-id',
+    );
   });
 });

@@ -36,7 +36,16 @@ describe('ApplicationsService', () => {
     validateAndAudit: jest.fn().mockResolvedValue({
       complianceFlags: [],
       blocked: false,
-      audit: { id: 'audit-id' },
+      audit: {
+        id: 'audit-id',
+        outputHash: '',
+        baselineVersionHash: 'hash-id',
+        baselineVersionId: 'baseline-version',
+        action: ComplianceAction.APPLICATION_EXPORT,
+        actorId: 'user-1',
+        jobId: null,
+        createdAt: new Date().toISOString(),
+      },
     }),
   });
 
@@ -229,16 +238,18 @@ describe('ApplicationsService', () => {
 
       const service = createService(repository, complianceService);
 
-      const csv = await service.exportApplicationsToCsv('user-1');
+      const result = await service.exportApplicationsToCsv('user-1');
 
       expect(repository.find).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
         order: { createdAt: 'DESC' },
       });
-      expect(csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
-      expect(csv).toContain(
+      expect(result.csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
+      expect(result.csv).toContain(
         'Acme Corp,Software Engineer,2024-01-01T00:00:00.000Z,80,SAVED,Followed up,https://example.com',
       );
+      expect(result.auditId).toBe('audit-id');
+      expect(result.baselineVersionHash).toBe('hash-id');
       expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: ComplianceAction.APPLICATION_EXPORT,

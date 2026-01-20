@@ -258,6 +258,7 @@ export class ResumeService {
       sections: normalizedSections,
       compliance_flags: complianceFlags,
       audit_id: audit.id,
+      auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
       quality,
     };
@@ -332,6 +333,8 @@ export class ResumeService {
       buffer,
       contentType,
       filename,
+      auditId: audit.id,
+      baselineVersionHash: audit.baselineVersionHash,
     };
   }
 }

@@ -51,14 +51,18 @@ export class ApplicationsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const csv = await this.applicationsService.exportApplicationsToCsv(userId);
+    const file = await this.applicationsService.exportApplicationsToCsv(userId);
 
     response.setHeader('Content-Type', 'text/csv');
     response.setHeader(
       'Content-Disposition',
       'attachment; filename="applications.csv"',
     );
-    response.send(csv);
+    response.setHeader('X-Compliance-Audit-Id', file.auditId);
+    if (file.baselineVersionHash) {
+      response.setHeader('X-Baseline-Version-Hash', file.baselineVersionHash);
+    }
+    response.send(file.csv);
   }
 
   @Get(':id')

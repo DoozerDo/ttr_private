@@ -6,6 +6,23 @@ describe('JobsService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    delete (global as any).fetch;
+  });
+
+  it('rejects localhost URLs during ingestion', async () => {
+    const service = createService();
+
+    await expect(
+      service.ingestJobDescription({ url: 'http://localhost/job' }),
+    ).rejects.toThrow('Job URLs hosted on private networks are not allowed.');
+  });
+
+  it('rejects private IP URLs during ingestion', async () => {
+    const service = createService();
+
+    await expect(
+      service.ingestJobDescription({ url: 'https://10.0.0.5/role' }),
+    ).rejects.toThrow('Job URLs hosted on private networks are not allowed.');
   });
 
   it('ingests job descriptions from a URL', async () => {
@@ -23,7 +40,12 @@ describe('JobsService', () => {
 
     global.fetch = jest.fn().mockResolvedValue({
       status: 200,
-      headers: { get: () => null },
+      headers: {
+        get: (key: string) =>
+          key.toLowerCase() === 'content-type'
+            ? 'text/html; charset=utf-8'
+            : null,
+      },
       arrayBuffer: async () => Buffer.from(html),
     } as never);
 
