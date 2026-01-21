@@ -10,14 +10,16 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 // - overrides that implement `get(key: string): string | null`
 type MockSearchParams = {
   get: (key?: string) => string | null;
+  toString: () => string;
 };
 
 const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
   get: (_key?: string) => null,
+  toString: () => "",
 }));
 
-const mockRouterPush = vi.fn();
-const mockPathname = vi.fn(() => "/");
+export const mockRouterPush = vi.fn();
+export const mockPathname = vi.fn(() => "/");
 export const mockUseParams = vi.fn(() => ({}));
 export const mockNotFound = vi.fn();
 export const mockRedirect = vi.fn();
@@ -123,6 +125,13 @@ function setDefaultFetch() {
 setDefaultFetch();
 
 export function overrideSearchParams(values: Record<string, string | null>) {
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== null) {
+      params.set(key, value);
+    }
+  });
+
   mockSearchParams.mockReturnValue({
     get: (key?: string) => {
       if (!key) return null;
@@ -131,12 +140,14 @@ export function overrideSearchParams(values: Record<string, string | null>) {
       }
       return null;
     },
+    toString: () => params.toString(),
   });
 }
 
 export function resetSearchParams() {
   mockSearchParams.mockReturnValue({
     get: (_key?: string) => null,
+    toString: () => "",
   });
 }
 

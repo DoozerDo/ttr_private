@@ -144,9 +144,6 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
           <WorkspaceRunner baselineId={selectedBaselineId} jobId={selectedJobId} />
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-xs text-slate-400">
-          debug baselineId={selectedBaselineId ?? "null"} jobId={selectedJobId ?? "null"}
-        </div>
       </div>
     </InstrumentPanelShell>
   );

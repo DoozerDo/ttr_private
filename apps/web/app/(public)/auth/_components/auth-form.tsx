@@ -6,9 +6,10 @@ import { FormEvent, useState } from "react";
 
 interface AuthFormProps {
   mode: "login" | "register";
+  returnPath?: string | null;
 }
 
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,7 +71,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       // - validated credentials
       // - set the auth cookie
       // We just navigate.
-      router.push("/");
+      router.push(returnPath ?? "/");
     } catch (submitError) {
       console.error("Auth request failed", submitError);
       setError("Unable to reach authentication service");
