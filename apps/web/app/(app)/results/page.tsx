@@ -21,7 +21,6 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
-import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
 import { useAutoGenerateThreshold } from "../lib/settings";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 
@@ -59,57 +58,6 @@ type LatestAnalysis = {
   dimensionScores?: FitDimensionScores | null;
   expandedDimensionScores?: FitDimensionScores | null;
   breakdown?: DimensionBreakdown | null;
-};
-
-const resolveStoredFitScore = (record: StoredAnalysisRecord) => {
-  if (typeof record.fitScore === "number") return record.fitScore;
-  if (typeof record.analysis.score === "number") return record.analysis.score;
-  if (typeof record.analysis.overallScore === "number") return record.analysis.overallScore;
-  if (typeof (record.analysis as any).overall_score === "number") return (record.analysis as any).overall_score;
-  return null;
-};
-
-const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis => {
-  const fitScore = resolveStoredFitScore(record);
-  const verdict =
-    record.verdict ??
-    (typeof record.analysis.verdict === "string" ? record.analysis.verdict : undefined);
-  const analysisPayload = record.analysis as Record<string, unknown>;
-  const normalizedBaselineVersionHash =
-    typeof analysisPayload.baselineVersionHash === "string"
-      ? analysisPayload.baselineVersionHash
-      : typeof analysisPayload.baseline_version_hash === "string"
-        ? analysisPayload.baseline_version_hash
-        : undefined;
-  const normalizedAuditId =
-    typeof analysisPayload.auditId === "string"
-      ? analysisPayload.auditId
-      : typeof analysisPayload.audit_id === "string"
-        ? analysisPayload.audit_id
-        : undefined;
-
-  return {
-    baselineId: record.baselineId ?? "",
-    baselineVersionId: record.baselineVersionId ?? null,
-    baselineVersion:
-      typeof analysisPayload.baselineVersion === "number"
-        ? analysisPayload.baselineVersion
-        : undefined,
-    baselineVersionHash: normalizedBaselineVersionHash,
-    jobId: record.jobId ?? "",
-    overallScore: fitScore ?? undefined,
-    score: fitScore,
-    note: record.summary ?? (record.analysis as any).summary ?? undefined,
-    verdict,
-    jobTitle: record.jobTitle ?? undefined,
-    company: record.company ?? undefined,
-    assessmentId: (record.analysis as any).assessmentId ?? undefined,
-    auditId: normalizedAuditId,
-    audit_id: typeof analysisPayload.audit_id === "string" ? analysisPayload.audit_id : undefined,
-    dimensionScores: (analysisPayload.dimensionScores ??
-      analysisPayload.dimension_scores) as FitDimensionScores | undefined,
-    breakdown: analysisPayload.breakdown as DimensionBreakdown | undefined,
-  };
 };
 
 type NextStep = {
@@ -781,11 +729,17 @@ export default function ResultsPage() {
       }
 
       const data: LatestAnalysis = await res.json();
-      setLatest(data);
-      setBaselineId(data.baselineId ?? "");
-      setJobId(data.jobId ?? "");
-      setAnalysisSource("latest");
-      setRestoredAt(null);
+      if (!data.assessmentId) {
+        throw new Error("Latest assessment is missing an assessment ID.");
+      }
+
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.delete("jobId");
+      params.delete("baselineId");
+      params.set("assessmentId", data.assessmentId);
+      const query = params.toString();
+      const path = query ? `/results?${query}` : "/results";
+      await router.replace(path);
     } catch (e: any) {
       setError(e?.message || "Failed to load analysis");
     } finally {
@@ -804,20 +758,6 @@ export default function ResultsPage() {
     setLastLoadedRunIdentifier(runIdentifier);
     void loadAssessmentById(runIdentifier);
   }, [loadAssessmentById, runIdentifier, lastLoadedRunIdentifier]);
-
-  useEffect(() => {
-    if (runIdentifier) return;
-    if (analysisSource !== "manual" || baselineId || jobId || latest) return;
-
-    const stored = readLastAnalysis();
-    if (!stored) return;
-
-    setLatest(mapStoredAnalysisToLatest(stored));
-    setBaselineId(stored.baselineId ?? "");
-    setJobId(stored.jobId ?? "");
-    setRestoredAt(stored.savedAt);
-    setAnalysisSource("latest");
-  }, [analysisSource, baselineId, jobId, latest, runIdentifier]);
 
   async function generateDocument(
     oneTap = false,

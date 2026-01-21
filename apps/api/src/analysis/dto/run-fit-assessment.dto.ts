@@ -4,4 +4,6 @@ export class RunFitAssessmentDto {
   baselineId!: string;
 
   baselineVersion?: number;
+
+  debug?: boolean;
 }

@@ -90,6 +90,21 @@ type ScoringProofSnapshot = {
   normalizedRequirementsCount: number;
 };
 
+type CompatibilityRunDebugPayload = {
+  baselineId: string;
+  baselineVersionHash: string | null;
+  baselineSelectedSectionCount: number;
+  baselineTotalChars: number;
+  jobId: string | null;
+  jobRawChars: number;
+  normalizedResponsibilitiesCount: number;
+  normalizedResponsibilitiesChars: number;
+  normalizedRequirementsCount: number;
+  normalizedRequirementsChars: number;
+  dimensionScores: FitDimensionScores;
+  totalScore: number;
+};
+
 type FitScoreResponse = {
   fit_score: number;
   overall_score: number;
@@ -116,55 +131,11 @@ type FitScoreResponse = {
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
   summary?: string;
-  debug?: FitScoreDebugPayload;
+  debug?: CompatibilityRunDebugPayload;
   scoringProof?: ScoringProofSnapshot;
 
   // Added to match runtime return payload.
   scoring_v2?: unknown;
-};
-
-type FitScoreDebugPayload = {
-  request: {
-    debugEnabled: boolean;
-    debugSource: DebugSource;
-    baselineVersionId: string | null;
-    jobId: string | null;
-  };
-  baseline: {
-    baselineId: string;
-    baselineVersionId: string;
-    baselineVersionNumber: number | null;
-    baselineContentHash: string | null;
-    baselineExtractedTextChars: number;
-    baselineExtractedTextWords: number;
-    baselineSectionsCharCounts: Array<{
-      type: string | null;
-      charCount: number;
-    }>;
-  };
-  job: {
-    jobId: string | null;
-    jobSource: 'url' | 'paste' | 'unknown';
-    rawTextChars: number;
-    rawTextWords: number;
-    normalizedTextChars: number;
-    normalizedTextWords: number;
-    chosenTextSourceForScoring: 'normalized' | 'raw' | 'unknown';
-    chosenTextChars: number;
-    chosenTextWords: number;
-    chosenTextHash: string;
-  };
-  scoring: {
-    overallScoreBeforeAnyCapsOrGates: number;
-    overallScoreAfterCapsOrGates: number;
-    dimensionScores: FitDimensionScores;
-    verdict: FitAssessmentVerdict;
-    weights?: Record<keyof FitDimensionScores, number>;
-    normalizedWeightTotal?: number;
-    gatesApplied?: string[];
-    penaltiesApplied?: string[];
-    summaryBasis: string;
-  };
 };
 
 @Injectable()
@@ -275,6 +246,57 @@ export class AnalysisService {
     };
 
     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private buildCompatibilityDebugPayload({
+    baselineId,
+    baselineVersionHash,
+    baselineSelectedSectionCount,
+    baselineTotalChars,
+    jobId,
+    jobRawChars,
+    normalizedResponsibilitiesCount,
+    normalizedResponsibilitiesChars,
+    normalizedRequirementsCount,
+    normalizedRequirementsChars,
+    dimensionScores,
+    totalScore,
+  }: {
+    baselineId: string;
+    baselineVersionHash: string | null;
+    baselineSelectedSectionCount: number;
+    baselineTotalChars: number;
+    jobId: string | null;
+    jobRawChars: number;
+    normalizedResponsibilitiesCount: number;
+    normalizedResponsibilitiesChars: number;
+    normalizedRequirementsCount: number;
+    normalizedRequirementsChars: number;
+    dimensionScores: FitDimensionScores;
+    totalScore: number;
+  }): CompatibilityRunDebugPayload {
+    return {
+      baselineId,
+      baselineVersionHash,
+      baselineSelectedSectionCount,
+      baselineTotalChars,
+      jobId,
+      jobRawChars,
+      normalizedResponsibilitiesCount,
+      normalizedResponsibilitiesChars,
+      normalizedRequirementsCount,
+      normalizedRequirementsChars,
+      dimensionScores,
+      totalScore,
+    };
+  }
+
+  private buildNormalizedSegmentStats(segments: string[]) {
+    const text = segments.join('\n');
+    return {
+      count: segments.length,
+      chars: getCharCount(text),
+    };
   }
 
   private coerceComplianceFlags(
@@ -550,7 +572,8 @@ export class AnalysisService {
 
     const jobInput = payload.job ?? {};
     const jobId = jobInput.id?.trim();
-    const allowDebug = Boolean(payload.debug && process.env.NODE_ENV !== 'production');
+    const baselineVersionHash = baseline.hash ?? null;
+    const allowDebug = Boolean(payload.debug);
 
     let job: Job | null = null;
     let jobPayload: {
@@ -600,6 +623,8 @@ export class AnalysisService {
     const normalizedText = normalizedSegments.join('\n');
     const normalizedTextChars = getCharCount(normalizedText);
     const normalizedTextWords = countWords(normalizedText);
+    const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(normalizedResponsibilities);
+    const normalizedRequirementsStats = this.buildNormalizedSegmentStats(normalizedRequirements);
 
     const rawText = jobPayload.rawDescription ?? '';
     const rawTextChars = getCharCount(rawText);
@@ -656,54 +681,21 @@ export class AnalysisService {
       baselineSections: includedSections,
     });
 
-    const scoringDebug = scoring.debug;
-    const normalizedWeightTotal =
-      scoringDebug && Object.keys(scoringDebug.weights ?? {}).length
-        ? Object.values(scoringDebug.weights ?? {}).reduce((sum, value) => sum + value, 0)
-        : undefined;
-    const debugPayload: FitScoreDebugPayload | undefined = allowDebug
-      ? {
-          request: {
-            debugEnabled: allowDebug,
-            debugSource: payload.debugSource ?? 'none',
-            baselineVersionId: baselineVersion.id,
-            jobId: jobId ?? null,
-          },
-          baseline: {
-            baselineId: baseline.id,
-            baselineVersionId: baselineVersion.id,
-            baselineVersionNumber: baselineVersion.versionNumber ?? baseline.version ?? null,
-            baselineContentHash,
-            baselineExtractedTextChars,
-            baselineExtractedTextWords,
-            baselineSectionsCharCounts,
-          },
-          job: {
-            jobId: job?.id ?? null,
-            jobSource,
-            rawTextChars,
-            rawTextWords,
-            normalizedTextChars,
-            normalizedTextWords,
-            chosenTextSourceForScoring,
-            chosenTextChars,
-            chosenTextWords,
-            chosenTextHash,
-          },
-          scoring: {
-            overallScoreBeforeAnyCapsOrGates: scoringDebug?.rawScore ?? scoring.overallScore,
-            overallScoreAfterCapsOrGates: scoring.overallScore,
-            dimensionScores: scoring.dimensionScores,
-            verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
-            weights: scoringDebug?.weights,
-            normalizedWeightTotal,
-            gatesApplied: scoring.leadershipOverrideApplied ? ['leadership_override'] : undefined,
-            penaltiesApplied: scoring.missingRequiredToolsPenalty
-              ? ['missing_required_tools']
-              : undefined,
-            summaryBasis: 'semantic_tool_weighted_fit',
-          },
-        }
+    const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
+      ? this.buildCompatibilityDebugPayload({
+          baselineId: baseline.id,
+          baselineVersionHash,
+          baselineSelectedSectionCount: includedSections.length,
+          baselineTotalChars: baselineTextCharsScored,
+          jobId: job?.id ?? jobId ?? null,
+          jobRawChars: rawTextChars,
+          normalizedResponsibilitiesCount: normalizedResponsibilitiesStats.count,
+          normalizedResponsibilitiesChars: normalizedResponsibilitiesStats.chars,
+          normalizedRequirementsCount: normalizedRequirementsStats.count,
+          normalizedRequirementsChars: normalizedRequirementsStats.chars,
+          dimensionScores: scoring.dimensionScores,
+          totalScore: scoring.overallScore,
+        })
       : undefined;
 
     const generatedSectionsForCompliance = normalizedJobDescription
@@ -790,7 +782,7 @@ export class AnalysisService {
       dimensionScores: scoring.dimensionScores,
       complianceFlags: scoring.complianceFlags,
       summary: scoring.summary,
-      ...(debugPayload ? { debug: debugPayload } : {}),
+      ...(debugInfo ? { debug: debugInfo } : {}),
       scoringProof,
     };
   }
@@ -969,7 +961,10 @@ export class AnalysisService {
     const normalizedRequirements = job.normalizedRequirements ?? [];
     const normalizedSegments = [...normalizedResponsibilities, ...normalizedRequirements].filter(Boolean);
     const normalizedText = normalizedSegments.join('\n');
+    const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(normalizedResponsibilities);
+    const normalizedRequirementsStats = this.buildNormalizedSegmentStats(normalizedRequirements);
     const rawText = job.rawDescription ?? '';
+    const jobRawChars = getCharCount(rawText);
     const chosenJobText = normalizedSegments.length ? normalizedText : rawText;
     const jobTextCharsScored = getCharCount(chosenJobText);
 
@@ -986,65 +981,7 @@ export class AnalysisService {
 
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
     const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
-
-    const existing = await this.fitAssessmentRepository.findOne({
-      where: { userId, jobId, baselineId, inputsHash },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (existing) {
-      const summary = this.buildSummaryFromTerms(
-        existing.strengths ?? [],
-        existing.gaps ?? [],
-      );
-      const compliance = await this.complianceService.validateAndAudit({
-        action: ComplianceAction.FIT_SCORE,
-        actorId: userId,
-        baselineVersion: { hash: baseline.hash } as BaselineVersion,
-        job,
-        outputHash: inputsHash,
-        baselineSections: complianceBaselineSections,
-        generatedSections: summary
-          ? [{ title: 'Fit scoring summary', content: summary }]
-          : undefined,
-        extraFlags: this.mapComplianceStringsToFlags(existing.complianceFlags),
-      });
-
-      if (compliance.blocked) {
-        throw new BadRequestException({
-          error: {
-            code: 'compliance_blocked',
-            message: 'Compliance validation failed.',
-            details: { compliance_flags: compliance.complianceFlags },
-          },
-        });
-      }
-
-      return {
-        ok: true,
-        assessmentId: existing.id,
-        jobId: existing.jobId,
-        baselineId: existing.baselineId,
-        baselineVersion: existing.baselineVersion,
-        overallScore: existing.overallScore,
-        score: existing.overallScore,
-        verdict: existing.verdict,
-        dimensionScores: existing.dimensionScores,
-        strengths: existing.strengths,
-      gaps: existing.gaps,
-      complianceFlags: existing.complianceFlags,
-      summary,
-      createdAt: existing.createdAt,
-      audit_id: compliance.audit.id,
-      auditId: compliance.audit.id,
-      scoringProof: {
-        ...scoringProofBase,
-        assessmentId: existing.id,
-      },
-      baseline_version_hash:
-        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
-    };
-  }
+    const allowDebug = Boolean(payload.debug);
 
     const scoring = await this.fitScoringService.score(
       {
@@ -1106,6 +1043,25 @@ export class AnalysisService {
       inputsHash,
     });
 
+    const baselineVersionHash = baseline.hash ?? null;
+    const jobIdentifier = job?.id ?? jobId ?? null;
+    const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
+      ? this.buildCompatibilityDebugPayload({
+          baselineId: baseline.id,
+          baselineVersionHash,
+          baselineSelectedSectionCount: includedSections.length,
+          baselineTotalChars: baselineTextCharsScored,
+          jobId: jobIdentifier,
+          jobRawChars,
+          normalizedResponsibilitiesCount: normalizedResponsibilitiesStats.count,
+          normalizedResponsibilitiesChars: normalizedResponsibilitiesStats.chars,
+          normalizedRequirementsCount: normalizedRequirementsStats.count,
+          normalizedRequirementsChars: normalizedRequirementsStats.chars,
+          dimensionScores: scoring.dimensionScores,
+          totalScore: scoring.overallScore,
+        })
+      : undefined;
+
     const saved = await this.fitAssessmentRepository.save(assessment);
     return {
       ok: true,
@@ -1123,6 +1079,7 @@ export class AnalysisService {
       summary: scoring.summary,
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
+      ...(debugInfo ? { debug: debugInfo } : {}),
       scoringProof: {
         ...scoringProofBase,
         assessmentId: saved.id,

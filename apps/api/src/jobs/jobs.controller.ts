@@ -103,6 +103,20 @@ export class JobsController {
     return this.jobsService.archiveJob(id, userId);
   }
 
+  @Post(':id/archive')
+  async archiveJobPost(
+    @Param('id') id: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.jobsService.archiveJob(id, userId);
+  }
+
   @Patch(':id/restore')
   async restoreJob(
     @Param('id') id: string,

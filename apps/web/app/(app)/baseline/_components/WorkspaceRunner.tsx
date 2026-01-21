@@ -15,16 +15,18 @@ type WorkspaceRunnerProps = {
 type DimensionScoreValue = number | string | null | undefined;
 
 type RunDebugInfo = {
+  baselineId: string;
   baselineVersionHash: string | null;
   baselineSelectedSectionCount: number;
   baselineTotalChars: number;
+  jobId: string | null;
   jobRawChars: number;
-  jobNormalizedResponsibilitiesCount: number;
-  jobNormalizedResponsibilitiesChars: number;
-  jobNormalizedRequirementsCount: number;
-  jobNormalizedRequirementsChars: number;
-  truncationApplied: boolean;
-  truncationReason: string | null;
+  normalizedResponsibilitiesCount: number;
+  normalizedResponsibilitiesChars: number;
+  normalizedRequirementsCount: number;
+  normalizedRequirementsChars: number;
+  dimensionScores: Record<string, DimensionScoreValue>;
+  totalScore: number;
 };
 
 type FitResultPayload = {
@@ -203,7 +205,8 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
 
   const isDevMode = process.env.NODE_ENV !== "production";
-  const runDebugInfo = isDevMode && result?.debug ? result.debug : null;
+  const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+  const runDebugInfo = debugUiEnabled && result?.debug ? result.debug : null;
 
   const viewResultsHref = buildResultsUrl({
     assessmentId: latestAssessmentId,
@@ -236,7 +239,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ baselineId, jobId }),
+        body: JSON.stringify({ baselineId, jobId, debug: debugUiEnabled }),
       });
 
       const payload = await response.json();
@@ -503,6 +506,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
               {showDebugInfo ? (
                 <div className="mt-2 space-y-1 text-[11px] text-slate-300">
                   <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Baseline ID</span>
+                    <span className="text-slate-100">{runDebugInfo.baselineId}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
                     <span className="text-slate-400">Baseline hash</span>
                     <span className="text-slate-100">
                       {runDebugInfo.baselineVersionHash ?? "n/a"}
@@ -511,37 +518,53 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Baseline sections</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.baselineSelectedSectionCount} sections ·{' '}
-                      {runDebugInfo.baselineTotalChars.toLocaleString()} chars
+                      {runDebugInfo.baselineSelectedSectionCount} sections -{' '}
+                      {formatProofNumber(runDebugInfo.baselineTotalChars)} chars
                     </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Job ID</span>
+                    <span className="text-slate-100">{runDebugInfo.jobId ?? "n/a"}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Job raw text</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.jobRawChars.toLocaleString()} chars
+                      {formatProofNumber(runDebugInfo.jobRawChars)} chars
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Responsibilities</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.jobNormalizedResponsibilitiesCount} items ·{' '}
-                      {runDebugInfo.jobNormalizedResponsibilitiesChars.toLocaleString()} chars
+                      {runDebugInfo.normalizedResponsibilitiesCount.toLocaleString()} items -{' '}
+                      {formatProofNumber(runDebugInfo.normalizedResponsibilitiesChars)} chars
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Requirements</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.jobNormalizedRequirementsCount} items ·{' '}
-                      {runDebugInfo.jobNormalizedRequirementsChars.toLocaleString()} chars
+                      {runDebugInfo.normalizedRequirementsCount.toLocaleString()} items -{' '}
+                      {formatProofNumber(runDebugInfo.normalizedRequirementsChars)} chars
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Truncation</span>
+                    <span className="text-slate-400">Total score</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.truncationApplied
-                        ? `Yes${runDebugInfo.truncationReason ? ` (${runDebugInfo.truncationReason})` : ""}`
-                        : "No"}
+                      {typeof runDebugInfo.totalScore === "number"
+                        ? runDebugInfo.totalScore.toFixed(1)
+                        : "n/a"}
                     </span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                      Dimension scores
+                    </p>
+                    <div className="grid gap-1 text-[11px] text-slate-300">
+                      {Object.entries(runDebugInfo.dimensionScores).map(([label, value]) => (
+                        <p key={label}>
+                          {label}: {renderDimensionValue(value)}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -563,3 +586,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     </section>
   );
 }
+
+
+
+
+
+
