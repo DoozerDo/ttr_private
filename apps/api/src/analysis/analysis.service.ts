@@ -39,6 +39,7 @@ import {
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
+import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -79,10 +80,20 @@ export type FitScoreRequest = {
   selected_block_ids?: string[];
 };
 
+type ScoringProofSnapshot = {
+  assessmentId: string | null;
+  baselineTextCharsScored: number;
+  jobTextCharsScored: number;
+  truncationAppliedBaseline: boolean;
+  truncationAppliedJob: boolean;
+  normalizedResponsibilitiesCount: number;
+  normalizedRequirementsCount: number;
+};
+
 type FitScoreResponse = {
   fit_score: number;
   overall_score: number;
-  verdict: 'strong_apply' | 'apply' | 'consider' | 'skip';
+  verdict: FitScoreVerdictLabel;
   breakdown: {
     experience_alignment: number;
     leadership_level: number;
@@ -106,6 +117,7 @@ type FitScoreResponse = {
   complianceFlags?: FitAssessment['complianceFlags'];
   summary?: string;
   debug?: FitScoreDebugPayload;
+  scoringProof?: ScoringProofSnapshot;
 
   // Added to match runtime return payload.
   scoring_v2?: unknown;
@@ -520,6 +532,9 @@ export class AnalysisService {
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
 
+    const baselineProofText = includedSections.map((section) => section.content ?? '').join('\n');
+    const baselineTextCharsScored = getCharCount(baselineProofText);
+
     const baselineTextForDebug = includedSections.map((section) => section.content).join('\n');
     const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
     const baselineExtractedTextWords = countWords(baselineTextForDebug);
@@ -579,10 +594,9 @@ export class AnalysisService {
           };
     }
 
-    const normalizedSegments = [
-      ...jobPayload.normalizedResponsibilities,
-      ...jobPayload.normalizedRequirements,
-    ].filter(Boolean);
+    const normalizedResponsibilities = jobPayload.normalizedResponsibilities ?? [];
+    const normalizedRequirements = jobPayload.normalizedRequirements ?? [];
+    const normalizedSegments = [...normalizedResponsibilities, ...normalizedRequirements].filter(Boolean);
     const normalizedText = normalizedSegments.join('\n');
     const normalizedTextChars = getCharCount(normalizedText);
     const normalizedTextWords = countWords(normalizedText);
@@ -590,7 +604,6 @@ export class AnalysisService {
     const rawText = jobPayload.rawDescription ?? '';
     const rawTextChars = getCharCount(rawText);
     const rawTextWords = countWords(rawText);
-
     const normalizedJobDescription = this.complianceService.normalizeText(rawText);
 
     const hasNormalizedText = normalizedSegments.length > 0;
@@ -614,8 +627,6 @@ export class AnalysisService {
         : rawText
         ? 'paste'
         : 'unknown';
-
-    const jobIdValue = job?.id ?? jobId ?? null;
 
     const hashableJob = (job ?? {
       rawDescription: jobPayload.rawDescription,
@@ -656,7 +667,7 @@ export class AnalysisService {
             debugEnabled: allowDebug,
             debugSource: payload.debugSource ?? 'none',
             baselineVersionId: baselineVersion.id,
-            jobId: jobIdValue,
+            jobId: jobId ?? null,
           },
           baseline: {
             baselineId: baseline.id,
@@ -668,7 +679,7 @@ export class AnalysisService {
             baselineSectionsCharCounts,
           },
           job: {
-            jobId: jobIdValue,
+            jobId: job?.id ?? null,
             jobSource,
             rawTextChars,
             rawTextWords,
@@ -748,6 +759,16 @@ export class AnalysisService {
       strategic_vs_tactical: scoring.dimensionScores.strategicTacticalFit,
     };
 
+    const scoringProof: ScoringProofSnapshot = {
+      assessmentId: null,
+      baselineTextCharsScored: baselineExtractedTextChars,
+      jobTextCharsScored: chosenTextChars,
+      truncationAppliedBaseline: false,
+      truncationAppliedJob: false,
+      normalizedResponsibilitiesCount: normalizedResponsibilities.length,
+      normalizedRequirementsCount: normalizedRequirements.length,
+    };
+
     return {
       fit_score: scoring.overallScore,
       overall_score: scoring.overallScore,
@@ -770,6 +791,7 @@ export class AnalysisService {
       complianceFlags: scoring.complianceFlags,
       summary: scoring.summary,
       ...(debugPayload ? { debug: debugPayload } : {}),
+      scoringProof,
     };
   }
 
@@ -941,6 +963,25 @@ export class AnalysisService {
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
 
+    const baselineProofText = includedSections.map((section) => section.content ?? '').join('\n');
+    const baselineTextCharsScored = getCharCount(baselineProofText);
+    const normalizedResponsibilities = job.normalizedResponsibilities ?? [];
+    const normalizedRequirements = job.normalizedRequirements ?? [];
+    const normalizedSegments = [...normalizedResponsibilities, ...normalizedRequirements].filter(Boolean);
+    const normalizedText = normalizedSegments.join('\n');
+    const rawText = job.rawDescription ?? '';
+    const chosenJobText = normalizedSegments.length ? normalizedText : rawText;
+    const jobTextCharsScored = getCharCount(chosenJobText);
+
+    const scoringProofBase = {
+      baselineTextCharsScored,
+      jobTextCharsScored,
+      truncationAppliedBaseline: false,
+      truncationAppliedJob: false,
+      normalizedResponsibilitiesCount: normalizedResponsibilities.length,
+      normalizedRequirementsCount: normalizedRequirements.length,
+    };
+
     const calibration = await this.getCalibration(userId);
 
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
@@ -990,16 +1031,20 @@ export class AnalysisService {
         verdict: existing.verdict,
         dimensionScores: existing.dimensionScores,
         strengths: existing.strengths,
-        gaps: existing.gaps,
-        complianceFlags: existing.complianceFlags,
-        summary,
-        createdAt: existing.createdAt,
-        audit_id: compliance.audit.id,
-        auditId: compliance.audit.id,
-        baseline_version_hash:
-          compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
-      };
-    }
+      gaps: existing.gaps,
+      complianceFlags: existing.complianceFlags,
+      summary,
+      createdAt: existing.createdAt,
+      audit_id: compliance.audit.id,
+      auditId: compliance.audit.id,
+      scoringProof: {
+        ...scoringProofBase,
+        assessmentId: existing.id,
+      },
+      baseline_version_hash:
+        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
+    };
+  }
 
     const scoring = await this.fitScoringService.score(
       {
@@ -1062,7 +1107,6 @@ export class AnalysisService {
     });
 
     const saved = await this.fitAssessmentRepository.save(assessment);
-
     return {
       ok: true,
       assessmentId: saved.id,
@@ -1079,6 +1123,10 @@ export class AnalysisService {
       summary: scoring.summary,
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
+      scoringProof: {
+        ...scoringProofBase,
+        assessmentId: saved.id,
+      },
       baseline_version_hash:
         compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
       createdAt: saved.createdAt,

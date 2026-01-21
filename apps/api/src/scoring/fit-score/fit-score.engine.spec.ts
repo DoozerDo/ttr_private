@@ -106,10 +106,10 @@ const weakJobInput: FitScoreInput = {
 describe('FitScoreEngine golden bands', () => {
   const engine = new FitScoreEngine();
 
-  it('scores strong inputs above 85 with strong_apply verdict', async () => {
+  it('scores strong inputs above 85 with Apply verdict', async () => {
     const result = await engine.score(strongJobInput);
     expect(result.overallScore).toBeGreaterThanOrEqual(85);
-    expect(result.verdict).toBe('strong_apply');
+    expect(result.verdict).toBe('Apply');
   });
 
   it('scores adjacent inputs between 65 and 85', async () => {

@@ -8,7 +8,6 @@ import {
   DimensionWeightOverrides,
   FitScoreDebugPayload,
   FitScoreDimensionScores,
-  FitScoreVerdictLabel,
   FitScoreDebugDimensionDetail,
 } from './fit-score.types';
 import {
@@ -20,6 +19,8 @@ import {
 } from './fit-score.utils';
 import { evaluateToolCoverage } from './tool-extractor';
 import { buildStrengths, buildGaps } from './fit-score.explain';
+import { verdictFromScore } from './fit-verdict';
+import type { FitScoreVerdictLabel } from './fit-verdict';
 
 const EXPERIENCE_SECTION_TYPES = ['EXPERIENCE', 'PROJECT', 'SUMMARY'];
 const CX_PHRASES = [
@@ -206,7 +207,7 @@ export class FitScoreEngine {
 
     finalScore = clamp(finalScore);
 
-    const verdictLabel = this.mapVerdict(finalScore);
+    const verdictLabel = verdictFromScore(finalScore);
     const strengths = buildStrengths(jobSelection.text, baselineText, dimensionScores);
     const gaps = buildGaps(technical.missingRequiredTools, dimensionScores);
     const summary =
@@ -452,18 +453,11 @@ export class FitScoreEngine {
     };
   }
 
-  private mapVerdict(score: number): FitScoreVerdictLabel {
-    if (score >= 85) return 'strong_apply';
-    if (score >= 70) return 'apply';
-    if (score >= 60) return 'consider';
-    return 'skip';
-  }
-
   private mapPersistenceVerdict(label: FitScoreVerdictLabel): FitAssessmentVerdict {
-    if (label === 'strong_apply' || label === 'apply') {
+    if (label === 'Apply') {
       return FitAssessmentVerdict.APPLY;
     }
-    if (label === 'consider') {
+    if (label === 'Consider') {
       return FitAssessmentVerdict.CONSIDER;
     }
     return FitAssessmentVerdict.SKIP;

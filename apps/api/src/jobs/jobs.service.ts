@@ -55,6 +55,9 @@ const MAX_HTML_BYTES = 1_000_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 4;
 const JOB_LIMIT = 5;
+const ALLOW_JOB_LIMIT_SKIP =
+  process.env.NODE_ENV !== "production" ||
+  process.env.DISABLE_JOB_LIMIT === "true";
 
 const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'text/plain']);
 const PRIVATE_NETWORK_URL_ERROR =
@@ -258,6 +261,10 @@ export class JobsService {
 
   private async enforceJobLimit(userId: string) {
     const count = await this.jobRepository.count({ where: { userId } });
+
+    if (ALLOW_JOB_LIMIT_SKIP) {
+      return;
+    }
 
     if (count >= JOB_LIMIT) {
       throw new UnprocessableEntityException({

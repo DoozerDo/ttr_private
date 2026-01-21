@@ -23,6 +23,7 @@ import {
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
 import { useAutoGenerateThreshold } from "../lib/settings";
+import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -109,11 +110,6 @@ const mapStoredAnalysisToLatest = (record: StoredAnalysisRecord): LatestAnalysis
       analysisPayload.dimension_scores) as FitDimensionScores | undefined,
     breakdown: analysisPayload.breakdown as DimensionBreakdown | undefined,
   };
-};
-
-type VerdictDefinition = {
-  label: string;
-  description: string;
 };
 
 type NextStep = {
@@ -229,45 +225,12 @@ const buildApiError = (response: Response, data: unknown, fallback: string): Api
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
 
-const VERDICT_DEFINITIONS: Record<string, VerdictDefinition> = {
-  STRONG_APPLY: {
-    label: "Strong apply",
-    description: "This role closely matches your baseline. Prioritize it in your pipeline.",
-  },
-  APPLY: {
-    label: "Apply",
-    description: "You meet the core requirements. Focus on the highlighted strengths.",
-  },
-  CONSIDER: {
-    label: "Consider",
-    description: "There are some gaps. Address the highlighted areas before you proceed.",
-  },
-  SKIP: {
-    label: "Target acquired",
-    description:
-      "Significant gaps detected. Open Fit Review to see the highest impact adjustments.",
-  },
-};
-
-const DEFAULT_VERDICT: VerdictDefinition = {
-  label: "Verdict pending",
-  description: "Load an analysis to see how this role compares to your baseline.",
-};
-
 const DIMENSION_LABELS: Record<keyof FitDimensionScores, string> = {
   experienceAlignment: "Experience alignment",
   leadershipLevel: "Leadership level",
   technicalPlatformFit: "Technical platform fit",
   industryContext: "Industry & context",
   strategicTacticalFit: "Strategic vs tactical",
-};
-
-const normalizeVerdictKey = (value?: string | null) =>
-  value?.trim().replace(/[^A-Za-z0-9]/g, "_").toUpperCase() ?? "";
-
-const formatVerdict = (verdict?: string | null): VerdictDefinition => {
-  const key = normalizeVerdictKey(verdict);
-  return VERDICT_DEFINITIONS[key] ?? DEFAULT_VERDICT;
 };
 
 function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionScores {
@@ -310,7 +273,7 @@ const getNextSteps = ({
   hasResume,
   autoGenerateThreshold,
 }: NextStepArgs): NextStep[] => {
-  const verdictInfo = formatVerdict(verdict);
+  const verdictInfo = getVerdictDisplayOrDefault(verdict);
   const needsMoreInsight =
     score === null || score === undefined || score < autoGenerateThreshold;
   const steps: NextStep[] = [];
@@ -582,11 +545,6 @@ export default function ResultsPage() {
     return { jobId: jobIdValue, baselineVersionId: baselineVersionIdValue };
   };
 
-  const latestEndpoint = useMemo(() => {
-    if (!jobId) return null;
-    return `/api/analysis/job/${encodeURIComponent(jobId)}/latest`;
-  }, [jobId]);
-
   const latestScore: number | null = useMemo(() => {
     if (!latest) return null;
     const v =
@@ -595,7 +553,10 @@ export default function ResultsPage() {
     return typeof v === "number" ? v : null;
   }, [latest]);
 
-  const verdictInfo = useMemo(() => formatVerdict(latest?.verdict ?? null), [latest?.verdict]);
+  const verdictInfo = useMemo(
+    () => getVerdictDisplayOrDefault(latest?.verdict ?? null),
+    [latest?.verdict],
+  );
 
   const jobDescriptor = useMemo(() => {
     if (latest?.jobTitle) {
@@ -689,9 +650,10 @@ export default function ResultsPage() {
   const latestStatusMessage = useMemo(() => {
     if (loadingLatest) return "Loading latest analysis...";
     if (!jobId) return "Enter a job ID to load the latest analysis.";
+    if (!baselineId) return "Select a baseline to load the latest analysis.";
     if (analysisSource === "latest" && latest) return "Latest analysis loaded.";
     return "Load latest analysis to populate the score and unlock one tap export.";
-  }, [analysisSource, jobId, latest, loadingLatest]);
+  }, [analysisSource, jobId, baselineId, latest, loadingLatest]);
 
   const documentPreviewText = useMemo(() => {
     if (!currentDocumentState.response) return "";
@@ -764,6 +726,10 @@ export default function ResultsPage() {
       setError("Job ID is required to load analysis.");
       return;
     }
+    if (!baselineId) {
+      setError("Baseline ID is required to load analysis.");
+      return;
+    }
 
     const hasManualSelection = baselineId.trim().length > 0 || jobId.trim().length > 0;
     const shouldConfirm = analysisSource === "manual" && hasManualSelection;
@@ -786,11 +752,14 @@ export default function ResultsPage() {
     clearDocumentErrors();
 
     try {
-      if (!latestEndpoint) throw new Error("Job ID is required.");
-
-      const res = await fetch(`/api/analysis/job/${encodeURIComponent(jobId)}/latest`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
+          baselineId,
+        )}/latest`,
+        {
+          cache: "no-store",
+        },
+      );
 
       const payload = await readResponsePayload(res.clone());
 

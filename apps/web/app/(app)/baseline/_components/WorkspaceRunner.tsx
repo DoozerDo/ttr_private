@@ -14,6 +14,19 @@ type WorkspaceRunnerProps = {
 
 type DimensionScoreValue = number | string | null | undefined;
 
+type RunDebugInfo = {
+  baselineVersionHash: string | null;
+  baselineSelectedSectionCount: number;
+  baselineTotalChars: number;
+  jobRawChars: number;
+  jobNormalizedResponsibilitiesCount: number;
+  jobNormalizedResponsibilitiesChars: number;
+  jobNormalizedRequirementsCount: number;
+  jobNormalizedRequirementsChars: number;
+  truncationApplied: boolean;
+  truncationReason: string | null;
+};
+
 type FitResultPayload = {
   score?: number | null;
   verdict?: string | null;
@@ -25,56 +38,53 @@ type FitResultPayload = {
   assessedAt?: string | null;
   runAt?: string | null;
   timestamp?: string | null;
+  debug?: RunDebugInfo | null;
+  scoringProof?: ScoringProofPayload | null;
 
   [key: string]: unknown;
 };
 
-type RunIdentifierKey = "assessmentId" | "analysisId" | "fitScoreId";
-
-type RunIdentifier = {
-  key: RunIdentifierKey;
-  value: string;
+type ScoringProofPayload = {
+  assessmentId?: string | null;
+  baselineTextCharsScored?: number;
+  jobTextCharsScored?: number;
+  truncationAppliedBaseline?: boolean;
+  truncationAppliedJob?: boolean;
+  normalizedResponsibilitiesCount?: number;
+  normalizedRequirementsCount?: number;
 };
 
-type LatestResultIdentifiers = {
-  jobId: string | null;
-  baselineId: string | null;
-  runIdentifier: RunIdentifier;
+type ResultsUrlArgs = {
+  assessmentId?: string | null;
+  jobId?: string | null;
+  baselineId?: string | null;
 };
 
-const RUN_IDENTIFIER_PRIORITY: RunIdentifierKey[] = [
-  "assessmentId",
-  "analysisId",
-  "fitScoreId",
-];
+export function buildResultsUrl({
+  assessmentId,
+  jobId,
+  baselineId,
+}: ResultsUrlArgs): string | null {
+  const normalizedAssessmentId = assessmentId?.trim();
+  if (normalizedAssessmentId) {
+    return `/results?assessmentId=${encodeURIComponent(normalizedAssessmentId)}`;
+  }
 
-const pickRunIdentifier = (payload: FitResultPayload | null): RunIdentifier | null => {
-  if (!payload) return null;
+  const normalizedJobId = jobId?.trim();
+  const normalizedBaselineId = baselineId?.trim();
 
-  for (const key of RUN_IDENTIFIER_PRIORITY) {
-    const candidate = payload[key];
-    if (typeof candidate === "string" && candidate.trim().length) {
-      return { key, value: candidate.trim() };
-    }
+  if (normalizedJobId && normalizedBaselineId) {
+    return `/results?jobId=${encodeURIComponent(normalizedJobId)}&baselineId=${encodeURIComponent(
+      normalizedBaselineId,
+    )}`;
+  }
+
+  if (normalizedJobId) {
+    return `/results?jobId=${encodeURIComponent(normalizedJobId)}`;
   }
 
   return null;
-};
-
-const buildLatestResultIdentifiers = (
-  payload: FitResultPayload | null,
-  jobId: string | null,
-  baselineId: string | null,
-): LatestResultIdentifiers | null => {
-  const runIdentifier = pickRunIdentifier(payload);
-  if (!runIdentifier) return null;
-
-  return {
-    jobId,
-    baselineId,
-    runIdentifier,
-  };
-};
+}
 
 const formatDimensionEntries = (
   payload: FitResultPayload,
@@ -106,6 +116,13 @@ const renderDimensionValue = (value: DimensionScoreValue): string => {
   } catch {
     return "n/a";
   }
+};
+
+const formatProofNumber = (value?: number | null) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toLocaleString();
+  }
+  return "n/a";
 };
 
 const extractErrorMessage = (payload: unknown): string | null => {
@@ -151,9 +168,12 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
-  const [latestResultIdentifiers, setLatestResultIdentifiers] = useState<LatestResultIdentifiers | null>(null);
+  const [latestAssessmentId, setLatestAssessmentId] = useState<string | null>(null);
+  const [latestJobId, setLatestJobId] = useState<string | null>(null);
+  const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const router = useRouter();
 
   const dimensionEntries = useMemo(
@@ -182,19 +202,14 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const scoreValueText =
     typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
 
-  const viewResultsHref = latestResultIdentifiers?.runIdentifier
-    ? `/results?${latestResultIdentifiers.runIdentifier.key}=${encodeURIComponent(
-        latestResultIdentifiers.runIdentifier.value,
-      )}${
-        latestResultIdentifiers.jobId
-          ? `&jobId=${encodeURIComponent(latestResultIdentifiers.jobId)}`
-          : ""
-      }${
-        latestResultIdentifiers.baselineId
-          ? `&baselineId=${encodeURIComponent(latestResultIdentifiers.baselineId)}`
-          : ""
-      }`
-    : null;
+  const isDevMode = process.env.NODE_ENV !== "production";
+  const runDebugInfo = isDevMode && result?.debug ? result.debug : null;
+
+  const viewResultsHref = buildResultsUrl({
+    assessmentId: latestAssessmentId,
+    jobId: latestJobId ?? jobId,
+    baselineId: latestBaselineId ?? baselineId,
+  });
 
   const statusLine = useMemo(() => {
     if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
@@ -211,7 +226,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     setIsRunning(true);
     setError(null);
     setCompleteBanner(null);
-    setLatestResultIdentifiers(null);
+    setLatestAssessmentId(null);
+    setLatestJobId(null);
+    setLatestBaselineId(null);
 
     try {
       const response = await fetch("/api/analysis/run", {
@@ -243,8 +260,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           : typeof baselineId === "string"
             ? baselineId
             : null;
-      setLatestResultIdentifiers(
-        buildLatestResultIdentifiers(nextResult, resolvedJobId, resolvedBaselineId),
+      setLatestJobId(resolvedJobId);
+      setLatestBaselineId(resolvedBaselineId);
+      setLatestAssessmentId(
+        typeof nextResult.assessmentId === "string" ? nextResult.assessmentId : null,
       );
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
@@ -252,7 +271,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       setCompleteBanner("Assessment complete");
     } catch (runError: any) {
       setError(runError?.message ?? "Unable to run compatibility scoring right now.");
-      setLatestResultIdentifiers(null);
+      setLatestAssessmentId(null);
+      setLatestJobId(null);
+      setLatestBaselineId(null);
     } finally {
       setIsRunning(false);
     }
@@ -264,13 +285,16 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     setIsLoadingLastRun(true);
     setError(null);
     setCompleteBanner(null);
+    setLatestAssessmentId(null);
+    setLatestJobId(null);
+    setLatestBaselineId(null);
 
     try {
-      const url = new URL("/api/analysis/latest", window.location.origin);
-      url.searchParams.set("baselineId", baselineId);
-      url.searchParams.set("jobId", jobId);
+      const url = `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
+        baselineId,
+      )}/latest`;
 
-      const response = await fetch(url.toString(), { cache: "no-store" });
+      const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
 
       if (!response.ok) {
@@ -292,8 +316,10 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           : typeof baselineId === "string"
             ? baselineId
             : null;
-      setLatestResultIdentifiers(
-        buildLatestResultIdentifiers(nextResult, resolvedJobId, resolvedBaselineId),
+      setLatestJobId(resolvedJobId);
+      setLatestBaselineId(resolvedBaselineId);
+      setLatestAssessmentId(
+        typeof nextResult.assessmentId === "string" ? nextResult.assessmentId : null,
       );
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
@@ -301,7 +327,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       setCompleteBanner("Loaded last run");
     } catch (loadError: any) {
       setError(loadError?.message ?? "Unable to load the last run.");
-      setLatestResultIdentifiers(null);
+      setLatestAssessmentId(null);
+      setLatestJobId(null);
+      setLatestBaselineId(null);
     } finally {
       setIsLoadingLastRun(false);
     }
@@ -419,6 +447,102 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                       <li key={`flag-${index}`}>{flag}</li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+              {result?.scoringProof ? (
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                    Scoring proof
+                  </p>
+                  <div className="grid gap-1 text-xs text-slate-300">
+                    <p>
+                      Assessment ID: {result.scoringProof.assessmentId ?? "n/a"}
+                    </p>
+                    <p>
+                      Baseline chars scored:{" "}
+                      {formatProofNumber(result.scoringProof.baselineTextCharsScored)}
+                    </p>
+                    <p>
+                      Job chars scored:{" "}
+                      {formatProofNumber(result.scoringProof.jobTextCharsScored)}
+                    </p>
+                    <p>
+                      Normalized responsibilities:{" "}
+                      {(result.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
+                    </p>
+                    <p>
+                      Normalized requirements:{" "}
+                      {(result.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
+                    </p>
+                    <p>
+                      Baseline truncated:{" "}
+                      {result.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
+                    </p>
+                    <p>
+                      Job truncated: {result.scoringProof.truncationAppliedJob ? "Yes" : "No"}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {runDebugInfo ? (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-3 text-xs text-slate-300">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">
+                  Debug
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugInfo((prev) => !prev)}
+                  className="text-[11px] font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
+                >
+                  {showDebugInfo ? "Hide info" : "Show info"}
+                </button>
+              </div>
+              {showDebugInfo ? (
+                <div className="mt-2 space-y-1 text-[11px] text-slate-300">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Baseline hash</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.baselineVersionHash ?? "n/a"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Baseline sections</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.baselineSelectedSectionCount} sections ·{' '}
+                      {runDebugInfo.baselineTotalChars.toLocaleString()} chars
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Job raw text</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.jobRawChars.toLocaleString()} chars
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Responsibilities</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.jobNormalizedResponsibilitiesCount} items ·{' '}
+                      {runDebugInfo.jobNormalizedResponsibilitiesChars.toLocaleString()} chars
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Requirements</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.jobNormalizedRequirementsCount} items ·{' '}
+                      {runDebugInfo.jobNormalizedRequirementsChars.toLocaleString()} chars
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Truncation</span>
+                    <span className="text-slate-100">
+                      {runDebugInfo.truncationApplied
+                        ? `Yes${runDebugInfo.truncationReason ? ` (${runDebugInfo.truncationReason})` : ""}`
+                        : "No"}
+                    </span>
+                  </div>
                 </div>
               ) : null}
             </div>

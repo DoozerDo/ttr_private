@@ -1,4 +1,5 @@
 import { FitAssessmentVerdict } from '../../analysis/fit-assessment.entity';
+import type { FitScoreVerdictLabel } from './fit-verdict';
 
 export type FitScoreInput = {
   job: {
@@ -25,8 +26,6 @@ export type FitScoreDimensionScores = {
 };
 
 export type DimensionWeightOverrides = Partial<Record<keyof FitScoreDimensionScores, number>>;
-
-export type FitScoreVerdictLabel = 'strong_apply' | 'apply' | 'consider' | 'skip';
 
 export type FitScoreDebugDimensionDetail = {
   score: number;

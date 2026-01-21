@@ -9,12 +9,12 @@ import {
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
-import { Job } from '../jobs/job.entity';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
 import { Interview } from '../interviews/interview.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisService } from './analysis.service';
-import { FitAssessment } from './fit-assessment.entity';
+import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 
 describe('AnalysisService - fit scores contract', () => {
@@ -26,6 +26,8 @@ describe('AnalysisService - fit scores contract', () => {
     save: jest.Mock;
     findOne: jest.Mock;
   };
+  let jobRepository: { findOne: jest.Mock };
+  let fitScoringServiceMock: { score: jest.Mock };
 
   const baselineVersion: Partial<BaselineVersion> = {
     id: 'bv-1',
@@ -75,11 +77,38 @@ describe('AnalysisService - fit scores contract', () => {
 
   beforeEach(async () => {
     baselineVersionRepository = { findOne: jest.fn().mockResolvedValue(baselineVersion) };
+    jobRepository = { findOne: jest.fn().mockResolvedValue(null) };
+    fitScoringServiceMock = {
+      score: jest.fn().mockResolvedValue({
+        overallScore: 82,
+        rawScore: 82,
+      verdict: 'Apply',
+        persistenceVerdict: FitAssessmentVerdict.APPLY,
+        dimensionScores: {
+          experienceAlignment: 80,
+          leadershipLevel: 85,
+          technicalPlatformFit: 70,
+          industryContext: 75,
+          strategicTacticalFit: 65,
+        },
+        strengths: [],
+        gaps: [],
+        summary: 'summary',
+        missingRequiredTools: [],
+        missingRequiredToolsCount: 0,
+        missingRequiredToolsPenalty: 0,
+        leadershipOverrideApplied: false,
+        complianceFlags: [],
+      }),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
         AnalysisService,
-        FitScoringService,
+        {
+          provide: FitScoringService,
+          useValue: fitScoringServiceMock,
+        },
         {
           provide: ComplianceService,
           useValue: {
@@ -97,6 +126,7 @@ describe('AnalysisService - fit scores contract', () => {
                 createdAt: new Date().toISOString(),
               },
             }),
+            normalizeSectionsForOutput: jest.fn().mockImplementation((sections) => sections),
           },
         },
         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
@@ -109,7 +139,7 @@ describe('AnalysisService - fit scores contract', () => {
           useValue: { find: jest.fn().mockResolvedValue([]) },
         },
         { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-        { provide: getRepositoryToken(Job), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Job), useValue: jobRepository },
         { provide: getRepositoryToken(Interview), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(FitAssessment),
@@ -248,5 +278,38 @@ describe('AnalysisService - fit scores contract', () => {
         outputHash: expect.any(String),
       }),
     );
+  });
+
+  it('returns scoring proof data when running a fit assessment', async () => {
+    const jobRecord: Partial<Job> = {
+      id: 'job-1',
+      userId: 'user-1',
+      rawDescription: 'Lead operations with AWS focus.',
+      normalizedResponsibilities: ['Lead operations'],
+      normalizedRequirements: ['AWS expertise'],
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+      title: 'Cloud Lead',
+      company: 'ExampleCo',
+      sourceUrl: null,
+    };
+    jobRepository.findOne.mockResolvedValue(jobRecord);
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(result.assessmentId).toBe('fit-1');
+    expect(result.verdict).toBe('APPLY');
+    expect(result.scoringProof?.assessmentId).toBe('fit-1');
+    expect(result.scoringProof?.baselineTextCharsScored).toBeGreaterThan(0);
+    expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
+    expect(result.scoringProof).toMatchObject({
+      normalizedResponsibilitiesCount: 1,
+      normalizedRequirementsCount: 1,
+      truncationAppliedBaseline: false,
+      truncationAppliedJob: false,
+    });
   });
 });
