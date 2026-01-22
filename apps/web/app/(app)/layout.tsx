@@ -18,6 +18,17 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
+function toSerializableProfile(profile: UserProfile | null): UserProfile | null {
+  if (!profile) return null;
+
+  return JSON.parse(
+    JSON.stringify(profile, (_key, value) => {
+      if (typeof value === "bigint") return value.toString();
+      return value;
+    }),
+  ) as UserProfile;
+}
+
 export default async function AppLayout({ children }: AppLayoutProps) {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
@@ -47,11 +58,15 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
   const finalProfile =
     isBetaForceProEnabled() && bootstrapProfile
-      ? (applyBetaForcePro(bootstrapProfile as Record<string, unknown>) as UserProfile)
+      ? (applyBetaForcePro(
+          bootstrapProfile as Record<string, unknown>,
+        ) as UserProfile)
       : bootstrapProfile;
 
+  const safeProfile = toSerializableProfile(finalProfile);
+
   return (
-    <EntitlementsProvider entitlements={finalProfile}>
+    <EntitlementsProvider entitlements={safeProfile}>
       <AppShell userEmail={email}>{children}</AppShell>
     </EntitlementsProvider>
   );

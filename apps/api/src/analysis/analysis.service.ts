@@ -42,6 +42,7 @@ import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
 import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
+import type { FitScoreRubricJson } from './prompts/fit-score-rubric.v1';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -178,7 +179,7 @@ type CompatibilityRunDebugPayload = {
 type FitScoreResponse = {
   fit_score: number;
   overall_score: number;
-  verdict: FitScoreVerdictLabel;
+  verdict: FitScoreVerdictLabel | FitScoreRubricJson['verdict'];
   breakdown: {
     experience_alignment: number;
     leadership_level: number;
@@ -368,11 +369,10 @@ export class AnalysisService {
 
   private buildInputsHash(
     job: FitScoreInput['job'],
-    baselineId: string,
-    baselineVersion: number | null,
-    sections: { type: string | null; content: string | null }[],
+    baseline: Baseline,
     dimensionWeights: DimensionWeightOverrides,
   ) {
+    const sectionPayload = this.buildSectionPayload(baseline.sections ?? []);
     const payload = {
       job: {
         rawDescription: job.rawDescription,
@@ -382,9 +382,9 @@ export class AnalysisService {
         company: job.company ?? null,
       },
       baseline: {
-        id: baselineId,
-        version: baselineVersion,
-        sections,
+        id: baseline.id,
+        version: baseline.version ?? null,
+        sections: sectionPayload,
       },
       calibration: dimensionWeights,
     };
@@ -433,7 +433,6 @@ export class AnalysisService {
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
     const includedSections = this.getIncludedSections(baseline.sections);
-    const sectionPayload = this.buildSectionPayload(includedSections);
     const { canonicalJobForHash } = this.buildCanonicalJobAssets({
       rawDescription: job.rawDescription,
       normalizedResponsibilities: job.normalizedResponsibilities ?? [],
@@ -442,13 +441,11 @@ export class AnalysisService {
       company: job.company ?? null,
       sourceUrl: job.sourceUrl ?? null,
     });
-    return this.buildInputsHash(
-      canonicalJobForHash,
-      baseline.id,
-      baseline.version ?? null,
-      sectionPayload,
-      dimensionWeights,
-    );
+    const baselineForHash: Baseline = {
+      ...baseline,
+      sections: includedSections,
+    };
+    return this.buildInputsHash(canonicalJobForHash, baselineForHash, dimensionWeights);
   }
 
   private async runAndPersistFitAssessment(
@@ -878,13 +875,12 @@ export class AnalysisService {
         ? 'paste'
         : 'unknown';
 
-    const inputsHash = this.buildInputsHash(
-      canonicalJobForHash,
-      baseline.id,
-      baselineVersion.versionNumber ?? baseline.version ?? null,
-      sectionPayload,
-      dimensionWeights,
-    );
+    const baselineForHash: Baseline = {
+      ...baseline,
+      sections: filteredSections,
+      version: baselineVersion.versionNumber ?? baseline.version,
+    };
+    const inputsHash = this.buildInputsHash(canonicalJobForHash, baselineForHash, dimensionWeights);
 
     const scoring = await this.fitScoringService.score(
       {
@@ -1193,6 +1189,13 @@ export class AnalysisService {
     }));
     const sectionPayload = includedSections;
 
+    const baselineVersionValue = payload.baselineVersion ?? baseline.version ?? 0;
+    const baselineForHash: Baseline = {
+      ...baseline,
+      sections: filteredSections,
+      version: baselineVersionValue,
+    };
+
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
 
@@ -1239,13 +1242,7 @@ export class AnalysisService {
     const calibration = await this.getCalibration(userId);
 
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-    const inputsHash = this.buildInputsHash(
-      canonicalJobForHash,
-      baseline.id,
-      baseline.version ?? null,
-      sectionPayload,
-      dimensionWeights,
-    );
+    const inputsHash = this.buildInputsHash(canonicalJobForHash, baselineForHash, dimensionWeights);
     const allowDebug = Boolean(payload.debug);
 
     const scoring = await this.fitScoringService.score(
@@ -1415,6 +1412,13 @@ export class AnalysisService {
         (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
       ) ?? [];
 
+    const baselineVersionValue = payload.baselineVersion ?? baseline.version ?? 0;
+    const baselineForHash: Baseline = {
+      ...baseline,
+      sections: includedSections,
+      version: baselineVersionValue,
+    };
+
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
 
@@ -1442,13 +1446,7 @@ export class AnalysisService {
       );
     }
 
-    const inputsHash = this.buildInputsHash(
-      canonicalJobForHash,
-      baseline.id,
-      payload.baselineVersion ?? baseline.version ?? null,
-      sectionPayload,
-      dimensionWeights,
-    );
+    const inputsHash = this.buildInputsHash(canonicalJobForHash, baselineForHash, dimensionWeights);
 
     const scoring = await this.fitScoringService.score(
       {

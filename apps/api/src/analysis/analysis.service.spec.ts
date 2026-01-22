@@ -141,6 +141,7 @@ describe('AnalysisService - fit scores contract', () => {
               },
             }),
             normalizeSectionsForOutput: jest.fn().mockImplementation((sections) => sections),
+            normalizeText: jest.fn().mockImplementation((text) => String(text)),
           },
         },
         { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },

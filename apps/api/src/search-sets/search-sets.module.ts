@@ -6,6 +6,7 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Job } from '../jobs/job.entity';
+import { LlmRubricScorerService } from '../analysis/llm-rubric-scorer.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { SearchSet } from './search-set.entity';
 import { SearchSetRun } from './search-set-run.entity';
@@ -35,6 +36,7 @@ import { JobSourcesModule } from '../job-sources/job-source.module';
     SearchSetsRunnerService,
     SearchSetRunsService,
     FitScoringService,
+    LlmRubricScorerService,
   ],
 })
 export class SearchSetsModule {}
