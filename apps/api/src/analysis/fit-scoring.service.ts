@@ -7,7 +7,10 @@ import {
 import type { GapEmbeddingProvider } from '../interviews/gap-detection.service';
 import { GAP_EMBEDDING_PROVIDER } from '../interviews/gap-detection.service';
 import { normalizeText } from '../scoring/fit-score/fit-score.utils';
-import { FitScoreEngine, FitScoreInputError } from '../scoring/fit-score/fit-score.engine';
+import {
+  FitScoreEngine,
+  FitScoreInputError,
+} from '../scoring/fit-score/fit-score.engine';
 import type {
   DimensionWeightOverrides as FitScoreDimensionWeightOverrides,
   FitScoreDimensionScores,
@@ -45,8 +48,22 @@ export class FitScoringService {
     dimensionWeights?: DimensionWeightOverrides | null,
     options?: { debug?: boolean },
   ): Promise<FitScoringResult> {
+    const jobText = this.buildJobText(input.job);
+    const jobTextOverride = jobText || undefined;
+
+    const hasRawText = (input.job.rawDescription ?? '').trim().length > 0;
+
+    const engineJob = {
+      ...input.job,
+      normalizedResponsibilities: hasRawText
+        ? []
+        : input.job.normalizedResponsibilities ?? [],
+      normalizedRequirements: hasRawText ? [] : input.job.normalizedRequirements ?? [],
+      jobTextOverride,
+    };
+
     const enginePayload = {
-      job: input.job,
+      job: engineJob,
       baseline: {
         version: input.baseline.version,
         sections: input.baseline.sections,
@@ -67,9 +84,15 @@ export class FitScoringService {
       throw error;
     }
 
-    const jobText = this.buildJobText(input.job);
-    const baselineText = input.baseline.sections.map((section) => section.content).join('\n');
-    const complianceFlags = this.computeComplianceFlags(jobText, baselineText, input.job.sourceUrl);
+    const baselineText = input.baseline.sections
+      .map((section) => section.content)
+      .join('\n');
+
+    const complianceFlags = this.computeComplianceFlags(
+      jobText,
+      baselineText,
+      input.job.sourceUrl,
+    );
 
     const additions = (input.verifiedAdditions ?? [])
       .map((entry) => entry?.trim())
@@ -84,8 +107,9 @@ export class FitScoringService {
         content,
         id: `addition-${index}`,
       }));
+
       const expandedPayload = {
-        job: input.job,
+        job: engineJob,
         baseline: {
           version: input.baseline.version,
           sections: [...input.baseline.sections, ...additionSections],
@@ -114,16 +138,29 @@ export class FitScoringService {
   }
 
   private buildJobText(job: FitScoringInput['job']) {
+    const rawText = (job.rawDescription ?? '').trim();
+    if (rawText.length) {
+      return rawText;
+    }
+
     const normalizedChunks = [
-      ...job.normalizedResponsibilities,
-      ...job.normalizedRequirements,
+      ...(job.normalizedResponsibilities ?? []),
+      ...(job.normalizedRequirements ?? []),
     ].filter(Boolean);
-    const normalized = normalizedChunks.join('\n').trim();
-    if (normalized) return normalized;
-    return job.rawDescription.trim();
+
+    const normalizedText = normalizedChunks.join('\n').trim();
+    if (normalizedText.length) {
+      return normalizedText;
+    }
+
+    throw new BadRequestException('Job description text is required for scoring.');
   }
 
-  private computeComplianceFlags(jobText: string, baselineText: string, sourceUrl?: string | null) {
+  private computeComplianceFlags(
+    jobText: string,
+    baselineText: string,
+    sourceUrl?: string | null,
+  ) {
     const flags: string[] = [];
 
     if (baselineText.trim().length < MIN_TEXT_LENGTH) {

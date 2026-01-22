@@ -6,12 +6,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { EmptyState } from "@/components/EmptyState";
-import { FormButton } from "@/components/FormButton";
+import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import type { JobDto } from "@/lib/jobs";
 import { archiveJob, listJobs } from "@/lib/jobsClient";
 import { getJobDetailsHref } from "@/src/navigation/routes";
-import { InputCard } from "./InputCard";
 import { OverflowMenu } from "./OverflowMenu";
+import { SetupModuleCard } from "./SetupModuleCard";
 import { setJobTitle } from "./selectionStore";
 
 function isArchived(job: JobDto): boolean {
@@ -64,6 +64,7 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
     () => visibleJobs.find((job) => job.id === selectedJobId)?.title ?? null,
     [visibleJobs, selectedJobId],
   );
+
   useEffect(() => {
     setJobTitle(selectedJobName);
   }, [selectedJobName]);
@@ -98,21 +99,16 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
     }
   };
 
-  const addJobButton = (
-    <Link
-      href="/jobs/new"
-      className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/20"
-    >
-      Add job
-    </Link>
-  );
+  const navigateToAddJob = useCallback(() => {
+    router.push("/jobs/new");
+  }, [router]);
 
   return (
-    <InputCard
-      kicker="JOB"
+    <SetupModuleCard
+      label="JOB"
       title="Job description"
       description="Add a job description to score against your baseline."
-      primaryAction={addJobButton}
+      primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
     >
       {error ? (
         <Alert intent="error" title="Jobs error">
@@ -121,7 +117,9 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
       ) : null}
 
       {selectedJobName ? (
-        <p className="text-xs text-slate-400">Selected: {selectedJobName}</p>
+        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+          Selected: {selectedJobName}
+        </p>
       ) : null}
 
       {isLoading ? (
@@ -132,52 +130,51 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
         <EmptyState
           title="No jobs yet"
           body="Add a job to start building your target workspace."
-          cta={
-            <Link
-              href="/jobs/new"
-              className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/20"
-            >
-              Add job
-            </Link>
-          }
+          cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
         />
       ) : (
-        <div className="rounded-2xl border border-white/10 bg-slate-950/40">
-          <div className="grid grid-cols-[2fr_220px] gap-4 border-b border-white/10 bg-slate-900/40 px-6 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">
-            <div>Title</div>
-            <div className="text-right">Actions</div>
-          </div>
-          <ul className="divide-y divide-white/5">
-            {visibleJobs.map((job) => {
-              const archived = isArchived(job);
-              const isSelected = job.id === selectedJobId;
+        <div className="space-y-3">
+          {visibleJobs.map((job) => {
+            const archived = isArchived(job);
+            const isSelected = job.id === selectedJobId;
+            const cardClasses = [
+              "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
+              isSelected ? "ring-2 ring-amber-400/40" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
 
-              return (
-                <li key={job.id} className="px-6 py-4">
-                  <div className="flex items-start gap-4">
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        href={getJobDetailsHref(job.id)}
-                        className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
-                      >
-                        <span className="block min-w-0 truncate">
-                          {job.title || "Untitled job"}
-                        </span>
-                      </Link>
-                      {archived ? (
-                        <p className="mt-1 text-xs text-slate-400">Archived</p>
+            return (
+              <div key={job.id} className={cardClasses}>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={getJobDetailsHref(job.id)}
+                          className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
+                        >
+                          <span className="block truncate">
+                            {job.title || "Untitled job"}
+                          </span>
+                        </Link>
+                        {archived ? (
+                          <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                            Archived
+                          </span>
+                        ) : null}
+                      </div>
+                      {job.company ? (
+                        <p className="text-xs text-slate-400">{job.company}</p>
                       ) : null}
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                      <Link
-                        href={getJobDetailsHref(job.id)}
-                        className="rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-white/50"
-                      >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SecondaryActionLink href={getJobDetailsHref(job.id)}>
                         View details
-                      </Link>
+                      </SecondaryActionLink>
                       <FormButton
-                        variant="ghost"
+                        variant="secondary"
                         onClick={() => setJobSelection(job.id)}
                         disabled={isSelected}
                       >
@@ -192,12 +189,12 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
                       ) : null}
                     </div>
                   </div>
-                </li>
-              );
-            })}
-          </ul>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-    </InputCard>
+    </SetupModuleCard>
   );
 }

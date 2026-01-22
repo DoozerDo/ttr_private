@@ -129,3 +129,58 @@ describe('FitScoreEngine golden bands', () => {
     expect(Math.abs(first.overallScore - second.overallScore)).toBeLessThanOrEqual(2);
   });
 });
+
+describe('FitScoreEngine job text override', () => {
+  const engine = new FitScoreEngine();
+  const baseJobInput: FitScoreInput = {
+    job: {
+      title: 'Override Test',
+      company: 'ExampleCo',
+      rawDescription: 'Raw leads from executive ops.',
+      normalizedResponsibilities: ['Run operations'],
+      normalizedRequirements: ['5 years operations'],
+      sourceUrl: null,
+    },
+    baseline: {
+      version: 1,
+      sections: baseSections,
+    },
+  };
+
+  it('prefers jobTextOverride when present', async () => {
+    const spy = jest.spyOn(engine as any, 'selectJobText');
+    const overrideToken = 'FULL RAW CONTEXT';
+    const input = {
+      ...baseJobInput,
+      job: {
+        ...baseJobInput.job,
+        jobTextOverride: overrideToken,
+      },
+    };
+
+    await engine.score(input);
+    const selection = spy.mock.results[0].value;
+    expect(selection.text).toContain(overrideToken);
+    spy.mockRestore();
+  });
+
+  it('falls back to normalized sections when override absent', async () => {
+    const spy = jest.spyOn(engine as any, 'selectJobText');
+    const input = {
+      ...baseJobInput,
+      job: {
+        ...baseJobInput.job,
+        rawDescription: '',
+        jobTextOverride: undefined,
+        normalizedResponsibilities: ['Normalized one'],
+        normalizedRequirements: ['Normalized two'],
+      },
+    };
+
+    await engine.score(input);
+    const selection = spy.mock.results[0].value;
+    expect(selection.text).toContain('Normalized one');
+    expect(selection.source).toBe('normalizedSections');
+    spy.mockRestore();
+  });
+});

@@ -75,9 +75,23 @@ describe('AnalysisService - fit scores contract', () => {
     updatedAt: new Date(),
   };
 
+  const defaultJobRecord: Partial<Job> = {
+    id: 'job-1',
+    userId: 'user-1',
+    rawDescription: 'Lead operations with AWS focus.',
+    normalizedResponsibilities: ['Lead operations'],
+    normalizedRequirements: ['AWS expertise'],
+    jdIngestionMethod: JobIngestionMethod.PASTE,
+    title: 'Cloud Lead',
+    company: 'ExampleCo',
+    sourceUrl: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
   beforeEach(async () => {
     baselineVersionRepository = { findOne: jest.fn().mockResolvedValue(baselineVersion) };
-    jobRepository = { findOne: jest.fn().mockResolvedValue(null) };
+    jobRepository = { findOne: jest.fn().mockResolvedValue(defaultJobRecord) };
     fitScoringServiceMock = {
       score: jest.fn().mockResolvedValue({
         overallScore: 82,
@@ -310,6 +324,186 @@ describe('AnalysisService - fit scores contract', () => {
       normalizedRequirementsCount: 1,
       truncationAppliedBaseline: false,
       truncationAppliedJob: false,
+    });
+    const rawCharCount = jobRecord.rawDescription.trim().length;
+    expect(result.scoringProof?.jobTextCharsScored).toBe(rawCharCount);
+    expect(result.scoringProof?.jobTextSource).toBe('raw');
+  });
+
+  it('falls back to normalized segments when the raw description is missing', async () => {
+    const fallbackJob: Partial<Job> = {
+      id: 'job-2',
+      userId: 'user-1',
+      rawDescription: '',
+      normalizedResponsibilities: ['Drive operational excellence'],
+      normalizedRequirements: ['Leader level AWS experience'],
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+      title: 'Operations Lead',
+      company: 'ExampleCo',
+      sourceUrl: null,
+    };
+    jobRepository.findOne.mockResolvedValueOnce(fallbackJob);
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-2',
+      baselineVersion: 2,
+    });
+
+    expect(result.scoringProof?.jobTextSource).toBe('normalized_fallback');
+    expect(result.scoringProof?.jobRawTextCharCount).toBe(0);
+    expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
+  });
+
+  describe('latest assessment refresh', () => {
+    const refreshJobRecord: Job = {
+      id: 'job-1',
+      userId: 'user-1',
+      rawDescription: '  Lead enterprise programs with narrative clarity.  ',
+      normalizedResponsibilities: ['Lead teams'],
+      normalizedRequirements: ['Executive-level experience'],
+      title: 'Strategic Lead',
+      company: 'ExampleCo',
+      sourceUrl: 'https://example.com/jobs/leadership',
+      jdIngestionMethod: JobIngestionMethod.PASTE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as Job;
+
+    const dimensionWeights = {
+      experienceAlignment: 1,
+      leadershipLevel: 1,
+      technicalPlatformFit: 1,
+      industryContext: 1,
+      strategicTacticalFit: 1,
+    };
+
+    let expectedHash: string;
+
+    beforeEach(async () => {
+      jobRepository.findOne.mockResolvedValue(refreshJobRecord);
+      expectedHash = await service['computeExpectedInputsHashForJobBaseline'](
+        'user-1',
+        refreshJobRecord,
+        baseline,
+      );
+    });
+
+    it('buildInputsHash ignores normalized segments when raw description exists', () => {
+      const filteredSections = service['getIncludedSections'](baseline.sections);
+      const sectionPayload = service['buildSectionPayload'](filteredSections);
+      const { canonicalJobForHash: canonicalWith } = service['buildCanonicalJobAssets']({
+        rawDescription: refreshJobRecord.rawDescription,
+        normalizedResponsibilities: refreshJobRecord.normalizedResponsibilities,
+        normalizedRequirements: refreshJobRecord.normalizedRequirements,
+        title: refreshJobRecord.title,
+        company: refreshJobRecord.company,
+        sourceUrl: refreshJobRecord.sourceUrl,
+      });
+      const { canonicalJobForHash: canonicalWithout } = service['buildCanonicalJobAssets']({
+        rawDescription: refreshJobRecord.rawDescription,
+        normalizedResponsibilities: [],
+        normalizedRequirements: [],
+        title: refreshJobRecord.title,
+        company: refreshJobRecord.company,
+        sourceUrl: refreshJobRecord.sourceUrl,
+      });
+
+      const hashWithNormalized = service['buildInputsHash'](
+        canonicalWith,
+        baseline.id,
+        baseline.version ?? null,
+        sectionPayload,
+        dimensionWeights,
+      );
+      const hashWithoutNormalized = service['buildInputsHash'](
+        canonicalWithout,
+        baseline.id,
+        baseline.version ?? null,
+        sectionPayload,
+        dimensionWeights,
+      );
+
+      expect(hashWithoutNormalized).toBe(hashWithNormalized);
+    });
+
+    it('returns the stored assessment when inputs hash matches', async () => {
+      const storedAssessment: FitAssessment = {
+        id: 'fit-old',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 72,
+        verdict: FitAssessmentVerdict.APPLY,
+        dimensionScores: {
+          experienceAlignment: 70,
+          leadershipLevel: 70,
+          technicalPlatformFit: 70,
+          industryContext: 70,
+          strategicTacticalFit: 70,
+        },
+        strengths: ['leadership'],
+        gaps: ['detail'],
+        complianceFlags: [],
+        inputsHash: expectedHash,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      fitAssessmentRepository.findOne.mockResolvedValue(storedAssessment);
+
+      const result = await service.getLatestAssessmentForBaseline('user-1', 'job-1', 'b-1');
+
+      expect(result.assessmentId).toBe(storedAssessment.id);
+      expect(result.overallScore).toBe(storedAssessment.overallScore);
+      expect(fitScoringServiceMock.score).not.toHaveBeenCalled();
+    });
+
+    it('recomputes when the stored inputs hash is stale', async () => {
+      const staleAssessment: FitAssessment = {
+        id: 'fit-old',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 41,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 40,
+          leadershipLevel: 40,
+          technicalPlatformFit: 40,
+          industryContext: 40,
+          strategicTacticalFit: 40,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        inputsHash: 'stale-hash',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      let savedAssessment: FitAssessment | null = null;
+
+      fitAssessmentRepository.save.mockImplementation(async (payload) => {
+        savedAssessment = { ...payload, id: 'fresh-fit', createdAt: new Date() } as FitAssessment;
+        return savedAssessment;
+      });
+
+      fitAssessmentRepository.findOne.mockImplementation(({ where }) => {
+        if (where?.id) {
+          return Promise.resolve(savedAssessment);
+        }
+        return Promise.resolve(staleAssessment);
+      });
+
+      const result = await service.getLatestAssessmentForBaseline('user-1', 'job-1', 'b-1');
+
+      expect(fitScoringServiceMock.score).toHaveBeenCalled();
+      expect(savedAssessment).not.toBeNull();
+      expect(savedAssessment?.inputsHash).toBe(expectedHash);
+      expect(result.assessmentId).toBe(savedAssessment?.id);
     });
   });
 });

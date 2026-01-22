@@ -21,6 +21,7 @@ type IngestionMode = "PASTE" | "URL";
 
 type IngestPreview = {
   rawDescription: string;
+  originalRawDescription: string;
   responsibilities: string[];
   requirements: string[];
   warning?: JobWarning | null;
@@ -252,9 +253,11 @@ export default function JobIngestionPage() {
     }
 
     const finalRawDescription =
-      isUrlMode ? previewPayload?.rawDescription ?? "" : previewPayload?.rawDescription ?? rawDescription;
+      previewPayload?.originalRawDescription ??
+      previewPayload?.rawDescription ??
+      rawDescription;
 
-    if (!finalRawDescription) {
+    if (!finalRawDescription?.trim()) {
       setError(createClientError("Please provide a job description before saving.", "submit_validation"));
       return;
     }

@@ -39,6 +39,8 @@ import {
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
+import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
+import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 
 export type AnalysisRequest = {
@@ -80,6 +82,64 @@ export type FitScoreRequest = {
   selected_block_ids?: string[];
 };
 
+export type JobTextSource = 'raw' | 'raw+normalized' | 'normalized_fallback';
+
+export type JobTextInput = {
+  rawDescription?: string | null;
+  normalizedResponsibilities?: string[] | null;
+  normalizedRequirements?: string[] | null;
+};
+
+export type JobTextForScoring = {
+  jobText: string;
+  jobTextSource: JobTextSource;
+  jobRawTextCharCount: number;
+  jobRawTextSha256: string;
+  jobRawTextTooShort: boolean;
+  jobRawTextWarning?: string;
+};
+
+const RAW_TEXT_WARNING_THRESHOLD = 3000;
+
+export function buildJobTextForScoring(job: JobTextInput): JobTextForScoring {
+  const rawDescription = (job.rawDescription ?? '').trim();
+  const normalizedResponsibilities = (job.normalizedResponsibilities ?? []).filter(Boolean);
+  const normalizedRequirements = (job.normalizedRequirements ?? []).filter(Boolean);
+  const normalizedText = [...normalizedResponsibilities, ...normalizedRequirements].join('\n');
+  const jobPrompt = buildJobPromptText({
+    rawDescription,
+    normalizedResponsibilities,
+    normalizedRequirements,
+  });
+
+  const hasRaw = rawDescription.length > 0;
+  const hasNormalized = Boolean(normalizedResponsibilities.length || normalizedRequirements.length);
+
+  if (!hasRaw && !hasNormalized) {
+    throw new BadRequestException('Job description text is required for scoring.');
+  }
+
+  const jobTextSource: JobTextSource = hasRaw ? 'raw' : 'normalized_fallback';
+  const jobText = hasRaw ? rawDescription : jobPrompt.text || normalizedText;
+
+  const jobRawTextCharCount = getCharCount(rawDescription);
+  const jobRawTextSha256 = sha256(rawDescription);
+  const jobRawTextTooShort =
+    jobRawTextCharCount > 0 && jobRawTextCharCount < RAW_TEXT_WARNING_THRESHOLD;
+  const jobRawTextWarning = jobRawTextTooShort
+    ? `Raw job description is only ${jobRawTextCharCount.toLocaleString()} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}); scoring may be less reliable.`
+    : undefined;
+
+  return {
+    jobText,
+    jobTextSource,
+    jobRawTextCharCount,
+    jobRawTextSha256,
+    jobRawTextTooShort,
+    jobRawTextWarning,
+  };
+}
+
 type ScoringProofSnapshot = {
   assessmentId: string | null;
   baselineTextCharsScored: number;
@@ -88,6 +148,11 @@ type ScoringProofSnapshot = {
   truncationAppliedJob: boolean;
   normalizedResponsibilitiesCount: number;
   normalizedRequirementsCount: number;
+  jobRawTextCharCount: number;
+  jobRawTextSha256: string;
+  jobRawTextTooShort: boolean;
+  jobRawTextWarning?: string | null;
+  jobTextSource: JobTextSource;
 };
 
 type CompatibilityRunDebugPayload = {
@@ -103,6 +168,11 @@ type CompatibilityRunDebugPayload = {
   normalizedRequirementsChars: number;
   dimensionScores: FitDimensionScores;
   totalScore: number;
+  jobRawTextCharCount: number;
+  jobRawTextSha256: string;
+  jobRawTextTooShort: boolean;
+  jobRawTextWarning?: string | null;
+  jobTextSource: JobTextSource;
 };
 
 type FitScoreResponse = {
@@ -216,36 +286,184 @@ export class AnalysisService {
     return `Matched ${strengths.length} of ${total} key terms from the job description.`;
   }
 
+  private buildCanonicalJobInputs(jobProps: {
+    rawDescription?: string | null;
+    normalizedResponsibilities?: string[] | null;
+    normalizedRequirements?: string[] | null;
+  }) {
+    const rawDescription = (jobProps.rawDescription ?? '').trim();
+    const normalizedResponsibilities =
+      rawDescription.length > 0
+        ? []
+        : (jobProps.normalizedResponsibilities ?? []).filter(Boolean);
+    const normalizedRequirements =
+      rawDescription.length > 0
+        ? []
+        : (jobProps.normalizedRequirements ?? []).filter(Boolean);
+
+    return {
+      rawDescription,
+      normalizedResponsibilities,
+      normalizedRequirements,
+    };
+  }
+
+  private buildCanonicalJobAssets(jobProps: {
+    rawDescription?: string | null;
+    normalizedResponsibilities?: string[] | null;
+    normalizedRequirements?: string[] | null;
+    title?: string | null;
+    company?: string | null;
+    sourceUrl?: string | null;
+  }) {
+    const canonicalInputs = this.buildCanonicalJobInputs(jobProps);
+    const jobTextForScoring = buildJobTextForScoring({
+      rawDescription: canonicalInputs.rawDescription,
+      normalizedResponsibilities: canonicalInputs.normalizedResponsibilities,
+      normalizedRequirements: canonicalInputs.normalizedRequirements,
+    });
+
+    const canonicalJobForHash: FitScoreInput['job'] = {
+      rawDescription: canonicalInputs.rawDescription,
+      normalizedResponsibilities: canonicalInputs.normalizedResponsibilities,
+      normalizedRequirements: canonicalInputs.normalizedRequirements,
+      title: jobProps.title ?? null,
+      company: jobProps.company ?? null,
+    };
+
+    const canonicalJobForScoring: FitScoreInput['job'] = {
+      ...canonicalJobForHash,
+      sourceUrl: jobProps.sourceUrl ?? null,
+      jobTextOverride: jobTextForScoring.jobText,
+    };
+
+    return {
+      canonicalJobForScoring,
+      canonicalJobForHash,
+      jobTextForScoring,
+    };
+  }
+
+  private getIncludedSections(
+    sections: BaselineSection[] | undefined,
+    selectedBlockIds?: string[] | null,
+  ) {
+    return (sections ?? []).filter((section) => {
+      if (section.includePolicy === BaselineIncludePolicy.NEVER) {
+        return false;
+      }
+      if (selectedBlockIds && !selectedBlockIds.includes(section.id)) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private buildSectionPayload(sections: BaselineSection[]) {
+    return sections.map((section) => ({
+      type: section.sectionType ?? section.type,
+      content: section.content ?? '',
+    }));
+  }
+
   private buildInputsHash(
-    job: Job,
-    baseline: Baseline,
+    job: FitScoreInput['job'],
+    baselineId: string,
+    baselineVersion: number | null,
+    sections: { type: string | null; content: string | null }[],
     dimensionWeights: DimensionWeightOverrides,
   ) {
-    const sectionPayload =
-      baseline.sections?.map((section) => ({
-        type: section.sectionType ?? section.type,
-        content: section.content,
-        includePolicy: section.includePolicy,
-        order: section.order,
-      })) ?? [];
-
     const payload = {
       job: {
         rawDescription: job.rawDescription,
-        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-        normalizedRequirements: job.normalizedRequirements ?? [],
+        normalizedResponsibilities: job.normalizedResponsibilities,
+        normalizedRequirements: job.normalizedRequirements,
         title: job.title ?? null,
         company: job.company ?? null,
       },
       baseline: {
-        id: baseline.id,
-        version: baseline.version ?? null,
-        sections: sectionPayload,
+        id: baselineId,
+        version: baselineVersion,
+        sections,
       },
       calibration: dimensionWeights,
     };
 
     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private async loadBaselineWithSections(userId: string, baselineId: string) {
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      relations: ['sections'],
+      order: { sections: { order: 'ASC' } },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    if (!baseline.sections?.length) {
+      baseline.sections = await this.baselineSectionRepository.find({
+        where: { baselineId: baseline.id },
+        order: { order: 'ASC' },
+      });
+    }
+
+    return baseline;
+  }
+
+  private async fetchJobForUser(jobId: string, userId: string) {
+    const job = await this.jobRepository.findOne({
+      where: { id: jobId, userId },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    return job;
+  }
+
+  private async computeExpectedInputsHashForJobBaseline(
+    userId: string,
+    job: Job,
+    baseline: Baseline,
+  ) {
+    const calibration = await this.getCalibration(userId);
+    const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
+    const includedSections = this.getIncludedSections(baseline.sections);
+    const sectionPayload = this.buildSectionPayload(includedSections);
+    const { canonicalJobForHash } = this.buildCanonicalJobAssets({
+      rawDescription: job.rawDescription,
+      normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+      normalizedRequirements: job.normalizedRequirements ?? [],
+      title: job.title ?? null,
+      company: job.company ?? null,
+      sourceUrl: job.sourceUrl ?? null,
+    });
+    return this.buildInputsHash(
+      canonicalJobForHash,
+      baseline.id,
+      baseline.version ?? null,
+      sectionPayload,
+      dimensionWeights,
+    );
+  }
+
+  private async runAndPersistFitAssessment(
+    userId: string,
+    jobId: string,
+    baselineId: string,
+    baselineVersion?: number,
+  ) {
+    const payload: RunFitAssessmentDto = { jobId, baselineId };
+    if (baselineVersion !== undefined) {
+      payload.baselineVersion = baselineVersion;
+    }
+
+    const result = await this.runFitAssessment(userId, payload);
+    return this.getFitAssessmentById(userId, result.assessmentId);
   }
 
   private buildCompatibilityDebugPayload({
@@ -261,6 +479,11 @@ export class AnalysisService {
     normalizedRequirementsChars,
     dimensionScores,
     totalScore,
+    jobRawTextCharCount,
+    jobRawTextSha256,
+    jobRawTextTooShort,
+    jobRawTextWarning,
+    jobTextSource,
   }: {
     baselineId: string;
     baselineVersionHash: string | null;
@@ -274,6 +497,11 @@ export class AnalysisService {
     normalizedRequirementsChars: number;
     dimensionScores: FitDimensionScores;
     totalScore: number;
+    jobRawTextCharCount: number;
+    jobRawTextSha256: string;
+    jobRawTextTooShort: boolean;
+    jobRawTextWarning?: string | null;
+    jobTextSource: JobTextSource;
   }): CompatibilityRunDebugPayload {
     return {
       baselineId,
@@ -288,6 +516,11 @@ export class AnalysisService {
       normalizedRequirementsChars,
       dimensionScores,
       totalScore,
+      jobRawTextCharCount,
+      jobRawTextSha256,
+      jobRawTextTooShort,
+      jobRawTextWarning,
+      jobTextSource,
     };
   }
 
@@ -540,16 +773,12 @@ export class AnalysisService {
     }
 
     const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
-    const isIncludedSection = (section: BaselineSection) =>
-      section.includePolicy !== BaselineIncludePolicy.NEVER &&
-      (!selectedBlockIds || selectedBlockIds.includes(section.id));
-    const includedSections =
-      baseline.sections
-        ?.filter(isIncludedSection)
-        .map((section) => ({
-          type: section.sectionType ?? section.type,
-          content: section.content,
-        })) ?? [];
+    const filteredSections = this.getIncludedSections(baseline.sections, selectedBlockIds);
+    const includedSections = filteredSections.map((section) => ({
+      type: section.sectionType ?? section.type,
+      content: section.content,
+    }));
+    const sectionPayload = includedSections;
 
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
@@ -617,30 +846,26 @@ export class AnalysisService {
           };
     }
 
-    const normalizedResponsibilities = jobPayload.normalizedResponsibilities ?? [];
-    const normalizedRequirements = jobPayload.normalizedRequirements ?? [];
-    const normalizedSegments = [...normalizedResponsibilities, ...normalizedRequirements].filter(Boolean);
-    const normalizedText = normalizedSegments.join('\n');
-    const normalizedTextChars = getCharCount(normalizedText);
-    const normalizedTextWords = countWords(normalizedText);
+    const {
+      canonicalJobForScoring,
+      canonicalJobForHash,
+      jobTextForScoring,
+    } = this.buildCanonicalJobAssets(jobPayload);
+
+    const normalizedResponsibilities = canonicalJobForHash.normalizedResponsibilities;
+    const normalizedRequirements = canonicalJobForHash.normalizedRequirements;
     const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(normalizedResponsibilities);
     const normalizedRequirementsStats = this.buildNormalizedSegmentStats(normalizedRequirements);
+    const normalizedJobDescription = this.complianceService.normalizeText(canonicalJobForHash.rawDescription);
 
-    const rawText = jobPayload.rawDescription ?? '';
-    const rawTextChars = getCharCount(rawText);
-    const rawTextWords = countWords(rawText);
-    const normalizedJobDescription = this.complianceService.normalizeText(rawText);
+    if (jobTextForScoring.jobRawTextTooShort) {
+      console.warn(
+        `Raw job description for job ${job?.id ?? jobId ?? 'ad-hoc'} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
+      );
+    }
 
-    const hasNormalizedText = normalizedSegments.length > 0;
-    const chosenTextSourceForScoring = hasNormalizedText
-      ? 'normalized'
-      : rawText
-      ? 'raw'
-      : 'unknown';
-    const chosenText = hasNormalizedText ? normalizedText : rawText;
+    const chosenText = jobTextForScoring.jobText;
     const chosenTextChars = getCharCount(chosenText);
-    const chosenTextWords = countWords(chosenText);
-    const chosenTextHash = sha256(chosenText);
 
     const jobSource =
       job?.jdIngestionMethod === JobIngestionMethod.URL ||
@@ -649,27 +874,24 @@ export class AnalysisService {
         ? 'url'
         : job?.jdIngestionMethod === JobIngestionMethod.PASTE
         ? 'paste'
-        : rawText
+        : canonicalJobForHash.rawDescription
         ? 'paste'
         : 'unknown';
 
-    const hashableJob = (job ?? {
-      rawDescription: jobPayload.rawDescription,
-      normalizedResponsibilities: jobPayload.normalizedResponsibilities,
-      normalizedRequirements: jobPayload.normalizedRequirements,
-      title: jobPayload.title,
-      company: jobPayload.company,
-      sourceUrl: jobPayload.sourceUrl,
-    }) as Job;
-
-    const inputsHash = this.buildInputsHash(hashableJob, baseline, dimensionWeights);
+    const inputsHash = this.buildInputsHash(
+      canonicalJobForHash,
+      baseline.id,
+      baselineVersion.versionNumber ?? baseline.version ?? null,
+      sectionPayload,
+      dimensionWeights,
+    );
 
     const scoring = await this.fitScoringService.score(
       {
-        job: jobPayload,
+        job: canonicalJobForScoring,
         baseline: {
           version: baselineVersion.versionNumber ?? baseline.version ?? null,
-          sections: includedSections,
+          sections: sectionPayload,
         },
       },
       dimensionWeights,
@@ -688,13 +910,18 @@ export class AnalysisService {
           baselineSelectedSectionCount: includedSections.length,
           baselineTotalChars: baselineTextCharsScored,
           jobId: job?.id ?? jobId ?? null,
-          jobRawChars: rawTextChars,
+          jobRawChars: jobTextForScoring.jobRawTextCharCount,
           normalizedResponsibilitiesCount: normalizedResponsibilitiesStats.count,
           normalizedResponsibilitiesChars: normalizedResponsibilitiesStats.chars,
           normalizedRequirementsCount: normalizedRequirementsStats.count,
           normalizedRequirementsChars: normalizedRequirementsStats.chars,
           dimensionScores: scoring.dimensionScores,
           totalScore: scoring.overallScore,
+          jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
+          jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
+          jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
+          jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+          jobTextSource: jobTextForScoring.jobTextSource,
         })
       : undefined;
 
@@ -759,6 +986,11 @@ export class AnalysisService {
       truncationAppliedJob: false,
       normalizedResponsibilitiesCount: normalizedResponsibilities.length,
       normalizedRequirementsCount: normalizedRequirements.length,
+      jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
+      jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
+      jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
+      jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+      jobTextSource: jobTextForScoring.jobTextSource,
     };
 
     return {
@@ -840,6 +1072,13 @@ export class AnalysisService {
     }
 
     const normalizedJobDescription = this.complianceService.normalizeText(jobDescription);
+    const jobRawChars = getCharCount(jobDescription);
+    const jobRawTextTooShort = jobRawChars > 0 && jobRawChars < 3000;
+    if (jobRawTextTooShort) {
+      console.warn(
+        `Raw job description for baseline ${baselineId} is only ${jobRawChars} characters (<3,000).`,
+      );
+    }
 
     const baselineText = this.buildBaselineText(includedSections);
     const baselineKeywords = this.normalizeKeywords(baselineText);
@@ -947,26 +1186,41 @@ export class AnalysisService {
       throw new NotFoundException('Job not found');
     }
 
-    const includedSections =
-      baseline.sections?.filter(
-        (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
-      ) ?? [];
+    const filteredSections = this.getIncludedSections(baseline.sections);
+    const includedSections = filteredSections.map((section) => ({
+      type: section.sectionType ?? section.type,
+      content: section.content,
+    }));
+    const sectionPayload = includedSections;
 
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(includedSections);
 
     const baselineProofText = includedSections.map((section) => section.content ?? '').join('\n');
     const baselineTextCharsScored = getCharCount(baselineProofText);
-    const normalizedResponsibilities = job.normalizedResponsibilities ?? [];
-    const normalizedRequirements = job.normalizedRequirements ?? [];
-    const normalizedSegments = [...normalizedResponsibilities, ...normalizedRequirements].filter(Boolean);
-    const normalizedText = normalizedSegments.join('\n');
+
+    const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
+      this.buildCanonicalJobAssets({
+        rawDescription: job.rawDescription,
+        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+        normalizedRequirements: job.normalizedRequirements ?? [],
+        title: job.title ?? null,
+        company: job.company ?? null,
+        sourceUrl: job.sourceUrl ?? null,
+      });
+
+    const normalizedResponsibilities = canonicalJobForHash.normalizedResponsibilities;
+    const normalizedRequirements = canonicalJobForHash.normalizedRequirements;
     const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(normalizedResponsibilities);
     const normalizedRequirementsStats = this.buildNormalizedSegmentStats(normalizedRequirements);
-    const rawText = job.rawDescription ?? '';
-    const jobRawChars = getCharCount(rawText);
-    const chosenJobText = normalizedSegments.length ? normalizedText : rawText;
-    const jobTextCharsScored = getCharCount(chosenJobText);
+
+    if (jobTextForScoring.jobRawTextTooShort) {
+      console.warn(
+        `Raw job description for job ${job.id} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
+      );
+    }
+
+    const jobTextCharsScored = getCharCount(jobTextForScoring.jobText);
 
     const scoringProofBase = {
       baselineTextCharsScored,
@@ -975,30 +1229,31 @@ export class AnalysisService {
       truncationAppliedJob: false,
       normalizedResponsibilitiesCount: normalizedResponsibilities.length,
       normalizedRequirementsCount: normalizedRequirements.length,
+      jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
+      jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
+      jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
+      jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+      jobTextSource: jobTextForScoring.jobTextSource,
     };
 
     const calibration = await this.getCalibration(userId);
 
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
+    const inputsHash = this.buildInputsHash(
+      canonicalJobForHash,
+      baseline.id,
+      baseline.version ?? null,
+      sectionPayload,
+      dimensionWeights,
+    );
     const allowDebug = Boolean(payload.debug);
 
     const scoring = await this.fitScoringService.score(
       {
-        job: {
-          rawDescription: job.rawDescription,
-          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-          normalizedRequirements: job.normalizedRequirements ?? [],
-          title: job.title ?? null,
-          company: job.company ?? null,
-          sourceUrl: job.sourceUrl ?? null,
-        },
+        job: canonicalJobForScoring,
         baseline: {
           version: baseline.version ?? null,
-          sections: includedSections.map((section) => ({
-            type: section.sectionType ?? section.type,
-            content: section.content,
-          })),
+          sections: sectionPayload,
         },
       },
       dimensionWeights,
@@ -1052,13 +1307,18 @@ export class AnalysisService {
           baselineSelectedSectionCount: includedSections.length,
           baselineTotalChars: baselineTextCharsScored,
           jobId: jobIdentifier,
-          jobRawChars,
+          jobRawChars: jobTextForScoring.jobRawTextCharCount,
           normalizedResponsibilitiesCount: normalizedResponsibilitiesStats.count,
           normalizedResponsibilitiesChars: normalizedResponsibilitiesStats.chars,
           normalizedRequirementsCount: normalizedRequirementsStats.count,
           normalizedRequirementsChars: normalizedRequirementsStats.chars,
           dimensionScores: scoring.dimensionScores,
           totalScore: scoring.overallScore,
+          jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
+          jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
+          jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
+          jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+          jobTextSource: jobTextForScoring.jobTextSource,
         })
       : undefined;
 
@@ -1160,24 +1420,42 @@ export class AnalysisService {
 
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(calibration.weights);
-    const inputsHash = this.buildInputsHash(job, baseline, dimensionWeights);
+
+    const sectionPayload = includedSections.map((section) => ({
+      type: section.sectionType ?? section.type,
+      content: section.content,
+    }));
+
+    const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
+      this.buildCanonicalJobAssets({
+        rawDescription: job.rawDescription,
+        normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+        normalizedRequirements: job.normalizedRequirements ?? [],
+        title: job.title ?? null,
+        company: job.company ?? null,
+        sourceUrl: job.sourceUrl ?? null,
+      });
+
+    if (jobTextForScoring.jobRawTextTooShort) {
+      console.warn(
+        `Raw job description for job ${job.id} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
+      );
+    }
+
+    const inputsHash = this.buildInputsHash(
+      canonicalJobForHash,
+      baseline.id,
+      payload.baselineVersion ?? baseline.version ?? null,
+      sectionPayload,
+      dimensionWeights,
+    );
 
     const scoring = await this.fitScoringService.score(
       {
-        job: {
-          rawDescription: job.rawDescription,
-          normalizedResponsibilities: job.normalizedResponsibilities ?? [],
-          normalizedRequirements: job.normalizedRequirements ?? [],
-          title: job.title ?? null,
-          company: job.company ?? null,
-          sourceUrl: job.sourceUrl ?? null,
-        },
+        job: canonicalJobForScoring,
         baseline: {
           version: payload.baselineVersion ?? baseline.version ?? null,
-          sections: includedSections.map((section) => ({
-            type: section.sectionType ?? section.type,
-            content: section.content,
-          })),
+          sections: sectionPayload,
         },
         verifiedAdditions: additions,
       },
@@ -1325,6 +1603,26 @@ export class AnalysisService {
       throw new NotFoundException('Fit assessment not found');
     }
 
+    const job = await this.fetchJobForUser(jobId, userId);
+
+    if (!assessment.baselineId) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    const baseline = await this.loadBaselineWithSections(userId, assessment.baselineId);
+    const expectedHash = await this.computeExpectedInputsHashForJobBaseline(userId, job, baseline);
+
+    if (assessment.inputsHash !== expectedHash) {
+      const baselineVersion =
+        assessment.baselineVersion ?? baseline.version ?? undefined;
+      return this.runAndPersistFitAssessment(
+        userId,
+        jobId,
+        assessment.baselineId,
+        baselineVersion,
+      );
+    }
+
     return this.buildLatestAssessmentPayload(assessment);
   }
 
@@ -1352,6 +1650,21 @@ export class AnalysisService {
 
     if (!assessment) {
       throw new NotFoundException('Fit assessment not found');
+    }
+
+    const job = await this.fetchJobForUser(jobId, userId);
+    const baseline = await this.loadBaselineWithSections(userId, baselineId);
+    const expectedHash = await this.computeExpectedInputsHashForJobBaseline(userId, job, baseline);
+
+    if (assessment.inputsHash !== expectedHash) {
+      const baselineVersion =
+        assessment.baselineVersion ?? baseline.version ?? undefined;
+      return this.runAndPersistFitAssessment(
+        userId,
+        jobId,
+        baselineId,
+        baselineVersion,
+      );
     }
 
     return this.buildLatestAssessmentPayload(assessment);

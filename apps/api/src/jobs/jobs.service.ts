@@ -32,6 +32,7 @@ export type IngestJobDescriptionInput = {
 
 export type IngestJobDescriptionResult = {
   rawDescription: string;
+  originalRawDescription: string;
   responsibilities: string[];
   requirements: string[];
   warning?: JobWarning | null;
@@ -92,23 +93,27 @@ export class JobsService {
     if (hasUrl) {
       const sanitizedUrl = this.validateUrl(url!);
       const html = await this.fetchHtml(sanitizedUrl);
-      const extracted = this.normalizeRawDescription(extractTextFromHtml(html));
-      this.validateDescriptionLength(extracted);
-      const normalizedOutcome = this.normalizeSafely(extracted);
+      const extracted = extractTextFromHtml(html);
+      const normalizedText = this.normalizeRawDescription(extracted);
+      this.validateDescriptionLength(normalizedText);
+      const normalizedOutcome = this.normalizeSafely(normalizedText);
       return {
-        rawDescription: extracted,
+        rawDescription: normalizedText,
+        originalRawDescription: extracted,
         responsibilities: normalizedOutcome.responsibilities,
         requirements: normalizedOutcome.requirements,
         warning: normalizedOutcome.warning,
       };
     }
 
-    const normalizedText = this.normalizeRawDescription(pastedText!);
+    const rawText = pastedText!;
+    const normalizedText = this.normalizeRawDescription(rawText);
     this.validateDescriptionLength(normalizedText);
     const normalizedOutcome = this.normalizeSafely(normalizedText);
 
     return {
       rawDescription: normalizedText,
+      originalRawDescription: rawText,
       responsibilities: normalizedOutcome.responsibilities,
       requirements: normalizedOutcome.requirements,
       warning: normalizedOutcome.warning,
@@ -116,10 +121,11 @@ export class JobsService {
   }
 
   async createJob(userId: string, payload: CreateJobInput): Promise<CreateJobResult> {
-    const rawDescription = this.normalizeRawDescription(payload.rawDescription);
-    this.validateDescriptionLength(rawDescription);
+    const originalRawDescription = payload.rawDescription;
+    const normalizedInput = this.normalizeRawDescription(originalRawDescription);
+    this.validateDescriptionLength(normalizedInput);
 
-    const normalizedOutcome = this.normalizeSafely(rawDescription);
+    const normalizedOutcome = this.normalizeSafely(normalizedInput);
     const responsibilities =
       payload.responsibilities && payload.responsibilities.length > 0
         ? sanitizeListItems(payload.responsibilities)
@@ -167,7 +173,7 @@ export class JobsService {
       userId,
       title: payload.title?.trim() || null,
       company: payload.company?.trim() || null,
-      rawDescription,
+      rawDescription: originalRawDescription,
       sourceUrl,
       sourceProviderId,
       sourceExternalId,

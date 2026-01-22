@@ -1,12 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
-import { FormButton } from "@/components/FormButton";
+import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import {
   BaselineDto,
   BaselineUploadResponse,
@@ -16,10 +14,10 @@ import {
 } from "@/lib/baselines";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 import { formatDateTime } from "@/lib/format-date";
-import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
-import { InputCard } from "./_components/InputCard";
+import { ttrComponents } from "@/app/(app)/ui/ttrStyles";
 import { OverflowMenu } from "./_components/OverflowMenu";
+import { SetupModuleCard } from "./_components/SetupModuleCard";
 import { setBaselineName } from "./_components/selectionStore";
 
 interface BaselineDashboardProps {
@@ -103,16 +101,15 @@ export function BaselineDashboard({
   );
 
   const selectedBaselineName = useMemo(
-    () => sortedBaselines.find((baseline) => baseline.id === selectedBaselineId)?.originalFilename ?? null,
+    () =>
+      sortedBaselines.find((baseline) => baseline.id === selectedBaselineId)
+        ?.originalFilename ?? null,
     [sortedBaselines, selectedBaselineId],
   );
 
   useEffect(() => {
     setBaselineName(selectedBaselineName);
   }, [selectedBaselineName]);
-  const uploadButtonEnabled = Boolean(file) && !isUploading;
-  const canOpenFilePicker = !file && !isUploading;
-
   const uploadBaselineFile = async (fileToUpload: File) => {
     if (isUploading) return;
     setError(null);
@@ -185,86 +182,9 @@ export function BaselineDashboard({
     fileInputRef.current?.click();
   };
 
-  const dividerStyle: CSSProperties = {
-    height: 1,
-    background: "rgba(255,255,255,0.06)",
-    margin: "14px 0",
-  };
-
-  const fileInfoStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 12,
-    color: "rgba(226,232,240,0.65)",
-  };
-
-  const statusActionButtonStyle: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: "6px 10px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.12)",
-    background: "rgba(255,255,255,0.05)",
-    color: "rgba(241,245,249,0.92)",
-    fontWeight: 800,
-    fontSize: 13,
-    cursor: "pointer",
-    boxShadow: "0 12px 22px rgba(0,0,0,0.25)",
-    transition: "transform 160ms ease, box-shadow 160ms ease",
-    userSelect: "none",
-  };
-
-  const archivedBadgeStyle: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "2px 8px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.25)",
-    background: "rgba(255,255,255,0.05)",
-    fontSize: 11,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    color: "rgba(226,232,240,0.75)",
-  };
-
-  const listItemStyle: CSSProperties = {
-    padding: "12px 0",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 14,
-  };
-
-  const filenameStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 14,
-    fontWeight: 700,
-    color: "rgba(248,250,252,0.95)",
-  };
-
-  const metaStyle: CSSProperties = {
-    margin: 0,
-    fontSize: 12,
-    color: "rgba(226,232,240,0.6)",
-  };
-
-  const linkStyle: CSSProperties = {
-    fontSize: 13,
-    fontWeight: 800,
-    color: "rgba(251,191,36,0.95)",
-    textDecoration: "none",
-    border: "1px solid rgba(251,191,36,0.28)",
-    background: "rgba(251,191,36,0.08)",
-    padding: "8px 10px",
-    borderRadius: 12,
-    whiteSpace: "nowrap",
-  };
-
   return (
-    <InputCard
-      kicker="BASELINE"
+    <SetupModuleCard
+      label="BASELINE"
       title="Baseline"
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
@@ -298,14 +218,18 @@ export function BaselineDashboard({
       />
 
       <div className="space-y-3 text-sm text-slate-300">
-        <p style={{ margin: 0 }}>
-          Upload a PDF or DOCX, and we’ll keep it securely stored for future scoring.
+        <p className="m-0">
+          Upload a PDF or DOCX, and weƒ?Tll keep it securely stored for future scoring.
         </p>
-        {file ? <p style={fileInfoStyle}>Selected: {file.name}</p> : null}
+        {file ? (
+          <p className="text-xs text-slate-400">Selected: {file.name}</p>
+        ) : null}
       </div>
 
       {selectedBaselineName ? (
-        <p className="text-xs text-slate-400">Selected: {selectedBaselineName}</p>
+        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+          Selected: {selectedBaselineName}
+        </p>
       ) : null}
 
       {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
@@ -318,11 +242,11 @@ export function BaselineDashboard({
             marginTop: 4,
           }}
         >
-          <p style={{ margin: 0, fontSize: 13 }}>{uploadStatus.message}</p>
+          <p className="m-0 text-[13px]">{uploadStatus.message}</p>
         </div>
       ) : null}
 
-      <div style={dividerStyle} />
+      <div className="h-px bg-white/10" />
 
       {initialFetchError ? (
         <Alert intent="error" title="Unable to load baselines">
@@ -332,97 +256,64 @@ export function BaselineDashboard({
 
       {sortedBaselines.length === 0 ? (
         initialFetchError ? null : (
-          <p
-            style={{
-              margin: 0,
-              fontSize: 13,
-              color: "rgba(226,232,240,0.7)",
-            }}
-          >
+          <p className="m-0 text-[13px] text-slate-400">
             No baselines uploaded yet.
           </p>
         )
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-          {sortedBaselines.map((baseline, index) => {
+        <div className="space-y-3">
+          {sortedBaselines.map((baseline) => {
             const isSelected = baseline.id === selectedBaselineId;
+            const cardClasses = [
+              "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
+              isSelected ? "ring-2 ring-amber-400/40" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
 
             return (
-              <li
-                key={baseline.id}
-                style={{
-                  ...listItemStyle,
-                  borderTop:
-                    index === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <p style={filenameStyle} className="truncate">
+              <div key={baseline.id} className={cardClasses}>
+                <div className="flex items-center justify-between gap-4 min-w-0">
+                  <div className="flex flex-1 min-w-0 items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-slate-100">
                       {baseline.originalFilename}
                     </p>
                     {baseline.status === "ARCHIVED" ? (
-                      <span style={archivedBadgeStyle}>Archived</span>
+                      <span className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                        Archived
+                      </span>
                     ) : null}
                   </div>
-                  <p style={metaStyle}>
-                    Uploaded {formatDateTime(baseline.createdAt)}
-                  </p>
-                </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <Link
-                    href={getBaselineDetailsHref(baseline.id)}
-                    style={linkStyle}
-                  >
-                    View details
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => setBaselineSelection(baseline.id)}
-                    disabled={isSelected}
-                    style={{
-                      ...statusActionButtonStyle,
-                      opacity: isSelected ? 0.6 : 1,
-                      cursor: isSelected ? "not-allowed" : "pointer",
-                      minWidth: 90,
-                    }}
-                  >
-                    {isSelected ? "Selected" : "Select"}
-                  </button>
-                  {baseline.status !== "ARCHIVED" ? (
-                    <OverflowMenu
-                      onArchive={() => handleArchiveBaseline(baseline.id)}
-                      loading={archivingBaselineId === baseline.id}
-                      ariaLabel="Baseline overflow actions"
-                    />
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+                    <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
+                      View details
+                    </SecondaryActionLink>
+                    <FormButton
+                      variant="secondary"
+                      onClick={() => setBaselineSelection(baseline.id)}
+                      disabled={isSelected}
+                      className="shrink-0"
+                    >
+                      {isSelected ? "Selected" : "Select"}
+                    </FormButton>
+                    {baseline.status !== "ARCHIVED" ? (
+                      <OverflowMenu
+                        onArchive={() => handleArchiveBaseline(baseline.id)}
+                        loading={archivingBaselineId === baseline.id}
+                        ariaLabel="Baseline overflow actions"
+                      />
+                    ) : null}
+                  </div>
                 </div>
-              </li>
+                <p className="text-xs text-slate-400 mt-2">
+                  Uploaded {formatDateTime(baseline.createdAt)}
+                </p>
+              </div>
             );
           })}
-        </ul>
+        </div>
       )}
-    </InputCard>
+    </SetupModuleCard>
   );
 }

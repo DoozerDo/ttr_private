@@ -126,9 +126,8 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
 
   return (
     <InstrumentPanelShell
-      kicker="WELCOME TO TTR"
       title="Target this role with clarity."
-      subtitle="TTR compares a baseline resume you trust against a job description to generate a CX Fit Score and tailored outputs. Thanks for letting us be part of your search."
+      subtitle="Target This Role compares your resume against a job description to generate a Compatibility/Fit Score. If your score is strong enough, your personalized resume and cover letter will be generated for you to use in the application process."
       contentWidth="wide"
     >
       <div className="space-y-6">

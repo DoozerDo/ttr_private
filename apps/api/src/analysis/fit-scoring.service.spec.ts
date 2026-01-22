@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { FitScoreEngine } from '../scoring/fit-score/fit-score.engine';
 import { FitScoringService } from './fit-scoring.service';
 
 const baseSentence =
@@ -32,7 +33,21 @@ const buildInput = (overrides?: Partial<Parameters<FitScoringService['score']>[0
 });
 
 describe('FitScoringService', () => {
-  const service = new FitScoringService();
+  let service: FitScoringService;
+  let scoreSpy: jest.SpyInstance;
+
+  beforeAll(() => {
+    scoreSpy = jest.spyOn(FitScoreEngine.prototype, 'score');
+  });
+
+  afterAll(() => {
+    scoreSpy.mockRestore();
+  });
+
+  beforeEach(() => {
+    service = new FitScoringService();
+    scoreSpy.mockClear();
+  });
 
   it('returns the new summary and theme-based strengths', async () => {
     const result = await service.score(buildInput());
@@ -47,6 +62,13 @@ describe('FitScoringService', () => {
     expect(result.debug).toBeDefined();
     expect(result.debug?.weights).toBeDefined();
     expect(result.debug?.finalScore).toBeDefined();
+  });
+
+  it('passes only the raw description to the engine when available', async () => {
+    await service.score(buildInput());
+    const engineJob = scoreSpy.mock.calls[0][0].job;
+    expect(engineJob.normalizedResponsibilities).toEqual([]);
+    expect(engineJob.normalizedRequirements).toEqual([]);
   });
 
   it('rejects job text that is too short for scoring', async () => {
@@ -82,5 +104,26 @@ describe('FitScoringService', () => {
     );
     expect(withAdditions.expandedScore).toBeGreaterThanOrEqual(withAdditions.originalScore);
     expect(withAdditions.appliedAdditions).toEqual(['Deep AWS and Kubernetes delivery experience']);
+  });
+
+  it('retains normalized segments when raw description is absent', async () => {
+    const fallbackJob = {
+      title: 'Senior Platform Leader',
+      company: 'ExampleCo',
+      rawDescription: '',
+      normalizedResponsibilities: [repeatedText(baseSentence, 25)],
+      normalizedRequirements: [repeatedText('Executive requirement text covers policy, security, and customer obsession.', 30)],
+      sourceUrl: 'https://example.com/jobs/leadership',
+    };
+
+    await service.score(
+      buildInput({
+        job: fallbackJob,
+      }),
+    );
+
+    const engineJob = scoreSpy.mock.calls[0][0].job;
+    expect(engineJob.normalizedResponsibilities).toEqual(fallbackJob.normalizedResponsibilities);
+    expect(engineJob.normalizedRequirements).toEqual(fallbackJob.normalizedRequirements);
   });
 });

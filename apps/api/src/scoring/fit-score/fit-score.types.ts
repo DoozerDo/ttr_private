@@ -9,6 +9,7 @@ export type FitScoreInput = {
     normalizedResponsibilities: string[];
     normalizedRequirements: string[];
     sourceUrl?: string | null;
+    jobTextOverride?: string | null;
   };
   baseline: {
     version?: number | null;

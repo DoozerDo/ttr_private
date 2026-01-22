@@ -16,6 +16,7 @@ import {
   tokenize,
   clamp,
   mapSimilarityToScore,
+  buildJobPromptText,
 } from './fit-score.utils';
 import { evaluateToolCoverage } from './tool-extractor';
 import { buildStrengths, buildGaps } from './fit-score.explain';
@@ -295,23 +296,19 @@ export class FitScoreEngine {
   }
 
   private selectJobText(job: FitScoreInput['job']) {
-    const normalizedChunks = [
-      ...job.normalizedResponsibilities,
-      ...job.normalizedRequirements,
-    ].filter(Boolean);
-    const normalizedText = normalizedChunks.join('\n').trim();
-    if (normalizedText) {
+    const override = job.jobTextOverride?.trim();
+    if (override) {
       return {
-        text: normalizedText,
-        wordCount: countWords(normalizedText),
-        source: 'normalized',
+        text: override,
+        wordCount: countWords(override),
+        source: 'rawDescription',
       };
     }
-    const rawText = job.rawDescription.trim();
+    const jobPrompt = buildJobPromptText(job);
     return {
-      text: rawText,
-      wordCount: countWords(rawText),
-      source: 'rawDescription',
+      text: jobPrompt.text,
+      wordCount: jobPrompt.wordCount,
+      source: jobPrompt.source,
     };
   }
 

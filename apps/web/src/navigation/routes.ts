@@ -14,18 +14,10 @@ export type RouteConfig = {
 const sidebarNavRoutes: RouteConfig[] = [
   {
     id: "baselines",
-    label: "Baseline Library",
+    label: "TARGET",
     href: "/baseline",
     requiresAuth: true,
     subtext: "Upload a baseline to begin targeting a role",
-  },
-  {
-    id: "analyze",
-    label: "Analyze",
-    href: "/analyze",
-    requiresAuth: true,
-    requiresBaseline: true,
-    subtext: "Calculate your Compatibility Score",
   },
   {
     id: "resume",
@@ -46,7 +38,7 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "jobTracker",
-    label: "Job Tracker",
+    label: "APPLICATION TRACKER",
     href: "/applications",
     requiresAuth: true,
     subtext: "What roles am I pursuing?",

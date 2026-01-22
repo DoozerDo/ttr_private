@@ -1,3 +1,4 @@
+import Link, { type LinkProps } from "next/link";
 import { ButtonHTMLAttributes, ReactNode } from "react";
 
 type FormButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -8,7 +9,8 @@ type FormButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const VARIANT_CLASSES: Record<FormButtonVariant, string> = {
-  primary: "border-0 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-900 shadow-lg shadow-amber-500/40",
+  primary:
+    "border-0 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-900 shadow-lg shadow-amber-500/40",
   secondary: "border border-white/20 bg-white/5 text-slate-100 shadow",
   ghost: "border border-white/10 bg-transparent text-slate-100",
   danger: "border border-rose-500 bg-rose-500/10 text-rose-100",
@@ -17,7 +19,36 @@ const VARIANT_CLASSES: Record<FormButtonVariant, string> = {
 const BASE_CLASSES =
   "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold transition-colors duration-150";
 
-export function FormButton({ variant = "primary", className, disabled, children, type, ...rest }: FormButtonProps) {
+export const SECONDARY_ACTION_BUTTON_CLASSES = `${BASE_CLASSES} ${VARIANT_CLASSES.secondary}`;
+
+type SecondaryActionLinkProps = LinkProps & {
+  className?: string;
+  children: ReactNode;
+};
+
+export function SecondaryActionLink({
+  className,
+  children,
+  ...rest
+}: SecondaryActionLinkProps) {
+  return (
+    <Link
+      className={[SECONDARY_ACTION_BUTTON_CLASSES, className].filter(Boolean).join(" ")}
+      {...rest}
+    >
+      {children}
+    </Link>
+  );
+}
+
+export function FormButton({
+  variant = "primary",
+  className,
+  disabled,
+  children,
+  type,
+  ...rest
+}: FormButtonProps) {
   const intentClass = VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary;
   const disabledClass = disabled ? "cursor-not-allowed opacity-60" : "hover:opacity-90";
 

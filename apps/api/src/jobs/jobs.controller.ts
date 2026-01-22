@@ -35,16 +35,16 @@ export class JobsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const rawDescription = body.rawDescription?.trim();
+    const rawDescriptionInput = body.rawDescription;
 
-    if (!rawDescription) {
+    if (!rawDescriptionInput?.trim()) {
       throw new BadRequestException('Job description is required');
     }
 
     const result = await this.jobsService.createJob(userId, {
       title: body.title,
       company: body.company,
-      rawDescription,
+      rawDescription: rawDescriptionInput,
       sourceUrl: body.sourceUrl ?? null,
       responsibilities: body.responsibilities ?? undefined,
       requirements: body.requirements ?? undefined,
