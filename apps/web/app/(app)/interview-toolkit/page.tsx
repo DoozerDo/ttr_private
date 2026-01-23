@@ -27,6 +27,7 @@ import {
   type StudyPacket,
 } from "@/lib/interviewToolkit";
 import { getInterviewResourcesForJob } from "@/lib/interviewToolkit/resources";
+import { LikelyQuestionsPanel } from "./_components/LikelyQuestionsPanel";
 import { ResourcesList } from "./_components/ResourcesList";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 
@@ -501,37 +502,7 @@ export default function InterviewToolkitPage() {
                     </ul>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                      Likely questions
-                    </p>
-                    {packet.questions.length === 0 ? (
-                      <span className="text-xs text-slate-400">None listed</span>
-                    ) : null}
-                  </div>
-                  {packet.questions.length === 0 ? (
-                    <Alert intent="warning">
-                      No questions available for this job yet.
-                    </Alert>
-                  ) : (
-                    <ul className="space-y-2 text-sm text-slate-200 pl-4 list-disc">
-                      {packet.questions.map((question) => (
-                        <li
-                          key={(question.gapId ?? question.prompt) + "-" + question.prompt}
-                          className="space-y-1"
-                        >
-                          <p className="font-semibold text-white">
-                            {question.prompt}
-                          </p>
-                          <p className="text-xs text-slate-400">
-                            {question.jdReference}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                  <LikelyQuestionsPanel signals={packet.fitSnapshot?.gaps ?? []} />
                 {packet.recentStories.length > 0 ? (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
