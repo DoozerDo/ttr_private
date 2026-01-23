@@ -23,6 +23,11 @@ import {
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { useAutoGenerateThreshold } from "../lib/settings";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
+import {
+  buildReasonSummary,
+  mapComplianceFlags,
+  sortComplianceFlagsBySeverity,
+} from "@/lib/resultsInsights";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -58,6 +63,11 @@ type LatestAnalysis = {
   dimensionScores?: FitDimensionScores | null;
   expandedDimensionScores?: FitDimensionScores | null;
   breakdown?: DimensionBreakdown | null;
+  strengths?: string[];
+  gaps?: string[];
+  complianceFlags?: string[];
+  summary?: string | null;
+  createdAt?: string | null;
 };
 
 type NextStep = {
@@ -377,6 +387,7 @@ export default function ResultsPage() {
   const [latest, setLatest] = useState<LatestAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isGeneratingBoth, setIsGeneratingBoth] = useState(false);
   const [loadingLatest, setLoadingLatest] = useState(false);
   const [exportState, setExportState] = useState<
     { docType: DocumentType; format: "docx" | "pdf" } | null
@@ -506,6 +517,19 @@ export default function ResultsPage() {
     [latest?.verdict],
   );
 
+  const verdictToneClass = useMemo(() => {
+    switch (verdictInfo.label) {
+      case "Apply":
+        return "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
+      case "Consider":
+        return "border-amber-300/40 bg-amber-500/10 text-amber-200";
+      case "Skip":
+        return "border-rose-400/40 bg-rose-500/10 text-rose-200";
+      default:
+        return "border-slate-500/30 bg-slate-800/40 text-slate-200";
+    }
+  }, [verdictInfo.label]);
+
   const jobDescriptor = useMemo(() => {
     if (latest?.jobTitle) {
       return latest.company ? `${latest.jobTitle} at ${latest.company}` : latest.jobTitle;
@@ -565,12 +589,56 @@ export default function ResultsPage() {
     }));
   }, [latest]);
 
+  const reasonSummary = useMemo(
+    () => buildReasonSummary(latest?.strengths ?? [], latest?.gaps ?? []),
+    [latest?.gaps, latest?.strengths],
+  );
+
+  const complianceFlagList = useMemo(
+    () =>
+      sortComplianceFlagsBySeverity(
+        mapComplianceFlags(latest?.complianceFlags ?? undefined),
+      ),
+    [latest?.complianceFlags],
+  );
+
+  const topComplianceFlags = complianceFlagList.slice(0, 3);
+  const hiddenComplianceFlags = complianceFlagList.slice(3);
+  const hasMoreComplianceFlags = complianceFlagList.length > 3;
+
   const latestAuditId = latest?.auditId ?? latest?.audit_id ?? null;
   const baselineVersionIdentifier =
     latest?.baselineVersionId ??
     latest?.baselineVersionHash ??
     (typeof latest?.baselineVersion === "number" ? `${latest.baselineVersion}` : null);
   const jobIdentifier = latest?.jobTitle ?? latest?.jobId ?? null;
+  const metadataEntries = useMemo(() => {
+    const createdAtValue = latest?.createdAt;
+    const createdAtLabel =
+      createdAtValue && !Number.isNaN(new Date(createdAtValue).getTime())
+        ? new Date(createdAtValue).toLocaleString()
+        : "Not available";
+
+    return [
+      { label: "Assessment ID", value: latest?.assessmentId ?? "Not available" },
+      { label: "Job", value: jobDescriptor ?? "Not available" },
+      { label: "Job ID", value: latest?.jobId ?? jobId ?? "Not available" },
+      { label: "Baseline ID", value: latest?.baselineId ?? baselineId ?? "Not available" },
+      { label: "Baseline version", value: baselineVersionIdentifier ?? "Not available" },
+      { label: "Audit ID", value: latestAuditId ?? "Not available" },
+      { label: "Run recorded", value: createdAtLabel },
+    ];
+  }, [
+    baselineId,
+    baselineVersionIdentifier,
+    jobDescriptor,
+    jobId,
+    latest?.assessmentId,
+    latest?.baselineId,
+    latest?.createdAt,
+    latest?.jobId,
+    latestAuditId,
+  ]);
 
   const exportBothSuccessDetails = exportBothSuccessAuditIds
     ? {
@@ -851,6 +919,17 @@ export default function ResultsPage() {
     }
   }
 
+  async function handleGenerateBothDocuments() {
+    if (!readyForDocument || isGeneratingBoth) return;
+    setIsGeneratingBoth(true);
+    try {
+      await generateDocument(false, "resume");
+      await generateDocument(false, "cover-letter");
+    } finally {
+      setIsGeneratingBoth(false);
+    }
+  }
+
   async function exportDocument(
     format: "docx" | "pdf",
     targetDocType: DocumentType = documentType,
@@ -985,102 +1064,222 @@ export default function ResultsPage() {
           description="Generate resumes and cover letters, review the latest analysis, and export artifacts for any job."
         />
 
-        <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-end justify-between gap-4">
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Demo summary
-              </p>
-              <h2 className="text-2xl font-semibold text-white">Key outputs</h2>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Instant view</span>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                 Fit score
               </p>
-              <p className="text-4xl font-semibold text-white">
+              <p className="text-5xl font-semibold text-white">
                 {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
               </p>
             </div>
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Verdict
-              </p>
-              <p className="text-lg font-semibold text-slate-100">{verdictInfo.label}</p>
+            <div className="flex flex-col items-start gap-2">
+              <span
+                className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
+              >
+                {verdictInfo.label}
+              </span>
+              <p className="max-w-2xl text-sm text-slate-200">{verdictInfo.description}</p>
             </div>
           </div>
+        </section>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-1">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Audit ID
+                Next action
               </p>
-              <p className="text-sm text-slate-100">{latestAuditId ?? "Not available"}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Baseline version
-              </p>
-              <p className="text-sm text-slate-100">
-                {baselineVersionIdentifier ?? "Not available"}
+              <h2 className="text-2xl font-semibold text-white">Continue shaping your story</h2>
+              <p className="text-sm text-slate-300">
+                Generate tailored documents, review what influenced the verdict, or run the analysis again.
               </p>
             </div>
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Job identifier
-              </p>
-              <p className="text-sm text-slate-100">{jobIdentifier ?? "Not available"}</p>
+            <div className="flex flex-wrap gap-3">
+              <FormButton
+                onClick={() => void handleGenerateBothDocuments()}
+                disabled={!readyForDocument || loading || isExportingBoth || isGeneratingBoth}
+              >
+                {isGeneratingBoth ? "Generating..." : "Generate tailored resume and cover letter"}
+              </FormButton>
+              <FormButton variant="secondary" onClick={() => router.push("/interview-toolkit")}>
+                View interview toolkit
+              </FormButton>
+              <FormButton variant="ghost" onClick={() => router.push("/analyze")}>
+                Run again
+              </FormButton>
             </div>
           </div>
+        </section>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex items-center justify-between">
+            <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Dimension scores
+                Why you got this score
               </p>
-              <span className="text-xs text-slate-400">Condensed view</span>
+              <h2 className="text-lg font-semibold text-slate-100">Insights</h2>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {dimensionEntries.map((dimension) => (
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Top 3</span>
+          </div>
+
+          {reasonSummary.primary.length ? (
+            <div className="mt-3 space-y-3">
+              {reasonSummary.primary.map((item, index) => (
                 <div
-                  key={dimension.key}
-                  className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                  key={`${item.message}-${item.type}-${index}`}
+                  className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
                 >
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                    {dimension.label}
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-white">
-                    {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
-                  </p>
+                  <span
+                    className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${
+                      item.type === "strength" ? "text-emerald-300" : "text-amber-300"
+                    }`}
+                  >
+                    {item.type === "strength" ? "Strength" : "Gap"}
+                  </span>
+                  <p className="text-sm text-slate-100">{item.message}</p>
                 </div>
               ))}
             </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              Load an analysis to see the strengths and gaps that shaped this score.
+            </p>
+          )}
+
+          <details className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Supporting evidence and extra context
+            </summary>
+            <div className="mt-3 space-y-3 text-sm text-slate-200">
+              {reasonSummary.extras.length
+                ? reasonSummary.extras.map((item, index) => (
+                    <div key={`${item.message}-${item.type}-${index}`}>
+                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                        {item.type === "strength" ? "Strength" : "Gap"}
+                      </p>
+                      <p>{item.message}</p>
+                    </div>
+                  ))
+                : null}
+              {latest?.summary ? (
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Summary</p>
+                  <p>{latest.summary}</p>
+                </div>
+              ) : null}
+              {!reasonSummary.extras.length && !latest?.summary ? (
+                <p className="text-sm text-slate-500">No additional context available yet.</p>
+              ) : null}
+            </div>
+          </details>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Compliance flags
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Integrity checks</h2>
+            </div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
+              Sorted by severity
+            </span>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <FormButton
-              onClick={() => void generateDocument(false, "resume")}
-              disabled={!readyForDocument || loading || isExportingBoth}
-            >
-              {loading ? "Generating..." : "Generate Resume"}
-            </FormButton>
-            <FormButton
-              onClick={() => void generateDocument(false, "cover-letter")}
-              disabled={!readyForDocument || loading || isExportingBoth}
-            >
-              {loading ? "Generating..." : "Generate Cover Letter"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportBothDocuments()}
-              disabled={!readyForDocument || !oneTapEligible || isExportingBoth || loading}
-            >
-              {isExportingBoth ? "Exporting..." : "Export Both"}
-            </FormButton>
-          </div>
+          {topComplianceFlags.length ? (
+            <ul className="mt-4 space-y-3 text-sm text-slate-200">
+              {topComplianceFlags.map((flag) => (
+                <li
+                  key={flag.id}
+                  className="rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+                >
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                    <span>{flag.severity === "block" ? "Critical" : "Advisory"}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-100">{flag.message}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-slate-400">No compliance flags detected for this run.</p>
+          )}
+
+          {hasMoreComplianceFlags ? (
+            <details className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                Show all {complianceFlagList.length} compliance flags
+              </summary>
+              <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                {complianceFlagList.map((flag) => (
+                  <li
+                    key={`all-${flag.id}`}
+                    className="rounded-xl border border-white/10 bg-slate-950/50 p-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                      {flag.severity === "block" ? "Critical" : "Advisory"}
+                    </p>
+                    <p className="text-sm text-slate-100">{flag.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <details className="space-y-4">
+            <summary className="flex items-center justify-between cursor-pointer text-sm font-semibold text-slate-100">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Advanced details
+                </p>
+                <h2 className="text-lg font-semibold text-white">
+                  Dimension scores & metadata
+                </h2>
+              </div>
+              <span className="text-xs text-slate-400">Expand for hidden context</span>
+            </summary>
+            <div className="space-y-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Dimension scores
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {dimensionEntries.map((dimension) => (
+                    <div
+                      key={dimension.key}
+                      className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                        {dimension.label}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-white">
+                        {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Run metadata
+                </p>
+                <dl className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {metadataEntries.map((entry) => (
+                    <div key={entry.label}>
+                      <dt className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                        {entry.label}
+                      </dt>
+                      <dd className="text-sm text-slate-100">{entry.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </div>
+          </details>
         </section>
 
         {exportBothSuccessDetails ? (
