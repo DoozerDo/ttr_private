@@ -148,17 +148,8 @@ Function Update-All {
 
 function Sync-EnvFiles {
     param(
-        # If you call this from Build-All while your current directory is the repo root,
-        # you can leave this alone.
         [string]$RepoRoot = (Get-Location).Path,
-
-        # By default, expect TargetThisRole_env to be a sibling of the repo root folder.
-        # Example:
-        #   C:\...\GitHub\TargetThisRole
-        #   C:\...\GitHub\TargetThisRole_env
-        [string]$EnvRoot = (Join-Path (Split-Path $RepoRoot -Parent) "TargetThisRole_env"),
-
-        # If set, print every file decision (Skip/Copy)
+        [string]$EnvRoot  = (Join-Path (Split-Path $RepoRoot -Parent) "TargetThisRole_env"),
         [switch]$VerboseOutput
     )
 
@@ -171,8 +162,9 @@ function Sync-EnvFiles {
     }
     $EnvRoot = (Resolve-Path $EnvRoot).Path
 
-    $copied = 0
+    $copied  = 0
     $skipped = 0
+    $copiedFiles = @()
 
     Get-ChildItem $EnvRoot -Recurse -File | ForEach-Object {
         $relative = $_.FullName.Substring($EnvRoot.Length).TrimStart('\')
@@ -186,7 +178,6 @@ function Sync-EnvFiles {
         $shouldCopy = $true
 
         If (Test-Path $destPath) {
-            # Compare file content using hashes (fast and reliable for small env files)
             $srcHash  = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash
             $destHash = (Get-FileHash -Algorithm SHA256 -Path $destPath).Hash
 
@@ -198,11 +189,17 @@ function Sync-EnvFiles {
         If ($shouldCopy) {
             Copy-Item -Path $_.FullName -Destination $destPath -Force
             $copied++
+            $copiedFiles += $relative
             If ($VerboseOutput) { Write-Host "COPY  $relative" }
         } else {
             $skipped++
             If ($VerboseOutput) { Write-Host "SKIP  $relative" }
         }
+    }
+
+    If ($copied -gt 0) {
+        Write-Host "Env files copied:"
+        $copiedFiles | ForEach-Object { Write-Host "  - $_" }
     }
 
     Write-Host "Env sync complete. Copied: $copied, Skipped (unchanged): $skipped"
