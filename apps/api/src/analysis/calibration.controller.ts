@@ -1,15 +1,24 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
+
 import { CalibrationDto } from './dto/calibration.dto';
 import { AnalysisService } from './analysis.service';
 
-@Controller('calibration')
 @UseGuards(AuthGuard('jwt'))
+@Controller()
 export class CalibrationController {
   constructor(private readonly analysisService: AnalysisService) {}
 
-  @Get()
+  @Get('calibration')
   async getCalibration(@Req() request: Request & { user?: { id?: string } }) {
     const userId = request.user?.id;
 
@@ -20,7 +29,7 @@ export class CalibrationController {
     return this.analysisService.getCalibration(userId);
   }
 
-  @Post()
+  @Post('calibration')
   async saveCalibration(
     @Body() body: CalibrationDto,
     @Req() request: Request & { user?: { id?: string } },

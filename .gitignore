@@ -55,3 +55,4 @@ override.tf.json
 # App storage (runtime artifacts)
 # =====================
 /apps/api/storage
+apps/api/.env.development.local

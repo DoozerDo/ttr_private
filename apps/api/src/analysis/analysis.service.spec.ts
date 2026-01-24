@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Baseline } from '../baseline/baseline.entity';
@@ -16,6 +17,7 @@ import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisService } from './analysis.service';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
+import type { CalibrationProfile } from './calibration-profiles';
 
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
@@ -505,6 +507,57 @@ describe('AnalysisService - fit scores contract', () => {
       expect(savedAssessment).not.toBeNull();
       expect(savedAssessment?.inputsHash).toBe(expectedHash);
       expect(result.assessmentId).toBe(savedAssessment?.id);
+    });
+  });
+
+  describe('calibrated scoring', () => {
+    it('returns a calibration payload with delta metadata', async () => {
+      const assessmentRecord: FitAssessment = {
+        id: 'fit-1',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: baseline.version,
+        overallScore: 70,
+        verdict: FitAssessmentVerdict.CONSIDER,
+        dimensionScores: {
+          experienceAlignment: 70,
+          leadershipLevel: 70,
+          technicalPlatformFit: 70,
+          industryContext: 70,
+          strategicTacticalFit: 70,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        inputsHash: 'hash-1',
+        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      };
+
+      fitAssessmentRepository.findOne.mockResolvedValueOnce(assessmentRecord);
+
+      const result = await service.calibrateAssessment('user-1', 'fit-1', 'aggressive');
+
+      expect(result.ok).toBe(true);
+      expect(result.assessmentId).toBe('fit-1');
+      expect(result.overallScore).toBe(82);
+      expect(result.baselineVersionId).toBe('bv-1');
+      expect(result.summary).toBe('No keywords found in the job description.');
+      expect(result.calibration).toMatchObject({
+        profile: 'aggressive',
+        label: 'Aggressive',
+        delta: 12,
+      });
+    });
+
+    it('rejects unsupported profiles', async () => {
+      await expect(
+        service.calibrateAssessment(
+          'user-1',
+          'fit-1',
+          'unsupported' as CalibrationProfile,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

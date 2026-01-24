@@ -28,6 +28,10 @@ import {
   mapComplianceFlags,
   sortComplianceFlagsBySeverity,
 } from "@/lib/resultsInsights";
+import {
+  CALIBRATION_PROFILE_OPTIONS,
+  type CalibrationProfile,
+} from "@/lib/calibration/profiles";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -68,6 +72,16 @@ type LatestAnalysis = {
   complianceFlags?: string[];
   summary?: string | null;
   createdAt?: string | null;
+};
+
+type CalibrationMetadata = {
+  profile: CalibrationProfile;
+  label: string;
+  delta: number;
+};
+
+type CalibratedResult = LatestAnalysis & {
+  calibration?: CalibrationMetadata;
 };
 
 type NextStep = {
@@ -209,15 +223,14 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
   if (fallback.dimension_scores && typeof fallback.dimension_scores === "object") {
     const scores = fallback.dimension_scores as Record<string, unknown>;
     return {
-      experienceAlignment: typeof scores.experience_alignment === "number" ? scores.experience_alignment : undefined,
+      experienceAlignment:
+        typeof scores.experience_alignment === "number" ? scores.experience_alignment : undefined,
       leadershipLevel: typeof scores.leadership_level === "number" ? scores.leadership_level : undefined,
-      technicalPlatformFit: typeof scores.technical_platform_fit === "number"
-        ? scores.technical_platform_fit
-        : undefined,
+      technicalPlatformFit:
+        typeof scores.technical_platform_fit === "number" ? scores.technical_platform_fit : undefined,
       industryContext: typeof scores.industry_context === "number" ? scores.industry_context : undefined,
-      strategicTacticalFit: typeof scores.strategic_vs_tactical === "number"
-        ? scores.strategic_vs_tactical
-        : undefined,
+      strategicTacticalFit:
+        typeof scores.strategic_vs_tactical === "number" ? scores.strategic_vs_tactical : undefined,
     };
   }
 
@@ -232,8 +245,7 @@ const getNextSteps = ({
   autoGenerateThreshold,
 }: NextStepArgs): NextStep[] => {
   const verdictInfo = getVerdictDisplayOrDefault(verdict);
-  const needsMoreInsight =
-    score === null || score === undefined || score < autoGenerateThreshold;
+  const needsMoreInsight = score === null || score === undefined || score < autoGenerateThreshold;
   const steps: NextStep[] = [];
 
   steps.push({
@@ -245,8 +257,7 @@ const getNextSteps = ({
 
   steps.push({
     title: "Practice with Interview Toolkit",
-    description:
-      "Pair Fit Review insights with the Interview Toolkit to tackle the most impactful gaps.",
+    description: "Pair Fit Review insights with the Interview Toolkit to tackle the most impactful gaps.",
   });
 
   if (needsMoreInsight) {
@@ -362,7 +373,7 @@ function extractBestResumeText(payload: unknown): string | null {
     const direct = typeof coercePreviewText === "function" ? coercePreviewText(payload) : null;
     if (typeof direct === "string" && direct.trim().length) return direct.trim();
   } catch {
-    /* ignore */
+    // ignore
   }
 
   const sectionsRaw = obj["sections"];
@@ -407,6 +418,17 @@ export default function ResultsPage() {
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
+  const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfile>("balanced");
+  const [calibrationResult, setCalibrationResult] = useState<CalibratedResult | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
+  const [useCalibratedScore, setUseCalibratedScore] = useState(false);
+
+  // Prevent SSR hydration mismatches for locale and timezone dependent formatting.
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   const updateDocumentState = (type: DocumentType, updates: Partial<DocumentState>) => {
     setDocuments((prev) => ({
@@ -448,8 +470,10 @@ export default function ResultsPage() {
       searchParams?.get("fitScoreId");
     return candidate?.trim() ?? null;
   }, [searchParams]);
+
   const hasClipboardAPI =
     typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+
   const copyTextToClipboard = async (text: string) => {
     if (!hasClipboardAPI || !text) return;
     try {
@@ -470,8 +494,7 @@ export default function ResultsPage() {
     return severity.toLowerCase() !== "block";
   });
 
-  const documentAuditId =
-    (documentResponse?.audit_id as string | undefined) || undefined;
+  const documentAuditId = (documentResponse?.audit_id as string | undefined) || undefined;
 
   const documentBaselineHash =
     (documentResponse?.baseline_version_hash as string | undefined) ||
@@ -506,19 +529,35 @@ export default function ResultsPage() {
 
   const latestScore: number | null = useMemo(() => {
     if (!latest) return null;
-    const v =
-      latest.overallScore ??
-      (typeof latest.score === "number" ? latest.score : latest.score ?? null);
+    const v = latest.overallScore ?? (typeof latest.score === "number" ? latest.score : latest.score ?? null);
     return typeof v === "number" ? v : null;
   }, [latest]);
 
-  const verdictInfo = useMemo(
+  const activeAnalysis = useMemo(() => {
+    if (useCalibratedScore && calibrationResult) return calibrationResult;
+    return latest;
+  }, [useCalibratedScore, calibrationResult, latest]);
+
+  const activeScore = useMemo(() => {
+    if (!activeAnalysis) return null;
+    const value =
+      activeAnalysis.overallScore ??
+      (typeof activeAnalysis.score === "number" ? activeAnalysis.score : activeAnalysis.score ?? null);
+    return typeof value === "number" ? value : null;
+  }, [activeAnalysis]);
+
+  const activeVerdictInfo = useMemo(
+    () => getVerdictDisplayOrDefault(activeAnalysis?.verdict ?? null),
+    [activeAnalysis?.verdict],
+  );
+
+  const currentVerdictInfo = useMemo(
     () => getVerdictDisplayOrDefault(latest?.verdict ?? null),
     [latest?.verdict],
   );
 
   const verdictToneClass = useMemo(() => {
-    switch (verdictInfo.label) {
+    switch (activeVerdictInfo.label) {
       case "Apply":
         return "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
       case "Consider":
@@ -528,7 +567,7 @@ export default function ResultsPage() {
       default:
         return "border-slate-500/30 bg-slate-800/40 text-slate-200";
     }
-  }, [verdictInfo.label]);
+  }, [activeVerdictInfo.label]);
 
   const jobDescriptor = useMemo(() => {
     if (latest?.jobTitle) {
@@ -554,30 +593,45 @@ export default function ResultsPage() {
   }, [analysisSource, latest?.baselineVersionId, latest?.jobId]);
 
   const oneTapEligible = useMemo(() => {
-    if (latestScore === null) return false;
-    return latestScore >= autoGenerateThreshold;
-  }, [latestScore, autoGenerateThreshold]);
+    if (activeScore === null) return false;
+    return activeScore >= autoGenerateThreshold;
+  }, [activeScore, autoGenerateThreshold]);
 
   const qualityBadge = useMemo(() => {
-    if (latestScore === null) return null;
-    const optimized = latestScore >= autoGenerateThreshold;
+    if (activeScore === null) return null;
+    const optimized = activeScore >= autoGenerateThreshold;
     return {
       label: optimized ? "Ready" : "Draft",
       toneClass: optimized
         ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
         : "border-amber-300/40 bg-amber-500/10 text-amber-200",
     };
-  }, [autoGenerateThreshold, latestScore]);
+  }, [activeScore, autoGenerateThreshold]);
 
-  const nextSteps = useMemo(() => {
-    return getNextSteps({
-      score: latestScore,
-      verdict: latest?.verdict ?? null,
-      hasAnalysis: !!latest,
-      hasResume: !!documents.resume.response,
-      autoGenerateThreshold,
-    });
-  }, [autoGenerateThreshold, documents.resume.response, latest, latestScore]);
+  const nextSteps = useMemo(
+    () =>
+      getNextSteps({
+        score: activeScore,
+        verdict: activeAnalysis?.verdict ?? null,
+        hasAnalysis: !!latest,
+        hasResume: !!documents.resume.response,
+        autoGenerateThreshold,
+      }),
+    [activeAnalysis?.verdict, activeScore, autoGenerateThreshold, documents.resume.response, latest],
+  );
+
+  const selectedCalibrationProfile = useMemo(
+    () => CALIBRATION_PROFILE_OPTIONS.find((option) => option.value === calibrationProfile),
+    [calibrationProfile],
+  );
+
+  const calibrationDeltaText = useMemo(() => {
+    const delta = calibrationResult?.calibration?.delta;
+    if (typeof delta !== "number") return null;
+    if (delta > 0) return `+${delta.toFixed(1)}`;
+    if (delta < 0) return delta.toFixed(1);
+    return "0.0";
+  }, [calibrationResult?.calibration?.delta]);
 
   const dimensionEntries = useMemo(() => {
     const scores = normalizeDimensionScores(latest);
@@ -595,10 +649,7 @@ export default function ResultsPage() {
   );
 
   const complianceFlagList = useMemo(
-    () =>
-      sortComplianceFlagsBySeverity(
-        mapComplianceFlags(latest?.complianceFlags ?? undefined),
-      ),
+    () => sortComplianceFlagsBySeverity(mapComplianceFlags(latest?.complianceFlags ?? undefined)),
     [latest?.complianceFlags],
   );
 
@@ -611,13 +662,19 @@ export default function ResultsPage() {
     latest?.baselineVersionId ??
     latest?.baselineVersionHash ??
     (typeof latest?.baselineVersion === "number" ? `${latest.baselineVersion}` : null);
-  const jobIdentifier = latest?.jobTitle ?? latest?.jobId ?? null;
+
   const metadataEntries = useMemo(() => {
     const createdAtValue = latest?.createdAt;
-    const createdAtLabel =
-      createdAtValue && !Number.isNaN(new Date(createdAtValue).getTime())
-        ? new Date(createdAtValue).toLocaleString()
-        : "Not available";
+
+    const isoLooksValid =
+      createdAtValue && !Number.isNaN(new Date(createdAtValue).getTime());
+
+    // Deterministic on first render (server + initial client render): do not call toLocaleString yet.
+    const createdAtLabel = isoLooksValid
+      ? hasMounted
+        ? new Date(createdAtValue as string).toLocaleString()
+        : (createdAtValue as string)
+      : "Not available";
 
     return [
       { label: "Assessment ID", value: latest?.assessmentId ?? "Not available" },
@@ -631,6 +688,7 @@ export default function ResultsPage() {
   }, [
     baselineId,
     baselineVersionIdentifier,
+    hasMounted,
     jobDescriptor,
     jobId,
     latest?.assessmentId,
@@ -714,10 +772,7 @@ export default function ResultsPage() {
             return;
           }
 
-          const message = formatErrorMessage(
-            payload,
-            "Unable to load the requested analysis.",
-          );
+          const message = formatErrorMessage(payload, "Unable to load the requested analysis.");
           throw new Error(message);
         }
 
@@ -769,12 +824,8 @@ export default function ResultsPage() {
 
     try {
       const res = await fetch(
-        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(
-          baselineId,
-        )}/latest`,
-        {
-          cache: "no-store",
-        },
+        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
+        { cache: "no-store" },
       );
 
       const payload = await readResponsePayload(res.clone());
@@ -827,12 +878,51 @@ export default function ResultsPage() {
     void loadAssessmentById(runIdentifier);
   }, [loadAssessmentById, runIdentifier, lastLoadedRunIdentifier]);
 
-  async function generateDocument(
-    oneTap = false,
-    targetDocType: DocumentType = documentType,
-  ) {
+  useEffect(() => {
+    setCalibrationResult(null);
+    setUseCalibratedScore(false);
+    setCalibrationError(null);
+  }, [latest?.assessmentId]);
+
+  const handleCalibrate = useCallback(async () => {
+    if (!latest?.assessmentId) return;
+
+    setCalibrating(true);
+    setCalibrationError(null);
+
+    try {
+      const res = await fetch(
+        `/api/analysis/fit-assessments/${encodeURIComponent(latest.assessmentId)}/calibrate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile: calibrationProfile }),
+        },
+      );
+
+      const payload = await readResponsePayload(res.clone());
+
+      if (!res.ok) {
+        const message = formatErrorMessage(payload, "Unable to calibrate the latest analysis.");
+        setCalibrationError(message);
+        setCalibrationResult(null);
+        return;
+      }
+
+      const data = await res.json();
+      setCalibrationResult(data as CalibratedResult);
+    } catch (e: any) {
+      setCalibrationError(e?.message ?? "Calibration failed.");
+      setCalibrationResult(null);
+    } finally {
+      setCalibrating(false);
+    }
+  }, [calibrationProfile, latest?.assessmentId]);
+
+  async function generateDocument(oneTap = false, targetDocType: DocumentType = documentType) {
     const targetDocumentConfig = DOCUMENT_CONFIG[targetDocType];
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
+
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
       updateDocumentState(targetDocType, {
         error: createClientError(
@@ -856,9 +946,7 @@ export default function ResultsPage() {
     try {
       const res = await fetch(targetDocumentConfig.generatePath, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           baselineId,
           baselineVersionId: resumeBaselineVersionId,
@@ -882,11 +970,7 @@ export default function ResultsPage() {
           return;
         }
 
-        const apiError = buildApiError(
-          res,
-          payload,
-          `${targetDocumentConfig.capitalizedLabel} generation failed`,
-        );
+        const apiError = buildApiError(res, payload, `${targetDocumentConfig.capitalizedLabel} generation failed`);
         updateDocumentState(targetDocType, { error: apiError });
         return;
       }
@@ -936,6 +1020,7 @@ export default function ResultsPage() {
   ): Promise<DocumentExportResult> {
     const targetDocumentConfig = DOCUMENT_CONFIG[targetDocType];
     const { jobId: resumeJobId, baselineVersionId: resumeBaselineVersionId } = getDocumentPayload();
+
     if (analysisSource !== "latest" || !resumeJobId || !resumeBaselineVersionId) {
       const clientError = createClientError(
         `Load the latest analysis before exporting a ${targetDocumentConfig.label}.`,
@@ -946,30 +1031,21 @@ export default function ResultsPage() {
     }
 
     setExportState({ docType: targetDocType, format });
-    updateDocumentState(targetDocType, {
-      error: null,
-      tierGateError: null,
-      complianceError: null,
-    });
+    updateDocumentState(targetDocType, { error: null, tierGateError: null, complianceError: null });
 
     const downloadName = targetDocumentConfig.label.replace(" ", "-");
 
     try {
-      const res = await fetch(
-        `${targetDocumentConfig.exportPath}?format=${encodeURIComponent(format)}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            baselineId,
-            baselineVersionId: resumeBaselineVersionId,
-            jobId: resumeJobId,
-            oneTap: true,
-          }),
-        },
-      );
+      const res = await fetch(`${targetDocumentConfig.exportPath}?format=${encodeURIComponent(format)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baselineId,
+          baselineVersionId: resumeBaselineVersionId,
+          jobId: resumeJobId,
+          oneTap: true,
+        }),
+      });
 
       if (!res.ok) {
         const payload = await readResponsePayload(res);
@@ -986,11 +1062,7 @@ export default function ResultsPage() {
           return { success: false };
         }
 
-        const apiError = buildApiError(
-          res,
-          payload,
-          `${targetDocumentConfig.capitalizedLabel} export failed`,
-        );
+        const apiError = buildApiError(res, payload, `${targetDocumentConfig.capitalizedLabel} export failed`);
         updateDocumentState(targetDocType, { error: apiError });
         return { success: false, error: apiError };
       }
@@ -1011,9 +1083,7 @@ export default function ResultsPage() {
         e?.message ?? `${targetDocumentConfig.capitalizedLabel} export failed`,
         "document_error",
       );
-      updateDocumentState(targetDocType, {
-        error: clientError,
-      });
+      updateDocumentState(targetDocType, { error: clientError });
       return { success: false, error: clientError };
     } finally {
       setExportState(null);
@@ -1025,6 +1095,7 @@ export default function ResultsPage() {
     setExportBothError(null);
     setExportBothSuccessAuditIds(null);
     setIsExportingBoth(true);
+
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -1065,24 +1136,140 @@ export default function ResultsPage() {
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Fit score
-              </p>
-              <p className="text-5xl font-semibold text-white">
-                {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
-              </p>
-            </div>
-            <div className="flex flex-col items-start gap-2">
-              <span
-                className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
-              >
-                {verdictInfo.label}
-              </span>
-              <p className="max-w-2xl text-sm text-slate-200">{verdictInfo.description}</p>
-            </div>
-          </div>
+          {!latest ? (
+            <EmptyState
+              title="No analysis yet"
+              body="Load the latest analysis to reveal the fit score and verdict."
+              cta={
+                <FormButton
+                  variant="ghost"
+                  onClick={() => void loadLatest()}
+                  disabled={!jobId || loading || loadingLatest}
+                >
+                  {loadingLatest ? "Loading latest..." : "Load analysis"}
+                </FormButton>
+              }
+              className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
+            />
+          ) : (
+            <>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Active fit score
+                  </p>
+                  <p className="text-5xl font-semibold text-white">
+                    {activeScore !== null ? activeScore.toFixed(1) : "Not available"}
+                  </p>
+                </div>
+                <div className="flex flex-col items-start gap-2">
+                  <span
+                    className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
+                  >
+                    {activeVerdictInfo.label}
+                  </span>
+                  <p className="max-w-2xl text-sm text-slate-200">{activeVerdictInfo.description}</p>
+                  <p className="text-xs text-slate-400">{jobDescriptor}</p>
+                  <p className="text-xs text-slate-400">{baselineDescriptor}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Current score
+                  </p>
+                  <p className="mt-1 text-3xl font-semibold text-white">
+                    {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
+                  </p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    {currentVerdictInfo.label}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    This result remains unchanged while calibration only affects the active score.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Calibrated score
+                    </p>
+                    <span className="text-xs text-slate-400">
+                      {calibrationResult?.calibration?.label ?? "Not run"}
+                    </span>
+                  </div>
+                  {calibrationResult ? (
+                    <>
+                      <p className="mt-1 text-3xl font-semibold text-white">
+                        {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
+                      </p>
+                      <p className="text-sm text-slate-300">
+                        {calibrationDeltaText ? `${calibrationDeltaText} vs current score` : "Delta unavailable"}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">Run a calibration to compare the adjusted score.</p>
+                  )}
+
+                  <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
+                    <input
+                      id="use-calibrated-score"
+                      type="checkbox"
+                      checked={useCalibratedScore}
+                      disabled={!calibrationResult}
+                      onChange={(event) => setUseCalibratedScore(event.target.checked)}
+                      className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
+                    />
+                    <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                      Use calibrated score for gating
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <div>
+                  <label
+                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
+                    htmlFor="calibration-profile"
+                  >
+                    Calibration profile
+                  </label>
+                  <div className="mt-2 flex flex-col gap-1">
+                    <select
+                      id="calibration-profile"
+                      value={calibrationProfile}
+                      onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
+                      className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
+                    >
+                      {CALIBRATION_PROFILE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-400">
+                      {selectedCalibrationProfile?.description ?? "Adjust weights to tilt the scoring emphasis."}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
+                    {calibrating ? "Calibrating..." : "Calibrate score"}
+                  </FormButton>
+                  <p className="text-xs text-slate-400">
+                    Calibration recalculates the score without overwriting the stored analysis.
+                  </p>
+                </div>
+              </div>
+
+              {calibrationError ? (
+                <Alert intent="error" title="Calibration failed">
+                  {calibrationError}
+                </Alert>
+              ) : null}
+            </>
+          )}
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
@@ -1184,18 +1371,13 @@ export default function ResultsPage() {
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Integrity checks</h2>
             </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
-              Sorted by severity
-            </span>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Sorted by severity</span>
           </div>
 
           {topComplianceFlags.length ? (
             <ul className="mt-4 space-y-3 text-sm text-slate-200">
               {topComplianceFlags.map((flag) => (
-                <li
-                  key={flag.id}
-                  className="rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-                >
+                <li key={flag.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
                   <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
                     <span>{flag.severity === "block" ? "Critical" : "Advisory"}</span>
                   </div>
@@ -1231,14 +1413,12 @@ export default function ResultsPage() {
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <details className="space-y-4">
-            <summary className="flex items-center justify-between cursor-pointer text-sm font-semibold text-slate-100">
+            <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   Advanced details
                 </p>
-                <h2 className="text-lg font-semibold text-white">
-                  Dimension scores & metadata
-                </h2>
+                <h2 className="text-lg font-semibold text-white">Dimension scores & metadata</h2>
               </div>
               <span className="text-xs text-slate-400">Expand for hidden context</span>
             </summary>
@@ -1324,11 +1504,12 @@ export default function ResultsPage() {
               )}
             </details>
             <p className="mt-2 text-xs text-slate-400">
-              Resume audit ID: {exportBothSuccessDetails.resumeAuditId ?? "Not available"}.
-              Cover letter audit ID: {exportBothSuccessDetails.coverLetterAuditId ?? "Not available"}.
+              Resume audit ID: {exportBothSuccessDetails.resumeAuditId ?? "Not available"}. Cover letter audit ID:{" "}
+              {exportBothSuccessDetails.coverLetterAuditId ?? "Not available"}.
             </p>
           </Alert>
         ) : null}
+
         {exportBothError ? (
           <Alert intent="error" title="Unable to export documents">
             <p className="text-sm text-slate-100" style={{ margin: 0 }}>
@@ -1373,9 +1554,7 @@ export default function ResultsPage() {
                 </button>
               )}
             </details>
-            <p className="mt-2 text-xs text-slate-400">
-              Audit ID: {exportBothError.auditId ?? "Not available"}
-            </p>
+            <p className="mt-2 text-xs text-slate-400">Audit ID: {exportBothError.auditId ?? "Not available"}</p>
           </Alert>
         ) : null}
 
@@ -1400,11 +1579,7 @@ export default function ResultsPage() {
           </ol>
 
           <div className="flex justify-end">
-            <FormButton
-              variant="ghost"
-              onClick={() => router.push(fitReviewPath)}
-              disabled={!latest?.jobId}
-            >
+            <FormButton variant="ghost" onClick={() => router.push(fitReviewPath)} disabled={!latest?.jobId}>
               Open Fit Review
             </FormButton>
           </div>
@@ -1412,315 +1587,238 @@ export default function ResultsPage() {
 
         {tierGateError ? (
           <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-50">
-            <span>
-              {tierGateError.message ?? "A plan update may unlock resume generation."}{" "}
-            </span>
+            <span>{tierGateError.message ?? "A plan update may unlock resume generation."} </span>
             <Link href="/pricing" className="font-semibold text-white underline">
               View plans
             </Link>
             .
           </div>
         ) : null}
+
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
+
         {error ? (
           <Alert intent="error" title="Uh oh">
             {error}
           </Alert>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Latest analysis
-                </p>
-                <h2 className="text-lg font-semibold text-slate-100">Fit score</h2>
-              </div>
-              <div className="text-xs text-slate-400">
-                <div>{jobDescriptor}</div>
-                <div>{baselineDescriptor}</div>
-              </div>
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Generate {documentConfig.capitalizedLabel}
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Output</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                {documentType === "resume"
+                  ? "This generates a resume draft. Cover letter generation is handled in the Cover Letter flow."
+                  : "This generates a cover letter draft. Resume generation is handled in the resume flow."}
+              </p>
             </div>
 
-            <div className="flex items-end gap-6">
-              <p className="text-4xl font-semibold text-white">
-                {latestScore !== null ? latestScore.toFixed(1) : "n/a"}
-              </p>
-              <div className="space-y-1 text-sm text-slate-300">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  {verdictInfo.label}
-                </p>
-                <p>{verdictInfo.description}</p>
-              </div>
-            </div>
-
-            {latest?.note ? <p className="text-sm text-slate-400">{latest.note}</p> : null}
-
-            {restoredAt ? (
-              <p className="text-xs text-slate-400">
-                Restored from your last browser session: {new Date(restoredAt).toLocaleString()}
-              </p>
+            {qualityBadge ? (
+              <span
+                className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
+              >
+                {qualityBadge.label}
+              </span>
             ) : null}
+          </div>
 
-            {!latest ? (
-              <EmptyState
-                title="No analysis yet"
-                body="Load the latest analysis to reveal the fit score and verdict."
-                cta={
-                  <FormButton
-                    variant="ghost"
-                    onClick={() => void loadLatest()}
-                    disabled={!jobId || loading || loadingLatest}
-                  >
-                    {loadingLatest ? "Loading latest..." : "Load analysis"}
-                  </FormButton>
-                }
-                className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
-              />
-            ) : null}
+          <div className="flex flex-wrap gap-3">
+            <FormButton onClick={() => void generateDocument(false)} disabled={!readyForDocument || loading || isExportingBoth}>
+              {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
+            </FormButton>
 
-            <p className="text-xs text-slate-400">
-              Review the latest match details in Fit Review using the CTA above.
+            <FormButton
+              variant="secondary"
+              onClick={() => void generateDocument(true)}
+              disabled={!readyForDocument || !oneTapEligible || loading || isExportingBoth}
+              title={
+                readyForDocument
+                  ? oneTapEligible
+                    ? `Generate an export-ready ${documentConfig.label} based on the latest analysis`
+                    : `Requires fit score of at least ${autoGenerateThreshold}`
+                  : "Load the latest analysis before using one tap"
+              }
+            >
+              One tap export (optimized {documentConfig.pluralLabel})
+            </FormButton>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportDocument("docx")}
+              disabled={
+                !readyForDocument ||
+                !oneTapEligible ||
+                (exportState?.docType === documentType && exportState.format === "docx") ||
+                isExportingBoth
+              }
+            >
+              {exportState?.docType === documentType && exportState.format === "docx"
+                ? "Downloading..."
+                : "Download DOCX"}
+            </FormButton>
+
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportDocument("pdf")}
+              disabled={
+                !readyForDocument ||
+                !oneTapEligible ||
+                (exportState?.docType === documentType && exportState.format === "pdf") ||
+                isExportingBoth
+              }
+            >
+              {exportState?.docType === documentType && exportState.format === "pdf"
+                ? "Downloading..."
+                : "Download PDF"}
+            </FormButton>
+          </div>
+
+          <div className="space-y-2 text-sm text-slate-300">
+            {oneTapEligible ? (
+              <p>
+                Your fit score meets the export threshold. Review the draft below and download this {documentConfig.label} when ready.
+              </p>
+            ) : (
+              <p>
+                Your score is below {autoGenerateThreshold}. You can generate and review a draft now. Downloads unlock once you reach the export threshold for this {documentConfig.label}.
+              </p>
+            )}
+          </div>
+
+          {currentDocumentState.tierGateError ? (
+            <p className="text-sm text-amber-300">
+              {currentDocumentState.tierGateError.message ??
+                `${documentConfig.capitalizedLabel} export is limited by your current plan.`}{" "}
+              <Link href="/pricing" className="font-semibold text-white underline">
+                View plans
+              </Link>
+              .
             </p>
-          </section>
+          ) : null}
 
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Generate {documentConfig.capitalizedLabel}
-                </p>
-                <h2 className="text-lg font-semibold text-slate-100">Output</h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  {documentType === "resume"
-                    ? "This generates a resume draft. Cover letter generation is handled in the Cover Letter flow."
-                    : "This generates a cover letter draft. Resume generation is handled in the resume flow."}
-                </p>
+          {currentDocumentState.complianceError ? (
+            <ComplianceViolationPanel error={currentDocumentState.complianceError} />
+          ) : null}
+
+          {currentDocumentState.error ? (
+            <Alert intent="error" title={`Unable to generate ${documentConfig.capitalizedLabel}`}>
+              <p style={{ margin: 0 }}>{currentDocumentState.error.message}</p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  fontSize: 12,
+                  marginTop: 6,
+                  color: "rgba(226,232,240,0.8)",
+                }}
+              >
+                <span>Status: {currentDocumentState.error.status}</span>
+                <span>Code: {currentDocumentState.error.code}</span>
+                {currentDocumentState.error.auditId && <span>Audit ID: {currentDocumentState.error.auditId}</span>}
               </div>
-
-              {qualityBadge ? (
-                <span
-                  className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
-                >
-                  {qualityBadge.label}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <FormButton
-                onClick={() => void generateDocument(false)}
-                disabled={!readyForDocument || loading || isExportingBoth}
+              <details
+                style={{
+                  marginTop: 8,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "rgba(226,232,240,0.7)",
+                }}
               >
-                {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
-              </FormButton>
-
-              <FormButton
-                variant="secondary"
-                onClick={() => void generateDocument(true)}
-                disabled={!readyForDocument || !oneTapEligible || loading || isExportingBoth}
-                title={
-                  readyForDocument
-                    ? oneTapEligible
-                      ? `Generate an export-ready ${documentConfig.label} based on the latest analysis`
-                      : `Requires fit score of at least ${autoGenerateThreshold}`
-                    : "Load the latest analysis before using one tap"
-                }
-              >
-                One tap export (optimized {documentConfig.pluralLabel})
-              </FormButton>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <FormButton
-                variant="secondary"
-                onClick={() => void exportDocument("docx")}
-                disabled={
-                  !readyForDocument ||
-                  !oneTapEligible ||
-                  (exportState?.docType === documentType && exportState.format === "docx") ||
-                  isExportingBoth
-                }
-              >
-                {exportState?.docType === documentType && exportState.format === "docx"
-                  ? "Downloading..."
-                  : "Download DOCX"}
-              </FormButton>
-
-              <FormButton
-                variant="secondary"
-                onClick={() => void exportDocument("pdf")}
-                disabled={
-                  !readyForDocument ||
-                  !oneTapEligible ||
-                  (exportState?.docType === documentType && exportState.format === "pdf") ||
-                  isExportingBoth
-                }
-              >
-                {exportState?.docType === documentType && exportState.format === "pdf"
-                  ? "Downloading..."
-                  : "Download PDF"}
-              </FormButton>
-            </div>
-
-            <div className="space-y-2 text-sm text-slate-300">
-              {oneTapEligible ? (
-                <p>
-                  Your fit score meets the export threshold. Review the draft below and download this{" "}
-                  {documentConfig.label} when ready.
-                </p>
-              ) : (
-                <p>
-                  Your score is below {autoGenerateThreshold}. You can generate and review a draft now.
-                  Downloads unlock once you reach the export threshold for this {documentConfig.label}.
-                </p>
-              )}
-            </div>
-
-            {currentDocumentState.tierGateError ? (
-              <p className="text-sm text-amber-300">
-                {currentDocumentState.tierGateError.message ??
-                  `${documentConfig.capitalizedLabel} export is limited by your current plan.`}{" "}
-                <Link href="/pricing" className="font-semibold text-white underline">
-                  View plans
-                </Link>
-                .
-              </p>
-            ) : null}
-            {currentDocumentState.complianceError ? (
-              <ComplianceViolationPanel error={currentDocumentState.complianceError} />
-            ) : null}
-            {currentDocumentState.error ? (
-              <Alert intent="error" title={`Unable to generate ${documentConfig.capitalizedLabel}`}>
-                <p style={{ margin: 0 }}>{currentDocumentState.error.message}</p>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    fontSize: 12,
-                    marginTop: 6,
-                    color: "rgba(226,232,240,0.8)",
-                  }}
-                >
-                  <span>Status: {currentDocumentState.error.status}</span>
-                  <span>Code: {currentDocumentState.error.code}</span>
-                  {currentDocumentState.error.auditId && (
-                    <span>Audit ID: {currentDocumentState.error.auditId}</span>
-                  )}
-                </div>
-                <details
+                <summary>Copy details</summary>
+                <pre
                   style={{
                     marginTop: 8,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    color: "rgba(226,232,240,0.7)",
+                    fontSize: 11,
+                    whiteSpace: "pre-wrap",
+                    backgroundColor: "rgba(15,23,42,0.6)",
+                    padding: 8,
+                    borderRadius: 6,
                   }}
                 >
-                  <summary>Copy details</summary>
-                  <pre
+                  {JSON.stringify(currentErrorDetails, null, 2)}
+                </pre>
+                {hasClipboardAPI && (
+                  <button
+                    type="button"
+                    onClick={() => copyTextToClipboard(JSON.stringify(currentErrorDetails, null, 2))}
+                    className="mt-2"
                     style={{
-                      marginTop: 8,
-                      fontSize: 11,
-                      whiteSpace: "pre-wrap",
-                      backgroundColor: "rgba(15,23,42,0.6)",
-                      padding: 8,
+                      border: "1px solid rgba(148,163,184,0.4)",
                       borderRadius: 6,
+                      padding: "6px 10px",
+                      fontSize: 12,
+                      backgroundColor: "transparent",
+                      color: "rgba(226,232,240,0.9)",
                     }}
                   >
-                    {JSON.stringify(
-                      currentErrorDetails,
-                      null,
-                      2,
-                    )}
-                  </pre>
-                  {hasClipboardAPI && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        copyTextToClipboard(
-                          JSON.stringify(
-                            currentErrorDetails,
-                            null,
-                            2,
-                          ),
-                        )
-                      }
-                      className="mt-2"
-                      style={{
-                        border: "1px solid rgba(148,163,184,0.4)",
-                        borderRadius: 6,
-                        padding: "6px 10px",
-                        fontSize: 12,
-                        backgroundColor: "transparent",
-                        color: "rgba(226,232,240,0.9)",
-                      }}
-                    >
-                      Copy details
-                    </button>
-                  )}
-                </details>
-              </Alert>
-            ) : null}
+                    Copy details
+                  </button>
+                )}
+              </details>
+            </Alert>
+          ) : null}
 
-            {currentDocumentState.response ? (
-              <>
-                {documentWarningFlags.length ? (
-                  <ComplianceFlagPanel
-                    title="Compliance warnings"
-                    description={`${documentConfig.capitalizedLabel} generated with compliance notices.`}
-                    flags={documentWarningFlags as any}
-                    auditId={documentAuditId}
-                    baselineVersionHash={documentBaselineHash}
-                    intent="warning"
-                  />
-                ) : null}
+          {currentDocumentState.response ? (
+            <>
+              {documentWarningFlags.length ? (
+                <ComplianceFlagPanel
+                  title="Compliance warnings"
+                  description={`${documentConfig.capitalizedLabel} generated with compliance notices.`}
+                  flags={documentWarningFlags as any}
+                  auditId={documentAuditId}
+                  baselineVersionHash={documentBaselineHash}
+                  intent="warning"
+                />
+              ) : null}
 
-                <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    {documentConfig.previewTitle}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    {documentConfig.capitalizedLabel} draft ready. Review below, then download when available.
-                  </p>
+              <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  {documentConfig.previewTitle}
+                </p>
+                <p className="mt-1 text-sm text-slate-300">
+                  {documentConfig.capitalizedLabel} draft ready. Review below, then download when available.
+                </p>
 
-                  <div className="mt-3 flex justify-end">
-                    <FormButton
-                      variant="secondary"
-                      onClick={() => {
-                        const text = documentPreviewText || "";
-                        if (!text) return;
-                        void navigator.clipboard.writeText(text);
-                      }}
-                      disabled={!documentPreviewText}
-                    >
-                      {documentConfig.copyButtonLabel}
-                    </FormButton>
-                  </div>
-
-                  <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
-                    {documentPreviewText}
-                  </pre>
+                <div className="mt-3 flex justify-end">
+                  <FormButton
+                    variant="secondary"
+                    onClick={() => {
+                      const text = documentPreviewText || "";
+                      if (!text) return;
+                      void navigator.clipboard.writeText(text);
+                    }}
+                    disabled={!documentPreviewText}
+                  >
+                    {documentConfig.copyButtonLabel}
+                  </FormButton>
                 </div>
-              </>
-            ) : (
-              <EmptyState
-                title={`No ${documentConfig.label} generated yet`}
-                body="Generate a draft to preview it here."
-                cta={null}
-                className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
-              />
-            )}
-          </section>
-        </div>
+
+                <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
+                  {documentPreviewText}
+                </pre>
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              title={`No ${documentConfig.label} generated yet`}
+              body="Generate a draft to preview it here."
+              cta={null}
+              className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
+            />
+          )}
+        </section>
 
         {debugMode ? (
           <div className="space-y-6">
             <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Selection
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Selection</p>
                 <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
               </div>
 
@@ -1760,11 +1858,7 @@ export default function ResultsPage() {
               ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
-                <FormButton
-                  variant="secondary"
-                  onClick={() => void loadLatest()}
-                  disabled={!jobId || loading || loadingLatest}
-                >
+                <FormButton variant="secondary" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
                   {loadingLatest ? "Loading latest..." : "Load latest analysis"}
                 </FormButton>
                 <span className="text-xs text-slate-400">{latestStatusMessage}</span>
@@ -1790,11 +1884,7 @@ export default function ResultsPage() {
                   title="No analysis yet"
                   body="Load the latest analysis to inspect the JSON payload."
                   cta={
-                    <FormButton
-                      variant="ghost"
-                      onClick={() => void loadLatest()}
-                      disabled={!jobId || loading || loadingLatest}
-                    >
+                    <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
                       {loadingLatest ? "Loading latest..." : "Load analysis"}
                     </FormButton>
                   }
