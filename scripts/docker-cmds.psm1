@@ -80,10 +80,12 @@ WARNING:
 
 
 Function Build-Both {
+    Sync-EnvFiles
     docker compose -f infra\docker\docker-compose.local.yml up -d --build api web
 }
 
 function Build-All {
+    Sync-EnvFiles
     docker compose -f infra\docker\docker-compose.local.yml down -v 
     docker compose -f infra\docker\docker-compose.local.yml up -d --build 
 }
@@ -102,6 +104,7 @@ Function Reset-Env {
 
     docker compose -f infra\docker\docker-compose.local.yml down -v
     docker builder prune -af
+    Sync-EnvFiles
 }
 
 
@@ -143,30 +146,64 @@ Function Update-All {
     docker compose -f infra\docker\docker-compose.local.yml up -d --build
 }
 
-Function Set-ENVFiles {
-
-}
-
 function Sync-EnvFiles {
-    $RepoRoot = ".\TargetThisRole"
-    $EnvRoot  = ".\TargetThisRole_env"
+    param(
+        # If you call this from Build-All while your current directory is the repo root,
+        # you can leave this alone.
+        [string]$RepoRoot = (Get-Location).Path,
+
+        # By default, expect TargetThisRole_env to be a sibling of the repo root folder.
+        # Example:
+        #   C:\...\GitHub\TargetThisRole
+        #   C:\...\GitHub\TargetThisRole_env
+        [string]$EnvRoot = (Join-Path (Split-Path $RepoRoot -Parent) "TargetThisRole_env"),
+
+        # If set, print every file decision (Skip/Copy)
+        [switch]$VerboseOutput
+    )
+
+    # --- Normalize to absolute paths ---
+    $RepoRoot = (Resolve-Path $RepoRoot).Path
 
     If (-Not (Test-Path $EnvRoot)) {
         Write-Error "Env source folder not found: $EnvRoot"
         return
     }
+    $EnvRoot = (Resolve-Path $EnvRoot).Path
+
+    $copied = 0
+    $skipped = 0
 
     Get-ChildItem $EnvRoot -Recurse -File | ForEach-Object {
-        $RelativePath = $_.FullName.Substring($EnvRoot.Length).TrimStart('\')
-        $Destination  = Join-Path $RepoRoot $RelativePath
-        $DestDir      = Split-Path $Destination -Parent
+        $relative = $_.FullName.Substring($EnvRoot.Length).TrimStart('\')
+        $destPath = Join-Path $RepoRoot $relative
+        $destDir  = Split-Path $destPath -Parent
 
-        If (-Not (Test-Path $DestDir)) {
-            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+        If (-Not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }
 
-        Copy-Item -Path $_.FullName -Destination $Destination -Force
+        $shouldCopy = $true
+
+        If (Test-Path $destPath) {
+            # Compare file content using hashes (fast and reliable for small env files)
+            $srcHash  = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash
+            $destHash = (Get-FileHash -Algorithm SHA256 -Path $destPath).Hash
+
+            If ($srcHash -eq $destHash) {
+                $shouldCopy = $false
+            }
+        }
+
+        If ($shouldCopy) {
+            Copy-Item -Path $_.FullName -Destination $destPath -Force
+            $copied++
+            If ($VerboseOutput) { Write-Host "COPY  $relative" }
+        } else {
+            $skipped++
+            If ($VerboseOutput) { Write-Host "SKIP  $relative" }
+        }
     }
 
-    Write-Host "Env files copied into repo working directory."
+    Write-Host "Env sync complete. Copied: $copied, Skipped (unchanged): $skipped"
 }
