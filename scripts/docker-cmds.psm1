@@ -142,3 +142,31 @@ Function Update-NPM {
 Function Update-All {
     docker compose -f infra\docker\docker-compose.local.yml up -d --build
 }
+
+Function Set-ENVFiles {
+
+}
+
+function Sync-EnvFiles {
+    $RepoRoot = ".\TargetThisRole"
+    $EnvRoot  = ".\TargetThisRole_env"
+
+    If (-Not (Test-Path $EnvRoot)) {
+        Write-Error "Env source folder not found: $EnvRoot"
+        return
+    }
+
+    Get-ChildItem $EnvRoot -Recurse -File | ForEach-Object {
+        $RelativePath = $_.FullName.Substring($EnvRoot.Length).TrimStart('\')
+        $Destination  = Join-Path $RepoRoot $RelativePath
+        $DestDir      = Split-Path $Destination -Parent
+
+        If (-Not (Test-Path $DestDir)) {
+            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+        }
+
+        Copy-Item -Path $_.FullName -Destination $Destination -Force
+    }
+
+    Write-Host "Env files copied into repo working directory."
+}
