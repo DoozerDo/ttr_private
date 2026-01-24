@@ -56,3 +56,6 @@ override.tf.json
 # =====================
 /apps/api/storage
 apps/api/.env.development.local
+apps/api/.env.development.local
+apps/web/.env.local
+apps/api/.env.development.local
