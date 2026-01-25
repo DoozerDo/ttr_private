@@ -75,17 +75,12 @@ WARNING:
 - Use sparingly
 #>
 ## Import-Module .\docker-cmds.psm1  
-
-
-
-
-Function Build-Both {
-    Sync-EnvFiles
+Function Invoke-BuildBoth {
+    Invoke-SyncEnvFiles
     docker compose -f infra\docker\docker-compose.local.yml up -d --build api web
 }
-
-function Build-All {
-    Sync-EnvFiles
+function Invoke-BuildAll {
+    Invoke-SyncEnvFiles
     docker compose -f infra\docker\docker-compose.local.yml down -v 
     docker compose -f infra\docker\docker-compose.local.yml up -d --build 
 }
@@ -104,7 +99,7 @@ Function Reset-Env {
 
     docker compose -f infra\docker\docker-compose.local.yml down -v
     docker builder prune -af
-    Sync-EnvFiles
+    Invoke-SyncEnvFiles
 }
 
 
@@ -145,8 +140,7 @@ Function Update-NPM {
 Function Update-All {
     docker compose -f infra\docker\docker-compose.local.yml up -d --build
 }
-
-function Sync-EnvFiles {
+function Invoke-SyncEnvFiles {
     param(
         [string]$RepoRoot = (Get-Location).Path,
         [string]$EnvRoot  = (Join-Path (Split-Path $RepoRoot -Parent) "TargetThisRole_env"),
