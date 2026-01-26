@@ -5,7 +5,9 @@ import { ApplicationStage } from './application.entity';
 
 describe('ApplicationsController', () => {
   const createMockRequest = (userId?: string) =>
-    ({ user: userId ? { id: userId } : undefined } as { user?: { id?: string } });
+    ({ user: userId ? { id: userId } : undefined }) as {
+      user?: { id?: string };
+    };
 
   const createMockResponse = () => {
     const response: Partial<{ setHeader: jest.Mock; send: jest.Mock }> = {
@@ -23,8 +25,12 @@ describe('ApplicationsController', () => {
       createApplication: jest.fn().mockResolvedValue({ id: 'app-1' }),
       listApplicationsForUser: jest.fn().mockResolvedValue([]),
       getApplicationForUser: jest.fn().mockResolvedValue({ id: 'app-1' }),
-      updateApplication: jest.fn().mockResolvedValue({ id: 'app-1', stage: ApplicationStage.APPLIED }),
-      deleteApplication: jest.fn().mockResolvedValue({ deleted: true, id: 'app-1' }),
+      updateApplication: jest
+        .fn()
+        .mockResolvedValue({ id: 'app-1', stage: ApplicationStage.APPLIED }),
+      deleteApplication: jest
+        .fn()
+        .mockResolvedValue({ deleted: true, id: 'app-1' }),
       exportApplicationsToCsv: jest.fn().mockResolvedValue({
         csv: 'csv-data',
         auditId: 'audit-id',
@@ -41,7 +47,10 @@ describe('ApplicationsController', () => {
     const controller = new ApplicationsController(service);
 
     await expect(
-      controller.createApplication({ company: 'Acme', title: 'Engineer' } as any, createMockRequest()),
+      controller.createApplication(
+        { company: 'Acme', title: 'Engineer' } as any,
+        createMockRequest(),
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -61,7 +70,11 @@ describe('ApplicationsController', () => {
     const controller = new ApplicationsController(service);
     const request = createMockRequest('user-1');
 
-    await controller.listApplications(request as any, ApplicationStage.SAVED, 'Acme');
+    await controller.listApplications(
+      request as any,
+      ApplicationStage.SAVED,
+      'Acme',
+    );
 
     expect(service.listApplicationsForUser).toHaveBeenCalledWith('user-1', {
       stage: ApplicationStage.SAVED,
@@ -76,7 +89,10 @@ describe('ApplicationsController', () => {
 
     await controller.getApplication('app-1', request as any);
 
-    expect(service.getApplicationForUser).toHaveBeenCalledWith('app-1', 'user-1');
+    expect(service.getApplicationForUser).toHaveBeenCalledWith(
+      'app-1',
+      'user-1',
+    );
   });
 
   it('updates application for user', async () => {
@@ -87,7 +103,11 @@ describe('ApplicationsController', () => {
 
     await controller.updateApplication('app-1', update as any, request as any);
 
-    expect(service.updateApplication).toHaveBeenCalledWith('app-1', 'user-1', update);
+    expect(service.updateApplication).toHaveBeenCalledWith(
+      'app-1',
+      'user-1',
+      update,
+    );
   });
 
   it('deletes application for user', async () => {

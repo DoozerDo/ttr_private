@@ -17,7 +17,10 @@ import {
   BaselineIncludePolicy,
 } from './baseline-section.entity';
 import { Baseline, BaselineStatus } from './baseline.entity';
-import { BaselineParserService, ParsedSection } from './baseline-parser.service';
+import {
+  BaselineParserService,
+  ParsedSection,
+} from './baseline-parser.service';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
@@ -164,7 +167,9 @@ export class BaselineService {
         return a.order - b.order;
       });
 
-    const normalizedAdditions = [...additions].sort((a, b) => a.localeCompare(b));
+    const normalizedAdditions = [...additions].sort((a, b) =>
+      a.localeCompare(b),
+    );
 
     return createHash('sha256')
       .update(
@@ -230,7 +235,9 @@ export class BaselineService {
     });
   }
 
-  private normalizePoliciesFromSections(sections: PolicySectionInput[]): PolicyState[] {
+  private normalizePoliciesFromSections(
+    sections: PolicySectionInput[],
+  ): PolicyState[] {
     return sections.map((section, index) => ({
       baselineSectionId: section.id,
       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
@@ -238,7 +245,10 @@ export class BaselineService {
     }));
   }
 
-  private raiseConflict(currentVersion: BaselineVersion, hash?: string | null): never {
+  private raiseConflict(
+    currentVersion: BaselineVersion,
+    hash?: string | null,
+  ): never {
     throw new ConflictException({
       error: {
         code: 'BASELINE_VERSION_CONFLICT',
@@ -262,33 +272,31 @@ export class BaselineService {
       throw new BadRequestException('Baseline file hash is required');
     }
 
-    return this.baselineRepository.manager.transaction(
-      async (manager) => {
-        const existingBaseline = await manager.findOne(Baseline, {
-          where: { userId, hash: fileHash },
-          relations: ['sections', 'versions'],
-          order: { versions: { versionNumber: 'DESC', createdAt: 'DESC' } },
-        });
+    return this.baselineRepository.manager.transaction(async (manager) => {
+      const existingBaseline = await manager.findOne(Baseline, {
+        where: { userId, hash: fileHash },
+        relations: ['sections', 'versions'],
+        order: { versions: { versionNumber: 'DESC', createdAt: 'DESC' } },
+      });
 
-        if (existingBaseline) {
-          return this.handleDuplicateBaselineUpload(
-            manager,
-            existingBaseline,
-            file,
-          );
-        }
-
-        await this.enforceBaselineLimit(manager, userId);
-
-        return this.createBaselineRecord(
+      if (existingBaseline) {
+        return this.handleDuplicateBaselineUpload(
           manager,
-          userId,
+          existingBaseline,
           file,
-          fileHash,
-          parsedSections,
         );
-      },
-    );
+      }
+
+      await this.enforceBaselineLimit(manager, userId);
+
+      return this.createBaselineRecord(
+        manager,
+        userId,
+        file,
+        fileHash,
+        parsedSections,
+      );
+    });
   }
 
   private async createBaselineRecord(
@@ -306,22 +314,21 @@ export class BaselineService {
       hash: fileHash,
       status: BaselineStatus.ACTIVE,
       archivedAt: null,
-      sections:
-        parsedSections?.map((section, index) => ({
-          sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-          title: section.title ?? null,
-          content: this.sanitizeSectionContent(section.content),
-          includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-          order: section.order ?? index,
-        })) ?? [
-          {
-            sectionType: BaselineSectionType.OTHER,
-            title: null,
-            content: this.sanitizeSectionContent(),
-            includePolicy: BaselineIncludePolicy.OPTIONAL,
-            order: 0,
-          },
-        ],
+      sections: parsedSections?.map((section, index) => ({
+        sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+        title: section.title ?? null,
+        content: this.sanitizeSectionContent(section.content),
+        includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+        order: section.order ?? index,
+      })) ?? [
+        {
+          sectionType: BaselineSectionType.OTHER,
+          title: null,
+          content: this.sanitizeSectionContent(),
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
+        },
+      ],
     });
 
     const savedBaseline = await manager.save(baseline);
@@ -389,7 +396,8 @@ export class BaselineService {
       );
     }
     const latestVersion =
-      baseline.versions?.[0] ?? (await this.getLatestVersionForBaseline(baseline.id));
+      baseline.versions?.[0] ??
+      (await this.getLatestVersionForBaseline(baseline.id));
 
     const nextVersionNumber =
       (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
@@ -492,7 +500,11 @@ export class BaselineService {
   }
 
   async archiveBaseline(userId: string, baselineId: string) {
-    return this.updateBaselineStatus(userId, baselineId, BaselineStatus.ARCHIVED);
+    return this.updateBaselineStatus(
+      userId,
+      baselineId,
+      BaselineStatus.ARCHIVED,
+    );
   }
 
   async restoreBaseline(userId: string, baselineId: string) {
@@ -517,7 +529,8 @@ export class BaselineService {
     }
 
     baseline.status = status;
-    baseline.archivedAt = status === BaselineStatus.ARCHIVED ? new Date() : null;
+    baseline.archivedAt =
+      status === BaselineStatus.ARCHIVED ? new Date() : null;
 
     return this.baselineRepository.save(baseline);
   }
@@ -542,7 +555,8 @@ export class BaselineService {
     }
 
     const latestVersion =
-      baseline.versions?.[0] ?? (await this.getLatestVersionForBaseline(baseline.id));
+      baseline.versions?.[0] ??
+      (await this.getLatestVersionForBaseline(baseline.id));
 
     if (latestVersion) {
       const policies = await this.baselineBlockPolicyRepository.find({
@@ -551,7 +565,10 @@ export class BaselineService {
         order: { order: 'ASC' },
       });
 
-      baseline.sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
+      baseline.sections = this.applyPoliciesToSections(
+        baseline.sections ?? [],
+        policies,
+      );
     }
 
     return baseline;
@@ -596,7 +613,7 @@ export class BaselineService {
 
       await manager.save(rebuiltEntities);
 
-      baseline.sections = rebuiltEntities as BaselineSection[];
+      baseline.sections = rebuiltEntities;
 
       const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
       const nextVersionNumber =
@@ -609,7 +626,9 @@ export class BaselineService {
         policyState,
         latestVersion?.verifiedAdditions ?? [],
       );
-      const allowlistSnapshot = buildBaselineAllowlistSnapshot(baseline.sections ?? []);
+      const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+        baseline.sections ?? [],
+      );
 
       const versionRecord = manager.create(BaselineVersion, {
         baselineId: baseline.id,
@@ -687,7 +706,10 @@ export class BaselineService {
       order: { order: 'ASC' },
     });
 
-    const sections = this.applyPoliciesToSections(baseline.sections ?? [], policies);
+    const sections = this.applyPoliciesToSections(
+      baseline.sections ?? [],
+      policies,
+    );
 
     const additionSections =
       (baselineVersion.verifiedAdditions ?? []).map((content, index) => ({
@@ -791,7 +813,9 @@ export class BaselineService {
           order: { order: 'ASC' },
         });
 
-    const sectionMap = new Map(sections.map((section) => [section.id, section]));
+    const sectionMap = new Map(
+      sections.map((section) => [section.id, section]),
+    );
 
     const updateMap = new Map<string, BaselineBlockUpdate>(
       blocks.map((block) => [block.id, block]),
@@ -895,7 +919,8 @@ export class BaselineService {
         );
 
         section.includePolicy = applied?.includePolicy ?? section.includePolicy;
-        section.order = applied?.order ?? section.order ?? section.orderIndex ?? 0;
+        section.order =
+          applied?.order ?? section.order ?? section.orderIndex ?? 0;
 
         return section;
       });

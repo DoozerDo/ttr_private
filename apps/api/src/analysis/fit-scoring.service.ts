@@ -18,7 +18,11 @@ import type {
   FitScoreResult,
 } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
-import { buildFitScoreRubricMessages, FitScoreRubricJson, FIT_SCORE_RUBRIC_VERSION } from './prompts/fit-score-rubric.v1';
+import {
+  buildFitScoreRubricMessages,
+  FitScoreRubricJson,
+  FIT_SCORE_RUBRIC_VERSION,
+} from './prompts/fit-score-rubric.v1';
 import { canonicalizeJobText, sha256Text } from './job-text.canonical';
 import { LlmRubricScorerService } from './llm-rubric-scorer.service';
 
@@ -43,7 +47,8 @@ export type FitScoringResult = Omit<FitScoreResult, 'verdict'> & {
 };
 
 const MIN_TEXT_LENGTH = 200;
-const ENABLE_INTERNAL_PARITY_ENDPOINT = process.env.ENABLE_INTERNAL_PARITY_ENDPOINT === 'true';
+const ENABLE_INTERNAL_PARITY_ENDPOINT =
+  process.env.ENABLE_INTERNAL_PARITY_ENDPOINT === 'true';
 const isLlmParityEnabled = () => process.env.ENABLE_LLM_PARITY_SCORE === 'true';
 void ENABLE_INTERNAL_PARITY_ENDPOINT;
 
@@ -66,7 +71,8 @@ export class FitScoringService {
     dimensionWeights?: DimensionWeightOverrides | null,
     options?: { debug?: boolean },
   ): Promise<FitScoringResult> {
-    const { jobTextUsed, jobTextSha256, jobTextCharCount } = canonicalizeJobText(input.job);
+    const { jobTextUsed, jobTextSha256, jobTextCharCount } =
+      canonicalizeJobText(input.job);
     const jobTextOverride = jobTextUsed;
 
     const hasRawText = (input.job.rawDescription ?? '').trim().length > 0;
@@ -75,8 +81,10 @@ export class FitScoringService {
       ...input.job,
       normalizedResponsibilities: hasRawText
         ? []
-        : input.job.normalizedResponsibilities ?? [],
-      normalizedRequirements: hasRawText ? [] : input.job.normalizedRequirements ?? [],
+        : (input.job.normalizedResponsibilities ?? []),
+      normalizedRequirements: hasRawText
+        ? []
+        : (input.job.normalizedRequirements ?? []),
       jobTextOverride,
     };
 
@@ -166,13 +174,19 @@ export class FitScoringService {
       } else {
         scoringMode = 'engine_fallback';
         const safeReason =
-          llmResult.reason.replace(/\s+/g, ' ').trim().slice(0, 120) || 'unknown';
-        complianceFlags.push('llm_scoring_failed', `llm_scoring_failed_reason:${safeReason}`);
+          llmResult.reason.replace(/\s+/g, ' ').trim().slice(0, 120) ||
+          'unknown';
+        complianceFlags.push(
+          'llm_scoring_failed',
+          `llm_scoring_failed_reason:${safeReason}`,
+        );
       }
     }
 
     const finalOverallScore =
-      scoringMode === 'llm' && llmScore !== null ? llmScore : baseResult.overallScore;
+      scoringMode === 'llm' && llmScore !== null
+        ? llmScore
+        : baseResult.overallScore;
     const finalVerdict: FitScoreVerdictLabel | FitScoreRubricJson['verdict'] =
       scoringMode === 'llm' && llmVerdict ? llmVerdict : baseResult.verdict;
 
@@ -230,7 +244,11 @@ export class FitScoringService {
     return flags;
   }
 
-  buildComplianceFlags(jobText: string, baselineText: string, sourceUrl?: string | null) {
+  buildComplianceFlags(
+    jobText: string,
+    baselineText: string,
+    sourceUrl?: string | null,
+  ) {
     return this.computeComplianceFlags(jobText, baselineText, sourceUrl);
   }
 }

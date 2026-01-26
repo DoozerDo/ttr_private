@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class UserRoleAndSubscriptionTier1810000000000
-  implements MigrationInterface
-{
+export class UserRoleAndSubscriptionTier1810000000000 implements MigrationInterface {
   name = 'UserRoleAndSubscriptionTier1810000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -15,7 +13,9 @@ export class UserRoleAndSubscriptionTier1810000000000
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "subscriptionTier"`);
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN "subscriptionTier"`,
+    );
     await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "role"`);
   }
 }

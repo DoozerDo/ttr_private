@@ -29,6 +29,8 @@ export class InterviewAcceptedAddition2030000000000 implements MigrationInterfac
     await queryRunner.query(
       `DROP INDEX IF EXISTS "IDX_interview_accepted_additions_interviewId"`,
     );
-    await queryRunner.query(`DROP TABLE IF EXISTS "interview_accepted_additions"`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "interview_accepted_additions"`,
+    );
   }
 }

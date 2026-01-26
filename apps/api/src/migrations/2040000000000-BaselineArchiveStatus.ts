@@ -30,7 +30,9 @@ export class BaselineArchiveStatus2040000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baselines_userId_status_createdAt"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_baselines_userId_status_createdAt"`,
+    );
     await queryRunner.query(`
       ALTER TABLE "baselines"
       DROP COLUMN IF EXISTS "archivedAt"

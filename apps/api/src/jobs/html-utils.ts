@@ -17,7 +17,10 @@ export const extractTextFromHtml = (html: string) => {
     /<(br|p|div|section|article|h[1-6]|tr|td|ul|ol)[^>]*>/gi,
     '\n',
   );
-  content = content.replace(/<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi, '\n');
+  content = content.replace(
+    /<\/(p|div|section|article|tr|td|ul|ol)[^>]*>/gi,
+    '\n',
+  );
 
   const text = content.replace(/<[^>]+>/g, '');
 

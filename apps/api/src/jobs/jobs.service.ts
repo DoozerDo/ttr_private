@@ -57,8 +57,8 @@ const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 4;
 const JOB_LIMIT = 5;
 const ALLOW_JOB_LIMIT_SKIP =
-  process.env.NODE_ENV !== "production" ||
-  process.env.DISABLE_JOB_LIMIT === "true";
+  process.env.NODE_ENV !== 'production' ||
+  process.env.DISABLE_JOB_LIMIT === 'true';
 
 const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'text/plain']);
 const PRIVATE_NETWORK_URL_ERROR =
@@ -87,7 +87,9 @@ export class JobsService {
     const hasUrl = Boolean(url);
 
     if (hasText === hasUrl) {
-      throw new BadRequestException('Provide exactly one of pastedText or url.');
+      throw new BadRequestException(
+        'Provide exactly one of pastedText or url.',
+      );
     }
 
     if (hasUrl) {
@@ -120,9 +122,14 @@ export class JobsService {
     };
   }
 
-  async createJob(userId: string, payload: CreateJobInput): Promise<CreateJobResult> {
+  async createJob(
+    userId: string,
+    payload: CreateJobInput,
+  ): Promise<CreateJobResult> {
     const originalRawDescription = payload.rawDescription;
-    const normalizedInput = this.normalizeRawDescription(originalRawDescription);
+    const normalizedInput = this.normalizeRawDescription(
+      originalRawDescription,
+    );
     this.validateDescriptionLength(normalizedInput);
 
     const normalizedOutcome = this.normalizeSafely(normalizedInput);
@@ -463,4 +470,3 @@ const isPrivateIpv6 = (ipAddress: string) => {
     normalized.startsWith(prefix),
   );
 };
-

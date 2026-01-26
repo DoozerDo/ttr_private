@@ -47,10 +47,11 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function filterJourneyNavStateForPath(pathname: string, state: JourneyNavState): JourneyNavState {
-  if (pathname.startsWith("/baseline")) {
-    return { ...state, steps: state.steps.filter((step) => step.id !== "searchSets") };
-  }
+export function filterJourneyNavStateForPath(
+  _pathname: string,
+  state: JourneyNavState,
+): JourneyNavState {
+  // Beta scope removes this journey step per spec Section 7.
   return state;
 }
 

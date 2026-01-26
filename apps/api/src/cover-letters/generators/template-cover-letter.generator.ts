@@ -69,7 +69,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       return normalized;
     }
 
-    const stripped = normalized.replace(/^dear\s+hiring\s+team,?\s*/i, '').trimStart();
+    const stripped = normalized
+      .replace(/^dear\s+hiring\s+team,?\s*/i, '')
+      .trimStart();
 
     return `${greeting} ${stripped}`.trim();
   }
@@ -142,7 +144,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
   private buildFocusAreas(job: NormalizedJob) {
     const merged = [...job.responsibilities, ...job.requirements];
-    const unique = Array.from(new Set(merged.map((item) => item.toLowerCase())));
+    const unique = Array.from(
+      new Set(merged.map((item) => item.toLowerCase())),
+    );
 
     return unique
       .map((key) => merged.find((item) => item.toLowerCase() === key) || key)
@@ -157,7 +161,9 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
   }
 
   private composeStrengths(statements: string[], tone: string | null) {
-    const toneLine = tone ? ` The same ${tone} style appears across these examples.` : '';
+    const toneLine = tone
+      ? ` The same ${tone} style appears across these examples.`
+      : '';
 
     if (statements.length === 0) {
       return `The approved baseline focuses on the way I plan work, collaborate with partners, and document outcomes in plain language.${toneLine} I will rely solely on that text to describe my strengths and keep the narrative consistent with verified material.`;
@@ -192,9 +198,15 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
   }
 
-  private composeClosing(job: NormalizedJob, tone: string | null, closingTemplate: string) {
+  private composeClosing(
+    job: NormalizedJob,
+    tone: string | null,
+    closingTemplate: string,
+  ) {
     const roleDescriptor = this.describeRole(job);
-    const toneLine = tone ? ` I will continue to communicate in the same ${tone} style.` : '';
+    const toneLine = tone
+      ? ` I will continue to communicate in the same ${tone} style.`
+      : '';
     const companyLine = job.company
       ? ` I appreciate your consideration and am ready to share any additional approved excerpts that help ${job.company} make a confident decision.`
       : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';

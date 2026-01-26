@@ -3,10 +3,7 @@
 import { TemplateCoverLetterGenerator } from './template-cover-letter.generator';
 
 function countWords(text: string): number {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
+  return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function countParagraphs(text: string): number {
@@ -75,7 +72,10 @@ describe('TemplateCoverLetterGenerator', () => {
       job: {
         title: 'Product Manager',
         company: 'Fabrikam',
-        responsibilities: ['Lead product roadmaps.', 'Partner with engineering.'],
+        responsibilities: [
+          'Lead product roadmaps.',
+          'Partner with engineering.',
+        ],
         requirements: ['Drive impact.', 'Collaborate across teams.'],
       },
       allowedBaselineBlocks: [
@@ -109,7 +109,9 @@ describe('TemplateCoverLetterGenerator', () => {
       job: {
         title: 'Manager, Support Programs',
         company: 'Example Inc',
-        responsibilities: ['Own support mechanisms and continuous improvement.'],
+        responsibilities: [
+          'Own support mechanisms and continuous improvement.',
+        ],
         requirements: ['Program management and stakeholder alignment.'],
       },
       // Intentionally do NOT include the sentinel in allowedBaselineBlocks.

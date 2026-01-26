@@ -26,11 +26,7 @@ const MAX_ITEMS = 40;
 const sentenceSplitRegex = /(?<=[.!?])\s+/;
 
 const normalizeHeadingText = (line: string) =>
-  line
-    .toLowerCase()
-    .replace(/[:*]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  line.toLowerCase().replace(/[:*]+/g, '').replace(/\s+/g, ' ').trim();
 
 const isHeading = (line: string, headings: string[]) => {
   const normalized = normalizeHeadingText(line);
@@ -79,7 +75,9 @@ export const sanitizeListItems = (items: string[]) => {
 
 const extractItemsFromLines = (lines: string[]) => {
   const bulletItems = lines.filter(isBulletLine).map(stripBullet);
-  const paragraphItems = splitSentences(lines.filter((line) => !isBulletLine(line)));
+  const paragraphItems = splitSentences(
+    lines.filter((line) => !isBulletLine(line)),
+  );
 
   if (bulletItems.length === 0) {
     return sanitizeListItems(paragraphItems);

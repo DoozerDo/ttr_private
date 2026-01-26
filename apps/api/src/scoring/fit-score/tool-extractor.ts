@@ -133,7 +133,9 @@ export type ToolCoverage = ToolMatchSummary & {
   preferredCoverage: number;
 };
 
-export const extractJobToolRequirements = (jobText: string): ToolRequirements => {
+export const extractJobToolRequirements = (
+  jobText: string,
+): ToolRequirements => {
   const normalized = normalizeText(jobText);
   const found = new Set<string>();
 

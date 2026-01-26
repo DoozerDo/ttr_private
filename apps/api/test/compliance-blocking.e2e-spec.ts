@@ -81,9 +81,9 @@ describe('Compliance blocking for generation endpoints (e2e)', () => {
 
         const hasInvented =
           normalizedSections.includes(INVENTED_CLAIM) ||
-          ((payload.job as Partial<Job>)?.normalizedResponsibilities ?? []).some(
-            (entry) => (entry ?? '').includes(INVENTED_CLAIM),
-          ) ||
+          (
+            (payload.job as Partial<Job>)?.normalizedResponsibilities ?? []
+          ).some((entry) => (entry ?? '').includes(INVENTED_CLAIM)) ||
           ((payload.job as Partial<Job>)?.normalizedRequirements ?? []).some(
             (entry) => (entry ?? '').includes(INVENTED_CLAIM),
           );
@@ -98,10 +98,13 @@ describe('Compliance blocking for generation endpoints (e2e)', () => {
           actorId: payload.actorId,
           outputHash: payload.outputHash,
           baselineVersionId:
-            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>).id ?? null,
+            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>).id ??
+            null,
           baselineVersionHash:
-            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>).hash ??
-            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>).fileHash ??
+            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>)
+              .hash ??
+            ((payload.baselineVersion ?? {}) as Partial<BaselineVersion>)
+              .fileHash ??
             null,
           jobId: payload.job?.id ?? null,
           createdAt: new Date().toISOString(),
@@ -153,7 +156,8 @@ describe('Compliance blocking for generation endpoints (e2e)', () => {
       userId,
       version: versionNumber,
       originalFilename: 'mock-baseline.docx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       storagePath: `/tmp/baseline-${hash}.docx`,
       hash,
       sections: sections.map((content, index) => ({
@@ -270,7 +274,9 @@ describe('Compliance blocking for generation endpoints (e2e)', () => {
       expect(details?.compliance_flags).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ code: ComplianceFlagCode.INVENTED_METRIC }),
-          expect.objectContaining({ code: ComplianceFlagCode.INVENTED_COMPANY }),
+          expect.objectContaining({
+            code: ComplianceFlagCode.INVENTED_COMPANY,
+          }),
           expect.objectContaining({ code: ComplianceFlagCode.INVENTED_ROLE }),
         ]),
       );
@@ -321,7 +327,9 @@ describe('Compliance blocking for generation endpoints (e2e)', () => {
       expect(details?.audit_id).toBeTruthy();
       expect(details?.compliance_flags).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ code: ComplianceFlagCode.INVENTED_COMPANY }),
+          expect.objectContaining({
+            code: ComplianceFlagCode.INVENTED_COMPANY,
+          }),
         ]),
       );
     });

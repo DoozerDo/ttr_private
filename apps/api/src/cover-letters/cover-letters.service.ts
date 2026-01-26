@@ -48,9 +48,8 @@ export class CoverLettersService {
     this.baselineRepository = this.dataSource.getRepository(Baseline);
     this.baselineVersionRepository =
       this.dataSource.getRepository(BaselineVersion);
-    this.baselineBlockPolicyRepository = this.dataSource.getRepository(
-      BaselineBlockPolicy,
-    );
+    this.baselineBlockPolicyRepository =
+      this.dataSource.getRepository(BaselineBlockPolicy);
     this.jobRepository = this.dataSource.getRepository(Job);
     this.generator = new TemplateCoverLetterGenerator();
   }
@@ -165,7 +164,9 @@ export class CoverLettersService {
         content: block.content,
         sectionType: block.sectionType,
       })),
-      generatedSections: [{ title: 'Cover Letter', content: generation.content }],
+      generatedSections: [
+        { title: 'Cover Letter', content: generation.content },
+      ],
     });
 
     const { complianceFlags, blocked, audit } =
@@ -178,7 +179,9 @@ export class CoverLettersService {
           .update(normalizedContent)
           .digest('hex'),
         baselineSections: complianceBaselineSections,
-        generatedSections: [{ title: 'Cover Letter', content: normalizedContent }],
+        generatedSections: [
+          { title: 'Cover Letter', content: normalizedContent },
+        ],
         extraFlags: [...writingFlags, ...scopeFlags],
         scopeInflationDetected: false,
       });
@@ -284,8 +287,7 @@ export class CoverLettersService {
       id: section.id,
       title: this.cleanText(section.title ?? null) || null,
       content: this.cleanText(section.content),
-      includePolicy:
-        section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+      includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
       order: section.order ?? index,
       sectionType:
         section.sectionType ?? section.type ?? BaselineSectionType.OTHER,
@@ -378,7 +380,9 @@ export class CoverLettersService {
 
   private normalizeClosingTemplateKey(key?: string | null) {
     if (!key) return null;
-    return COVER_LETTER_CLOSING_TEMPLATES.some((template) => template.key === key)
+    return COVER_LETTER_CLOSING_TEMPLATES.some(
+      (template) => template.key === key,
+    )
       ? key
       : null;
   }

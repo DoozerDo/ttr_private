@@ -17,7 +17,9 @@ export class ComplianceAuditEnhancements1860000000000 implements MigrationInterf
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "jobId"`);
+    await queryRunner.query(
+      `ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "jobId"`,
+    );
     await queryRunner.query(
       `ALTER TABLE "compliance_audits" DROP COLUMN IF EXISTS "baselineVersionId"`,
     );

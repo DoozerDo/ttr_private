@@ -17,7 +17,10 @@ export class RealityCheckRepository {
     return this.realityCheckRepository.save(entity);
   }
 
-  async findLatestByJobAndBaseline(jobId: string, baselineId: string): Promise<RealityCheck | null> {
+  async findLatestByJobAndBaseline(
+    jobId: string,
+    baselineId: string,
+  ): Promise<RealityCheck | null> {
     return this.realityCheckRepository.findOne({
       where: { jobId, baselineId },
       order: { createdAt: 'DESC' },

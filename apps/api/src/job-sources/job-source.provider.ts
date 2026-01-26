@@ -1,4 +1,9 @@
-import { JobSourceInput, JobSourceListing, JobDetailRaw, ParsedJob } from './job-source.types';
+import {
+  JobSourceInput,
+  JobSourceListing,
+  JobDetailRaw,
+  ParsedJob,
+} from './job-source.types';
 
 export interface JobSourceProvider {
   id: string;

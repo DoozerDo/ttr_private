@@ -29,14 +29,6 @@ const sidebarNavRoutes: RouteConfig[] = [
     subtext: "Generate tailored documents",
   },
   {
-    id: "searchSets",
-    label: "Search Sets",
-    href: "/search-sets",
-    requiresAuth: true,
-    requiresBaseline: true,
-    subtext: "Find your next role",
-  },
-  {
     id: "jobTracker",
     label: "APPLICATION TRACKER",
     href: "/applications",

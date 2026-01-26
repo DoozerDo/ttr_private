@@ -99,7 +99,8 @@ export class ResumeController {
     const oneTap = Boolean(body.oneTap);
 
     if (!baselineId) throw new BadRequestException('baselineId is required');
-    if (!baselineVersionId) throw new BadRequestException('baselineVersionId is required');
+    if (!baselineVersionId)
+      throw new BadRequestException('baselineVersionId is required');
     if (!jobId) throw new BadRequestException('jobId is required');
 
     return {
@@ -135,7 +136,10 @@ export class ResumeController {
     const file = await this.resumeService.exportResume(userId, payload, format);
 
     res.setHeader('Content-Type', file.contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.filename}"`,
+    );
     res.setHeader('Content-Length', String(file.buffer.byteLength));
     res.setHeader('X-Compliance-Audit-Id', file.auditId);
     if (file.baselineVersionHash) {

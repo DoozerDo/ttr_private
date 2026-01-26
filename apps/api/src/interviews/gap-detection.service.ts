@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
@@ -104,12 +110,16 @@ export class GapDetectionService {
       }),
     ]);
 
-    const normalizedSections = this.applyPoliciesToSections(sections, blockPolicies).filter(
+    const normalizedSections = this.applyPoliciesToSections(
+      sections,
+      blockPolicies,
+    ).filter(
       (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
     );
 
     const sectionTokens = this.buildSectionTokens(normalizedSections);
-    let sectionEmbeddings = await this.buildSectionEmbeddings(normalizedSections);
+    let sectionEmbeddings =
+      await this.buildSectionEmbeddings(normalizedSections);
 
     const jdItems = [
       ...(job.normalizedRequirements ?? []),
@@ -134,7 +144,10 @@ export class GapDetectionService {
       if (sectionEmbeddings) {
         try {
           jdEmbedding = await this.embeddingProvider!.embed(item);
-          const embeddingMatch = this.findBestEmbeddingMatch(jdEmbedding ?? [], sectionEmbeddings);
+          const embeddingMatch = this.findBestEmbeddingMatch(
+            jdEmbedding ?? [],
+            sectionEmbeddings,
+          );
           const similarity = embeddingMatch?.similarity ?? 0;
           if (similarity >= GAP_EMBEDDING_MATCH_THRESHOLD) {
             continue;
@@ -155,7 +168,9 @@ export class GapDetectionService {
         gapId: randomUUID(),
         domain: this.inferDomain(item),
         jdExcerpt: item,
-        baselineExcerpt: this.buildBaselineExcerpt(match?.section?.content ?? null),
+        baselineExcerpt: this.buildBaselineExcerpt(
+          match?.section?.content ?? null,
+        ),
         confidence,
       };
 
@@ -237,11 +252,16 @@ export class GapDetectionService {
     }
   }
 
-  private findBestSectionMatch(jdTokens: Set<string>, sections: SectionTokens[]) {
+  private findBestSectionMatch(
+    jdTokens: Set<string>,
+    sections: SectionTokens[],
+  ) {
     let bestMatch: { section: BaselineSection; overlap: number } | null = null;
 
     for (const candidate of sections) {
-      const overlap = [...jdTokens].filter((token) => candidate.tokens.has(token)).length;
+      const overlap = [...jdTokens].filter((token) =>
+        candidate.tokens.has(token),
+      ).length;
       if (!bestMatch || overlap > bestMatch.overlap) {
         bestMatch = { section: candidate.section, overlap };
       }
@@ -258,10 +278,14 @@ export class GapDetectionService {
       return null;
     }
 
-    let bestMatch: { section: BaselineSection; similarity: number } | null = null;
+    let bestMatch: { section: BaselineSection; similarity: number } | null =
+      null;
 
     for (const candidate of sections) {
-      const similarity = this.cosineSimilarity(jdEmbedding, candidate.embedding);
+      const similarity = this.cosineSimilarity(
+        jdEmbedding,
+        candidate.embedding,
+      );
       if (!bestMatch || similarity > bestMatch.similarity) {
         bestMatch = { section: candidate.section, similarity };
       }
@@ -275,9 +299,16 @@ export class GapDetectionService {
       return 0;
     }
 
-    const dotProduct = a.reduce((sum, value, index) => sum + value * b[index], 0);
-    const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
-    const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
+    const dotProduct = a.reduce(
+      (sum, value, index) => sum + value * b[index],
+      0,
+    );
+    const magnitudeA = Math.sqrt(
+      a.reduce((sum, value) => sum + value * value, 0),
+    );
+    const magnitudeB = Math.sqrt(
+      b.reduce((sum, value) => sum + value * value, 0),
+    );
 
     if (magnitudeA === 0 || magnitudeB === 0) {
       return 0;
@@ -328,14 +359,20 @@ export class GapDetectionService {
     return clusters.flatMap((cluster) => cluster.map((entry) => entry.gap));
   }
 
-  private findBestClusterIndex(candidate: GapCandidate, clusters: GapCandidate[][]): number {
+  private findBestClusterIndex(
+    candidate: GapCandidate,
+    clusters: GapCandidate[][],
+  ): number {
     let bestIndex = -1;
     let bestSimilarity = 0;
 
     clusters.forEach((cluster, index) => {
       const seed = cluster[0];
       const similarity = this.resolveSimilarity(candidate, seed);
-      if (similarity >= GAP_CLUSTER_EMBEDDING_THRESHOLD && similarity > bestSimilarity) {
+      if (
+        similarity >= GAP_CLUSTER_EMBEDDING_THRESHOLD &&
+        similarity > bestSimilarity
+      ) {
         bestSimilarity = similarity;
         bestIndex = index;
       }
@@ -348,7 +385,10 @@ export class GapDetectionService {
     clusters.forEach((cluster, index) => {
       const seed = cluster[0];
       const similarity = this.tokenSimilarity(candidate.tokens, seed.tokens);
-      if (similarity >= GAP_CLUSTER_TOKEN_THRESHOLD && similarity > bestSimilarity) {
+      if (
+        similarity >= GAP_CLUSTER_TOKEN_THRESHOLD &&
+        similarity > bestSimilarity
+      ) {
         bestSimilarity = similarity;
         bestIndex = index;
       }
@@ -376,25 +416,53 @@ export class GapDetectionService {
   private inferDomain(text: string): GapDomain {
     const value = text.toLowerCase();
 
-    if (['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'].some((k) => value.includes(k))) {
+    if (
+      ['lead', 'leader', 'leadership', 'manager', 'mentor', 'coach'].some((k) =>
+        value.includes(k),
+      )
+    ) {
       return 'leadership';
     }
 
-    if (['sql', 'python', 'javascript', 'aws', 'gcp', 'azure', 'tool', 'framework', 'platform'].some((k) =>
-      value.includes(k),
-    )) {
+    if (
+      [
+        'sql',
+        'python',
+        'javascript',
+        'aws',
+        'gcp',
+        'azure',
+        'tool',
+        'framework',
+        'platform',
+      ].some((k) => value.includes(k))
+    ) {
       return 'tooling';
     }
 
-    if (['scale', 'scalable', 'enterprise', 'multiple teams', 'cross-functional', 'global'].some((k) =>
-      value.includes(k),
-    )) {
+    if (
+      [
+        'scale',
+        'scalable',
+        'enterprise',
+        'multiple teams',
+        'cross-functional',
+        'global',
+      ].some((k) => value.includes(k))
+    ) {
       return 'scope';
     }
 
-    if (['healthcare', 'finance', 'fintech', 'ecommerce', 'retail', 'government'].some((k) =>
-      value.includes(k),
-    )) {
+    if (
+      [
+        'healthcare',
+        'finance',
+        'fintech',
+        'ecommerce',
+        'retail',
+        'government',
+      ].some((k) => value.includes(k))
+    ) {
       return 'industry';
     }
 

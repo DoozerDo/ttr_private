@@ -4,7 +4,6 @@ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 export enum FeatureKey {
   RESUME_EXPORT = 'RESUME_EXPORT',
   COVER_LETTER_EXPORT = 'COVER_LETTER_EXPORT',
-  SEARCH_SET_RUN = 'SEARCH_SET_RUN',
 }
 
 const paidTiers = new Set<SubscriptionTier>([
@@ -75,11 +74,13 @@ export function wouldBlock(
   );
 }
 
-export function hasFeature(tier: SubscriptionTier, feature: FeatureKey): boolean {
+export function hasFeature(
+  tier: SubscriptionTier,
+  feature: FeatureKey,
+): boolean {
   switch (feature) {
     case FeatureKey.RESUME_EXPORT:
     case FeatureKey.COVER_LETTER_EXPORT:
-    case FeatureKey.SEARCH_SET_RUN:
       return paidTiers.has(tier);
     default:
       return true;
@@ -90,7 +91,6 @@ function getRequiredTierForFeature(feature: FeatureKey): SubscriptionTier {
   switch (feature) {
     case FeatureKey.RESUME_EXPORT:
     case FeatureKey.COVER_LETTER_EXPORT:
-    case FeatureKey.SEARCH_SET_RUN:
       return SubscriptionTier.PRO;
     default:
       return SubscriptionTier.PRO;
@@ -113,6 +113,11 @@ export function assertFeatureAvailable(
   }
 
   if (!hasFeature(entitlements.tier, feature)) {
-    wouldBlock(feature, requiredTier, entitlements.tier, entitlements.effectiveTier);
+    wouldBlock(
+      feature,
+      requiredTier,
+      entitlements.tier,
+      entitlements.effectiveTier,
+    );
   }
 }

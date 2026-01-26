@@ -13,7 +13,11 @@ import { BaselineVersion } from './baseline-version.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { Interview } from '../interviews/interview.entity';
 import { ComplianceService } from '../compliance/compliance.service';
-import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagCode,
+  ComplianceFlagSeverity,
+} from '../compliance/compliance.types';
 
 describe('BaselineVersionService', () => {
   let service: BaselineVersionService;
@@ -97,10 +101,22 @@ describe('BaselineVersionService', () => {
       providers: [
         BaselineVersionService,
         { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
-        { provide: getRepositoryToken(BaselineSection), useValue: baselineSectionRepository },
-        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: baselineBlockPolicyRepository },
-        { provide: getRepositoryToken(Interview), useValue: interviewRepository },
+        {
+          provide: getRepositoryToken(BaselineSection),
+          useValue: baselineSectionRepository,
+        },
+        {
+          provide: getRepositoryToken(BaselineVersion),
+          useValue: baselineVersionRepository,
+        },
+        {
+          provide: getRepositoryToken(BaselineBlockPolicy),
+          useValue: baselineBlockPolicyRepository,
+        },
+        {
+          provide: getRepositoryToken(Interview),
+          useValue: interviewRepository,
+        },
         {
           provide: ComplianceService,
           useValue: {
@@ -118,6 +134,10 @@ describe('BaselineVersionService', () => {
                 createdAt: new Date().toISOString(),
               },
             }),
+            normalizeSectionsForOutput: jest
+              .fn()
+              .mockImplementation((sections: BaselineSection[]) => sections),
+            normalizeText: jest.fn().mockImplementation((text: string) => text),
           },
         },
       ],
@@ -134,7 +154,10 @@ describe('BaselineVersionService', () => {
     });
 
     expect(result.version_number).toBe(2);
-    expect(result.diff).toEqual({ added: ['added context'], interviewId: null });
+    expect(result.diff).toEqual({
+      added: ['added context'],
+      interviewId: null,
+    });
     expect(baselineVersion.fileHash).toBe('existing-hash');
     expect(baselineVersion.verifiedAdditions).toEqual([]);
   });

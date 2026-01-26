@@ -15,14 +15,19 @@ export class RelayEmailService {
     const apiToken = process.env.API_TOKEN;
 
     if (!relayUrl) {
-      throw new Error('Missing RELAY_URL environment variable for email relay.');
+      throw new Error(
+        'Missing RELAY_URL environment variable for email relay.',
+      );
     }
 
     if (!apiToken) {
-      throw new Error('Missing API_TOKEN environment variable for email relay.');
+      throw new Error(
+        'Missing API_TOKEN environment variable for email relay.',
+      );
     }
 
-    const replyTo = input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.ai';
+    const replyTo =
+      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.ai';
 
     const response = await fetch(relayUrl, {
       method: 'POST',

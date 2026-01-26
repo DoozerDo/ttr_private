@@ -48,11 +48,16 @@ import { ComplianceModule } from '../compliance/compliance.module';
           },
         }),
         fileFilter: (_req, file, cb) => {
-          const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+          const allowedMimes = [
+            'application/pdf',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          ];
 
           if (!allowedMimes.includes(file.mimetype)) {
             return cb(
-              new Error('Only PDF and DOCX uploads are supported for baselines'),
+              new Error(
+                'Only PDF and DOCX uploads are supported for baselines',
+              ),
               false,
             );
           }

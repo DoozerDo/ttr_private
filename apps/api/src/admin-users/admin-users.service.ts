@@ -41,19 +41,13 @@ export class AdminUsersService {
   async listUsers() {
     try {
       return await this.userRepo.find({
-        select: [
-          'id',
-          'email',
-          'accountType',
-          'createdAt',
-          'updatedAt',
-        ],
+        select: ['id', 'email', 'accountType', 'createdAt', 'updatedAt'],
         order: {
           createdAt: 'DESC',
         },
       });
     } catch (err) {
-      this.logger.error('listUsers failed', err as any);
+      this.logger.error('listUsers failed', err);
       throw err;
     }
   }
@@ -61,10 +55,7 @@ export class AdminUsersService {
   /**
    * PATCH /admin/users/:id
    */
-  async updateUserAccountType(
-    userId: string,
-    accountType: AccountType,
-  ) {
+  async updateUserAccountType(userId: string, accountType: AccountType) {
     const user = await this.userRepo.findOne({
       where: { id: userId },
     });

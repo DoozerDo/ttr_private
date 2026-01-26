@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AccountTypeAndAdminUsers1890000000000
-  implements MigrationInterface
-{
+export class AccountTypeAndAdminUsers1890000000000 implements MigrationInterface {
   name = 'AccountTypeAndAdminUsers1890000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -39,9 +37,7 @@ export class AccountTypeAndAdminUsers1890000000000
       `ALTER TABLE "admin_users" DROP CONSTRAINT "FK_admin_users_userId"`,
     );
     await queryRunner.query(`DROP TABLE "admin_users"`);
-    await queryRunner.query(
-      `ALTER TABLE "users" DROP COLUMN "accountType"`,
-    );
+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "accountType"`);
     await queryRunner.query(`DROP TYPE "account_type_enum"`);
   }
 }

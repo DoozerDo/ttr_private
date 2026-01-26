@@ -16,8 +16,14 @@ export class InterviewAcceptedAdditions1870000000000 implements MigrationInterfa
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "expandedFitAssessment"`);
-    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "promotedBaselineVersionId"`);
-    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "acceptedAdditionIds"`);
+    await queryRunner.query(
+      `ALTER TABLE "interviews" DROP COLUMN IF EXISTS "expandedFitAssessment"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "interviews" DROP COLUMN IF EXISTS "promotedBaselineVersionId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "interviews" DROP COLUMN IF EXISTS "acceptedAdditionIds"`,
+    );
   }
 }

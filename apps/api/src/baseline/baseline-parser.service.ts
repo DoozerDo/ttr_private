@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { BaselineIncludePolicy, BaselineSectionType } from './baseline-section.entity';
+import {
+  BaselineIncludePolicy,
+  BaselineSectionType,
+} from './baseline-section.entity';
 
 export interface ParsedSection {
   sectionType: BaselineSectionType;

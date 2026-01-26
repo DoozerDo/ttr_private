@@ -158,16 +158,19 @@ const ROLE_KEYWORDS = [
 ];
 
 const ROLE_KEYWORD_PATTERN = new RegExp(
-  `\\b(?:${ROLE_KEYWORDS
-    .map((keyword) => keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|')})\\b`,
+  `\\b(?:${ROLE_KEYWORDS.map((keyword) =>
+    keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  ).join('|')})\\b`,
   'i',
 );
 
 // Header delimiters used for detecting "header-like" fragments when scanning text.
 const HEADER_DELIMITERS = new Set<string>([':', '-', '–', '—', '|', '/', '@']);
 
-function hasSentenceTerminatorBeforeIndex(text: string, index: number): boolean {
+function hasSentenceTerminatorBeforeIndex(
+  text: string,
+  index: number,
+): boolean {
   let cursor = index - 1;
   while (cursor >= 0) {
     const char = text[cursor];
@@ -317,7 +320,9 @@ const SPELLED_NUMBER_PATTERN = new RegExp(
 const METRIC_PERCENT_SUFFIX_PATTERN = /^\s*(?:percent(?:age)?|%)\b/i;
 
 export function normalizeCandidate(value: string): string {
-  return String(value ?? '').replace(/\s+/g, ' ').trim();
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function normalizeTokenForComparison(value: string): string {
@@ -528,7 +533,9 @@ export function extractBaselineCompanyTokens(
   return extractExperienceHeaderCompanyCandidates(sections);
 }
 
-export function shouldUseForRoleDetection(sectionType?: string | null): boolean {
+export function shouldUseForRoleDetection(
+  sectionType?: string | null,
+): boolean {
   if (!sectionType) return true;
   return BASELINE_ROLE_SECTION_TYPES.has(sectionType);
 }
@@ -636,15 +643,16 @@ export function collectMetricCandidatesFromSections(
 
       if (!normalizedValue) continue;
 
-      const contextStart = Math.max(0, spelledMatch.index - METRIC_CONTEXT_WINDOW);
+      const contextStart = Math.max(
+        0,
+        spelledMatch.index - METRIC_CONTEXT_WINDOW,
+      );
       const context = text
         .slice(
           contextStart,
           Math.min(
             text.length,
-            spelledMatch.index +
-              spelledMatch[0].length +
-              METRIC_CONTEXT_WINDOW,
+            spelledMatch.index + spelledMatch[0].length + METRIC_CONTEXT_WINDOW,
           ),
         )
         .toLowerCase();
@@ -683,7 +691,9 @@ function isIgnoredMetricCandidate(candidate: MetricCandidate): boolean {
   return false;
 }
 
-export function detectInventedMetric(payload: DetectorPayload): ComplianceFlag[] {
+export function detectInventedMetric(
+  payload: DetectorPayload,
+): ComplianceFlag[] {
   const generatedCandidates = collectMetricCandidatesFromSections(
     payload.generatedSections,
   );
@@ -883,8 +893,8 @@ function detectInventedEntity(options: {
       typeof options.confidence === 'number'
         ? options.confidence
         : options.confidenceFactory
-        ? options.confidenceFactory(original)
-        : 0.92;
+          ? options.confidenceFactory(original)
+          : 0.92;
 
     flags.push({
       code: options.code,
@@ -897,7 +907,9 @@ function detectInventedEntity(options: {
   return flags;
 }
 
-export function detectInventedCompany(payload: DetectorPayload): ComplianceFlag[] {
+export function detectInventedCompany(
+  payload: DetectorPayload,
+): ComplianceFlag[] {
   return detectInventedEntity({
     baselineSections: payload.baselineSections,
     generatedSections: payload.generatedSections,
@@ -986,15 +998,20 @@ export function computeTechnologyConfidence(token: string): number {
   return Math.min(0.98, score);
 }
 
-export function detectFictionalTechnology(payload: DetectorPayload): ComplianceFlag[] {
+export function detectFictionalTechnology(
+  payload: DetectorPayload,
+): ComplianceFlag[] {
   const generatedTokens = collectTechnologyTokensFromSections(
     payload.generatedSections,
   );
   if (!generatedTokens.size) return [];
 
-  const baselineTokenSet = payload.baselineAllowlist?.allowedTechnologies?.length
+  const baselineTokenSet = payload.baselineAllowlist?.allowedTechnologies
+    ?.length
     ? new Set(payload.baselineAllowlist.allowedTechnologies)
-    : new Set(collectTechnologyTokensFromSections(payload.baselineSections).keys());
+    : new Set(
+        collectTechnologyTokensFromSections(payload.baselineSections).keys(),
+      );
   const flags: ComplianceFlag[] = [];
 
   for (const [normalized, original] of generatedTokens.entries()) {

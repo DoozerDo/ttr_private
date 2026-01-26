@@ -34,7 +34,10 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { id } });
   }
 
-  async updateSubscriptionTier(userId: string, tier: SubscriptionTier): Promise<User> {
+  async updateSubscriptionTier(
+    userId: string,
+    tier: SubscriptionTier,
+  ): Promise<User> {
     const user = await this.findById(userId);
 
     if (!user) {

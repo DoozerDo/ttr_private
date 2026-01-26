@@ -117,11 +117,10 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const responses =
-      (body?.responses?.length ? body.responses : []).filter(
-        (response): response is CreateInterviewResponseDto =>
-          Boolean(response?.question && response?.response),
-      );
+    const responses = (body?.responses?.length ? body.responses : []).filter(
+      (response): response is CreateInterviewResponseDto =>
+        Boolean(response?.question && response?.response),
+    );
 
     if (responses.length === 0) {
       throw new BadRequestException('No responses provided');

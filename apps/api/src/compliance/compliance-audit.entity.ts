@@ -4,10 +4,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import {
-  ComplianceAction,
-  ComplianceFlag,
-} from './compliance.types';
+import { ComplianceAction, ComplianceFlag } from './compliance.types';
 
 @Entity({ name: 'compliance_audits' })
 export class ComplianceAudit {
@@ -35,7 +32,7 @@ export class ComplianceAudit {
   @Column({ type: 'varchar', length: 255, nullable: true })
   outputHash!: string | null;
 
-  @Column({ type: 'jsonb', default: () => '\'[]\'::jsonb' })
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   complianceFlags!: ComplianceFlag[];
 
   @Column({ type: 'boolean', default: false })

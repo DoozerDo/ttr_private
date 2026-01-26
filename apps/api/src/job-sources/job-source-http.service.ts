@@ -29,7 +29,9 @@ export class JobSourceHttpService {
 
       const buffer = await response.arrayBuffer();
       if (buffer.byteLength > maxBytes) {
-        throw new BadRequestException('Provider response exceeded allowed size.');
+        throw new BadRequestException(
+          'Provider response exceeded allowed size.',
+        );
       }
 
       return Buffer.from(buffer).toString('utf-8');

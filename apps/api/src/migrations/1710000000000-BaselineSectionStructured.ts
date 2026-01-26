@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class BaselineSectionStructured1710000000000
-  implements MigrationInterface
-{
+export class BaselineSectionStructured1710000000000 implements MigrationInterface {
   name = 'BaselineSectionStructured1710000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -57,11 +55,21 @@ export class BaselineSectionStructured1710000000000
       `DELETE FROM "baseline_sections" WHERE "type" = 'RAW'`,
     );
 
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_sections_orderIndex"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_sections_baselineId"`);
-    await queryRunner.query(`ALTER TABLE "baseline_sections" DROP COLUMN "updatedAt"`);
-    await queryRunner.query(`ALTER TABLE "baseline_sections" DROP COLUMN "title"`);
-    await queryRunner.query(`ALTER TABLE "baseline_sections" ALTER COLUMN "type" DROP DEFAULT`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_baseline_sections_orderIndex"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_baseline_sections_baselineId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "baseline_sections" DROP COLUMN "updatedAt"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "baseline_sections" DROP COLUMN "title"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "baseline_sections" ALTER COLUMN "type" DROP DEFAULT`,
+    );
     await queryRunner.query(
       `ALTER TABLE "baseline_sections" ALTER COLUMN "type" TYPE character varying USING "type"::text`,
     );

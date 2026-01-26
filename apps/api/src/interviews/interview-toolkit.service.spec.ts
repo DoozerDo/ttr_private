@@ -12,7 +12,9 @@ import { InterviewToolkitService } from './interview-toolkit.service';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { Baseline } from '../baseline/baseline.entity';
 
-const buildRepository = <T>(overrides: Partial<Repository<T>> = {}): Partial<Repository<T>> => ({
+const buildRepository = <T>(
+  overrides: Partial<Repository<T>> = {},
+): Partial<Repository<T>> => ({
   findOne: jest.fn(),
   find: jest.fn(),
   ...overrides,
@@ -32,18 +34,37 @@ describe('InterviewToolkitService', () => {
     starStoryRepository = buildRepository();
     baselineVersionRepository = buildRepository();
     questionGenerator = {
-      generateQuestions: jest.fn().mockReturnValue([{ gapId: 'gap-1', prompt: 'Q1', category: 'Context', jdReference: '' }]),
+      generateQuestions: jest.fn().mockReturnValue([
+        {
+          gapId: 'gap-1',
+          prompt: 'Q1',
+          category: 'Context',
+          jdReference: '',
+        },
+      ]),
     } as any;
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         InterviewToolkitService,
         { provide: getRepositoryToken(Job), useValue: jobRepository },
-        { provide: getRepositoryToken(FitAssessment), useValue: fitAssessmentRepository },
-        { provide: getRepositoryToken(StarStory), useValue: starStoryRepository },
-        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
+        {
+          provide: getRepositoryToken(FitAssessment),
+          useValue: fitAssessmentRepository,
+        },
+        {
+          provide: getRepositoryToken(StarStory),
+          useValue: starStoryRepository,
+        },
+        {
+          provide: getRepositoryToken(BaselineVersion),
+          useValue: baselineVersionRepository,
+        },
         { provide: getRepositoryToken(Baseline), useValue: buildRepository() },
-        { provide: InterviewQuestionGeneratorService, useValue: questionGenerator },
+        {
+          provide: InterviewQuestionGeneratorService,
+          useValue: questionGenerator,
+        },
         {
           provide: ComplianceService,
           useValue: {
@@ -108,7 +129,9 @@ describe('InterviewToolkitService', () => {
     } as any;
 
     (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
-    (fitAssessmentRepository.findOne as jest.Mock).mockResolvedValue(assessment);
+    (fitAssessmentRepository.findOne as jest.Mock).mockResolvedValue(
+      assessment,
+    );
     (starStoryRepository.find as jest.Mock).mockResolvedValue([
       {
         id: 'story-1',
@@ -127,7 +150,11 @@ describe('InterviewToolkitService', () => {
 
     const packet = await service.buildStudyPacket('user-1', 'job-1');
 
-    expect(packet.job).toEqual({ id: 'job-1', title: 'Senior Engineer', company: 'TestCo' });
+    expect(packet.job).toEqual({
+      id: 'job-1',
+      title: 'Senior Engineer',
+      company: 'TestCo',
+    });
     expect(packet.fitSnapshot?.overallScore).toBe(92);
     expect(packet.recommendedStories).toHaveLength(1);
     expect(packet.questions).toHaveLength(1);
@@ -154,10 +181,19 @@ describe('InterviewToolkitService', () => {
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
       hash: 'hash-1',
-      baseline: { id: 'baseline-1', userId: 'user-1', sections: [] } as Baseline,
+      baseline: {
+        id: 'baseline-1',
+        userId: 'user-1',
+        sections: [],
+      } as Baseline,
     });
 
-    const result = await service.generateFollowUp('user-1', 'job-2', 'bv-1', 'roadmap planning');
+    const result = await service.generateFollowUp(
+      'user-1',
+      'job-2',
+      'bv-1',
+      'roadmap planning',
+    );
 
     expect(result.content).toContain('roadmap planning');
     expect(result.job).toEqual({ id: 'job-2', title: 'PM', company: 'Acme' });
@@ -185,11 +221,15 @@ describe('InterviewToolkitService', () => {
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
       hash: 'hash-1',
-      baseline: { id: 'baseline-1', userId: 'user-1', sections: [] } as Baseline,
+      baseline: {
+        id: 'baseline-1',
+        userId: 'user-1',
+        sections: [],
+      } as Baseline,
     });
 
-    await expect(service.generateFollowUp('user-1', 'job-2', '')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.generateFollowUp('user-1', 'job-2', ''),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

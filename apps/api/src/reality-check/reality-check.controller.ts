@@ -65,7 +65,12 @@ export class RealityCheckController {
 
     const answers = body.answers ?? [];
 
-    return this.realityCheckService.createRealityCheck(userId, jobId, baselineId, answers);
+    return this.realityCheckService.createRealityCheck(
+      userId,
+      jobId,
+      baselineId,
+      answers,
+    );
   }
 
   @Post('questions')
@@ -86,6 +91,10 @@ export class RealityCheckController {
       throw new BadRequestException('jobId and baselineId are required');
     }
 
-    return this.realityCheckService.prepareQuestionSet(userId, jobId, baselineId);
+    return this.realityCheckService.prepareQuestionSet(
+      userId,
+      jobId,
+      baselineId,
+    );
   }
 }

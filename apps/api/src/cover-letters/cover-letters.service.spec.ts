@@ -1,7 +1,16 @@
-import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
-import { ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  BaselineIncludePolicy,
+  BaselineSectionType,
+} from '../baseline/baseline-section.entity';
+import {
+  ComplianceFlagCode,
+  ComplianceFlagSeverity,
+} from '../compliance/compliance.types';
 import { CoverLettersService } from './cover-letters.service';
 
 type MockRepository<T extends Record<string, any>> = {
@@ -12,16 +21,23 @@ type MockRepository<T extends Record<string, any>> = {
   remove: jest.Mock;
 };
 
-function buildRepository<T extends Record<string, any>>(initial?: T): MockRepository<T> {
+function buildRepository<T extends Record<string, any>>(
+  initial?: T,
+): MockRepository<T> {
   let saved = initial;
 
   return {
     findOne: jest.fn(async () => saved ?? null),
     find: jest.fn(async () => []),
-    create: jest.fn((payload: Partial<T>) => ({ ...payload } as T)),
+    create: jest.fn((payload: Partial<T>) => ({ ...payload }) as T),
     save: jest.fn(async (payload: T) => {
-      saved = { ...payload, id: payload['id'] ?? 'saved-id', createdAt: new Date(), updatedAt: new Date() } as T;
-      return saved as T;
+      saved = {
+        ...payload,
+        id: payload['id'] ?? 'saved-id',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as T;
+      return saved;
     }),
     remove: jest.fn(async (payload: T) => payload),
   };
@@ -64,7 +80,8 @@ describe('CoverLettersService', () => {
     validateAndAudit: jest.fn(async (ctx: any) => ({
       complianceFlags: ctx.extraFlags ?? [],
       blocked: (ctx.extraFlags ?? []).some(
-        (flag: { severity: ComplianceFlagSeverity }) => flag.severity === ComplianceFlagSeverity.BLOCK,
+        (flag: { severity: ComplianceFlagSeverity }) =>
+          flag.severity === ComplianceFlagSeverity.BLOCK,
       ),
       audit: { id: 'audit-1' },
     })),
@@ -72,7 +89,7 @@ describe('CoverLettersService', () => {
 
   const dataSource = {
     getRepository: jest.fn((entity) => {
-      switch ((entity as any)?.name) {
+      switch (entity?.name) {
         case 'CoverLetter':
           return coverLetterRepository;
         case 'Baseline':
@@ -84,7 +101,7 @@ describe('CoverLettersService', () => {
         case 'Job':
           return jobRepository;
         default:
-          throw new Error(`Unexpected repository request: ${(entity as any)?.name}`);
+          throw new Error(`Unexpected repository request: ${entity?.name}`);
       }
     }),
   } as unknown as DataSource;
@@ -94,7 +111,10 @@ describe('CoverLettersService', () => {
   });
 
   it('persists a chosen closing template and reuses it for the next generation', async () => {
-    const service = new CoverLettersService(dataSource, complianceService as any);
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
 
     await service.generateCoverLetter('user-1', {
       baselineId: 'baseline-1',
@@ -127,7 +147,10 @@ describe('CoverLettersService', () => {
       },
     ]);
 
-    const service = new CoverLettersService(dataSource, complianceService as any);
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
 
     await expect(
       service.generateCoverLetter('user-1', {
@@ -149,7 +172,10 @@ describe('CoverLettersService', () => {
       },
     ]);
 
-    const service = new CoverLettersService(dataSource, complianceService as any);
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
 
     await expect(
       service.generateCoverLetter('user-1', {
@@ -163,7 +189,10 @@ describe('CoverLettersService', () => {
   });
 
   it('rejects generation without a baseline version id', async () => {
-    const service = new CoverLettersService(dataSource, complianceService as any);
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
 
     await expect(
       service.generateCoverLetter('user-1', {

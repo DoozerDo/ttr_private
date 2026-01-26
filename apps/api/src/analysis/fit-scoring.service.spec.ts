@@ -5,15 +5,23 @@ import { FitScoringService } from './fit-scoring.service';
 
 const baseSentence =
   'Lead strategic SaaS operations teams, coach stakeholders, and embed enterprise security processes.';
-const repeatedText = (text: string, times: number) => Array(times).fill(text).join(' ');
+const repeatedText = (text: string, times: number) =>
+  Array(times).fill(text).join(' ');
 
-const buildInput = (overrides?: Partial<Parameters<FitScoringService['score']>[0]>) => ({
+const buildInput = (
+  overrides?: Partial<Parameters<FitScoringService['score']>[0]>,
+) => ({
   job: {
     title: 'Senior Platform Leader',
     company: 'ExampleCo',
     rawDescription: repeatedText(baseSentence, 30),
     normalizedResponsibilities: [repeatedText(baseSentence, 25)],
-    normalizedRequirements: [repeatedText('Experience with AWS, Kubernetes, Terraform, ServiceNow, and Snowflake.', 20)],
+    normalizedRequirements: [
+      repeatedText(
+        'Experience with AWS, Kubernetes, Terraform, ServiceNow, and Snowflake.',
+        20,
+      ),
+    ],
     sourceUrl: 'https://example.com/jobs/leadership',
   },
   baseline: {
@@ -26,7 +34,8 @@ const buildInput = (overrides?: Partial<Parameters<FitScoringService['score']>[0
       },
       {
         type: 'SKILLS',
-        content: 'AWS, Kubernetes, Terraform, ServiceNow, Snowflake, Jira, incident response',
+        content:
+          'AWS, Kubernetes, Terraform, ServiceNow, Snowflake, Jira, incident response',
       },
     ],
   },
@@ -55,11 +64,15 @@ describe('FitScoringService', () => {
     expect(result.summary).toContain('Weighted fit based on leadership');
     expect(result.strengths).toContain('leadership');
     expect(result.gaps).toEqual(expect.any(Array));
-    expect(result.dimensionScores.experienceAlignment).toBeGreaterThanOrEqual(0);
+    expect(result.dimensionScores.experienceAlignment).toBeGreaterThanOrEqual(
+      0,
+    );
   });
 
   it('includes the debug payload when requested', async () => {
-    const result = await service.score(buildInput(), undefined, { debug: true });
+    const result = await service.score(buildInput(), undefined, {
+      debug: true,
+    });
     expect(result.debug).toBeDefined();
     expect(result.debug?.weights).toBeDefined();
     expect(result.debug?.finalScore).toBeDefined();
@@ -103,8 +116,12 @@ describe('FitScoringService', () => {
         verifiedAdditions: ['Deep AWS and Kubernetes delivery experience'],
       }),
     );
-    expect(withAdditions.expandedScore).toBeGreaterThanOrEqual(withAdditions.originalScore);
-    expect(withAdditions.appliedAdditions).toEqual(['Deep AWS and Kubernetes delivery experience']);
+    expect(withAdditions.expandedScore).toBeGreaterThanOrEqual(
+      withAdditions.originalScore,
+    );
+    expect(withAdditions.appliedAdditions).toEqual([
+      'Deep AWS and Kubernetes delivery experience',
+    ]);
   });
 
   it('retains normalized segments when raw description is absent', async () => {
@@ -113,7 +130,12 @@ describe('FitScoringService', () => {
       company: 'ExampleCo',
       rawDescription: '',
       normalizedResponsibilities: [repeatedText(baseSentence, 25)],
-      normalizedRequirements: [repeatedText('Executive requirement text covers policy, security, and customer obsession.', 30)],
+      normalizedRequirements: [
+        repeatedText(
+          'Executive requirement text covers policy, security, and customer obsession.',
+          30,
+        ),
+      ],
       sourceUrl: 'https://example.com/jobs/leadership',
     };
 
@@ -124,8 +146,12 @@ describe('FitScoringService', () => {
     );
 
     const engineJob = scoreSpy.mock.calls[0][0].job;
-    expect(engineJob.normalizedResponsibilities).toEqual(fallbackJob.normalizedResponsibilities);
-    expect(engineJob.normalizedRequirements).toEqual(fallbackJob.normalizedRequirements);
+    expect(engineJob.normalizedResponsibilities).toEqual(
+      fallbackJob.normalizedResponsibilities,
+    );
+    expect(engineJob.normalizedRequirements).toEqual(
+      fallbackJob.normalizedRequirements,
+    );
   });
 });
 

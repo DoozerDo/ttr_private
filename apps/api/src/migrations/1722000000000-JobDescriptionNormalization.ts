@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class JobDescriptionNormalization1722000000000
-  implements MigrationInterface
-{
+export class JobDescriptionNormalization1722000000000 implements MigrationInterface {
   name = 'JobDescriptionNormalization1722000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

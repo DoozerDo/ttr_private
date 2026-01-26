@@ -8,7 +8,9 @@ export type JobTextCanonical = {
   jobTextCharCount: number;
 };
 
-export function canonicalizeJobText(job: FitScoreInput['job']): JobTextCanonical {
+export function canonicalizeJobText(
+  job: FitScoreInput['job'],
+): JobTextCanonical {
   const rawDescription = (job.rawDescription ?? '').trim();
   if (rawDescription.length) {
     return {
@@ -18,9 +20,16 @@ export function canonicalizeJobText(job: FitScoreInput['job']): JobTextCanonical
     };
   }
 
-  const normalizedResponsibilities = (job.normalizedResponsibilities ?? []).filter(Boolean);
-  const normalizedRequirements = (job.normalizedRequirements ?? []).filter(Boolean);
-  const normalizedChunks = [...normalizedResponsibilities, ...normalizedRequirements];
+  const normalizedResponsibilities = (
+    job.normalizedResponsibilities ?? []
+  ).filter(Boolean);
+  const normalizedRequirements = (job.normalizedRequirements ?? []).filter(
+    Boolean,
+  );
+  const normalizedChunks = [
+    ...normalizedResponsibilities,
+    ...normalizedRequirements,
+  ];
   const normalizedText = normalizedChunks.join('\n').trim();
 
   if (!normalizedText.length) {

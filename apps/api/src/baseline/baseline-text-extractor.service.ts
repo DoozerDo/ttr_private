@@ -11,13 +11,16 @@ export class BaselineTextExtractor {
 
   async extractText(file: Express.Multer.File): Promise<string> {
     const buffer = await this.readFileBuffer(file);
-    const extension = path.extname(file.originalname || file.path || '').toLowerCase();
+    const extension = path
+      .extname(file.originalname || file.path || '')
+      .toLowerCase();
     const mimetype = (file.mimetype || '').toLowerCase();
 
     try {
       if (
         extension === '.docx' ||
-        mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        mimetype ===
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       ) {
         return await this.extractDocx(buffer);
       }

@@ -15,7 +15,8 @@ const baseSections = [
   },
   {
     type: 'SKILLS',
-    content: 'AWS, Kubernetes, Terraform, Snowflake, ServiceNow, Jira, security automation, CX operations',
+    content:
+      'AWS, Kubernetes, Terraform, Snowflake, ServiceNow, Jira, security automation, CX operations',
   },
 ];
 
@@ -23,16 +24,8 @@ const strongJobInput: FitScoreInput = {
   job: {
     title: 'Director of Customer Experience',
     company: 'ExampleCo',
-    rawDescription: repeatSentence(
-      baseSentence,
-      35,
-    ),
-    normalizedResponsibilities: [
-      repeatSentence(
-        baseSentence,
-        30,
-      ),
-    ],
+    rawDescription: repeatSentence(baseSentence, 35),
+    normalizedResponsibilities: [repeatSentence(baseSentence, 30)],
     normalizedRequirements: [
       repeatSentence(
         'Drive enterprise strategy, security, and CX operations with AWS, Kubernetes, Terraform, Snowflake, ServiceNow, Jira, and ServiceNow ticketing.',
@@ -126,7 +119,9 @@ describe('FitScoreEngine golden bands', () => {
   it('is deterministic within a 2-point delta for repeated runs', async () => {
     const first = await engine.score(adjacentJobInput);
     const second = await engine.score(adjacentJobInput);
-    expect(Math.abs(first.overallScore - second.overallScore)).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(first.overallScore - second.overallScore),
+    ).toBeLessThanOrEqual(2);
   });
 });
 

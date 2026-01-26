@@ -1,7 +1,13 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
+import {
+  BaselineIncludePolicy,
+  BaselineSection,
+} from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { GapDetectionService, GapEmbeddingProvider } from './gap-detection.service';
+import {
+  GapDetectionService,
+  GapEmbeddingProvider,
+} from './gap-detection.service';
 import { Job } from '../jobs/job.entity';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
@@ -44,7 +50,10 @@ describe('GapDetectionService', () => {
       company: null,
       rawDescription: 'sample',
       sourceUrl: null,
-      normalizedRequirements: ['Hands-on Kubernetes administration', 'Lead cross-functional teams'],
+      normalizedRequirements: [
+        'Hands-on Kubernetes administration',
+        'Lead cross-functional teams',
+      ],
       normalizedResponsibilities: [],
       jdIngestionMethod: 'PASTE' as never,
       jdParsedAt: null,
@@ -98,7 +107,12 @@ describe('GapDetectionService', () => {
     ]);
     baselineBlockPolicyRepository.find.mockResolvedValue([]);
 
-    const service = createService(jobRepository, baselineSectionRepository, baselineVersionRepository, baselineBlockPolicyRepository);
+    const service = createService(
+      jobRepository,
+      baselineSectionRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+    );
 
     const result = await service.detectGaps({
       userId: 'user-1',
@@ -116,19 +130,31 @@ describe('GapDetectionService', () => {
     const service = createService();
 
     await expect(
-      service.detectGaps({ userId: 'user-1', jobId: '', baselineVersionId: '' }),
+      service.detectGaps({
+        userId: 'user-1',
+        jobId: '',
+        baselineVersionId: '',
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('validates job and baseline ownership', async () => {
     const jobRepository = createMockRepository();
     const baselineVersionRepository = createMockRepository();
-    const service = createService(jobRepository, createMockRepository(), baselineVersionRepository);
+    const service = createService(
+      jobRepository,
+      createMockRepository(),
+      baselineVersionRepository,
+    );
 
     jobRepository.findOne.mockResolvedValue(null);
 
     await expect(
-      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
+      service.detectGaps({
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineVersionId: 'bv-1',
+      }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     jobRepository.findOne.mockResolvedValue({
@@ -146,7 +172,11 @@ describe('GapDetectionService', () => {
     } as BaselineVersion);
 
     await expect(
-      service.detectGaps({ userId: 'user-1', jobId: 'job-1', baselineVersionId: 'bv-1' }),
+      service.detectGaps({
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineVersionId: 'bv-1',
+      }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -175,7 +205,10 @@ describe('GapDetectionService', () => {
       company: null,
       rawDescription: 'sample',
       sourceUrl: null,
-      normalizedRequirements: ['Optimize data pipelines', 'Customer support leadership'],
+      normalizedRequirements: [
+        'Optimize data pipelines',
+        'Customer support leadership',
+      ],
       normalizedResponsibilities: [],
       jdIngestionMethod: 'PASTE' as never,
       jdParsedAt: null,
@@ -259,10 +292,18 @@ describe('GapDetectionService', () => {
 
     expect(result.gaps).toHaveLength(1);
     expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
-    expect(embeddingProvider.embed).toHaveBeenCalledWith('Optimize data pipelines');
-    expect(embeddingProvider.embed).toHaveBeenCalledWith('Customer support leadership');
-    expect(embeddingProvider.embed).toHaveBeenCalledWith('Stream processing and pipeline optimization');
-    expect(embeddingProvider.embed).toHaveBeenCalledWith('Backend architecture and api design');
+    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+      'Optimize data pipelines',
+    );
+    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+      'Customer support leadership',
+    );
+    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+      'Stream processing and pipeline optimization',
+    );
+    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+      'Backend architecture and api design',
+    );
   });
 
   it('clusters semantically similar JD gaps together while preserving deterministic ordering', async () => {
@@ -291,7 +332,11 @@ describe('GapDetectionService', () => {
       company: null,
       rawDescription: 'sample',
       sourceUrl: null,
-      normalizedRequirements: ['Build analytics dashboards', 'Scale distributed systems', 'Develop analytics dashboards and reporting'],
+      normalizedRequirements: [
+        'Build analytics dashboards',
+        'Scale distributed systems',
+        'Develop analytics dashboards and reporting',
+      ],
       normalizedResponsibilities: [],
       jdIngestionMethod: 'PASTE' as never,
       jdParsedAt: null,
@@ -408,7 +453,11 @@ describe('GapDetectionService', () => {
       company: null,
       rawDescription: 'sample',
       sourceUrl: null,
-      normalizedRequirements: ['Cloud security architecture', 'Frontend component libraries', 'Experimental data science'],
+      normalizedRequirements: [
+        'Cloud security architecture',
+        'Frontend component libraries',
+        'Experimental data science',
+      ],
       normalizedResponsibilities: [],
       jdIngestionMethod: 'PASTE' as never,
       jdParsedAt: null,
@@ -461,7 +510,9 @@ describe('GapDetectionService', () => {
       baselineVersionId: baselineVersion.id,
     });
 
-    expect(result.gaps.map((gap) => gap.jdExcerpt)).toEqual(job.normalizedRequirements);
+    expect(result.gaps.map((gap) => gap.jdExcerpt)).toEqual(
+      job.normalizedRequirements,
+    );
     expect(result.gaps).toHaveLength(3);
   });
 });

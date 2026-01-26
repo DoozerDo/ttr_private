@@ -1,8 +1,16 @@
 import { RealityCheckService } from './reality-check.service';
-import type { RealityCheckAnswer, RealityCheckQuestion } from './reality-check.types';
+import type {
+  RealityCheckAnswer,
+  RealityCheckQuestion,
+} from './reality-check.types';
 
 describe('RealityCheckService', () => {
-  const service = new RealityCheckService(null as any, null as any, null as any, null as any);
+  const service = new RealityCheckService(
+    null as any,
+    null as any,
+    null as any,
+    null as any,
+  );
 
   const baseQuestions: RealityCheckQuestion[] = [
     {
@@ -60,7 +68,10 @@ describe('RealityCheckService', () => {
   });
 
   it('throws when an answer references an unknown question', () => {
-    const answers = [...validAnswers, { questionId: 'unknown', type: 'boolean', value: true }];
+    const answers = [
+      ...validAnswers,
+      { questionId: 'unknown', type: 'boolean', value: true },
+    ];
     expect(() => service['validateAnswers'](baseQuestions, answers)).toThrow(
       /Unknown questionId/,
     );
@@ -112,7 +123,11 @@ describe('RealityCheckService', () => {
       missingSkillOptions: [],
     };
 
-    const outcome = service['computeOutcome'](context as any, baseQuestions, validAnswers);
+    const outcome = service['computeOutcome'](
+      context as any,
+      baseQuestions,
+      validAnswers,
+    );
     expect(outcome.outcome).toBe('mismatch');
     expect(outcome.triggeredBy).toContain('seniority_mismatch');
     expect(outcome.triggeredBy).toContain('core_skill_mismatch');
@@ -169,7 +184,11 @@ describe('RealityCheckService', () => {
       missingSkillOptions: [],
     };
 
-    const outcome = service['computeOutcome'](context as any, baseQuestions, answers);
+    const outcome = service['computeOutcome'](
+      context as any,
+      baseQuestions,
+      answers,
+    );
     expect(outcome.outcome).toBe('update_recommended');
     expect(outcome.triggeredBy).toContain('role_evolution');
     expect(outcome.suggestedBaselineSections).toContain('experience');
@@ -222,7 +241,11 @@ describe('RealityCheckService', () => {
       missingSkillOptions: [],
     };
 
-    const outcome = service['computeOutcome'](context as any, baseQuestions, answers);
+    const outcome = service['computeOutcome'](
+      context as any,
+      baseQuestions,
+      answers,
+    );
     expect(outcome.outcome).toBe('valid');
   });
 });

@@ -22,7 +22,9 @@ import { InterviewRecordsService } from './interview-records.service';
 @Controller('interview-records')
 @UseGuards(AuthGuard('jwt'))
 export class InterviewRecordsController {
-  constructor(private readonly interviewRecordsService: InterviewRecordsService) {}
+  constructor(
+    private readonly interviewRecordsService: InterviewRecordsService,
+  ) {}
 
   @Post()
   async createInterviewRecord(
@@ -62,7 +64,10 @@ export class InterviewRecordsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewRecordsService.getInterviewRecordForUserResponse(id, userId);
+    return this.interviewRecordsService.getInterviewRecordForUserResponse(
+      id,
+      userId,
+    );
   }
 
   @Get(':id/recommended-additions')
@@ -135,7 +140,11 @@ export class InterviewRecordsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewRecordsService.applyAdditionDecisions(id, userId, body);
+    return this.interviewRecordsService.applyAdditionDecisions(
+      id,
+      userId,
+      body,
+    );
   }
 
   @Patch(':id/accepted-additions')

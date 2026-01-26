@@ -62,7 +62,9 @@ export class ResumeService {
     }
   }
 
-  private buildResumeText(sections: Array<{ title: string | null; content: string }>) {
+  private buildResumeText(
+    sections: Array<{ title: string | null; content: string }>,
+  ) {
     return sections
       .map((section) => {
         const title = section.title ? `${section.title}\n` : '';
@@ -73,7 +75,10 @@ export class ResumeService {
 
   private buildPdfBuffer(content: string) {
     const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const escaped = sanitized.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    const escaped = sanitized
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
     const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
     const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
     const pdfParts = [
@@ -180,9 +185,10 @@ export class ResumeService {
       source: 'baseline',
     }));
 
-    const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(
-      baseline.sections ?? [],
-    );
+    const normalizedBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(
+        baseline.sections ?? [],
+      );
 
     const job = jobId
       ? await this.jobsRepository.findOne({
@@ -203,7 +209,11 @@ export class ResumeService {
     }
 
     const outputHash = createHash('sha256')
-      .update(JSON.stringify(this.complianceService.normalizeSectionsForOutput(sections)))
+      .update(
+        JSON.stringify(
+          this.complianceService.normalizeSectionsForOutput(sections),
+        ),
+      )
       .digest('hex');
 
     const writingFlags = this.complianceService.enforceResumeWritingRules({
@@ -216,7 +226,8 @@ export class ResumeService {
       generatedSections: sections,
     });
 
-    const normalizedSections = this.complianceService.normalizeSectionsForOutput(sections);
+    const normalizedSections =
+      this.complianceService.normalizeSectionsForOutput(sections);
 
     const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({
@@ -246,7 +257,8 @@ export class ResumeService {
     }
 
     const quality =
-      latestAssessment && latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
+      latestAssessment &&
+      latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
         ? 'optimized'
         : 'draft';
 
@@ -287,7 +299,10 @@ export class ResumeService {
     const filename = `resume.${format}`;
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
-      where: { id: generation.baselineVersionId, baselineId: generation.baselineId },
+      where: {
+        id: generation.baselineVersionId,
+        baselineId: generation.baselineId,
+      },
     });
 
     if (!baselineVersion) {
@@ -303,17 +318,18 @@ export class ResumeService {
         })
       : null;
 
-    const { complianceFlags, blocked, audit } = await this.complianceService.validateAndAudit({
-      action: ComplianceAction.RESUME_EXPORT,
-      actorId: userId,
-      baselineVersion,
-      job,
-      outputHash: createHash('sha256')
-        .update(`${format}:${text}`)
-        .digest('hex'),
-      baselineSections: generation.sections,
-      generatedSections: generation.sections,
-    });
+    const { complianceFlags, blocked, audit } =
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: userId,
+        baselineVersion,
+        job,
+        outputHash: createHash('sha256')
+          .update(`${format}:${text}`)
+          .digest('hex'),
+        baselineSections: generation.sections,
+        generatedSections: generation.sections,
+      });
 
     if (blocked) {
       throw new UnprocessableEntityException({

@@ -94,7 +94,9 @@ describe('BaselineService - block policies', () => {
           ? baseline
           : null,
       ),
-      manager: { transaction: jest.fn(async (cb: any) => cb(transactionManager)) },
+      manager: {
+        transaction: jest.fn(async (cb: any) => cb(transactionManager)),
+      },
       save: jest.fn(),
     };
 
@@ -120,11 +122,26 @@ describe('BaselineService - block policies', () => {
       providers: [
         BaselineService,
         { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
-        { provide: getRepositoryToken(BaselineSection), useValue: baselineSectionRepository },
-        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
-        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: baselineBlockPolicyRepository },
-        { provide: BaselineTextExtractor, useValue: { extractText: jest.fn() } },
-        { provide: BaselineParserService, useValue: { parseBaseline: jest.fn() } },
+        {
+          provide: getRepositoryToken(BaselineSection),
+          useValue: baselineSectionRepository,
+        },
+        {
+          provide: getRepositoryToken(BaselineVersion),
+          useValue: baselineVersionRepository,
+        },
+        {
+          provide: getRepositoryToken(BaselineBlockPolicy),
+          useValue: baselineBlockPolicyRepository,
+        },
+        {
+          provide: BaselineTextExtractor,
+          useValue: { extractText: jest.fn() },
+        },
+        {
+          provide: BaselineParserService,
+          useValue: { parseBaseline: jest.fn() },
+        },
       ],
     }).compile();
 

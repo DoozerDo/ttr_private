@@ -27,8 +27,14 @@ describe('AuthController', () => {
   });
 
   it('handles registration', async () => {
-    const dto: RegisterDto = { email: 'test@example.com', password: 'Password123' };
-    const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
+    const dto: RegisterDto = {
+      email: 'test@example.com',
+      password: 'Password123',
+    };
+    const response = {
+      user: { id: '1', email: dto.email },
+      accessToken: 'token',
+    };
     authService.register.mockResolvedValue(response);
     const res = { cookie: jest.fn() };
 
@@ -49,8 +55,14 @@ describe('AuthController', () => {
   });
 
   it('handles login', async () => {
-    const dto: LoginDto = { email: 'test@example.com', password: 'Password123' };
-    const response = { user: { id: '1', email: dto.email }, accessToken: 'token' };
+    const dto: LoginDto = {
+      email: 'test@example.com',
+      password: 'Password123',
+    };
+    const response = {
+      user: { id: '1', email: dto.email },
+      accessToken: 'token',
+    };
     authService.login.mockResolvedValue(response);
     const res = { cookie: jest.fn() };
 

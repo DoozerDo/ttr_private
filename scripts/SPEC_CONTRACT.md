@@ -116,30 +116,7 @@ Binary stream with `X-Baseline-Hash` and `Content-Type` set.
 - **Export** `GET /api/applications/export`
 Returns CSV artifact metadata `{ "artifact_id": "...", "url": "..." }` for download.
 
-### 2.6 Search Sets
-- **Create** `POST /api/search-sets`
-```json
-{
-  "title_patterns": ["Senior SRE", "Staff Reliability"],
-  "seniority": "senior|staff|principal",
-  "industry": ["fintech"],
-  "work_mode": "remote|hybrid|onsite",
-  "source_url": "https://..." 
-}
-```
-- **List/Update**: `GET /api/search-sets` → array; `PATCH /api/search-sets/:id` updates same fields.
-- **Run** `POST /api/search-sets/:id/run`
-```json
-{"limit": 10}
-```
-- **Run Response** `202`
-```json
-{
-  "results": [{"job_id": "...", "title": "...", "company": "...", "fit_score": 78, "verdict": "consider"}]
-}
-```
-
-### 2.7 Compliance/Audit & Export Storage
+### 2.6 Compliance/Audit & Export Storage
 - **Audit Log Create** `POST /api/audit`
 ```json
 {
@@ -168,7 +145,5 @@ Returns CSV artifact metadata `{ "artifact_id": "...", "url": "..." }` for downl
 - **Baseline Tagging**: Blocks can be set to always/optional/never; updates yield a new baseline version and hash; ordering preserved.
 - **Résumé Generator**: Accepts baseline version and block selection; enforces compliance; generates DOCX/PDF with baseline hash headers; status and download endpoints work.
 - **Cover Letter Studio**: Honors locked opening and baseline-scoped content; generates one-page DOCX/PDF; exposes status and download with compliance visibility.
-- **Job Tracker**: Allows create/list/update of application records with stage, applied date, and Fit Score snapshot; CSV export available and audit logged.
-- **Search Sets**: Supports create/list/update and run; run returns up to requested limit of roles with Fit Score snapshot and verdict.
 - **Compliance/Audit**: Every generation/scoring/export action records audit entries with actor, baseline version hash, and flags; retrieval available by action or artifact.
 - **Export/Storage**: Artifacts stored in S3-compatible storage with user- and hash-aware keys; downloads stream binary or return time-limited URLs; headers expose baseline hash.

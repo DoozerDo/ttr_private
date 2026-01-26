@@ -25,7 +25,11 @@ describe('ResumeController tier gating', () => {
     } as any;
 
     await controller.generateResume(
-      { baselineId: 'baseline-1', baselineVersionId: 'version-1', jobId: 'job-1' },
+      {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'version-1',
+        jobId: 'job-1',
+      },
       request,
     );
 
@@ -46,7 +50,11 @@ describe('ResumeController tier gating', () => {
 
     await expect(
       controller.exportResume(
-        { baselineId: 'baseline-1', baselineVersionId: 'version-1', jobId: 'job-1' },
+        {
+          baselineId: 'baseline-1',
+          baselineVersionId: 'version-1',
+          jobId: 'job-1',
+        },
         request,
         res,
       ),

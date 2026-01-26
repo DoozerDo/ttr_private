@@ -1,11 +1,18 @@
-import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagCode,
+  ComplianceFlagSeverity,
+} from './compliance.types';
 
 export type CompliancePolicyEntry = {
   severity: ComplianceFlagSeverity;
   blockConfidenceThreshold?: number;
 };
 
-const BASE_COMPLIANCE_POLICY: Record<ComplianceFlagCode, CompliancePolicyEntry> = {
+const BASE_COMPLIANCE_POLICY: Record<
+  ComplianceFlagCode,
+  CompliancePolicyEntry
+> = {
   [ComplianceFlagCode.SCOPE_INFLATION]: {
     severity: ComplianceFlagSeverity.WARN,
     blockConfidenceThreshold: 0.75,
@@ -34,15 +41,23 @@ const BASE_COMPLIANCE_POLICY: Record<ComplianceFlagCode, CompliancePolicyEntry> 
   },
 };
 
-const COMPLIANCE_ACTIONS = Object.values(ComplianceAction) as ComplianceAction[];
+const COMPLIANCE_ACTIONS = Object.values(
+  ComplianceAction,
+) as ComplianceAction[];
 
 export const COMPLIANCE_POLICY_MAP: Record<
   ComplianceAction,
   Record<ComplianceFlagCode, CompliancePolicyEntry>
-> = COMPLIANCE_ACTIONS.reduce((acc, action) => {
-  acc[action] = { ...BASE_COMPLIANCE_POLICY };
-  return acc;
-}, {} as Record<ComplianceAction, Record<ComplianceFlagCode, CompliancePolicyEntry>>);
+> = COMPLIANCE_ACTIONS.reduce(
+  (acc, action) => {
+    acc[action] = { ...BASE_COMPLIANCE_POLICY };
+    return acc;
+  },
+  {} as Record<
+    ComplianceAction,
+    Record<ComplianceFlagCode, CompliancePolicyEntry>
+  >,
+);
 
 export function resolveCompliancePolicy(
   action: ComplianceAction,

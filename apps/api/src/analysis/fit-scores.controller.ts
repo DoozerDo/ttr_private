@@ -31,7 +31,11 @@ export class FitScoresController {
     const queryDebug = isQueryDebugEnabled(request);
     const bodyDebug = Boolean(body?.debug);
     const debugEnabled = headerDebug || queryDebug || bodyDebug;
-    const debugSource: DebugSource = determineDebugSource(headerDebug, queryDebug, bodyDebug);
+    const debugSource: DebugSource = determineDebugSource(
+      headerDebug,
+      queryDebug,
+      bodyDebug,
+    );
 
     const payloadWithDebug = {
       ...body,

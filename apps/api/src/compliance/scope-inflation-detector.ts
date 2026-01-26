@@ -12,7 +12,11 @@ type Fingerprint = {
   evidence: Record<ScopeCategory, Map<string, string>>;
 };
 
-type SectionShape = { content?: string | null; title?: string | null; sectionType?: string };
+type SectionShape = {
+  content?: string | null;
+  title?: string | null;
+  sectionType?: string;
+};
 
 const SCOPE_CUES: Record<ScopeCategory, string[]> = {
   seniority: [
@@ -121,12 +125,18 @@ export class ScopeInflationDetector {
       if (!text) continue;
 
       const normalized = this.normalize(text);
-      for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
+      for (const [category, cues] of Object.entries(SCOPE_CUES) as [
+        ScopeCategory,
+        string[],
+      ][]) {
         for (const cue of cues) {
           if (normalized.includes(cue)) {
             fingerprint.cues[category].add(cue);
             if (!fingerprint.evidence[category].has(cue)) {
-              fingerprint.evidence[category].set(cue, this.extractSnippet(text, cue));
+              fingerprint.evidence[category].set(
+                cue,
+                this.extractSnippet(text, cue),
+              );
             }
           }
         }
@@ -136,16 +146,24 @@ export class ScopeInflationDetector {
     return fingerprint;
   }
 
-  private gatherCues(
-    section: { content?: string | null; title?: string | null },
-  ): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
+  private gatherCues(section: {
+    content?: string | null;
+    title?: string | null;
+  }): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
     const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
     if (!text) return [];
     const normalized = this.normalize(text);
 
-    const matches: Array<{ category: ScopeCategory; cue: string; snippet: string }> = [];
+    const matches: Array<{
+      category: ScopeCategory;
+      cue: string;
+      snippet: string;
+    }> = [];
 
-    for (const [category, cues] of Object.entries(SCOPE_CUES) as [ScopeCategory, string[]][]) {
+    for (const [category, cues] of Object.entries(SCOPE_CUES) as [
+      ScopeCategory,
+      string[],
+    ][]) {
       for (const cue of cues) {
         if (normalized.includes(cue)) {
           matches.push({
@@ -162,7 +180,10 @@ export class ScopeInflationDetector {
 
   detect(
     baselineSections: SectionShape[],
-    generatedSections: Array<{ title?: string | null; content?: string | null }>,
+    generatedSections: Array<{
+      title?: string | null;
+      content?: string | null;
+    }>,
   ): ComplianceFlag[] {
     const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
     const violations: Array<{
@@ -192,10 +213,13 @@ export class ScopeInflationDetector {
     if (!violations.length) return [];
 
     const hasBlocking = violations.some(
-      (violation) => CATEGORY_SEVERITY[violation.category] === ComplianceFlagSeverity.BLOCK,
+      (violation) =>
+        CATEGORY_SEVERITY[violation.category] === ComplianceFlagSeverity.BLOCK,
     );
 
-    const severity = hasBlocking ? ComplianceFlagSeverity.BLOCK : ComplianceFlagSeverity.WARN;
+    const severity = hasBlocking
+      ? ComplianceFlagSeverity.BLOCK
+      : ComplianceFlagSeverity.WARN;
     const confidence = hasBlocking ? 0.92 : 0.45;
 
     const evidence = violations.map((violation) => ({

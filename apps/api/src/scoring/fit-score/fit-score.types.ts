@@ -26,7 +26,9 @@ export type FitScoreDimensionScores = {
   strategicTacticalFit: number;
 };
 
-export type DimensionWeightOverrides = Partial<Record<keyof FitScoreDimensionScores, number>>;
+export type DimensionWeightOverrides = Partial<
+  Record<keyof FitScoreDimensionScores, number>
+>;
 
 export type FitScoreDebugDimensionDetail = {
   score: number;
@@ -48,7 +50,10 @@ export type FitScoreDebugPayload = {
   jobWordCount: number;
   baselineWordCount: number;
   verdict: FitScoreVerdictLabel;
-  dimensionDetails: Record<keyof FitScoreDimensionScores, FitScoreDebugDimensionDetail>;
+  dimensionDetails: Record<
+    keyof FitScoreDimensionScores,
+    FitScoreDebugDimensionDetail
+  >;
 };
 
 export type FitScoreResult = {

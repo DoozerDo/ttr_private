@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { InterviewToolkitService } from './interview-toolkit.service';
@@ -6,10 +15,15 @@ import { InterviewToolkitService } from './interview-toolkit.service';
 @UseGuards(AuthGuard('jwt'))
 @Controller('interview-toolkit')
 export class InterviewToolkitController {
-  constructor(private readonly interviewToolkitService: InterviewToolkitService) {}
+  constructor(
+    private readonly interviewToolkitService: InterviewToolkitService,
+  ) {}
 
   @Get(':jobId/study-packet')
-  async getStudyPacket(@Param('jobId') jobId: string, @Req() request: Request & { user?: { id?: string } }) {
+  async getStudyPacket(
+    @Param('jobId') jobId: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
     const userId = request.user?.id;
 
     if (!userId) {

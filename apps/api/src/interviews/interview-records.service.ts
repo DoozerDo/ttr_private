@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
@@ -27,18 +31,26 @@ import {
 import { RecommendedAdditionsService } from './recommended-additions.service';
 
 function normalizeStringArray(value?: unknown[]): string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 function normalizeGapList(value?: unknown[]): InterviewGap[] {
   return Array.isArray(value)
-    ? value.filter((entry): entry is InterviewGap => typeof entry === 'object' && entry !== null)
+    ? value.filter(
+        (entry): entry is InterviewGap =>
+          typeof entry === 'object' && entry !== null,
+      )
     : [];
 }
 
 function normalizeQuestionList(value?: unknown[]): InterviewQuestion[] {
   return Array.isArray(value)
-    ? value.filter((entry): entry is InterviewQuestion => typeof entry === 'object' && entry !== null)
+    ? value.filter(
+        (entry): entry is InterviewQuestion =>
+          typeof entry === 'object' && entry !== null,
+      )
     : [];
 }
 
@@ -46,7 +58,9 @@ function normalizeAdditionStatus(value?: unknown): RecommendedAdditionStatus {
   return value === 'accepted' || value === 'rejected' ? value : 'proposed';
 }
 
-function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] {
+function normalizeAdditionSources(
+  value?: unknown,
+): RecommendedAdditionSource[] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -56,10 +70,16 @@ function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] 
       const raw = entry as Partial<RecommendedAdditionSource>;
 
       const gapId = typeof raw.gapId === 'string' ? raw.gapId : undefined;
-      const questionIndex = typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
-      const questionPrompt = typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
+      const questionIndex =
+        typeof raw.questionIndex === 'number' ? raw.questionIndex : undefined;
+      const questionPrompt =
+        typeof raw.questionPrompt === 'string' ? raw.questionPrompt : undefined;
 
-      if (gapId === undefined && questionIndex === undefined && questionPrompt === undefined) {
+      if (
+        gapId === undefined &&
+        questionIndex === undefined &&
+        questionPrompt === undefined
+      ) {
         return null;
       }
 
@@ -74,11 +94,18 @@ function normalizeAdditionSources(value?: unknown): RecommendedAdditionSource[] 
     .filter((entry): entry is RecommendedAdditionSource => entry !== null);
 }
 
-function buildAdditionId(text: string, sources: RecommendedAdditionSource[]): string {
-  return createHash('sha256').update(JSON.stringify({ text, sources })).digest('hex');
+function buildAdditionId(
+  text: string,
+  sources: RecommendedAdditionSource[],
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ text, sources }))
+    .digest('hex');
 }
 
-function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[] {
+function normalizeRecommendedAdditions(
+  value?: unknown[],
+): RecommendedAddition[] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -98,14 +125,18 @@ function normalizeRecommendedAdditions(value?: unknown[]): RecommendedAddition[]
       if (!entry || typeof entry !== 'object') return null;
 
       const addition = entry as RecommendedAddition;
-      const text = typeof addition.text === 'string' ? addition.text.trim() : '';
+      const text =
+        typeof addition.text === 'string' ? addition.text.trim() : '';
       if (!text) return null;
 
       const sources = normalizeAdditionSources(addition.sources);
       const status = normalizeAdditionStatus(addition.status);
 
       return {
-        id: typeof addition.id === 'string' && addition.id ? addition.id : buildAdditionId(text, sources),
+        id:
+          typeof addition.id === 'string' && addition.id
+            ? addition.id
+            : buildAdditionId(text, sources),
         text,
         sources,
         status,
@@ -138,20 +169,29 @@ export class InterviewRecordsService {
 
   private requireBaselineVersionId(baselineVersionId?: string): string {
     const normalized = baselineVersionId?.trim();
-    if (!normalized) throw new BadRequestException('baselineVersionId is required');
+    if (!normalized)
+      throw new BadRequestException('baselineVersionId is required');
     return normalized;
   }
 
-  private hasBlockingCompliance(validationResults: Record<string, unknown> | undefined | null): boolean {
+  private hasBlockingCompliance(
+    validationResults: Record<string, unknown> | undefined | null,
+  ): boolean {
     if (!validationResults) return false;
 
-    const blocked = Boolean((validationResults as { blocked?: boolean }).blocked);
+    const blocked = Boolean(
+      (validationResults as { blocked?: boolean }).blocked,
+    );
     if (blocked) return true;
 
-    const flags = (validationResults as { complianceFlags?: Array<{ severity?: string }> }).complianceFlags;
+    const flags = (
+      validationResults as { complianceFlags?: Array<{ severity?: string }> }
+    ).complianceFlags;
     if (!Array.isArray(flags)) return false;
 
-    return flags.some((flag) => flag?.severity === ComplianceFlagSeverity.BLOCK);
+    return flags.some(
+      (flag) => flag?.severity === ComplianceFlagSeverity.BLOCK,
+    );
   }
 
   private normalizeAcceptedAdditionIds(value?: unknown): string[] {
@@ -169,14 +209,21 @@ export class InterviewRecordsService {
     additions: RecommendedAddition[],
     acceptedIds?: string[] | null,
   ): string[] {
-    const acceptedSet = new Set(this.normalizeAcceptedAdditionIds(acceptedIds ?? []));
+    const acceptedSet = new Set(
+      this.normalizeAcceptedAdditionIds(acceptedIds ?? []),
+    );
     if (!acceptedSet.size) return [];
     const validIds = new Set(additions.map((addition) => addition.id));
     return Array.from(acceptedSet).filter((id) => validIds.has(id));
   }
 
-  private buildFallbackRecommendedAddition(gap: InterviewGap, index: number): RecommendedAddition {
-    const domainLabel = gap.domain ? gap.domain.replace(/[_-]+/g, ' ') : 'experience';
+  private buildFallbackRecommendedAddition(
+    gap: InterviewGap,
+    index: number,
+  ): RecommendedAddition {
+    const domainLabel = gap.domain
+      ? gap.domain.replace(/[_-]+/g, ' ')
+      : 'experience';
     const text = `Share a ${domainLabel} story that addresses ${gap.gapId}.`;
     return {
       id: `gap-fallback-${gap.gapId}-${index}`,
@@ -207,7 +254,9 @@ export class InterviewRecordsService {
   }
 
   private async buildInterviewResponse(interview: Interview) {
-    const baselineVersionHash = await this.getBaselineVersionHash(interview.baselineVersionId);
+    const baselineVersionHash = await this.getBaselineVersionHash(
+      interview.baselineVersionId,
+    );
     return { ...interview, baselineVersionHash };
   }
 
@@ -218,9 +267,14 @@ export class InterviewRecordsService {
     return FitAssessmentVerdict.SKIP;
   }
 
-  async createInterviewRecord(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
+  async createInterviewRecord(
+    userId: string,
+    dto: CreateInterviewRecordDto,
+  ): Promise<Interview> {
     const jobId = this.requireJobId(dto.jobId);
-    const baselineVersionId = this.requireBaselineVersionId(dto.baselineVersionId);
+    const baselineVersionId = this.requireBaselineVersionId(
+      dto.baselineVersionId,
+    );
 
     const detection = await this.gapDetectionService.detectGaps({
       userId,
@@ -228,7 +282,9 @@ export class InterviewRecordsService {
       baselineVersionId,
     });
 
-    const gapList = dto.gapList?.length ? normalizeGapList(dto.gapList) : detection.gaps;
+    const gapList = dto.gapList?.length
+      ? normalizeGapList(dto.gapList)
+      : detection.gaps;
 
     const questions = dto.questions?.length
       ? normalizeQuestionList(dto.questions)
@@ -243,7 +299,9 @@ export class InterviewRecordsService {
       questions,
       responses: normalizeStringArray(dto.responses),
       validationResults: dto.validationResults ?? {},
-      recommendedAdditions: normalizeRecommendedAdditions(dto.recommendedAdditions),
+      recommendedAdditions: normalizeRecommendedAdditions(
+        dto.recommendedAdditions,
+      ),
     });
 
     const saved = await this.interviewsRepo.save(interview);
@@ -257,7 +315,10 @@ export class InterviewRecordsService {
     });
   }
 
-  async getInterviewRecordForUser(id: string, userId: string): Promise<Interview> {
+  async getInterviewRecordForUser(
+    id: string,
+    userId: string,
+  ): Promise<Interview> {
     const interview = await this.interviewsRepo.findOne({
       where: { id, userId },
     });
@@ -277,7 +338,11 @@ export class InterviewRecordsService {
     return this.buildInterviewResponse(interview);
   }
 
-  async updateInterviewRecord(id: string, userId: string, dto: UpdateInterviewRecordDto): Promise<Interview> {
+  async updateInterviewRecord(
+    id: string,
+    userId: string,
+    dto: UpdateInterviewRecordDto,
+  ): Promise<Interview> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
     if (dto.jobId !== undefined) {
@@ -313,11 +378,12 @@ export class InterviewRecordsService {
     if (this.hasBlockingCompliance(interview.validationResults)) {
       interview.recommendedAdditions = [];
     } else {
-      interview.recommendedAdditions = this.recommendedAdditionsService.generateFromResponses({
-        responses: interview.responses,
-        questions: interview.questions,
-        gaps: interview.gapList,
-      });
+      interview.recommendedAdditions =
+        this.recommendedAdditionsService.generateFromResponses({
+          responses: interview.responses,
+          questions: interview.questions,
+          gaps: interview.gapList,
+        });
     }
 
     interview.acceptedAdditionIds = this.filterAcceptedAdditionIds(
@@ -338,10 +404,16 @@ export class InterviewRecordsService {
     return this.buildInterviewResponse(saved);
   }
 
-  async applyAdditionDecisions(id: string, userId: string, body: unknown): Promise<Interview> {
+  async applyAdditionDecisions(
+    id: string,
+    userId: string,
+    body: unknown,
+  ): Promise<Interview> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
-    const existing = Array.isArray(interview.recommendedAdditions) ? interview.recommendedAdditions : [];
+    const existing = Array.isArray(interview.recommendedAdditions)
+      ? interview.recommendedAdditions
+      : [];
 
     const payload = (body ?? {}) as {
       decisions?: Array<{ id?: string; status?: RecommendedAdditionStatus }>;
@@ -356,20 +428,31 @@ export class InterviewRecordsService {
         ? payload.additions
         : [];
 
-    const acceptedSet = new Set(Array.isArray(payload.acceptedIds) ? payload.acceptedIds : []);
-    const rejectedSet = new Set(Array.isArray(payload.rejectedIds) ? payload.rejectedIds : []);
+    const acceptedSet = new Set(
+      Array.isArray(payload.acceptedIds) ? payload.acceptedIds : [],
+    );
+    const rejectedSet = new Set(
+      Array.isArray(payload.rejectedIds) ? payload.rejectedIds : [],
+    );
 
     const statusById = new Map<string, RecommendedAdditionStatus>();
     for (const decision of decisionsList) {
       const idValue = typeof decision?.id === 'string' ? decision.id : '';
-      const statusValue = decision?.status === 'accepted' || decision?.status === 'rejected' ? decision.status : null;
+      const statusValue =
+        decision?.status === 'accepted' || decision?.status === 'rejected'
+          ? decision.status
+          : null;
       if (idValue && statusValue) statusById.set(idValue, statusValue);
     }
 
     interview.recommendedAdditions = existing.map((addition) => {
       const nextStatus =
         statusById.get(addition.id) ??
-        (acceptedSet.has(addition.id) ? 'accepted' : rejectedSet.has(addition.id) ? 'rejected' : undefined);
+        (acceptedSet.has(addition.id)
+          ? 'accepted'
+          : rejectedSet.has(addition.id)
+            ? 'rejected'
+            : undefined);
 
       return nextStatus ? { ...addition, status: nextStatus } : addition;
     });
@@ -388,12 +471,19 @@ export class InterviewRecordsService {
     const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
       ? interview.recommendedAdditions
       : [];
-    const normalizedIds = this.normalizeAcceptedAdditionIds(acceptedAdditionIds);
-    const knownIds = new Set(recommendedAdditions.map((addition) => addition.id));
-    const invalidIds = normalizedIds.filter((additionId) => !knownIds.has(additionId));
+    const normalizedIds =
+      this.normalizeAcceptedAdditionIds(acceptedAdditionIds);
+    const knownIds = new Set(
+      recommendedAdditions.map((addition) => addition.id),
+    );
+    const invalidIds = normalizedIds.filter(
+      (additionId) => !knownIds.has(additionId),
+    );
 
     if (invalidIds.length) {
-      throw new BadRequestException('acceptedAdditionIds contain unknown addition ids');
+      throw new BadRequestException(
+        'acceptedAdditionIds contain unknown addition ids',
+      );
     }
 
     interview.acceptedAdditionIds = normalizedIds;
@@ -403,10 +493,15 @@ export class InterviewRecordsService {
     return this.buildInterviewResponse(saved);
   }
 
-  async listRecommendedAdditions(id: string, userId: string): Promise<RecommendedAddition[]> {
+  async listRecommendedAdditions(
+    id: string,
+    userId: string,
+  ): Promise<RecommendedAddition[]> {
     const interview = await this.getInterviewRecordForUser(id, userId);
 
-    const normalized = normalizeRecommendedAdditions(interview.recommendedAdditions);
+    const normalized = normalizeRecommendedAdditions(
+      interview.recommendedAdditions,
+    );
     const gaps = Array.isArray(interview.gapList) ? interview.gapList : [];
 
     const coveredGapIds = new Set<string>();
@@ -471,12 +566,17 @@ export class InterviewRecordsService {
     return this.acceptedAdditionsRepository.save(addition);
   }
 
-  async listAcceptedAdditions(id: string, userId: string): Promise<InterviewAcceptedAddition[]> {
+  async listAcceptedAdditions(
+    id: string,
+    userId: string,
+  ): Promise<InterviewAcceptedAddition[]> {
     const interview = await this.getInterviewRecordForUser(id, userId);
     return this.fetchAcceptedAdditions(interview.id);
   }
 
-  private async fetchAcceptedAdditions(interviewId: string): Promise<InterviewAcceptedAddition[]> {
+  private async fetchAcceptedAdditions(
+    interviewId: string,
+  ): Promise<InterviewAcceptedAddition[]> {
     return this.acceptedAdditionsRepository.find({
       where: { interviewId },
       order: { createdAt: 'ASC' },
@@ -504,20 +604,25 @@ export class InterviewRecordsService {
     );
 
     if (!verifiedAdditions.length) {
-      throw new BadRequestException('No additions available for expanded scoring');
+      throw new BadRequestException(
+        'No additions available for expanded scoring',
+      );
     }
 
     const baselineVersionNumber = await this.getBaselineVersionNumber(
       interview.baselineVersionId,
     );
 
-    const expansion = await this.analysisService.runExpandedFitAssessment(userId, {
-      jobId: interview.jobId,
-      baselineId: interview.baselineId,
-      baselineVersion: baselineVersionNumber,
-      interviewId: interview.id,
-      verifiedAdditions,
-    });
+    const expansion = await this.analysisService.runExpandedFitAssessment(
+      userId,
+      {
+        jobId: interview.jobId,
+        baselineId: interview.baselineId,
+        baselineVersion: baselineVersionNumber,
+        interviewId: interview.id,
+        verifiedAdditions,
+      },
+    );
 
     interview.expandedFitAssessment = {
       ...expansion,
@@ -546,10 +651,14 @@ export class InterviewRecordsService {
     const recommendedAdditions = Array.isArray(interview.recommendedAdditions)
       ? interview.recommendedAdditions
       : [];
-    const acceptedIds = this.normalizeAcceptedAdditionIds(interview.acceptedAdditionIds ?? []);
+    const acceptedIds = this.normalizeAcceptedAdditionIds(
+      interview.acceptedAdditionIds ?? [],
+    );
 
     if (!acceptedIds.length) {
-      throw new BadRequestException('At least one accepted addition is required');
+      throw new BadRequestException(
+        'At least one accepted addition is required',
+      );
     }
 
     const acceptedSet = new Set(acceptedIds);
@@ -558,14 +667,17 @@ export class InterviewRecordsService {
     );
 
     if (!acceptedAdditions.length) {
-      throw new BadRequestException('Accepted additions were not found on this interview');
+      throw new BadRequestException(
+        'Accepted additions were not found on this interview',
+      );
     }
 
-    const promotion = await this.baselineVersionService.approveVerifiedAdditions(userId, {
-      baselineId: interview.baselineId,
-      interviewId: interview.id,
-      additions: acceptedAdditions,
-    });
+    const promotion =
+      await this.baselineVersionService.approveVerifiedAdditions(userId, {
+        baselineId: interview.baselineId,
+        interviewId: interview.id,
+        additions: acceptedAdditions,
+      });
 
     interview.promotedBaselineVersionId = promotion.baseline_version_id ?? null;
 
@@ -578,13 +690,19 @@ export class InterviewRecordsService {
     };
   }
 
-  async deleteInterviewRecord(id: string, userId: string): Promise<{ deleted: true; id: string }> {
+  async deleteInterviewRecord(
+    id: string,
+    userId: string,
+  ): Promise<{ deleted: true; id: string }> {
     const interview = await this.getInterviewRecordForUser(id, userId);
     await this.interviewsRepo.remove(interview);
     return { deleted: true, id };
   }
 
-  async createInterview(userId: string, dto: CreateInterviewRecordDto): Promise<Interview> {
+  async createInterview(
+    userId: string,
+    dto: CreateInterviewRecordDto,
+  ): Promise<Interview> {
     return this.createInterviewRecord(userId, dto);
   }
 
@@ -592,7 +710,10 @@ export class InterviewRecordsService {
     return this.listInterviewRecordsForUser(userId);
   }
 
-  async getInterviewById(userId: string, interviewId: string): Promise<Interview> {
+  async getInterviewById(
+    userId: string,
+    interviewId: string,
+  ): Promise<Interview> {
     return this.getInterviewRecordForUser(interviewId, userId);
   }
 }

@@ -9,7 +9,9 @@ import { RealityCheckRepository } from './reality-check.repository';
 import { RealityCheckService } from './reality-check.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([RealityCheck, Baseline, BaselineSection, Job])],
+  imports: [
+    TypeOrmModule.forFeature([RealityCheck, Baseline, BaselineSection, Job]),
+  ],
   controllers: [RealityCheckController],
   providers: [RealityCheckService, RealityCheckRepository],
 })

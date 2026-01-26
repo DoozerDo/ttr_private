@@ -19,8 +19,13 @@ describe('ApplicationsService', () => {
   };
 
   const createMockRepository = () => ({
-    create: jest.fn((data: Partial<Application>) => ({ ...mockApplication, ...data })),
-    save: jest.fn((app: Application) => Promise.resolve({ ...app, id: app.id || 'new-id' })),
+    create: jest.fn((data: Partial<Application>) => ({
+      ...mockApplication,
+      ...data,
+    })),
+    save: jest.fn((app: Application) =>
+      Promise.resolve({ ...app, id: app.id || 'new-id' }),
+    ),
     findOne: jest.fn(),
     remove: jest.fn((app: Application) => Promise.resolve(app)),
     find: jest.fn(),
@@ -117,7 +122,9 @@ describe('ApplicationsService', () => {
       const queryBuilder = repository.createQueryBuilder();
       const service = createService(repository);
 
-      await service.listApplicationsForUser('user-1', { stage: ApplicationStage.APPLIED });
+      await service.listApplicationsForUser('user-1', {
+        stage: ApplicationStage.APPLIED,
+      });
 
       expect(queryBuilder.andWhere).toHaveBeenCalledWith(
         'application.stage = :stage',
@@ -155,9 +162,9 @@ describe('ApplicationsService', () => {
       repository.findOne.mockResolvedValue(null);
       const service = createService(repository);
 
-      await expect(service.getApplicationForUser('app-1', 'user-1')).rejects.toThrow(
-        'Application not found',
-      );
+      await expect(
+        service.getApplicationForUser('app-1', 'user-1'),
+      ).rejects.toThrow('Application not found');
     });
 
     it('enforces ownership', async () => {
@@ -165,9 +172,9 @@ describe('ApplicationsService', () => {
       repository.findOne.mockResolvedValue(null);
       const service = createService(repository);
 
-      await expect(service.getApplicationForUser('app-1', 'other-user')).rejects.toThrow(
-        'Application not found',
-      );
+      await expect(
+        service.getApplicationForUser('app-1', 'other-user'),
+      ).rejects.toThrow('Application not found');
     });
   });
 
@@ -188,7 +195,10 @@ describe('ApplicationsService', () => {
 
     it('persists a stage-only change', async () => {
       const repository = createMockRepository();
-      const existing = { ...mockApplication, stage: ApplicationStage.SCREENING };
+      const existing = {
+        ...mockApplication,
+        stage: ApplicationStage.SCREENING,
+      };
       repository.findOne.mockResolvedValue(existing);
       const service = createService(repository);
 
@@ -244,7 +254,9 @@ describe('ApplicationsService', () => {
         where: { userId: 'user-1' },
         order: { createdAt: 'DESC' },
       });
-      expect(result.csv).toContain('company,title,appliedDate,fitScore,stage,notes,sourceUrl');
+      expect(result.csv).toContain(
+        'company,title,appliedDate,fitScore,stage,notes,sourceUrl',
+      );
       expect(result.csv).toContain(
         'Acme Corp,Software Engineer,2024-01-01T00:00:00.000Z,80,SAVED,Followed up,https://example.com',
       );

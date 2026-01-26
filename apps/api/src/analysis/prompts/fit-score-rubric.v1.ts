@@ -14,7 +14,11 @@ export type FitScoreRubricDimensions = {
   strategicBalance: number;
 };
 
-export type FitScoreRubricVerdict = 'Strong' | 'Moderate' | 'Borderline' | 'Skip';
+export type FitScoreRubricVerdict =
+  | 'Strong'
+  | 'Moderate'
+  | 'Borderline'
+  | 'Skip';
 
 export type FitScoreRubricJson = {
   scoringPromptVersion: typeof FIT_SCORE_RUBRIC_VERSION;
@@ -57,7 +61,8 @@ export function buildFitScoreRubricMessages(options: {
   ].join('\n');
 
   return {
-    system: 'You are a scoring assistant that evaluates job descriptions against a baseline using a rubric.',
+    system:
+      'You are a scoring assistant that evaluates job descriptions against a baseline using a rubric.',
     developer:
       'Identify how well the job description matches the baseline and score contextual fit for experience, leadership, technical platform, industry context, and strategic balance.',
     user,

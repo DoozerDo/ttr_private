@@ -43,8 +43,12 @@ export class BaselineBlockPolicies1750000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_block_policies_section"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_baseline_block_policies_version"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_baseline_block_policies_section"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_baseline_block_policies_version"`,
+    );
     await queryRunner.query(`DROP TABLE "baseline_block_policies"`);
   }
 }

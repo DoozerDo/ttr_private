@@ -1,4 +1,7 @@
-export type RealityCheckQuestionType = 'boolean' | 'single_select' | 'multi_select';
+export type RealityCheckQuestionType =
+  | 'boolean'
+  | 'single_select'
+  | 'multi_select';
 
 export type RealityCheckQuestionOption = {
   value: string;

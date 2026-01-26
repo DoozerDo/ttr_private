@@ -190,29 +190,6 @@ Follow-up message generator:
 
 Based strictly on interview notes
 
-2.7 Search Set Builder
-Features:
-
-Create job search recipes:
-
-Title patterns
-
-Seniority
-
-Industry
-
-Remote/hybrid filters
-
-Paste a LinkedIn or job board search URL and auto-generate a reusable set
-
-“Run Search Sets” returns:
-
-5–10 highest-matching roles
-
-Each with quick CX Fit Score snapshot
-
-Direct links to apply
-
 3. NEW MODULE: BASELINE EXPANSION INTERVIEW
 
 This module is a major differentiator and must be included in v1.0.
@@ -482,14 +459,6 @@ hash
 
 diff json
 
-Search Sets
-
-id
-
-config_json
-
-last_run
-
 Job Tracker
 
 id
@@ -532,8 +501,6 @@ Web app
 Export docx/pdf
 
 v2.0
-
-Search Sets v1
 
 Interview Toolkit
 

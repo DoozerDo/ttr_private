@@ -1,4 +1,8 @@
-import { InterviewGap, InterviewQuestion, RecommendedAddition } from '../interview-types';
+import {
+  InterviewGap,
+  InterviewQuestion,
+  RecommendedAddition,
+} from '../interview-types';
 
 export class CreateInterviewRecordDto {
   jobId!: string;

@@ -4,8 +4,12 @@ export class SearchSetFilters1880000000000 implements MigrationInterface {
   name = 'SearchSetFilters1880000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "search_sets" RENAME COLUMN "seniority" TO "seniority_old"`);
-    await queryRunner.query(`ALTER TABLE "search_sets" RENAME COLUMN "workMode" TO "workMode_old"`);
+    await queryRunner.query(
+      `ALTER TABLE "search_sets" RENAME COLUMN "seniority" TO "seniority_old"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "search_sets" RENAME COLUMN "workMode" TO "workMode_old"`,
+    );
 
     await queryRunner.query(
       `ALTER TABLE "search_sets" ADD COLUMN "seniority" jsonb NOT NULL DEFAULT '[]'::jsonb`,
@@ -66,9 +70,7 @@ export class SearchSetFilters1880000000000 implements MigrationInterface {
     await queryRunner.query(
       `UPDATE "search_sets" SET "workMode_old" = CASE WHEN jsonb_array_length("workMode") > 0 THEN ("workMode"->>0)::search_sets_workmode_enum ELSE 'ANY' END`,
     );
-    await queryRunner.query(
-      `ALTER TABLE "search_sets" DROP COLUMN "workMode"`,
-    );
+    await queryRunner.query(`ALTER TABLE "search_sets" DROP COLUMN "workMode"`);
     await queryRunner.query(
       `ALTER TABLE "search_sets" RENAME COLUMN "workMode_old" TO "workMode"`,
     );

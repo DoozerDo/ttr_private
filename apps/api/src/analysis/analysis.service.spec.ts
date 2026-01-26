@@ -92,13 +92,15 @@ describe('AnalysisService - fit scores contract', () => {
   };
 
   beforeEach(async () => {
-    baselineVersionRepository = { findOne: jest.fn().mockResolvedValue(baselineVersion) };
+    baselineVersionRepository = {
+      findOne: jest.fn().mockResolvedValue(baselineVersion),
+    };
     jobRepository = { findOne: jest.fn().mockResolvedValue(defaultJobRecord) };
     fitScoringServiceMock = {
       score: jest.fn().mockResolvedValue({
         overallScore: 82,
         rawScore: 82,
-      verdict: 'Apply',
+        verdict: 'Apply',
         persistenceVerdict: FitAssessmentVerdict.APPLY,
         dimensionScores: {
           experienceAlignment: 80,
@@ -142,11 +144,16 @@ describe('AnalysisService - fit scores contract', () => {
                 createdAt: new Date().toISOString(),
               },
             }),
-            normalizeSectionsForOutput: jest.fn().mockImplementation((sections) => sections),
+            normalizeSectionsForOutput: jest
+              .fn()
+              .mockImplementation((sections) => sections),
             normalizeText: jest.fn().mockImplementation((text) => String(text)),
           },
         },
-        { provide: getRepositoryToken(Baseline), useValue: { findOne: jest.fn().mockResolvedValue(baseline) } },
+        {
+          provide: getRepositoryToken(Baseline),
+          useValue: { findOne: jest.fn().mockResolvedValue(baseline) },
+        },
         {
           provide: getRepositoryToken(BaselineSection),
           useValue: { find: jest.fn().mockResolvedValue(baselineSections) },
@@ -155,18 +162,28 @@ describe('AnalysisService - fit scores contract', () => {
           provide: getRepositoryToken(BaselineBlockPolicy),
           useValue: { find: jest.fn().mockResolvedValue([]) },
         },
-        { provide: getRepositoryToken(BaselineVersion), useValue: baselineVersionRepository },
+        {
+          provide: getRepositoryToken(BaselineVersion),
+          useValue: baselineVersionRepository,
+        },
         { provide: getRepositoryToken(Job), useValue: jobRepository },
-        { provide: getRepositoryToken(Interview), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(Interview),
+          useValue: { findOne: jest.fn() },
+        },
         {
           provide: getRepositoryToken(FitAssessment),
           useValue: (() => {
             fitAssessmentRepository = {
               create: jest.fn((payload) => payload),
-              save: jest.fn(async (payload) => ({ ...payload, id: 'fit-1', createdAt: new Date() })),
+              save: jest.fn(async (payload) => ({
+                ...payload,
+                id: 'fit-1',
+                createdAt: new Date(),
+              })),
               findOne: jest.fn(),
             };
-            
+
             return fitAssessmentRepository;
           })(),
         },
@@ -174,7 +191,11 @@ describe('AnalysisService - fit scores contract', () => {
           provide: getRepositoryToken(ExpandedFitAssessment),
           useValue: {
             create: jest.fn((payload) => payload),
-            save: jest.fn(async (payload) => ({ ...payload, id: 'exp-1', createdAt: new Date() })),
+            save: jest.fn(async (payload) => ({
+              ...payload,
+              id: 'exp-1',
+              createdAt: new Date(),
+            })),
           },
         },
         {
@@ -231,15 +252,26 @@ describe('AnalysisService - fit scores contract', () => {
         baseline_version_id: 'bv-1',
         job: { raw_jd_text: 'text', parsed_jd: { requirements: ['x'] } },
       }),
-    ).rejects.toThrowError(expect.objectContaining({ response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }) }) }));
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: 'JD_INPUT_AMBIGUOUS' }),
+        }),
+      }),
+    );
   });
 
   it('rejects missing JD inputs', async () => {
     await expect(
-      service.scoreCompatibility('user-1', { baseline_version_id: 'bv-1', job: {} }),
+      service.scoreCompatibility('user-1', {
+        baseline_version_id: 'bv-1',
+        job: {},
+      }),
     ).rejects.toThrowError(
       expect.objectContaining({
-        response: expect.objectContaining({ error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }) }),
+        response: expect.objectContaining({
+          error: expect.objectContaining({ code: 'JD_INPUT_MISSING' }),
+        }),
       }),
     );
   });
@@ -247,7 +279,9 @@ describe('AnalysisService - fit scores contract', () => {
   it('returns a contract-compliant success response', async () => {
     const result = await service.scoreCompatibility('user-1', {
       baseline_version_id: 'bv-1',
-      job: { raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.' },
+      job: {
+        raw_jd_text: 'Lead cloud platforms with AWS and Kubernetes expertise.',
+      },
     });
 
     expect(result).toEqual(
@@ -393,9 +427,13 @@ describe('AnalysisService - fit scores contract', () => {
     });
 
     it('buildInputsHash ignores normalized segments when raw description exists', () => {
-      const filteredSections = service['getIncludedSections'](baseline.sections);
+      const filteredSections = service['getIncludedSections'](
+        baseline.sections,
+      );
       const sectionPayload = service['buildSectionPayload'](filteredSections);
-      const { canonicalJobForHash: canonicalWith } = service['buildCanonicalJobAssets']({
+      const { canonicalJobForHash: canonicalWith } = service[
+        'buildCanonicalJobAssets'
+      ]({
         rawDescription: refreshJobRecord.rawDescription,
         normalizedResponsibilities: refreshJobRecord.normalizedResponsibilities,
         normalizedRequirements: refreshJobRecord.normalizedRequirements,
@@ -403,7 +441,9 @@ describe('AnalysisService - fit scores contract', () => {
         company: refreshJobRecord.company,
         sourceUrl: refreshJobRecord.sourceUrl,
       });
-      const { canonicalJobForHash: canonicalWithout } = service['buildCanonicalJobAssets']({
+      const { canonicalJobForHash: canonicalWithout } = service[
+        'buildCanonicalJobAssets'
+      ]({
         rawDescription: refreshJobRecord.rawDescription,
         normalizedResponsibilities: [],
         normalizedRequirements: [],
@@ -456,7 +496,11 @@ describe('AnalysisService - fit scores contract', () => {
 
       fitAssessmentRepository.findOne.mockResolvedValue(storedAssessment);
 
-      const result = await service.getLatestAssessmentForBaseline('user-1', 'job-1', 'b-1');
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
 
       expect(result.assessmentId).toBe(storedAssessment.id);
       expect(result.overallScore).toBe(storedAssessment.overallScore);
@@ -490,7 +534,11 @@ describe('AnalysisService - fit scores contract', () => {
       let savedAssessment: FitAssessment | null = null;
 
       fitAssessmentRepository.save.mockImplementation(async (payload) => {
-        savedAssessment = { ...payload, id: 'fresh-fit', createdAt: new Date() } as FitAssessment;
+        savedAssessment = {
+          ...payload,
+          id: 'fresh-fit',
+          createdAt: new Date(),
+        } as FitAssessment;
         return savedAssessment;
       });
 
@@ -501,7 +549,11 @@ describe('AnalysisService - fit scores contract', () => {
         return Promise.resolve(staleAssessment);
       });
 
-      const result = await service.getLatestAssessmentForBaseline('user-1', 'job-1', 'b-1');
+      const result = await service.getLatestAssessmentForBaseline(
+        'user-1',
+        'job-1',
+        'b-1',
+      );
 
       expect(fitScoringServiceMock.score).toHaveBeenCalled();
       expect(savedAssessment).not.toBeNull();
@@ -536,7 +588,11 @@ describe('AnalysisService - fit scores contract', () => {
 
       fitAssessmentRepository.findOne.mockResolvedValueOnce(assessmentRecord);
 
-      const result = await service.calibrateAssessment('user-1', 'fit-1', 'aggressive');
+      const result = await service.calibrateAssessment(
+        'user-1',
+        'fit-1',
+        'aggressive',
+      );
 
       expect(result.ok).toBe(true);
       expect(result.assessmentId).toBe('fit-1');

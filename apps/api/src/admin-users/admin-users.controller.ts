@@ -29,7 +29,9 @@ export class AdminUsersController {
   ) {
     const requestedAccountType = (body.accountType ?? '').toLowerCase().trim();
 
-    if (!Object.values(AccountType).includes(requestedAccountType as AccountType)) {
+    if (
+      !Object.values(AccountType).includes(requestedAccountType as AccountType)
+    ) {
       throw new BadRequestException('accountType must be "free" or "paid"');
     }
 

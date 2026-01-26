@@ -37,7 +37,8 @@ describe('ScopeInflationDetector', () => {
       [
         {
           title: 'Generated Resume',
-          content: 'Directed a global organization of thousands across regions.',
+          content:
+            'Directed a global organization of thousands across regions.',
         },
       ],
     );
@@ -49,7 +50,9 @@ describe('ScopeInflationDetector', () => {
         evidence: expect.arrayContaining([
           expect.objectContaining({
             baseline: expect.any(String),
-            generated: expect.stringContaining('Directed a global organization'),
+            generated: expect.stringContaining(
+              'Directed a global organization',
+            ),
           }),
         ]),
         confidence: expect.any(Number),

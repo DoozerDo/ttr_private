@@ -75,7 +75,11 @@ export class ComplianceService {
 
   // Preserve section shape so downstream callers can still reference `title`, etc.
   public normalizeSectionsForOutput<
-    T extends { content?: string | null; title?: string | null; [key: string]: any },
+    T extends {
+      content?: string | null;
+      title?: string | null;
+      [key: string]: any;
+    },
   >(sections: T[]): T[] {
     if (!Array.isArray(sections)) return [];
 
@@ -91,8 +95,9 @@ export class ComplianceService {
     rawContent?: string;
     [key: string]: unknown;
   }): ComplianceFlag[] {
-    const content =
-      this.normalizeText(payload.normalizedContent ?? payload.rawContent ?? '');
+    const content = this.normalizeText(
+      payload.normalizedContent ?? payload.rawContent ?? '',
+    );
 
     if (!content) return [];
 
@@ -124,12 +129,22 @@ export class ComplianceService {
   }
 
   public detectScopeInflation(payload: {
-    baselineSections?: Array<{ content?: string | null; title?: string | null; sectionType?: string }> | null;
-    generatedSections?: Array<{ content?: string | null; title?: string | null }> | null;
+    baselineSections?: Array<{
+      content?: string | null;
+      title?: string | null;
+      sectionType?: string;
+    }> | null;
+    generatedSections?: Array<{
+      content?: string | null;
+      title?: string | null;
+    }> | null;
   }): ComplianceFlag[] {
     const baselineSections = payload.baselineSections ?? [];
     const generatedSections = payload.generatedSections ?? [];
-    return this.scopeInflationDetector.detect(baselineSections, generatedSections);
+    return this.scopeInflationDetector.detect(
+      baselineSections,
+      generatedSections,
+    );
   }
 
   public enforceTechnologyConsistency(payload: {
@@ -145,15 +160,17 @@ export class ComplianceService {
     });
   }
 
-  async validateAndAudit(payload: ValidateAndAuditRequest): Promise<ValidateAndAuditResult> {
+  async validateAndAudit(
+    payload: ValidateAndAuditRequest,
+  ): Promise<ValidateAndAuditResult> {
     const rawFlags: ComplianceFlag[] = [];
     const baselineVersion = payload.baselineVersion;
 
     const needsFallback =
-      !(baselineVersion?.allowedCompanies?.length) ||
-      !(baselineVersion?.allowedRoles?.length) ||
-      !(baselineVersion?.allowedTechnologies?.length) ||
-      !(baselineVersion?.allowedMetricTokens?.length);
+      !baselineVersion?.allowedCompanies?.length ||
+      !baselineVersion?.allowedRoles?.length ||
+      !baselineVersion?.allowedTechnologies?.length ||
+      !baselineVersion?.allowedMetricTokens?.length;
 
     const fallbackSnapshot =
       needsFallback && payload.baselineSections?.length
@@ -161,22 +178,18 @@ export class ComplianceService {
         : EMPTY_BASELINE_ALLOWLIST;
 
     const baselineAllowlist: BaselineAllowlistSnapshot = {
-      allowedCompanies:
-        baselineVersion?.allowedCompanies?.length
-          ? baselineVersion.allowedCompanies
-          : fallbackSnapshot.allowedCompanies,
-      allowedRoles:
-        baselineVersion?.allowedRoles?.length
-          ? baselineVersion.allowedRoles
-          : fallbackSnapshot.allowedRoles,
-      allowedTechnologies:
-        baselineVersion?.allowedTechnologies?.length
-          ? baselineVersion.allowedTechnologies
-          : fallbackSnapshot.allowedTechnologies,
-      allowedMetricTokens:
-        baselineVersion?.allowedMetricTokens?.length
-          ? baselineVersion.allowedMetricTokens
-          : fallbackSnapshot.allowedMetricTokens,
+      allowedCompanies: baselineVersion?.allowedCompanies?.length
+        ? baselineVersion.allowedCompanies
+        : fallbackSnapshot.allowedCompanies,
+      allowedRoles: baselineVersion?.allowedRoles?.length
+        ? baselineVersion.allowedRoles
+        : fallbackSnapshot.allowedRoles,
+      allowedTechnologies: baselineVersion?.allowedTechnologies?.length
+        ? baselineVersion.allowedTechnologies
+        : fallbackSnapshot.allowedTechnologies,
+      allowedMetricTokens: baselineVersion?.allowedMetricTokens?.length
+        ? baselineVersion.allowedMetricTokens
+        : fallbackSnapshot.allowedMetricTokens,
     };
 
     const actorId = String(payload.actorId ?? '').trim();
@@ -190,7 +203,11 @@ export class ComplianceService {
 
     if (!actorId) {
       rawFlags.push(
-        this.flag('missing_actor', 'Actor id is required.', ComplianceFlagSeverity.BLOCK),
+        this.flag(
+          'missing_actor',
+          'Actor id is required.',
+          ComplianceFlagSeverity.BLOCK,
+        ),
       );
     }
 
@@ -269,7 +286,8 @@ export class ComplianceService {
 
     const blocked = finalFlags.some(
       (f) =>
-        (f.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+        (f.severity ?? ComplianceFlagSeverity.BLOCK) ===
+        ComplianceFlagSeverity.BLOCK,
     );
 
     const audit = this.auditsRepository.create({
@@ -335,7 +353,10 @@ export class ComplianceService {
     ];
   }
 
-  private applyPolicy(action: ComplianceAction, flag: ComplianceFlag): ComplianceFlag {
+  private applyPolicy(
+    action: ComplianceAction,
+    flag: ComplianceFlag,
+  ): ComplianceFlag {
     const policy = resolveCompliancePolicy(action, flag.code);
     const baseSeverity = flag.severity ?? ComplianceFlagSeverity.BLOCK;
     if (!policy) {

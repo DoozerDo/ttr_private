@@ -36,7 +36,10 @@ describe('AuthService', () => {
   });
 
   it('registers a user and returns a token', async () => {
-    const payload: RegisterDto = { email: 'user@example.com', password: 'Password123' };
+    const payload: RegisterDto = {
+      email: 'user@example.com',
+      password: 'Password123',
+    };
     const savedUser: User = {
       id: 'user-id',
       email: payload.email,
@@ -71,7 +74,10 @@ describe('AuthService', () => {
   });
 
   it('logs in a user with valid credentials', async () => {
-    const payload: LoginDto = { email: 'user@example.com', password: 'Password123' };
+    const payload: LoginDto = {
+      email: 'user@example.com',
+      password: 'Password123',
+    };
     const passwordHash = await bcrypt.hash(payload.password, 10);
     const savedUser: User = {
       id: 'user-id',

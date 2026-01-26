@@ -60,7 +60,10 @@ export class ComplianceController {
       baseline_version_hash?: string | null;
       job_id?: string | null;
       output_hash?: string | null;
-      compliance_flags?: Array<{ code: ComplianceFlagCode; message?: string | null }>;
+      compliance_flags?: Array<{
+        code: ComplianceFlagCode;
+        message?: string | null;
+      }>;
     },
   ) {
     const actorId = request.user?.id;

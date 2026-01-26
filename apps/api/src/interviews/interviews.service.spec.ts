@@ -15,7 +15,10 @@ describe('InterviewsService', () => {
   };
 
   const createMockRepository = () => ({
-    create: jest.fn((data: Partial<InterviewSession>) => ({ ...mockInterview, ...data })),
+    create: jest.fn((data: Partial<InterviewSession>) => ({
+      ...mockInterview,
+      ...data,
+    })),
     save: jest.fn((data: InterviewSession) =>
       Promise.resolve({
         ...mockInterview,
@@ -102,12 +105,18 @@ describe('InterviewsService', () => {
     it('requires jobId and baselineId', async () => {
       const service = createService();
 
-      await expect(service.startInterviewFromFitReview('user-1', { jobId: '', baselineId: 'b-1' })).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: '' })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.startInterviewFromFitReview('user-1', {
+          jobId: '',
+          baselineId: 'b-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.startInterviewFromFitReview('user-1', {
+          jobId: 'job-1',
+          baselineId: '',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('returns existing session for same job', async () => {
@@ -115,7 +124,10 @@ describe('InterviewsService', () => {
       repository.findOne.mockResolvedValue(mockInterview);
       const service = createService(repository);
 
-      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
+      const result = await service.startInterviewFromFitReview('user-1', {
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+      });
 
       expect(repository.findOne).toHaveBeenCalledWith({
         where: { userId: 'user-1', jobId: 'job-1' },
@@ -130,7 +142,10 @@ describe('InterviewsService', () => {
       repository.findOne.mockResolvedValue(null);
       const service = createService(repository);
 
-      const result = await service.startInterviewFromFitReview('user-1', { jobId: 'job-1', baselineId: 'baseline-1' });
+      const result = await service.startInterviewFromFitReview('user-1', {
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+      });
 
       expect(repository.create).toHaveBeenCalledWith({
         userId: 'user-1',
@@ -151,7 +166,10 @@ describe('InterviewsService', () => {
       repository.findOne.mockResolvedValue(mockInterview);
       const service = createService(repository);
 
-      const interview = await service.getInterviewForUser('interview-1', 'user-1');
+      const interview = await service.getInterviewForUser(
+        'interview-1',
+        'user-1',
+      );
 
       expect(repository.findOne).toHaveBeenCalledWith({
         where: { id: 'interview-1', userId: 'user-1' },
@@ -164,9 +182,9 @@ describe('InterviewsService', () => {
       repository.findOne.mockResolvedValue(null);
       const service = createService(repository);
 
-      await expect(service.getInterviewForUser('interview-1', 'user-1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.getInterviewForUser('interview-1', 'user-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

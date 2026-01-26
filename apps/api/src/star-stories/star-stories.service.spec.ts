@@ -82,7 +82,9 @@ describe('StarStoriesService', () => {
 
     const story = await service.getStarStoryForUser('story-1', 'user-1');
 
-    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'story-1', userId: 'user-1' } });
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { id: 'story-1', userId: 'user-1' },
+    });
     expect(story).toEqual(mockStory);
   });
 
@@ -91,9 +93,9 @@ describe('StarStoriesService', () => {
     repository.findOne.mockResolvedValue(null);
     const service = createService(repository);
 
-    await expect(service.getStarStoryForUser('missing', 'user-1')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.getStarStoryForUser('missing', 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('updates a story with validation', async () => {

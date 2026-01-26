@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
+import {
+  InterviewGap,
+  InterviewQuestion,
+  RecommendedAddition,
+} from './interview-types';
 
 type RecommendationInput = {
   responses: string[];
@@ -21,7 +25,11 @@ export class RecommendedAdditionsService {
 
     const suggestions: RecommendedAddition[] = [];
 
-    for (let index = 0; index < normalizedResponses.length && suggestions.length < 8; index += 1) {
+    for (
+      let index = 0;
+      index < normalizedResponses.length && suggestions.length < 8;
+      index += 1
+    ) {
       const snippet = this.buildSnippet(normalizedResponses[index]);
       const question = input.questions?.[index];
       const gap = input.gaps?.find((entry) => entry.gapId === question?.gapId);
@@ -33,7 +41,9 @@ export class RecommendedAdditionsService {
           questionIndex: question ? index : undefined,
           questionPrompt: question?.prompt,
         },
-      ].filter((source) => Boolean(source.gapId || source.questionPrompt)) as RecommendedAddition['sources'];
+      ].filter((source) =>
+        Boolean(source.gapId || source.questionPrompt),
+      ) as RecommendedAddition['sources'];
 
       const id = this.buildId(text, sources);
 
@@ -55,7 +65,12 @@ export class RecommendedAdditionsService {
     return snippet.length > 180 ? `${snippet.slice(0, 177)}...` : snippet;
   }
 
-  private buildId(text: string, sources: RecommendedAddition['sources']): string {
-    return createHash('sha256').update(JSON.stringify({ text, sources })).digest('hex');
+  private buildId(
+    text: string,
+    sources: RecommendedAddition['sources'],
+  ): string {
+    return createHash('sha256')
+      .update(JSON.stringify({ text, sources }))
+      .digest('hex');
   }
 }

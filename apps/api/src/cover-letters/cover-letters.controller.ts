@@ -35,7 +35,10 @@ export class CoverLettersController {
   constructor(private readonly coverLettersService: CoverLettersService) {}
 
   @Post('generate')
-  async generate(@Body() body: GenerateCoverLetterDto, @Req() request: TieredRequest) {
+  async generate(
+    @Body() body: GenerateCoverLetterDto,
+    @Req() request: TieredRequest,
+  ) {
     const userId = this.requireUserId(request);
 
     const entitlements = resolveEntitlementsFromUser(request.user);

@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { FitScoreRubricMessages, FitScoreRubricJson, FitScoreRubricVerdict } from './prompts/fit-score-rubric.v1';
+import {
+  FitScoreRubricMessages,
+  FitScoreRubricJson,
+  FitScoreRubricVerdict,
+} from './prompts/fit-score-rubric.v1';
 
 type RubricScoreSuccess = {
   ok: true;
@@ -15,7 +19,9 @@ type RubricScoreFailure = {
 
 @Injectable()
 export class LlmRubricScorerService {
-  async score(messages: FitScoreRubricMessages): Promise<RubricScoreSuccess | RubricScoreFailure> {
+  async score(
+    messages: FitScoreRubricMessages,
+  ): Promise<RubricScoreSuccess | RubricScoreFailure> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return { ok: false, reason: 'missing_openai_api_key', rawText: '' };
@@ -24,22 +30,25 @@ export class LlmRubricScorerService {
     const model = process.env.OPENAI_FIT_SCORE_MODEL ?? 'gpt-3.5-turbo';
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+      const response = await fetch(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: 0,
+            messages: [
+              { role: 'system', content: messages.system },
+              { role: 'developer', content: messages.developer },
+              { role: 'user', content: messages.user },
+            ],
+          }),
         },
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          messages: [
-            { role: 'system', content: messages.system },
-            { role: 'developer', content: messages.developer },
-            { role: 'user', content: messages.user },
-          ],
-        }),
-      });
+      );
 
       if (!response.ok) {
         const rawText = await response.text();
@@ -75,9 +84,9 @@ export class LlmRubricScorerService {
     }
   }
 
-  private validateParsed(parsed: unknown):
-    | { ok: true; value: FitScoreRubricJson }
-    | { ok: false; reason: string } {
+  private validateParsed(
+    parsed: unknown,
+  ): { ok: true; value: FitScoreRubricJson } | { ok: false; reason: string } {
     if (typeof parsed !== 'object' || parsed === null) {
       return { ok: false, reason: 'parsed_not_object' };
     }
@@ -108,23 +117,35 @@ export class LlmRubricScorerService {
       ok: true,
       value: {
         scoringPromptVersion: candidate.scoringPromptVersion,
-        score: candidate.score as number,
-        verdict: candidate.verdict as FitScoreRubricVerdict,
-        dimensionScores: candidate.dimensionScores as FitScoreRubricJson['dimensionScores'],
+        score: candidate.score,
+        verdict: candidate.verdict,
+        dimensionScores: candidate.dimensionScores,
         notes: candidate.notes,
       },
     };
   }
 
   private isValidScore(score: unknown): score is number {
-    return typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100;
+    return (
+      typeof score === 'number' &&
+      Number.isFinite(score) &&
+      score >= 0 &&
+      score <= 100
+    );
   }
 
   private isValidVerdict(verdict: unknown): verdict is FitScoreRubricVerdict {
-    return verdict === 'Strong' || verdict === 'Moderate' || verdict === 'Borderline' || verdict === 'Skip';
+    return (
+      verdict === 'Strong' ||
+      verdict === 'Moderate' ||
+      verdict === 'Borderline' ||
+      verdict === 'Skip'
+    );
   }
 
-  private isValidDimensionScores(scores: unknown): scores is FitScoreRubricJson['dimensionScores'] {
+  private isValidDimensionScores(
+    scores: unknown,
+  ): scores is FitScoreRubricJson['dimensionScores'] {
     if (typeof scores !== 'object' || scores === null) {
       return false;
     }

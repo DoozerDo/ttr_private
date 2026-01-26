@@ -54,7 +54,9 @@ describe('JobsService', () => {
     });
 
     expect(result.rawDescription.length).toBeGreaterThan(1000);
-    expect(result.originalRawDescription.length).toBeGreaterThanOrEqual(result.rawDescription.length);
+    expect(result.originalRawDescription.length).toBeGreaterThanOrEqual(
+      result.rawDescription.length,
+    );
     expect(result.responsibilities).toContain('Build features');
     expect(result.requirements).toContain('5+ years');
   });

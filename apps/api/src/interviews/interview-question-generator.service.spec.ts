@@ -24,7 +24,13 @@ describe('InterviewQuestionGeneratorService', () => {
 
     const categories = questions.map((q) => q.category);
     expect(categories).toEqual(
-      expect.arrayContaining(['Direct Experience', 'Context', 'Scope', 'Tooling', 'Impact']),
+      expect.arrayContaining([
+        'Direct Experience',
+        'Context',
+        'Scope',
+        'Tooling',
+        'Impact',
+      ]),
     );
   });
 });

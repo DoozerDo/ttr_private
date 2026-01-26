@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
@@ -45,13 +49,18 @@ export class ApplicationsService {
     return this.applicationRepository.save(application);
   }
 
-  async listApplicationsForUser(userId: string, filters?: ListApplicationsFilters) {
+  async listApplicationsForUser(
+    userId: string,
+    filters?: ListApplicationsFilters,
+  ) {
     const queryBuilder = this.applicationRepository
       .createQueryBuilder('application')
       .where('application.userId = :userId', { userId });
 
     if (filters?.stage) {
-      queryBuilder.andWhere('application.stage = :stage', { stage: filters.stage });
+      queryBuilder.andWhere('application.stage = :stage', {
+        stage: filters.stage,
+      });
     }
 
     if (filters?.company) {
@@ -77,19 +86,26 @@ export class ApplicationsService {
     return application;
   }
 
-  async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
+  async updateApplication(
+    id: string,
+    userId: string,
+    dto: UpdateApplicationDto,
+  ) {
     const application = await this.getApplicationForUser(id, userId);
 
     if (dto.company !== undefined) application.company = dto.company.trim();
     if (dto.title !== undefined) application.title = dto.title.trim();
     if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
     if (dto.appliedDate !== undefined) {
-      application.appliedDate = dto.appliedDate ? new Date(dto.appliedDate) : null;
+      application.appliedDate = dto.appliedDate
+        ? new Date(dto.appliedDate)
+        : null;
     }
     if (dto.fitScore !== undefined) application.fitScore = dto.fitScore;
     if (dto.stage !== undefined) application.stage = dto.stage;
     if (dto.notes !== undefined) application.notes = dto.notes?.trim() || null;
-    if (dto.sourceUrl !== undefined) application.sourceUrl = dto.sourceUrl?.trim() || null;
+    if (dto.sourceUrl !== undefined)
+      application.sourceUrl = dto.sourceUrl?.trim() || null;
 
     return this.applicationRepository.save(application);
   }
@@ -138,7 +154,9 @@ export class ApplicationsService {
 
     const csv = [
       headers.join(','),
-      ...rows.map((row) => row.map((value) => escapeCsv(String(value))).join(',')),
+      ...rows.map((row) =>
+        row.map((value) => escapeCsv(String(value))).join(','),
+      ),
     ].join('\n');
 
     const baselineVersion = new BaselineVersion();

@@ -1,7 +1,5 @@
-import { SearchSetSourceType } from '../search-sets/search-set.entity';
-
 export type JobSourceInput = {
-  sourceType: SearchSetSourceType;
+  sourceType: string;
   sourceUrl: string;
   options?: Record<string, unknown> | null;
 };

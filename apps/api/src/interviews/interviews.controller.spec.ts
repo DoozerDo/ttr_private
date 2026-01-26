@@ -4,16 +4,24 @@ import { InterviewsService } from './interviews.service';
 
 describe('InterviewsController', () => {
   const createMockRequest = (userId?: string) =>
-    ({ user: userId ? { id: userId } : undefined } as { user?: { id?: string } });
+    ({ user: userId ? { id: userId } : undefined }) as {
+      user?: { id?: string };
+    };
 
   const createMockService = () =>
     ({
       createInterview: jest.fn().mockResolvedValue({ id: 'interview-1' }),
       listInterviewsForUser: jest.fn().mockResolvedValue([]),
       getInterviewForUser: jest.fn().mockResolvedValue({ id: 'interview-1' }),
-      startInterviewFromFitReview: jest.fn().mockResolvedValue({ id: 'interview-1', jobId: 'job-1' }),
-      updateInterview: jest.fn().mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
-      deleteInterview: jest.fn().mockResolvedValue({ deleted: true, id: 'interview-1' }),
+      startInterviewFromFitReview: jest
+        .fn()
+        .mockResolvedValue({ id: 'interview-1', jobId: 'job-1' }),
+      updateInterview: jest
+        .fn()
+        .mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
+      deleteInterview: jest
+        .fn()
+        .mockResolvedValue({ deleted: true, id: 'interview-1' }),
     }) as unknown as InterviewsService;
 
   afterEach(() => {
@@ -24,16 +32,20 @@ describe('InterviewsController', () => {
     const service = createMockService();
     const controller = new InterviewsController(service);
 
-    await expect(controller.createInterview({}, createMockRequest())).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      controller.createInterview({}, createMockRequest()),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('creates interview with user context', async () => {
     const service = createMockService();
     const controller = new InterviewsController(service);
     const request = createMockRequest('user-1');
-    const body = { baselineId: 'baseline-1', date: '2024-02-01', type: 'phone' };
+    const body = {
+      baselineId: 'baseline-1',
+      date: '2024-02-01',
+      type: 'phone',
+    };
 
     await controller.createInterview(body, request as any);
 
@@ -57,7 +69,10 @@ describe('InterviewsController', () => {
 
     await controller.getInterview('interview-1', request as any);
 
-    expect(service.getInterviewForUser).toHaveBeenCalledWith('interview-1', 'user-1');
+    expect(service.getInterviewForUser).toHaveBeenCalledWith(
+      'interview-1',
+      'user-1',
+    );
   });
 
   it('starts interview from fit review', async () => {
@@ -68,7 +83,10 @@ describe('InterviewsController', () => {
 
     await controller.startInterviewFromFitReview(body, request as any);
 
-    expect(service.startInterviewFromFitReview).toHaveBeenCalledWith('user-1', body);
+    expect(service.startInterviewFromFitReview).toHaveBeenCalledWith(
+      'user-1',
+      body,
+    );
   });
 
   it('updates interview for user', async () => {
@@ -79,7 +97,11 @@ describe('InterviewsController', () => {
 
     await controller.updateInterview('interview-1', update, request as any);
 
-    expect(service.updateInterview).toHaveBeenCalledWith('interview-1', 'user-1', update);
+    expect(service.updateInterview).toHaveBeenCalledWith(
+      'interview-1',
+      'user-1',
+      update,
+    );
   });
 
   it('deletes interview for user', async () => {
@@ -89,6 +111,9 @@ describe('InterviewsController', () => {
 
     await controller.deleteInterview('interview-1', request as any);
 
-    expect(service.deleteInterview).toHaveBeenCalledWith('interview-1', 'user-1');
+    expect(service.deleteInterview).toHaveBeenCalledWith(
+      'interview-1',
+      'user-1',
+    );
   });
 });

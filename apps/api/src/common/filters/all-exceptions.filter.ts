@@ -25,11 +25,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const method = req?.method ?? '';
 
     const message = isHttp
-      ? (exception.getResponse() as any)?.message ?? exception.message
+      ? ((exception.getResponse() as any)?.message ?? exception.message)
       : 'Internal server error';
 
-    const error =
-      isHttp ? (exception.getResponse() as any)?.error ?? 'Error' : 'Error';
+    const error = isHttp
+      ? ((exception.getResponse() as any)?.error ?? 'Error')
+      : 'Error';
 
     const stack =
       exception && typeof exception === 'object' && 'stack' in exception

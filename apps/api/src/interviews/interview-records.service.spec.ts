@@ -4,7 +4,11 @@ import { Interview } from './interview.entity';
 import { InterviewRecordsService } from './interview-records.service';
 import { GapDetectionService } from './gap-detection.service';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
-import { InterviewGap, InterviewQuestion, RecommendedAddition } from './interview-types';
+import {
+  InterviewGap,
+  InterviewQuestion,
+  RecommendedAddition,
+} from './interview-types';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
 import { AnalysisService } from '../analysis/analysis.service';
 
@@ -37,7 +41,10 @@ describe('InterviewRecordsService', () => {
   };
 
   const createMockRepository = () => ({
-    create: jest.fn((data: Partial<Interview>) => ({ ...mockInterview, ...data })),
+    create: jest.fn((data: Partial<Interview>) => ({
+      ...mockInterview,
+      ...data,
+    })),
     save: jest.fn(async (data: Interview) => data),
     find: jest.fn(),
     findOne: jest.fn(),
@@ -57,7 +64,9 @@ describe('InterviewRecordsService', () => {
     baselineVersionRepository = { findOne: jest.fn() },
     gapDetectionService: Partial<GapDetectionService> = {},
     interviewQuestionGenerator: Partial<InterviewQuestionGeneratorService> = {},
-    recommendedAdditionsService: Partial<{ generateFromResponses: () => RecommendedAddition[] }> = {
+    recommendedAdditionsService: Partial<{
+      generateFromResponses: () => RecommendedAddition[];
+    }> = {
       generateFromResponses: jest.fn().mockReturnValue([]),
     },
     baselineVersionService: Partial<BaselineVersionService> = {
@@ -161,9 +170,14 @@ describe('InterviewRecordsService', () => {
     repository.findOne.mockResolvedValue(mockInterview);
     const service = createService(repository);
 
-    const record = await service.getInterviewRecordForUser('interview-1', 'user-1');
+    const record = await service.getInterviewRecordForUser(
+      'interview-1',
+      'user-1',
+    );
 
-    expect(repository.findOne).toHaveBeenCalledWith({ where: { id: 'interview-1', userId: 'user-1' } });
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { id: 'interview-1', userId: 'user-1' },
+    });
     expect(record).toEqual(mockInterview);
   });
 
@@ -183,16 +197,26 @@ describe('InterviewRecordsService', () => {
     const recommendedAdditions = [
       { id: 'abc', text: 'addition', sources: [], status: 'proposed' as const },
     ];
-    const service = createService(repository, undefined, {}, {}, {
-      generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
-    });
+    const service = createService(
+      repository,
+      undefined,
+      {},
+      {},
+      {
+        generateFromResponses: jest.fn().mockReturnValue(recommendedAdditions),
+      },
+    );
 
-    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-      jobId: ' job-3 ',
-      gapList: [{ gapId: 'gap-2' }],
-      validationResults: { ok: false },
-      responses: [' a '],
-    });
+    const result = await service.updateInterviewRecord(
+      'interview-1',
+      'user-1',
+      {
+        jobId: ' job-3 ',
+        gapList: [{ gapId: 'gap-2' }],
+        validationResults: { ok: false },
+        responses: [' a '],
+      },
+    );
 
     expect(repository.save).toHaveBeenCalled();
     expect(result.jobId).toBe('job-3');
@@ -213,20 +237,35 @@ describe('InterviewRecordsService', () => {
 
   it('generates recommended additions when compliance allows', async () => {
     const repository = createMockRepository();
-    repository.findOne.mockResolvedValue({ ...mockInterview, recommendedAdditions: [] });
+    repository.findOne.mockResolvedValue({
+      ...mockInterview,
+      recommendedAdditions: [],
+    });
     const additions = [
       { id: 'a', text: 'Addition 1', sources: [], status: 'proposed' as const },
     ];
     const recommendedAdditionsService = {
       generateFromResponses: jest.fn().mockReturnValue(additions),
     };
-    const service = createService(repository, undefined, {}, {}, recommendedAdditionsService);
+    const service = createService(
+      repository,
+      undefined,
+      {},
+      {},
+      recommendedAdditionsService,
+    );
 
-    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-      responses: [' Response '],
-    });
+    const result = await service.updateInterviewRecord(
+      'interview-1',
+      'user-1',
+      {
+        responses: [' Response '],
+      },
+    );
 
-    expect(recommendedAdditionsService.generateFromResponses).toHaveBeenCalledWith({
+    expect(
+      recommendedAdditionsService.generateFromResponses,
+    ).toHaveBeenCalledWith({
       responses: [' Response '],
       questions: [],
       gaps: [],
@@ -246,13 +285,25 @@ describe('InterviewRecordsService', () => {
     const recommendedAdditionsService = {
       generateFromResponses: jest.fn(),
     };
-    const service = createService(repository, undefined, {}, {}, recommendedAdditionsService);
+    const service = createService(
+      repository,
+      undefined,
+      {},
+      {},
+      recommendedAdditionsService,
+    );
 
-    const result = await service.updateInterviewRecord('interview-1', 'user-1', {
-      responses: [' Response '],
-    });
+    const result = await service.updateInterviewRecord(
+      'interview-1',
+      'user-1',
+      {
+        responses: [' Response '],
+      },
+    );
 
-    expect(recommendedAdditionsService.generateFromResponses).not.toHaveBeenCalled();
+    expect(
+      recommendedAdditionsService.generateFromResponses,
+    ).not.toHaveBeenCalled();
     expect(result.recommendedAdditions).toEqual([]);
   });
 
@@ -261,26 +312,49 @@ describe('InterviewRecordsService', () => {
     repository.findOne.mockResolvedValue({
       ...mockInterview,
       recommendedAdditions: [
-        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
-        { id: 'a2', text: 'Addition B', sources: [], status: 'proposed' as const },
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
+        {
+          id: 'a2',
+          text: 'Addition B',
+          sources: [],
+          status: 'proposed' as const,
+        },
       ],
     });
     const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-    const service = createService(repository, undefined, {}, {}, undefined, baselineVersionService);
+    const service = createService(
+      repository,
+      undefined,
+      {},
+      {},
+      undefined,
+      baselineVersionService,
+    );
 
-    const result = await service.applyAdditionDecisions('interview-1', 'user-1', {
-      decisions: [
-        { additionId: 'a1', decision: 'reject' },
-        { additionId: 'a2', decision: 'defer' },
-      ],
-    });
+    const result = await service.applyAdditionDecisions(
+      'interview-1',
+      'user-1',
+      {
+        decisions: [
+          { additionId: 'a1', decision: 'reject' },
+          { additionId: 'a2', decision: 'defer' },
+        ],
+      },
+    );
 
     expect(repository.save).toHaveBeenCalledTimes(1);
     expect(result.recommendedAdditions).toEqual([
       { id: 'a1', text: 'Addition A', sources: [], status: 'rejected' },
       { id: 'a2', text: 'Addition B', sources: [], status: 'deferred' },
     ]);
-    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
+    expect(
+      baselineVersionService.approveVerifiedAdditions,
+    ).not.toHaveBeenCalled();
   });
 
   it('rejects promotion when no accepted additions are set', async () => {
@@ -288,18 +362,32 @@ describe('InterviewRecordsService', () => {
     repository.findOne.mockResolvedValue({
       ...mockInterview,
       recommendedAdditions: [
-        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
       ],
       acceptedAdditionIds: [],
     });
     const baselineVersionService = { approveVerifiedAdditions: jest.fn() };
-    const service = createService(repository, undefined, {}, {}, undefined, baselineVersionService);
+    const service = createService(
+      repository,
+      undefined,
+      {},
+      {},
+      undefined,
+      baselineVersionService,
+    );
 
     await expect(
       service.promoteAcceptedAdditions('interview-1', 'user-1'),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(baselineVersionService.approveVerifiedAdditions).not.toHaveBeenCalled();
+    expect(
+      baselineVersionService.approveVerifiedAdditions,
+    ).not.toHaveBeenCalled();
   });
 
   it('stores expanded fit assessment when computed', async () => {
@@ -307,12 +395,19 @@ describe('InterviewRecordsService', () => {
     repository.findOne.mockResolvedValue({
       ...mockInterview,
       recommendedAdditions: [
-        { id: 'a1', text: 'Addition A', sources: [], status: 'proposed' as const },
+        {
+          id: 'a1',
+          text: 'Addition A',
+          sources: [],
+          status: 'proposed' as const,
+        },
       ],
       acceptedAdditionIds: ['a1'],
     });
     const baselineVersionRepository = {
-      findOne: jest.fn().mockResolvedValue({ versionNumber: 4, fileHash: 'hash' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ versionNumber: 4, fileHash: 'hash' }),
     };
     const analysisService = {
       runExpandedFitAssessment: jest.fn().mockResolvedValue({
@@ -334,13 +429,16 @@ describe('InterviewRecordsService', () => {
 
     const result = await service.computeExpandedFit('interview-1', 'user-1');
 
-    expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith('user-1', {
-      jobId: 'job-1',
-      baselineId: 'baseline-1',
-      baselineVersion: 4,
-      interviewId: 'interview-1',
-      verifiedAdditions: ['Addition A'],
-    });
+    expect(analysisService.runExpandedFitAssessment).toHaveBeenCalledWith(
+      'user-1',
+      {
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+        baselineVersion: 4,
+        interviewId: 'interview-1',
+        verifiedAdditions: ['Addition A'],
+      },
+    );
     expect(result.expandedFitAssessment).toEqual(
       expect.objectContaining({
         ok: true,

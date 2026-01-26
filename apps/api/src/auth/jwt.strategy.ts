@@ -15,7 +15,9 @@ type JwtPayload = {
 
 const AUTH_COOKIE_NAME = 'ttr_token';
 
-function extractTokenFromCookie(req: Request | undefined | null): string | null {
+function extractTokenFromCookie(
+  req: Request | undefined | null,
+): string | null {
   if (!req) {
     return null;
   }

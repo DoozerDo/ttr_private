@@ -44,16 +44,21 @@ export class RealityCheckService {
     private readonly jobRepository: Repository<Job>,
   ) {}
 
-  async getLatestRealityCheck(userId: string, jobId: string, baselineId: string) {
+  async getLatestRealityCheck(
+    userId: string,
+    jobId: string,
+    baselineId: string,
+  ) {
     await this.ensureJobForUser(userId, jobId);
     const baseline = await this.loadBaselineForUser(userId, baselineId);
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
     }
-    const existing = await this.realityCheckRepository.findLatestByJobAndBaseline(
-      jobId,
-      baselineId,
-    );
+    const existing =
+      await this.realityCheckRepository.findLatestByJobAndBaseline(
+        jobId,
+        baselineId,
+      );
     if (!existing) {
       throw new NotFoundException('Reality check not found');
     }
@@ -77,7 +82,11 @@ export class RealityCheckService {
     );
     const questions = this.generateQuestions(context);
     const validatedAnswers = this.validateAnswers(questions, answers);
-    const outcomeState = this.computeOutcome(context, questions, validatedAnswers);
+    const outcomeState = this.computeOutcome(
+      context,
+      questions,
+      validatedAnswers,
+    );
 
     return this.realityCheckRepository.createRealityCheck({
       jobId: job.id,
@@ -119,7 +128,10 @@ export class RealityCheckService {
     });
   }
 
-  private async ensureBaselineForRealityCheck(userId: string, baselineId: string) {
+  private async ensureBaselineForRealityCheck(
+    userId: string,
+    baselineId: string,
+  ) {
     const baseline = await this.loadBaselineForUser(userId, baselineId);
     if (!baseline) {
       this.throwBaselineRequired();
@@ -132,27 +144,37 @@ export class RealityCheckService {
     jobId: string,
     baselineId: string,
   ) {
-    const baseline = await this.ensureBaselineForRealityCheck(userId, baselineId);
+    const baseline = await this.ensureBaselineForRealityCheck(
+      userId,
+      baselineId,
+    );
     const job = await this.ensureJobForUser(userId, jobId);
     const context = this.buildContext(job, baseline);
     return { baseline, job, context };
   }
 
   async prepareQuestionSet(userId: string, jobId: string, baselineId: string) {
-    const { context } = await this.buildRealityCheckContext(userId, jobId, baselineId);
+    const { context } = await this.buildRealityCheckContext(
+      userId,
+      jobId,
+      baselineId,
+    );
     return { questions: this.generateQuestions(context) };
   }
 
   private buildContext(job: Job, baseline: Baseline): RealityCheckContext {
-    const baselineSections =
-      (baseline.sections ?? []).sort((a, b) => a.order - b.order);
+    const baselineSections = (baseline.sections ?? []).sort(
+      (a, b) => a.order - b.order,
+    );
     const baselinePayloadSections = baselineSections.map((section) => ({
       type: section.sectionType ?? section.type,
       content: section.content,
     }));
 
     const jobText = this.buildJobText(job);
-    const baselineText = baselinePayloadSections.map((section) => section.content).join('\n');
+    const baselineText = baselinePayloadSections
+      .map((section) => section.content)
+      .join('\n');
     const cxFit = scoreCxFitV2({
       job: {
         rawDescription: job.rawDescription,
@@ -210,9 +232,13 @@ export class RealityCheckService {
     const baselineKeywords = this.normalizeKeywords(baselineText);
 
     const candidates = [...jobKeywords.entries()]
-      .filter(([keyword]) => !baselineKeywords.has(keyword) && !uniqueRequired.includes(keyword))
+      .filter(
+        ([keyword]) =>
+          !baselineKeywords.has(keyword) && !uniqueRequired.includes(keyword),
+      )
       .sort((a, b) => {
-        const delta = (jobKeywords.get(b[0]) ?? 0) - (jobKeywords.get(a[0]) ?? 0);
+        const delta =
+          (jobKeywords.get(b[0]) ?? 0) - (jobKeywords.get(a[0]) ?? 0);
         if (delta !== 0) return delta;
         return a[0].localeCompare(b[0]);
       })
@@ -238,7 +264,9 @@ export class RealityCheckService {
 
   private normalizeKeywords(text: string) {
     const normalized = text.toLowerCase();
-    const tokens = normalized.match(/[a-z0-9]+/g)?.filter((token) => token.length >= 3) ?? [];
+    const tokens =
+      normalized.match(/[a-z0-9]+/g)?.filter((token) => token.length >= 3) ??
+      [];
     const frequencies = new Map<string, number>();
     for (const token of tokens) {
       frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
@@ -246,7 +274,9 @@ export class RealityCheckService {
     return frequencies;
   }
 
-  private generateQuestions(context: RealityCheckContext): RealityCheckQuestion[] {
+  private generateQuestions(
+    context: RealityCheckContext,
+  ): RealityCheckQuestion[] {
     const questions: RealityCheckQuestion[] = [];
 
     questions.push({
@@ -268,10 +298,13 @@ export class RealityCheckService {
     });
 
     if (context.missingSkillOptions.length) {
-      const options = context.missingSkillOptions.map<RealityCheckQuestionOption>((skill) => ({
-        value: skill,
-        label: skill,
-      }));
+      const options =
+        context.missingSkillOptions.map<RealityCheckQuestionOption>(
+          (skill) => ({
+            value: skill,
+            label: skill,
+          }),
+        );
 
       questions.push({
         id: 'skill_currency',
@@ -287,7 +320,8 @@ export class RealityCheckService {
     questions.push({
       id: 'time_relevance',
       type: 'boolean',
-      prompt: 'Is this baseline representative of what you have done in the last 12 to 18 months?',
+      prompt:
+        'Is this baseline representative of what you have done in the last 12 to 18 months?',
       mapsToSections: ['summary', 'experience'],
       gatingTag: 'time_relevance',
     });
@@ -295,7 +329,8 @@ export class RealityCheckService {
     questions.push({
       id: 'summary_confidence',
       type: 'boolean',
-      prompt: 'Does this baseline fully describe your current responsibilities and outcomes?',
+      prompt:
+        'Does this baseline fully describe your current responsibilities and outcomes?',
       mapsToSections: ['summary'],
       gatingTag: 'summary_confidence',
     });
@@ -308,21 +343,29 @@ export class RealityCheckService {
     answers: RealityCheckAnswerInput[],
   ): RealityCheckAnswer[] {
     if (!questions.length) {
-      throw new BadRequestException('No Reality Check questions were generated');
+      throw new BadRequestException(
+        'No Reality Check questions were generated',
+      );
     }
 
-    const questionMap = new Map(questions.map((question) => [question.id, question]));
+    const questionMap = new Map(
+      questions.map((question) => [question.id, question]),
+    );
     const seen = new Set<string>();
     const validated: RealityCheckAnswer[] = [];
 
     for (const answer of answers) {
       const question = questionMap.get(answer.questionId);
       if (!question) {
-        throw new BadRequestException(`Unknown questionId: ${answer.questionId}`);
+        throw new BadRequestException(
+          `Unknown questionId: ${answer.questionId}`,
+        );
       }
 
       if (seen.has(question.id)) {
-        throw new BadRequestException(`Duplicate answer for question: ${question.id}`);
+        throw new BadRequestException(
+          `Duplicate answer for question: ${question.id}`,
+        );
       }
 
       seen.add(question.id);
@@ -338,21 +381,29 @@ export class RealityCheckService {
       switch (question.type) {
         case 'boolean':
           if (typeof value !== 'boolean') {
-            throw new BadRequestException(`Question ${question.id} requires a boolean value`);
+            throw new BadRequestException(
+              `Question ${question.id} requires a boolean value`,
+            );
           }
           break;
         case 'single_select': {
           if (typeof value !== 'string') {
-            throw new BadRequestException(`Question ${question.id} requires a single select value`);
+            throw new BadRequestException(
+              `Question ${question.id} requires a single select value`,
+            );
           }
           if (!question.options?.some((option) => option.value === value)) {
-            throw new BadRequestException(`Invalid option for question ${question.id}`);
+            throw new BadRequestException(
+              `Invalid option for question ${question.id}`,
+            );
           }
           break;
         }
         case 'multi_select': {
           if (!Array.isArray(value)) {
-            throw new BadRequestException(`Question ${question.id} requires an array`);
+            throw new BadRequestException(
+              `Question ${question.id} requires an array`,
+            );
           }
           if (value.length > this.multiSelectLimit) {
             throw new BadRequestException(
@@ -360,20 +411,30 @@ export class RealityCheckService {
             );
           }
           if (!question.options?.length) {
-            throw new BadRequestException(`Question ${question.id} has no options`);
+            throw new BadRequestException(
+              `Question ${question.id} has no options`,
+            );
           }
           for (const candidate of value) {
             if (typeof candidate !== 'string') {
-              throw new BadRequestException(`Invalid multi select value for ${question.id}`);
+              throw new BadRequestException(
+                `Invalid multi select value for ${question.id}`,
+              );
             }
-            if (!question.options.some((option) => option.value === candidate)) {
-              throw new BadRequestException(`Invalid option for question ${question.id}`);
+            if (
+              !question.options.some((option) => option.value === candidate)
+            ) {
+              throw new BadRequestException(
+                `Invalid option for question ${question.id}`,
+              );
             }
           }
           break;
         }
         default:
-          throw new BadRequestException(`Unsupported question type: ${question.type}`);
+          throw new BadRequestException(
+            `Unsupported question type: ${question.type}`,
+          );
       }
 
       validated.push({
@@ -384,7 +445,9 @@ export class RealityCheckService {
     }
 
     if (validated.length !== questions.length) {
-      throw new BadRequestException('All Reality Check questions must be answered');
+      throw new BadRequestException(
+        'All Reality Check questions must be answered',
+      );
     }
 
     return validated;
@@ -395,7 +458,9 @@ export class RealityCheckService {
     questions: RealityCheckQuestion[],
     answers: RealityCheckAnswer[],
   ) {
-    const answerMap = new Map(answers.map((answer) => [answer.questionId, answer]));
+    const answerMap = new Map(
+      answers.map((answer) => [answer.questionId, answer]),
+    );
     const triggeredTags: string[] = [];
 
     for (const question of questions) {
@@ -424,7 +489,10 @@ export class RealityCheckService {
         outcome: RealityCheckOutcome.UPDATE_RECOMMENDED,
         triggeredBy: triggeredTags,
         baselineUpdateSuggested: true,
-        suggestedBaselineSections: this.deriveSuggestedSections(questions, answers),
+        suggestedBaselineSections: this.deriveSuggestedSections(
+          questions,
+          answers,
+        ),
       };
     }
 
@@ -441,7 +509,10 @@ export class RealityCheckService {
     answer: RealityCheckAnswer,
   ) {
     if (question.type === 'boolean') {
-      if (question.id === 'time_relevance' || question.id === 'summary_confidence') {
+      if (
+        question.id === 'time_relevance' ||
+        question.id === 'summary_confidence'
+      ) {
         return answer.value === false;
       }
       return answer.value === true;
@@ -477,7 +548,9 @@ export class RealityCheckService {
     questions: RealityCheckQuestion[],
     answers: RealityCheckAnswer[],
   ) {
-    const answerMap = new Map(answers.map((answer) => [answer.questionId, answer]));
+    const answerMap = new Map(
+      answers.map((answer) => [answer.questionId, answer]),
+    );
     const sections = new Set<string>();
 
     for (const question of questions) {

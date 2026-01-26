@@ -1,5 +1,9 @@
 import { ComplianceService } from './compliance.service';
-import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from './compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagCode,
+  ComplianceFlagSeverity,
+} from './compliance.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
 const buildAuditRepo = () => {
@@ -182,10 +186,16 @@ describe('ComplianceService', () => {
         baselineVersion: baselineVersionWithHash,
         outputHash: 'out-role',
         baselineSections: [
-          { title: 'Experience', content: 'Served as Software Engineer managing releases.' },
+          {
+            title: 'Experience',
+            content: 'Served as Software Engineer managing releases.',
+          },
         ],
         generatedSections: [
-          { title: 'Experience', content: 'Discussed the Chief Innovation Strategist role.' },
+          {
+            title: 'Experience',
+            content: 'Discussed the Chief Innovation Strategist role.',
+          },
         ],
       });
 
@@ -205,7 +215,8 @@ describe('ComplianceService', () => {
         generatedSections: [
           {
             title: 'Cover Letter',
-            content: 'Thank you to the hiring manager and interview panel for their time.',
+            content:
+              'Thank you to the hiring manager and interview panel for their time.',
           },
         ],
       });
@@ -267,7 +278,10 @@ describe('ComplianceService', () => {
           { title: 'Experience', content: 'Served as Principal Designer.' },
         ],
         generatedSections: [
-          { title: 'Experience', content: 'Solidified experience as Principal Designer role.' },
+          {
+            title: 'Experience',
+            content: 'Solidified experience as Principal Designer role.',
+          },
         ],
       });
 
@@ -284,12 +298,16 @@ describe('ComplianceService', () => {
         baselineVersion: baselineVersionWithHash,
         outputHash: 'out-baseline-fragment',
         baselineSections: [
-          { title: 'Experience', content: 'Served as Senior Manager focusing on CX.' },
+          {
+            title: 'Experience',
+            content: 'Served as Senior Manager focusing on CX.',
+          },
         ],
         generatedSections: [
           {
             title: 'Experience',
-            content: 'confidence. Experience Senior Manager with deep customer success experience.',
+            content:
+              'confidence. Experience Senior Manager with deep customer success experience.',
           },
         ],
       });
@@ -306,11 +324,14 @@ describe('ComplianceService', () => {
         actorId: 'user-invented-role',
         baselineVersion: baselineVersionWithHash,
         outputHash: 'out-invented-role',
-        baselineSections: [{ title: 'Experience', content: 'Served as Software Engineer.' }],
+        baselineSections: [
+          { title: 'Experience', content: 'Served as Software Engineer.' },
+        ],
         generatedSections: [
           {
             title: 'Experience',
-            content: 'Experience VP of Galactic Support overseeing interplanetary missions.',
+            content:
+              'Experience VP of Galactic Support overseeing interplanetary missions.',
           },
         ],
       });
@@ -358,13 +379,15 @@ describe('ComplianceService', () => {
           {
             sectionType: BaselineSectionType.SUMMARY,
             title: 'Summary',
-            content: 'Senior Product Manager driving clarity for product launches.',
+            content:
+              'Senior Product Manager driving clarity for product launches.',
           },
         ],
         generatedSections: [
           {
             title: 'Experience',
-            content: 'I served as a senior product manager coordinating global launches.',
+            content:
+              'I served as a senior product manager coordinating global launches.',
           },
         ],
       });
@@ -391,14 +414,12 @@ describe('ComplianceService', () => {
     const metricScenarios: MetricScenario[] = [
       {
         name: 'blocks new backlog metric without baseline',
-        generated:
-          'Reduced backlog by 30 percent in a single quarter.',
+        generated: 'Reduced backlog by 30 percent in a single quarter.',
         expectBlock: true,
       },
       {
         name: 'blocks SLA uptime claim missing baseline',
-        generated:
-          'Delivered SLA of 99.9% uptime for 30 days.',
+        generated: 'Delivered SLA of 99.9% uptime for 30 days.',
         expectBlock: true,
       },
       {
@@ -440,8 +461,7 @@ describe('ComplianceService', () => {
       },
       {
         name: 'allows tier reference despite tickets context',
-        generated:
-          'Improved Tier 1 ticket response with dedicated coverage.',
+        generated: 'Improved Tier 1 ticket response with dedicated coverage.',
         expectBlock: false,
       },
       {
@@ -452,7 +472,8 @@ describe('ComplianceService', () => {
       },
       {
         name: 'blocks spelled-out backlog metric without baseline',
-        generated: 'Reduced backlog by ten percent after launching the intake review.',
+        generated:
+          'Reduced backlog by ten percent after launching the intake review.',
         expectBlock: true,
       },
       {
@@ -511,10 +532,16 @@ describe('ComplianceService', () => {
         baselineVersion: baselineVersionWithHash,
         outputHash: 'out-tech-1',
         baselineSections: [
-          { title: 'Experience', content: 'Managed PostgreSQL and AWS migrations.' },
+          {
+            title: 'Experience',
+            content: 'Managed PostgreSQL and AWS migrations.',
+          },
         ],
         generatedSections: [
-          { title: 'Experience', content: 'Built the ImaginaryDB control plane.' },
+          {
+            title: 'Experience',
+            content: 'Built the ImaginaryDB control plane.',
+          },
         ],
       });
 
@@ -541,7 +568,10 @@ describe('ComplianceService', () => {
           },
         ],
         generatedSections: [
-          { title: 'Experience', content: 'Scaled ImaginaryDB automation globally.' },
+          {
+            title: 'Experience',
+            content: 'Scaled ImaginaryDB automation globally.',
+          },
         ],
       });
 

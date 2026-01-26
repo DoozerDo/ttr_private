@@ -53,11 +53,20 @@ export type CxFitV2Result = {
 const RESPONSIBILITY_VECTORS = [
   {
     id: 'incident_management',
-    keywords: ['incident management', 'incident response', 'incident command', 'major incident'],
+    keywords: [
+      'incident management',
+      'incident response',
+      'incident command',
+      'major incident',
+    ],
   },
   {
     id: 'escalation_governance',
-    keywords: ['escalation governance', 'escalation policy', 'escalation process'],
+    keywords: [
+      'escalation governance',
+      'escalation policy',
+      'escalation process',
+    ],
   },
   {
     id: 'service_delivery',
@@ -65,15 +74,32 @@ const RESPONSIBILITY_VECTORS = [
   },
   {
     id: 'service_reliability',
-    keywords: ['service reliability', 'reliability engineering', 'availability', 'resilience', 'sre'],
+    keywords: [
+      'service reliability',
+      'reliability engineering',
+      'availability',
+      'resilience',
+      'sre',
+    ],
   },
   {
     id: 'itsm_process_maturity',
-    keywords: ['itsm', 'itsm process', 'itsm process maturity', 'process maturity', 'change governance'],
+    keywords: [
+      'itsm',
+      'itsm process',
+      'itsm process maturity',
+      'process maturity',
+      'change governance',
+    ],
   },
   {
     id: 'automation_workflow',
-    keywords: ['automation', 'workflow design', 'workflow engineering', 'runbooks'],
+    keywords: [
+      'automation',
+      'workflow design',
+      'workflow engineering',
+      'runbooks',
+    ],
   },
   {
     id: 'contact_center_ops',
@@ -81,11 +107,22 @@ const RESPONSIBILITY_VECTORS = [
   },
   {
     id: 'global_coverage',
-    keywords: ['global coverage', 'global ops', 'global operations', 'multi region support', 'worldwide coverage'],
+    keywords: [
+      'global coverage',
+      'global ops',
+      'global operations',
+      'multi region support',
+      'worldwide coverage',
+    ],
   },
   {
     id: 'dashboards_kpis',
-    keywords: ['dashboards', 'kpis', 'key performance indicators', 'scorecards'],
+    keywords: [
+      'dashboards',
+      'kpis',
+      'key performance indicators',
+      'scorecards',
+    ],
   },
 ];
 
@@ -136,16 +173,36 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
   { tag: 'SaaS', patterns: [/saas/, /software as a service/] },
   {
     tag: 'Enterprise IT',
-    patterns: [/enterprise it/, /enterprise technology/, /it operations/, /enterprise operations/],
+    patterns: [
+      /enterprise it/,
+      /enterprise technology/,
+      /it operations/,
+      /enterprise operations/,
+    ],
   },
-  { tag: 'MSP', patterns: [/managed service provider/, /\bmsp\b/, /managed services/] },
+  {
+    tag: 'MSP',
+    patterns: [/managed service provider/, /\bmsp\b/, /managed services/],
+  },
   {
     tag: 'Regulated',
-    patterns: [/regulated/, /security sensitive/, /compliance/, /hipaa/, /pci/, /sox/, /fedramp/],
+    patterns: [
+      /regulated/,
+      /security sensitive/,
+      /compliance/,
+      /hipaa/,
+      /pci/,
+      /sox/,
+      /fedramp/,
+    ],
   },
   {
     tag: 'Internal Delivery',
-    patterns: [/internal (?:operations|support|teams|stakeholders|services)/, /employee facing/, /internal customers/],
+    patterns: [
+      /internal (?:operations|support|teams|stakeholders|services)/,
+      /employee facing/,
+      /internal customers/,
+    ],
   },
   {
     tag: 'External Delivery',
@@ -198,16 +255,25 @@ const inferLeadershipBand = (text: string) => {
     band = Math.max(band, Math.min(value, 8));
   };
 
-  if (/(?:budget authority|revenue ownership|p\s*&?\s*l|profit and loss)/.test(text)) {
+  if (
+    /(?:budget authority|revenue ownership|p\s*&?\s*l|profit and loss)/.test(
+      text,
+    )
+  ) {
     elevate(8);
   }
   if (
     /(directs|oversees|lead(?:s|ing)?).*global/.test(text) ||
-    /(global (?:coverage|ops|operations|delivery|org|organization|service))/.test(text)
+    /(global (?:coverage|ops|operations|delivery|org|organization|service))/.test(
+      text,
+    )
   ) {
     elevate(7);
   }
-  if (/enterprise[- ]wide/.test(text) || /global (?:org|organization|ops)/.test(text)) {
+  if (
+    /enterprise[- ]wide/.test(text) ||
+    /global (?:org|organization|ops)/.test(text)
+  ) {
     elevate(7);
   }
   if (/(manages|managing|leads|leading).*(?:managers|leaders)/.test(text)) {
@@ -229,7 +295,10 @@ const inferLeadershipBand = (text: string) => {
   return band;
 };
 
-const computeDomainScore = (baselineTags: DomainTag[], roleTags: DomainTag[]) => {
+const computeDomainScore = (
+  baselineTags: DomainTag[],
+  roleTags: DomainTag[],
+) => {
   const baselineSet = new Set(baselineTags);
   const roleSet = new Set(roleTags);
 
@@ -250,30 +319,44 @@ const computeDomainScore = (baselineTags: DomainTag[], roleTags: DomainTag[]) =>
 };
 
 export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
-  const baselineText = input.baselineSections.map((section) => section.content ?? '').join('\n');
+  const baselineText = input.baselineSections
+    .map((section) => section.content ?? '')
+    .join('\n');
   const jobSegments = [
     ...input.job.normalizedResponsibilities,
     ...input.job.normalizedRequirements,
   ]
     .filter(Boolean)
     .join(' ');
-  const jobText = [jobSegments, input.job.rawDescription].filter(Boolean).join('\n');
+  const jobText = [jobSegments, input.job.rawDescription]
+    .filter(Boolean)
+    .join('\n');
 
   const normalizedJobText = normalizeText(jobText);
   const normalizedBaselineText = normalizeText(baselineText);
 
   const jobVectors = detectVectors(normalizedJobText);
   const baselineVectors = detectVectors(normalizedBaselineText);
-  const sharedVectors = jobVectors.filter((vector) => baselineVectors.includes(vector));
+  const sharedVectors = jobVectors.filter((vector) =>
+    baselineVectors.includes(vector),
+  );
   const responsibilityOverlapPercent =
-    jobVectors.length === 0 ? 0 : (sharedVectors.length / jobVectors.length) * 100;
+    jobVectors.length === 0
+      ? 0
+      : (sharedVectors.length / jobVectors.length) * 100;
   const baselineCoveragePercent =
-    baselineVectors.length === 0 ? 0 : (sharedVectors.length / baselineVectors.length) * 100;
+    baselineVectors.length === 0
+      ? 0
+      : (sharedVectors.length / baselineVectors.length) * 100;
   const ownershipMatches = OWNERSHIP_TERMS.filter(
-    (term) => normalizedJobText.includes(term) && normalizedBaselineText.includes(term),
+    (term) =>
+      normalizedJobText.includes(term) && normalizedBaselineText.includes(term),
   ).length;
-  const baseScope = (responsibilityOverlapPercent + baselineCoveragePercent) / 2;
-  let scopeScore = clamp(Math.round(baseScope + Math.min(15, ownershipMatches * 4)));
+  const baseScope =
+    (responsibilityOverlapPercent + baselineCoveragePercent) / 2;
+  let scopeScore = clamp(
+    Math.round(baseScope + Math.min(15, ownershipMatches * 4)),
+  );
   if (responsibilityOverlapPercent >= 70) {
     scopeScore = Math.max(scopeScore, 80);
   }
@@ -287,8 +370,14 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
   const bandDelta = Math.abs(baselineBand - roleBand);
   const leadershipScore = bandDelta <= 1 ? 100 : bandDelta === 2 ? 80 : 60;
 
-  const strategyMatchesJob = countPatternMatches(normalizedJobText, STRATEGY_PATTERNS);
-  const strategyMatchesBaseline = countPatternMatches(normalizedBaselineText, STRATEGY_PATTERNS);
+  const strategyMatchesJob = countPatternMatches(
+    normalizedJobText,
+    STRATEGY_PATTERNS,
+  );
+  const strategyMatchesBaseline = countPatternMatches(
+    normalizedBaselineText,
+    STRATEGY_PATTERNS,
+  );
   let strategyScore: number;
   if (strategyMatchesJob === 0) {
     strategyScore = strategyMatchesBaseline > 0 ? 50 : 0;
@@ -297,8 +386,14 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
     strategyScore = Math.round(ratio * 100);
   }
 
-  const executionMatchesJob = countPatternMatches(normalizedJobText, EXECUTION_PATTERNS);
-  const executionMatchesBaseline = countPatternMatches(normalizedBaselineText, EXECUTION_PATTERNS);
+  const executionMatchesJob = countPatternMatches(
+    normalizedJobText,
+    EXECUTION_PATTERNS,
+  );
+  const executionMatchesBaseline = countPatternMatches(
+    normalizedBaselineText,
+    EXECUTION_PATTERNS,
+  );
   let executionScore: number;
   if (executionMatchesJob === 0) {
     executionScore = executionMatchesBaseline > 0 ? 60 : 40;
@@ -309,10 +404,15 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
 
   const toolingCoverage = evaluateToolCoverage(jobText, baselineText);
   const rawToolingScore = clamp(
-    Math.round(toolingCoverage.requiredCoverage * 70 + toolingCoverage.preferredCoverage * 30),
+    Math.round(
+      toolingCoverage.requiredCoverage * 70 +
+        toolingCoverage.preferredCoverage * 30,
+    ),
   );
   const hasMissingHardTools = HARD_TOOL_GUARDS.some(
-    (term) => normalizedJobText.includes(term) && !normalizedBaselineText.includes(term),
+    (term) =>
+      normalizedJobText.includes(term) &&
+      !normalizedBaselineText.includes(term),
   );
   const toolingScore = hasMissingHardTools ? 0 : rawToolingScore;
   const toolingMismatchPenalty = hasMissingHardTools ? 15 : 0;
@@ -335,13 +435,18 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
   }
 
   const missingOwnershipRequirements = OWNERSHIP_GAP_INDICATORS.filter(
-    (term) => normalizedJobText.includes(term) && !normalizedBaselineText.includes(term),
+    (term) =>
+      normalizedJobText.includes(term) &&
+      !normalizedBaselineText.includes(term),
   );
   let stretchDampenerApplied = false;
   let stretchDampenerPoints = 0;
   if (missingOwnershipRequirements.length > 0) {
     stretchDampenerApplied = true;
-    stretchDampenerPoints = Math.min(12, 5 + (missingOwnershipRequirements.length - 1) * 3);
+    stretchDampenerPoints = Math.min(
+      12,
+      5 + (missingOwnershipRequirements.length - 1) * 3,
+    );
     totalScore -= stretchDampenerPoints;
   }
 

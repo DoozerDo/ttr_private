@@ -12,7 +12,9 @@ describe('buildJobTextForScoring', () => {
     const result = buildJobTextForScoring(jobInput);
 
     expect(result.jobTextSource).toBe('raw');
-    expect(result.jobText).toBe('Lead SaaS operations and strategy across APAC.');
+    expect(result.jobText).toBe(
+      'Lead SaaS operations and strategy across APAC.',
+    );
     expect(result.jobText).not.toContain('SUPPLEMENTAL RESPONSIBILITIES');
     expect(result.jobText).not.toContain('SUPPLEMENTAL REQUIREMENTS');
   });

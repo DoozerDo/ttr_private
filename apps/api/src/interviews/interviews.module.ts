@@ -47,7 +47,11 @@ import { BaselineVersionService } from '../baseline/baseline-version.service';
     ]),
     ComplianceModule,
   ],
-  controllers: [InterviewsController, InterviewRecordsController, InterviewToolkitController],
+  controllers: [
+    InterviewsController,
+    InterviewRecordsController,
+    InterviewToolkitController,
+  ],
   providers: [
     InterviewsService,
     InterviewRecordsService,

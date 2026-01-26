@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateStarStoryDto } from './dto/create-star-story.dto';
@@ -23,7 +27,13 @@ export class StarStoriesService {
   }
 
   private validateRequiredFields(dto: CreateStarStoryDto | UpdateStarStoryDto) {
-    const required = ['title', 'situation', 'task', 'action', 'result'] as const;
+    const required = [
+      'title',
+      'situation',
+      'task',
+      'action',
+      'result',
+    ] as const;
 
     for (const field of required) {
       const value = (dto as Record<string, unknown>)[field];
@@ -74,7 +84,9 @@ export class StarStoriesService {
   }
 
   async getStarStoryForUser(id: string, userId: string) {
-    const story = await this.starStoryRepository.findOne({ where: { id, userId } });
+    const story = await this.starStoryRepository.findOne({
+      where: { id, userId },
+    });
 
     if (!story) {
       throw new NotFoundException('STAR story not found');

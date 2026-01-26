@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
@@ -48,7 +52,9 @@ export class BaselineVersionService {
     private readonly complianceService: ComplianceService,
   ) {}
 
-  private normalizePoliciesFromSections(sections: BaselineSection[]): PolicyState[] {
+  private normalizePoliciesFromSections(
+    sections: BaselineSection[],
+  ): PolicyState[] {
     return sections.map((section, index) => ({
       baselineSectionId: section.id,
       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
@@ -73,21 +79,34 @@ export class BaselineVersionService {
         return a.order - b.order;
       });
 
-    const normalizedAdditions = [...additions].sort((a, b) => a.localeCompare(b));
+    const normalizedAdditions = [...additions].sort((a, b) =>
+      a.localeCompare(b),
+    );
 
     return createHash('sha256')
-      .update(JSON.stringify({ baselineHash: baselineHash ?? null, policies: normalizedPolicies, additions: normalizedAdditions }))
+      .update(
+        JSON.stringify({
+          baselineHash: baselineHash ?? null,
+          policies: normalizedPolicies,
+          additions: normalizedAdditions,
+        }),
+      )
       .digest('hex');
   }
 
-  private normalizeAdditions(additions?: (string | RecommendedAddition)[] | null) {
+  private normalizeAdditions(
+    additions?: (string | RecommendedAddition)[] | null,
+  ) {
     if (!additions?.length) return [];
     return additions
       .map((entry) => (typeof entry === 'string' ? entry : entry?.text)?.trim())
       .filter((entry): entry is string => Boolean(entry));
   }
 
-  async approveVerifiedAdditions(userId: string, payload: ApproveAdditionsPayload) {
+  async approveVerifiedAdditions(
+    userId: string,
+    payload: ApproveAdditionsPayload,
+  ) {
     const baselineId = payload.baselineId?.trim();
 
     if (!baselineId) {
@@ -116,7 +135,9 @@ export class BaselineVersionService {
     }
 
     if (interview?.baselineId && interview.baselineId !== baselineId) {
-      throw new BadRequestException('Interview baseline does not match target baseline');
+      throw new BadRequestException(
+        'Interview baseline does not match target baseline',
+      );
     }
 
     const additions = additionsFromPayload.length
@@ -124,7 +145,9 @@ export class BaselineVersionService {
       : this.normalizeAdditions(interview?.recommendedAdditions);
 
     if (!additions.length) {
-      throw new BadRequestException('No verified additions supplied for promotion');
+      throw new BadRequestException(
+        'No verified additions supplied for promotion',
+      );
     }
 
     const latestVersion = await this.baselineVersionRepository.findOne({
@@ -137,15 +160,18 @@ export class BaselineVersionService {
       order: { order: 'ASC' },
     });
 
-    const additionSections: ComplianceTextSection[] = additions.map((content, index) => ({
-      title: `Addition ${index + 1}`,
-      content,
-      sectionType: BaselineSectionType.OTHER,
-    }));
+    const additionSections: ComplianceTextSection[] = additions.map(
+      (content, index) => ({
+        title: `Addition ${index + 1}`,
+        content,
+        sectionType: BaselineSectionType.OTHER,
+      }),
+    );
     const snapshotSections = [...sections, ...additionSections];
     const allowlistSnapshot = buildBaselineAllowlistSnapshot(snapshotSections);
 
-    const normalizedBaselineSections = this.complianceService.normalizeSectionsForOutput(sections);
+    const normalizedBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(sections);
 
     const generatedSections = additions.map((content, index) => ({
       title: `Addition ${index + 1}`,
@@ -168,9 +194,14 @@ export class BaselineVersionService {
           }))
         : this.normalizePoliciesFromSections(sections);
 
-    const nextVersionNumber = (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
+    const nextVersionNumber =
+      (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
 
-    const versionHash = this.buildVersionHash(baseline.hash, policyState, additions);
+    const versionHash = this.buildVersionHash(
+      baseline.hash,
+      policyState,
+      additions,
+    );
 
     const diffPayload = {
       added: additions,
@@ -189,10 +220,12 @@ export class BaselineVersionService {
     if (complianceResult.blocked) {
       const blockingFlag = complianceResult.complianceFlags.find(
         (flag) =>
-          (flag.severity ?? ComplianceFlagSeverity.BLOCK) === ComplianceFlagSeverity.BLOCK,
+          (flag.severity ?? ComplianceFlagSeverity.BLOCK) ===
+          ComplianceFlagSeverity.BLOCK,
       );
       throw new BadRequestException(
-        blockingFlag?.message ?? 'Promotion blocked due to compliance policy violations.',
+        blockingFlag?.message ??
+          'Promotion blocked due to compliance policy violations.',
       );
     }
 

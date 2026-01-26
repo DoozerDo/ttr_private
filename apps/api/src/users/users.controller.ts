@@ -57,12 +57,16 @@ export class UsersController {
     const isAdmin = user.role === 'admin';
 
     if (isProd && !isAdmin) {
-      throw new ForbiddenException('Subscription tier updates are disabled in production.');
+      throw new ForbiddenException(
+        'Subscription tier updates are disabled in production.',
+      );
     }
 
     const requested = (body.tier ?? '').trim().toUpperCase();
 
-    if (!Object.values(SubscriptionTier).includes(requested as SubscriptionTier)) {
+    if (
+      !Object.values(SubscriptionTier).includes(requested as SubscriptionTier)
+    ) {
       throw new BadRequestException('Invalid subscription tier');
     }
 

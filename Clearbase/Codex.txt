@@ -46,8 +46,6 @@ Tailoring Service (résumé & cover letter)
 
 Interview Toolkit
 
-Search Sets
-
 Job Tracker
 
 Compliance Engine
@@ -208,7 +206,7 @@ Use Tailwind classes for styling when reasonable.
 
 Keep endpoints and modules aligned with the product spec:
 
-Auth, Baseline Library, Job Ingestion, Compatibility Engine, Baseline Expansion Interview, Tailoring, Job Tracker, Search Sets, Interview Toolkit, Compliance Engine.
+Auth, Baseline Library, Job Ingestion, Compatibility Engine, Baseline Expansion Interview, Tailoring, Job Tracker, Interview Toolkit, Compliance Engine.
 
 Always structure new backend features as Nest modules (module + controller + service + DTOs), even if initially simple.
 

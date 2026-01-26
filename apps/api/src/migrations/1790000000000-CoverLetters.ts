@@ -43,12 +43,8 @@ export class CoverLetters1790000000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP INDEX IF EXISTS "IDX_cover_letters_baselineId"`,
     );
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "IDX_cover_letters_jobId"`,
-    );
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "IDX_cover_letters_userId"`,
-    );
+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_cover_letters_jobId"`);
+    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_cover_letters_userId"`);
     await queryRunner.query(`DROP TABLE "cover_letters"`);
   }
 }

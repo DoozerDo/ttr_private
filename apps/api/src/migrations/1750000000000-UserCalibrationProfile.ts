@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class UserCalibrationProfile1750000000000
-  implements MigrationInterface
-{
+export class UserCalibrationProfile1750000000000 implements MigrationInterface {
   name = 'UserCalibrationProfile1750000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

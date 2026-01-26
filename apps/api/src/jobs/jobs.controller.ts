@@ -48,7 +48,7 @@ export class JobsController {
       sourceUrl: body.sourceUrl ?? null,
       responsibilities: body.responsibilities ?? undefined,
       requirements: body.requirements ?? undefined,
-      jdIngestionMethod: body.jdIngestionMethod as JobIngestionMethod | undefined,
+      jdIngestionMethod: body.jdIngestionMethod,
     });
 
     return {

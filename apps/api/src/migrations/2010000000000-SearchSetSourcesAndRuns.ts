@@ -100,14 +100,24 @@ export class SearchSetSourcesAndRuns2010000000000 implements MigrationInterface 
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "search_set_runs" DROP CONSTRAINT "FK_search_set_runs_baseline_versions"`);
-    await queryRunner.query(`ALTER TABLE "search_set_runs" DROP CONSTRAINT "FK_search_set_runs_search_sets"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_search_set_runs_baselineVersionId"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_search_set_runs_searchSetId"`);
+    await queryRunner.query(
+      `ALTER TABLE "search_set_runs" DROP CONSTRAINT "FK_search_set_runs_baseline_versions"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "search_set_runs" DROP CONSTRAINT "FK_search_set_runs_search_sets"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_search_set_runs_baselineVersionId"`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_search_set_runs_searchSetId"`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "search_set_runs"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_jobs_dedupe_hash"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_jobs_canonical_url"`);
-    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_jobs_source_provider_external"`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_jobs_source_provider_external"`,
+    );
     await queryRunner.query(`
       ALTER TABLE "jobs"
       DROP COLUMN IF EXISTS "dedupeHash"
@@ -132,6 +142,8 @@ export class SearchSetSourcesAndRuns2010000000000 implements MigrationInterface 
       ALTER TABLE "search_sets"
       DROP COLUMN IF EXISTS "sourceType"
     `);
-    await queryRunner.query(`DROP TYPE IF EXISTS "search_sets_source_type_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "search_sets_source_type_enum"`,
+    );
   }
 }

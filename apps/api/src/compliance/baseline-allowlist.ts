@@ -53,10 +53,12 @@ export function buildBaselineAllowlistSnapshot(
     normalizeTokenForComparison,
   );
 
-  const technologyTokens = collectTechnologyTokensFromSections(normalizedSections);
+  const technologyTokens =
+    collectTechnologyTokensFromSections(normalizedSections);
 
   const metricTokens = new Set<string>();
-  const metricCandidates = collectMetricCandidatesFromSections(normalizedSections);
+  const metricCandidates =
+    collectMetricCandidatesFromSections(normalizedSections);
   for (const candidate of metricCandidates) {
     if (candidate.normalized) {
       metricTokens.add(candidate.normalized);

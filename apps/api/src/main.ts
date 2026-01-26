@@ -6,12 +6,10 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 async function bootstrap() {
   // Log anything that would otherwise kill a request or process silently
   process.on('unhandledRejection', (reason: any) => {
-    // eslint-disable-next-line no-console
     console.error('unhandledRejection:', reason);
   });
 
   process.on('uncaughtException', (err: any) => {
-    // eslint-disable-next-line no-console
     console.error('uncaughtException:', err);
   });
 
@@ -30,7 +28,10 @@ async function bootstrap() {
   const corsOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
   const corsOptions = {
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!origin) {
         return callback(null, true);
       }
@@ -51,11 +52,8 @@ async function bootstrap() {
 
   const isProduction = config.get<string>('NODE_ENV') === 'production';
   if (!isProduction) {
-    // eslint-disable-next-line no-console
     console.log(
-      `DEV CORS allowlist: ${corsOrigins.join(
-        ', ',
-      )}; credentials enabled`,
+      `DEV CORS allowlist: ${corsOrigins.join(', ')}; credentials enabled`,
     );
   }
 

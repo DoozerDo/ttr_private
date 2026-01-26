@@ -13,7 +13,11 @@ export class InterviewBaselineReferences1830000000000 implements MigrationInterf
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineVersionId"`);
-    await queryRunner.query(`ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineId"`);
+    await queryRunner.query(
+      `ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineVersionId"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "interviews" DROP COLUMN IF EXISTS "baselineId"`,
+    );
   }
 }

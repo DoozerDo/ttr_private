@@ -58,4 +58,3 @@ export class Application {
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 }
-

@@ -6,8 +6,14 @@ import { GreenhouseJobSourceProvider } from './greenhouse.provider';
 
 const FIXTURE_DIR = join(__dirname, '../fixtures/greenhouse');
 const listingHtml = readFileSync(join(FIXTURE_DIR, 'listing.html'), 'utf-8');
-const headingHtml = readFileSync(join(FIXTURE_DIR, 'job-heading.html'), 'utf-8');
-const minimalHtml = readFileSync(join(FIXTURE_DIR, 'job-minimal.html'), 'utf-8');
+const headingHtml = readFileSync(
+  join(FIXTURE_DIR, 'job-heading.html'),
+  'utf-8',
+);
+const minimalHtml = readFileSync(
+  join(FIXTURE_DIR, 'job-minimal.html'),
+  'utf-8',
+);
 
 describe('GreenhouseJobSourceProvider', () => {
   const boardUrl = 'https://boards.greenhouse.io/example';

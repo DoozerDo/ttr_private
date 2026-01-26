@@ -116,7 +116,8 @@ const combineSections = (
     .map((section) => section.content)
     .join('\n');
 
-const hashForCache = (text: string) => createHash('sha256').update(text).digest('hex');
+const hashForCache = (text: string) =>
+  createHash('sha256').update(text).digest('hex');
 
 export class FitScoreInputError extends Error {
   constructor(message: string) {
@@ -144,15 +145,21 @@ export class FitScoreEngine {
     this.embeddingProvider = embeddingProvider;
     this.embeddingsEnabled = Boolean(this.embeddingProvider?.isEnabled?.());
     this.embeddingModel =
-      (this.embeddingProvider as unknown as { modelName?: string })?.modelName ??
+      (this.embeddingProvider as unknown as { modelName?: string })
+        ?.modelName ??
       (this.embeddingProvider as unknown as { model?: string })?.model ??
       'default';
   }
 
-  async score(input: FitScoreInput, options?: FitScoreOptions): Promise<FitScoreResult> {
+  async score(
+    input: FitScoreInput,
+    options?: FitScoreOptions,
+  ): Promise<FitScoreResult> {
     const jobSelection = this.selectJobText(input.job);
     if (jobSelection.wordCount < 300) {
-      throw new FitScoreInputError('Job text must contain at least 300 words for reliable scoring.');
+      throw new FitScoreInputError(
+        'Job text must contain at least 300 words for reliable scoring.',
+      );
     }
 
     const baselineText = combineSections(input.baseline.sections);
@@ -167,10 +174,22 @@ export class FitScoreEngine {
       baselineExperienceText,
       baselineText,
     );
-    const leadership = await this.scoreLeadershipLevel(jobSelection.text, baselineExperienceText);
-    const strategic = await this.scoreStrategicFit(jobSelection.text, baselineText);
-    const industry = await this.scoreIndustryContext(jobSelection.text, baselineText);
-    const technical = await this.scoreTechnicalPlatformFit(jobSelection.text, baselineText);
+    const leadership = await this.scoreLeadershipLevel(
+      jobSelection.text,
+      baselineExperienceText,
+    );
+    const strategic = await this.scoreStrategicFit(
+      jobSelection.text,
+      baselineText,
+    );
+    const industry = await this.scoreIndustryContext(
+      jobSelection.text,
+      baselineText,
+    );
+    const technical = await this.scoreTechnicalPlatformFit(
+      jobSelection.text,
+      baselineText,
+    );
 
     const dimensionScores: FitScoreDimensionScores = {
       experienceAlignment: experience.score,
@@ -182,14 +201,20 @@ export class FitScoreEngine {
 
     const appliedWeights = this.applyDimensionWeights(options?.weights);
     const weightSum =
-      Object.values(appliedWeights).reduce((total, value) => total + value, 0) || 1;
+      Object.values(appliedWeights).reduce(
+        (total, value) => total + value,
+        0,
+      ) || 1;
     const baseRawScore = clamp(
       Math.round(
-        (dimensionScores.experienceAlignment * appliedWeights.experienceAlignment +
+        (dimensionScores.experienceAlignment *
+          appliedWeights.experienceAlignment +
           dimensionScores.leadershipLevel * appliedWeights.leadershipLevel +
-          dimensionScores.strategicTacticalFit * appliedWeights.strategicTacticalFit +
+          dimensionScores.strategicTacticalFit *
+            appliedWeights.strategicTacticalFit +
           dimensionScores.industryContext * appliedWeights.industryContext +
-          dimensionScores.technicalPlatformFit * appliedWeights.technicalPlatformFit) /
+          dimensionScores.technicalPlatformFit *
+            appliedWeights.technicalPlatformFit) /
           weightSum,
       ),
     );
@@ -201,7 +226,10 @@ export class FitScoreEngine {
     let finalScore = rawScore - penalty;
     let leadershipOverrideApplied = false;
 
-    if (dimensionScores.leadershipLevel >= 80 && dimensionScores.strategicTacticalFit >= 75) {
+    if (
+      dimensionScores.leadershipLevel >= 80 &&
+      dimensionScores.strategicTacticalFit >= 75
+    ) {
       finalScore = Math.max(finalScore, 70);
       leadershipOverrideApplied = true;
     }
@@ -209,7 +237,11 @@ export class FitScoreEngine {
     finalScore = clamp(finalScore);
 
     const verdictLabel = verdictFromScore(finalScore);
-    const strengths = buildStrengths(jobSelection.text, baselineText, dimensionScores);
+    const strengths = buildStrengths(
+      jobSelection.text,
+      baselineText,
+      dimensionScores,
+    );
     const gaps = buildGaps(technical.missingRequiredTools, dimensionScores);
     const summary =
       'Weighted fit based on leadership, experience alignment, strategy, industry context, and tools. Tools are a modest factor; missing required tools apply a bounded penalty.';
@@ -288,9 +320,11 @@ export class FitScoreEngine {
       technicalPlatformFit: DEFAULT_WEIGHTS.technicalPlatformFit,
     };
 
-    (Object.keys(weights) as Array<keyof FitScoreDimensionScores>).forEach((dimension) => {
-      weights[dimension] = weights[dimension] * (overrides?.[dimension] ?? 1);
-    });
+    (Object.keys(weights) as Array<keyof FitScoreDimensionScores>).forEach(
+      (dimension) => {
+        weights[dimension] = weights[dimension] * (overrides?.[dimension] ?? 1);
+      },
+    );
 
     return weights;
   }
@@ -317,7 +351,10 @@ export class FitScoreEngine {
     baselineExperienceText: string,
     baselineText: string,
   ): Promise<DimensionWithDetail> {
-    const semanticScore = this.referenceCoverage(jobText, baselineExperienceText);
+    const semanticScore = this.referenceCoverage(
+      jobText,
+      baselineExperienceText,
+    );
     const cxBoost = this.computeCxBoost(jobText, baselineText);
     const finalScore = clamp(semanticScore + cxBoost);
 
@@ -335,7 +372,8 @@ export class FitScoreEngine {
     const normalizedJob = normalizeText(jobText);
     const normalizedBaseline = normalizeText(baselineText);
     const matches = CX_PHRASES.filter(
-      (phrase) => normalizedJob.includes(phrase) && normalizedBaseline.includes(phrase),
+      (phrase) =>
+        normalizedJob.includes(phrase) && normalizedBaseline.includes(phrase),
     ).length;
     return Math.min(10, matches * 4);
   }
@@ -344,17 +382,24 @@ export class FitScoreEngine {
     jobText: string,
     baselineLeadershipText: string,
   ): Promise<DimensionWithDetail> {
-    const semanticScore = this.referenceCoverage(jobText, baselineLeadershipText);
+    const semanticScore = this.referenceCoverage(
+      jobText,
+      baselineLeadershipText,
+    );
 
     const normalizedJob = normalizeText(jobText);
     const normalizedBaseline = normalizeText(baselineLeadershipText);
-    const jobCount = LEADERSHIP_MARKERS.filter((marker) => normalizedJob.includes(marker)).length;
+    const jobCount = LEADERSHIP_MARKERS.filter((marker) =>
+      normalizedJob.includes(marker),
+    ).length;
     const baselineCount = LEADERSHIP_MARKERS.filter((marker) =>
       normalizedBaseline.includes(marker),
     ).length;
     const structuredScore =
       jobCount === 0 ? 65 : clamp(Math.min(baselineCount / jobCount, 1) * 100);
-    const finalScore = clamp(Math.round(semanticScore * 0.7 + structuredScore * 0.3));
+    const finalScore = clamp(
+      Math.round(semanticScore * 0.7 + structuredScore * 0.3),
+    );
 
     return {
       score: finalScore,
@@ -366,7 +411,10 @@ export class FitScoreEngine {
     };
   }
 
-  private async scoreStrategicFit(jobText: string, baselineText: string): Promise<DimensionWithDetail> {
+  private async scoreStrategicFit(
+    jobText: string,
+    baselineText: string,
+  ): Promise<DimensionWithDetail> {
     const semanticScore = this.referenceCoverage(jobText, baselineText);
 
     const normalizedJob = normalizeText(jobText);
@@ -387,7 +435,10 @@ export class FitScoreEngine {
     };
   }
 
-  private async scoreIndustryContext(jobText: string, baselineText: string): Promise<DimensionWithDetail> {
+  private async scoreIndustryContext(
+    jobText: string,
+    baselineText: string,
+  ): Promise<DimensionWithDetail> {
     const normalizedJob = normalizeText(jobText);
     const normalizedBaseline = normalizeText(baselineText);
 
@@ -402,7 +453,9 @@ export class FitScoreEngine {
           strongMatches += 1;
         }
         const conflicts = INCOMPATIBLE_INDUSTRY_MAP[marker] ?? [];
-        if (conflicts.some((conflict) => normalizedBaseline.includes(conflict))) {
+        if (
+          conflicts.some((conflict) => normalizedBaseline.includes(conflict))
+        ) {
           incompatiblePenalty = -10;
         }
       }
@@ -417,7 +470,10 @@ export class FitScoreEngine {
     const blendedScore =
       strongMatches >= 2
         ? clamp(keywordScore + incompatiblePenalty)
-        : clamp(Math.round(keywordScore * 0.6 + semanticFallback * 0.4) + incompatiblePenalty);
+        : clamp(
+            Math.round(keywordScore * 0.6 + semanticFallback * 0.4) +
+              incompatiblePenalty,
+          );
 
     return {
       score: blendedScore,
@@ -436,7 +492,9 @@ export class FitScoreEngine {
   ): Promise<TechnicalDimensionResult> {
     const coverage = evaluateToolCoverage(jobText, baselineText);
     const finalScore = clamp(
-      Math.round(coverage.requiredCoverage * 70 + coverage.preferredCoverage * 30),
+      Math.round(
+        coverage.requiredCoverage * 70 + coverage.preferredCoverage * 30,
+      ),
     );
     return {
       score: finalScore,
@@ -450,7 +508,9 @@ export class FitScoreEngine {
     };
   }
 
-  private mapPersistenceVerdict(label: FitScoreVerdictLabel): FitAssessmentVerdict {
+  private mapPersistenceVerdict(
+    label: FitScoreVerdictLabel,
+  ): FitAssessmentVerdict {
     if (label === 'Apply') {
       return FitAssessmentVerdict.APPLY;
     }
@@ -460,7 +520,10 @@ export class FitScoreEngine {
     return FitAssessmentVerdict.SKIP;
   }
 
-  private async computeSemanticSimilarity(textA: string, textB: string): Promise<number> {
+  private async computeSemanticSimilarity(
+    textA: string,
+    textB: string,
+  ): Promise<number> {
     if (!textA || !textB) return 0;
     const [firstEmbedding, secondEmbedding] = await Promise.all([
       this.embedWithCache(textA),
@@ -494,8 +557,12 @@ export class FitScoreEngine {
       return 0;
     }
     const dot = a.reduce((sum, value, index) => sum + value * b[index], 0);
-    const magnitudeA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
-    const magnitudeB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
+    const magnitudeA = Math.sqrt(
+      a.reduce((sum, value) => sum + value * value, 0),
+    );
+    const magnitudeB = Math.sqrt(
+      b.reduce((sum, value) => sum + value * value, 0),
+    );
     if (!magnitudeA || !magnitudeB) {
       return 0;
     }

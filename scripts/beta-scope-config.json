@@ -1,0 +1,26 @@
+{
+  "tripwires": [
+    { "type": "pattern", "value": "/search-sets/" },
+    { "type": "pattern", "value": "/api/search-sets" },
+    { "type": "pattern", "value": "SearchSetsModule" },
+    { "type": "pattern", "value": "search-sets.service" },
+    { "type": "pattern", "value": "search-sets.router" }
+  ],
+  "paths": [
+    "apps/api/src/search-sets",
+    "apps/web/app/(app)/search-sets",
+    "apps/web/app/api/search-sets",
+    "apps/web/src/lib/searchSetsClient.ts",
+    "apps/web/lib/searchSetsClient.ts",
+    "scripts/verify-searchsets-expandedfit.js"
+  ],
+  "skips": [
+    "docs/spec_beta_v1.md",
+    "scripts/beta-scope-config.json",
+    "apps/api/src/migrations",
+    "Clearbase"
+  ],
+  "skipExtensions": [
+    ".txt"
+  ]
+}

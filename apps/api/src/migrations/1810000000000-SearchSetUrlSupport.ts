@@ -13,7 +13,11 @@ export class SearchSetUrlSupport1810000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "search_sets" DROP COLUMN "parseWarning"`);
-    await queryRunner.query(`ALTER TABLE "search_sets" DROP COLUMN "urlBacked"`);
+    await queryRunner.query(
+      `ALTER TABLE "search_sets" DROP COLUMN "parseWarning"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "search_sets" DROP COLUMN "urlBacked"`,
+    );
   }
 }

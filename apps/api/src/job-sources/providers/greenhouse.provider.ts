@@ -8,7 +8,6 @@ import {
   JobDetailRaw,
   ParsedJob,
 } from '../job-source.types';
-import { SearchSetSourceType } from '../../search-sets/search-set.entity';
 import { extractTextFromHtml } from '../../jobs/html-utils';
 
 const RESPONSIBILITY_HEADINGS = [
@@ -42,7 +41,7 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
   ) {}
 
   canHandle(input: JobSourceInput): boolean {
-    return input.sourceType === SearchSetSourceType.GREENHOUSE;
+    return input.sourceType === 'greenhouse';
   }
 
   async fetchListings(input: JobSourceInput): Promise<JobSourceListing[]> {
@@ -85,7 +84,9 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
       detail.metadata?.externalId ?? this.extractExternalIdFromUrl(detail.url);
 
     if (!externalId) {
-      throw new BadRequestException('Greenhouse job detail missing identifier.');
+      throw new BadRequestException(
+        'Greenhouse job detail missing identifier.',
+      );
     }
 
     return {
@@ -285,9 +286,7 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
     }
 
     if (!requirements.length && fallback.length) {
-      requirements.push(
-        ...fallback.slice(Math.ceil(fallback.length / 2)),
-      );
+      requirements.push(...fallback.slice(Math.ceil(fallback.length / 2)));
     }
 
     return {
@@ -297,8 +296,7 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
   }
 
   private extractApplyUrl(html: string, baseUrl: string): string | null {
-    const anchorRegex =
-      /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const anchorRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = anchorRegex.exec(html))) {
@@ -325,11 +323,16 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
       return extractTextFromHtml(headingMatch[1]).trim();
     }
 
-    const firstLine = sanitized.split('\n').find((line) => line.trim().length > 0);
+    const firstLine = sanitized
+      .split('\n')
+      .find((line) => line.trim().length > 0);
     return firstLine?.trim() ?? 'Greenhouse role';
   }
 
-  private extractLocationFromHtml(html: string, sanitized: string): string | null {
+  private extractLocationFromHtml(
+    html: string,
+    sanitized: string,
+  ): string | null {
     const locationMatch = html.match(/data-location=["']([^"']+)["']/i);
     if (locationMatch) {
       return locationMatch[1].trim();
@@ -426,6 +429,6 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
     const { value } = await this.cache.fetch(this.id, url, async () => {
       return this.jobSourceHttp.fetch(url, this.fetchOptions);
     });
-    return value as string;
+    return value;
   }
 }

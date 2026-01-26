@@ -15,7 +15,6 @@ import { CoverLettersModule } from './cover-letters/cover-letters.module';
 import { EmailModule } from './email/email.module';
 import { RealityCheckModule } from './reality-check/reality-check.module';
 import { ResumeModule } from './resume/resume.module';
-import { SearchSetsModule } from './search-sets/search-sets.module';
 import { StarStoriesModule } from './star-stories/star-stories.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
@@ -35,7 +34,8 @@ import { UsersModule } from './users/users.module';
           configService.get<string>('DATABASE_URL') ??
           'postgresql://postgres:postgres@db:5432/targetthisrole',
         entities: [User],
-        synchronize: configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
+        synchronize:
+          configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
         autoLoadEntities: true,
       }),
     }),
@@ -49,7 +49,6 @@ import { UsersModule } from './users/users.module';
     ComplianceModule,
     InterviewsModule,
     JobsModule,
-    SearchSetsModule,
     ResumeModule,
     CoverLettersModule,
     EmailModule,

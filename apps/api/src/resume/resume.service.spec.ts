@@ -1,7 +1,17 @@
-import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline-section.entity';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import {
+  BaselineIncludePolicy,
+  BaselineSectionType,
+} from '../baseline/baseline-section.entity';
 import { ComplianceService } from '../compliance/compliance.service';
-import { ComplianceAction, ComplianceFlagCode, ComplianceFlagSeverity } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagCode,
+  ComplianceFlagSeverity,
+} from '../compliance/compliance.types';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { ResumeService } from './resume.service';
 
@@ -39,12 +49,12 @@ const buildRepository = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
-  const buildService = (
-    fitScore: number,
-    writingFlags: any[] = [],
-    baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
-    complianceOverride: Partial<ComplianceService> = {},
-  ) => {
+const buildService = (
+  fitScore: number,
+  writingFlags: any[] = [],
+  baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
+  complianceOverride: Partial<ComplianceService> = {},
+) => {
   const baselineRepository = buildRepository({
     findOne: jest.fn().mockResolvedValue(mockBaseline),
   });
@@ -117,15 +127,17 @@ describe('ResumeService', () => {
   it('rejects one-tap generation when fit score is below the threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 1);
 
-    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.generateResume('user-1', request),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('includes the threshold in the rejection response', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 2);
 
-    await expect(service.generateResume('user-1', request)).rejects.toMatchObject({
+    await expect(
+      service.generateResume('user-1', request),
+    ).rejects.toMatchObject({
       response: {
         error: {
           message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
@@ -154,7 +166,10 @@ describe('ResumeService', () => {
   it('returns draft quality when fit score is below the threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 4);
 
-    const result = await service.generateResume('user-1', { ...request, oneTap: false });
+    const result = await service.generateResume('user-1', {
+      ...request,
+      oneTap: false,
+    });
 
     expect(result.quality).toBe('draft');
   });
@@ -162,7 +177,10 @@ describe('ResumeService', () => {
   it('returns optimized quality when fit score is at least the threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD + 2);
 
-    const result = await service.generateResume('user-1', { ...request, oneTap: false });
+    const result = await service.generateResume('user-1', {
+      ...request,
+      oneTap: false,
+    });
 
     expect(result.quality).toBe('optimized');
   });
@@ -197,11 +215,16 @@ describe('ResumeService', () => {
       }),
     } as unknown as ComplianceService;
 
-    const { service } = buildService(95, [], { ...mockBaselineVersion, hash: null }, complianceService);
-
-    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-      BadRequestException,
+    const { service } = buildService(
+      95,
+      [],
+      { ...mockBaselineVersion, hash: null },
+      complianceService,
     );
+
+    await expect(
+      service.generateResume('user-1', request),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('audits resume export actions', async () => {
@@ -230,9 +253,9 @@ describe('ResumeService', () => {
     ];
     const { service } = buildService(95, inventedMetricFlag);
 
-    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.generateResume('user-1', request),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('blocks export when compliance flags are blocking', async () => {
@@ -241,17 +264,25 @@ describe('ResumeService', () => {
       detectScopeInflation: jest.fn().mockReturnValue([]),
       validateAndAudit: jest.fn().mockResolvedValue({
         complianceFlags: [
-          { code: ComplianceFlagCode.INVENTED_METRIC, severity: ComplianceFlagSeverity.BLOCK },
+          {
+            code: ComplianceFlagCode.INVENTED_METRIC,
+            severity: ComplianceFlagSeverity.BLOCK,
+          },
         ],
         blocked: true,
         audit: { id: 'audit-2' },
       }),
     } as unknown as ComplianceService;
-    const { service } = buildService(95, [], mockBaselineVersion, complianceService);
-
-    await expect(service.exportResume('user-1', request, 'docx')).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
+    const { service } = buildService(
+      95,
+      [],
+      mockBaselineVersion,
+      complianceService,
     );
+
+    await expect(
+      service.exportResume('user-1', request, 'docx'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('blocks generation when scope inflation is detected', async () => {
@@ -273,8 +304,8 @@ describe('ResumeService', () => {
       }),
     });
 
-    await expect(service.generateResume('user-1', request)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.generateResume('user-1', request),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });

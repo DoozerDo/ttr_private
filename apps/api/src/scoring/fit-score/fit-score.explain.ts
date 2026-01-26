@@ -10,12 +10,28 @@ type ThemeDefinition = {
 const THEME_DEFINITIONS: ThemeDefinition[] = [
   {
     label: 'leadership',
-    cues: ['leadership', 'lead', 'direct', 'stakeholder', 'manage', 'mentor', 'global'],
+    cues: [
+      'leadership',
+      'lead',
+      'direct',
+      'stakeholder',
+      'manage',
+      'mentor',
+      'global',
+    ],
     dimension: 'leadershipLevel',
   },
   {
     label: 'operations',
-    cues: ['operations', 'ops', 'incidents', 'runbook', 'support', 'tickets', 'monitoring'],
+    cues: [
+      'operations',
+      'ops',
+      'incidents',
+      'runbook',
+      'support',
+      'tickets',
+      'monitoring',
+    ],
     dimension: 'strategicTacticalFit',
   },
   {
@@ -30,7 +46,14 @@ const THEME_DEFINITIONS: ThemeDefinition[] = [
   },
   {
     label: 'scaling teams',
-    cues: ['scale', 'growing', 'expand', 'cross-functional', 'coaching', 'teams'],
+    cues: [
+      'scale',
+      'growing',
+      'expand',
+      'cross-functional',
+      'coaching',
+      'teams',
+    ],
     dimension: 'leadershipLevel',
   },
 ];
