@@ -4,11 +4,8 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
-import { ttrTypography } from "../ui/ttrStyles";
 import { JobsHub } from "./_components/JobsHub";
 import { WorkspaceRunner } from "./_components/WorkspaceRunner";
-import type { CSSProperties } from "react";
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -65,13 +62,6 @@ const resolveParam = (value: string | string[] | undefined): string | null => {
     return value.length ? value[0] : null;
   }
   return value ?? null;
-};
-
-const onboardingTextStyle: CSSProperties = {
-  ...ttrTypography.paragraph,
-  color: "rgba(226,232,240,0.85)",
-  margin: 0,
-  lineHeight: 1.5,
 };
 
 async function fetchBaselines(): Promise<BaselineFetchResult> {

@@ -397,11 +397,11 @@ export default function InterviewToolkitPage() {
                 to this role.
               </li>
               <li>
-                Pick 2-3 STAR stories that fit the role's gaps and keep them
+                Pick 2-3 STAR stories that fit the role&rsquo;s gaps and keep them
                 handy.
               </li>
               <li>
-                Write down the company's product, user, and one recent headline
+                Write down the company&rsquo;s product, user, and one recent headline
                 to mention.
               </li>
               <li>
@@ -409,7 +409,7 @@ export default function InterviewToolkitPage() {
                 confirmed.
               </li>
               <li>
-                Keep a one-line "why me for this role" ready as your opener.
+                Keep a one-line &ldquo;why me for this role&rdquo; ready as your opener.
               </li>
             </ul>
           </section>

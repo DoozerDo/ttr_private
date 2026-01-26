@@ -148,6 +148,17 @@ function isFitAssessment(
   );
 }
 
+function getComplianceFlagsSource(
+  value: FitAssessment | AnalysisResult | null | undefined,
+): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as {
+    complianceFlags?: unknown;
+    compliance_flags?: unknown;
+  };
+  return candidate.complianceFlags ?? candidate.compliance_flags;
+}
+
 function normalizeComplianceFlags(
   flags?: string[] | ComplianceFlagLike[] | undefined,
 ): string[] {
@@ -346,9 +357,7 @@ export default function FitReviewClient() {
     }
     return {};
   }, [displayAssessment]);
-  const rawComplianceFlags =
-    (displayAssessment as any)?.complianceFlags ??
-    (displayAssessment as any)?.compliance_flags;
+  const rawComplianceFlags = getComplianceFlagsSource(displayAssessment);
   const complianceFlags = normalizeComplianceFlags(
     getComplianceFlagsInput(rawComplianceFlags),
   );

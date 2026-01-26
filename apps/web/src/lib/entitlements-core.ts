@@ -27,6 +27,13 @@ export function normalizeTier(candidate: unknown): SubscriptionTier {
  * Server-safe. Do NOT put this in a "use client" file.
  * Used by app/(app)/layout.tsx during bootstrap.
  */
+type EntitlementsInput = {
+  tier?: unknown;
+  effectiveTier?: unknown;
+  betaUnlockPro?: unknown;
+  reasons?: unknown;
+};
+
 export function computeEffectiveEntitlements(
   input: unknown,
   tierCandidate?: unknown,
@@ -34,17 +41,18 @@ export function computeEffectiveEntitlements(
   const tier = normalizeTier(tierCandidate);
 
   if (input && typeof input === "object") {
-    const e = input as any;
-    const normalizedTier = normalizeTier(e.tier ?? tier);
-    const normalizedEffective = normalizeTier(e.effectiveTier ?? normalizedTier);
+    const candidate = input as EntitlementsInput;
+    const normalizedTier = normalizeTier(candidate.tier ?? tier);
+    const normalizedEffective = normalizeTier(candidate.effectiveTier ?? normalizedTier);
+    const reasons = Array.isArray(candidate.reasons)
+      ? candidate.reasons.filter((item): item is string => typeof item === "string")
+      : [];
 
     return {
       tier: normalizedTier,
       effectiveTier: normalizedEffective,
-      betaUnlockPro: Boolean(e.betaUnlockPro),
-      reasons: Array.isArray(e.reasons)
-        ? e.reasons.filter((item: unknown) => typeof item === "string")
-        : [],
+      betaUnlockPro: Boolean(candidate.betaUnlockPro),
+      reasons,
     };
   }
 

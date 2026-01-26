@@ -276,8 +276,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
       setCompleteBanner("Assessment complete");
-    } catch (runError: any) {
-      setError(runError?.message ?? "Unable to run compatibility scoring right now.");
+    } catch (runError: unknown) {
+      const message = extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
+      setError(message);
       setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
@@ -332,8 +333,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
       setCompleteBanner("Loaded last run");
-    } catch (loadError: any) {
-      setError(loadError?.message ?? "Unable to load the last run.");
+    } catch (loadError: unknown) {
+      const message = extractErrorMessage(loadError) ?? "Unable to load the last run.";
+      setError(message);
       setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);

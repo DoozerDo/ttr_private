@@ -1,7 +1,7 @@
 // apps/web/app/components/next-step-card.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ttrComponents } from "../ui/ttrStyles";
@@ -10,6 +10,17 @@ import {
   readLastAnalysis,
   type StoredAnalysisRecord,
 } from "../lib/session";
+
+function formatSavedTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString();
+  } catch {
+    return null;
+  }
+}
 
 export function NextStepCard() {
   const [stored, setStored] = useState<StoredAnalysisRecord | null>(null);
@@ -31,17 +42,7 @@ export function NextStepCard() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const lastUpdated = useMemo(() => {
-    if (!stored?.savedAt) return null;
-
-    try {
-      const d = new Date(stored.savedAt);
-      if (Number.isNaN(d.getTime())) return null;
-      return d.toLocaleString();
-    } catch {
-      return null;
-    }
-  }, [stored?.savedAt]);
+  const lastUpdated = formatSavedTimestamp(stored?.savedAt);
 
   const hasLastAnalysis = stored?.fitScore !== null && stored?.fitScore !== undefined;
 

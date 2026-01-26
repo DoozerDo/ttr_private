@@ -70,8 +70,8 @@ function isStepCompleted(state: unknown): boolean {
 
 export function AppShell({ children, userEmail }: AppShellProps) {
   const pathname = usePathname() ?? "/";
-  const [hasBaseline, setHasBaseline] = useState(false);
-  const [hasJob, setHasJob] = useState(false);
+  const [, setHasBaseline] = useState(false);
+  const [, setHasJob] = useState(false);
   const lastPath = useRef(pathname);
 
   const journeyAppState = useJourneyNavAppState();
@@ -136,18 +136,34 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
     setHasBaseline(Boolean(baselinesOk));
     setHasJob(Boolean(jobsOk));
+
   }, []);
 
   useEffect(() => {
-    refreshContext();
+    if (typeof window === "undefined") return;
+    const timer = window.setTimeout(() => {
+      void refreshContext();
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [refreshContext]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const timers = new Set<number>();
     const onFocus = () => {
-      refreshContext();
+      const timer = window.setTimeout(() => {
+        void refreshContext();
+        timers.delete(timer);
+      }, 0);
+      timers.add(timer);
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, [refreshContext]);
 
   useEffect(() => {

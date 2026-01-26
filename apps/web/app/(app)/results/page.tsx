@@ -8,6 +8,7 @@ import { Alert } from "@/components/Alert";
 import {
   ComplianceFlagPanel,
   ComplianceViolationPanel,
+  type ComplianceFlag,
 } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
@@ -282,6 +283,20 @@ const getNextSteps = ({
 
 type AnyObject = Record<string, unknown>;
 
+function resolveUnknownMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as { message?: unknown; error?: unknown };
+  if (typeof candidate.message === "string" && candidate.message.length) {
+    return candidate.message;
+  }
+  if (typeof candidate.error === "string" && candidate.error.length) {
+    return candidate.error;
+  }
+  return undefined;
+}
+
 function stripInternalKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripInternalKeys);
 
@@ -403,11 +418,6 @@ export default function ResultsPage() {
   const [exportState, setExportState] = useState<
     { docType: DocumentType; format: "docx" | "pdf" } | null
   >(null);
-  const [isExportingBoth, setIsExportingBoth] = useState(false);
-  const [exportBothError, setExportBothError] = useState<ApiError | null>(null);
-  const [exportBothSuccessAuditIds, setExportBothSuccessAuditIds] = useState<
-    { resume?: string | null; coverLetter?: string | null } | null
-  >(null);
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [tierGateError, setTierGateError] = useState<TierGateError | null>(null);
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
@@ -415,7 +425,6 @@ export default function ResultsPage() {
     resume: createDocumentState(),
     "cover-letter": createDocumentState(),
   });
-  const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfile>("balanced");
@@ -485,14 +494,49 @@ export default function ResultsPage() {
 
   const documentResponse = (currentDocumentState.response as AnyObject | null) ?? null;
 
-  const rawFlags = Array.isArray(documentResponse?.compliance_flags)
-    ? (documentResponse?.compliance_flags as unknown[])
-    : [];
+  const documentWarningFlags = useMemo<ComplianceFlag[]>(() => {
+    const flags = Array.isArray(documentResponse?.compliance_flags)
+      ? (documentResponse?.compliance_flags as unknown[])
+      : [];
 
-  const documentWarningFlags = rawFlags.filter((flag) => {
-    const severity = ((flag as AnyObject | null)?.severity as string | null | undefined) ?? "warn";
-    return severity.toLowerCase() !== "block";
-  });
+    const results: ComplianceFlag[] = [];
+    for (const flag of flags) {
+      if (!flag || typeof flag !== "object") continue;
+      const entry = flag as AnyObject;
+      const severity =
+        typeof entry.severity === "string"
+          ? entry.severity
+          : typeof entry.flagSeverity === "string"
+            ? entry.flagSeverity
+            : undefined;
+      if ((severity ?? "warn").toLowerCase() === "block") {
+        continue;
+      }
+      const message =
+        typeof entry.message === "string"
+          ? entry.message
+          : typeof entry.msg === "string"
+            ? entry.msg
+            : typeof entry.description === "string"
+              ? entry.description
+              : "";
+      if (!message.length) continue;
+      const code =
+        typeof entry.code === "string"
+          ? entry.code
+          : typeof entry.flagCode === "string"
+            ? entry.flagCode
+            : undefined;
+
+      results.push({
+        code,
+        message,
+        severity,
+      });
+    }
+
+    return results;
+  }, [documentResponse?.compliance_flags]);
 
   const documentAuditId = (documentResponse?.audit_id as string | undefined) || undefined;
 
@@ -654,7 +698,6 @@ export default function ResultsPage() {
   );
 
   const topComplianceFlags = complianceFlagList.slice(0, 3);
-  const hiddenComplianceFlags = complianceFlagList.slice(3);
   const hasMoreComplianceFlags = complianceFlagList.length > 3;
 
   const latestAuditId = latest?.auditId ?? latest?.audit_id ?? null;
@@ -697,27 +740,6 @@ export default function ResultsPage() {
     latest?.jobId,
     latestAuditId,
   ]);
-
-  const exportBothSuccessDetails = exportBothSuccessAuditIds
-    ? {
-        message: "Resume and cover letter exported.",
-        resumeAuditId: exportBothSuccessAuditIds.resume ?? null,
-        coverLetterAuditId: exportBothSuccessAuditIds.coverLetter ?? null,
-      }
-    : null;
-
-  const exportBothErrorDetails = exportBothError
-    ? {
-        status: exportBothError.status ?? null,
-        code: exportBothError.code ?? null,
-        message: exportBothError.message ?? null,
-        details: exportBothError.details ?? null,
-        auditId: exportBothError.auditId ?? null,
-      }
-    : null;
-
-  const exportBothErrorJson = JSON.stringify(exportBothErrorDetails ?? {}, null, 2);
-  const exportBothSuccessJson = JSON.stringify(exportBothSuccessDetails ?? {}, null, 2);
 
   const debugMode = debugUiEnabled;
 
@@ -781,9 +803,8 @@ export default function ResultsPage() {
         setBaselineId(data.baselineId ?? "");
         setJobId(data.jobId ?? "");
         setAnalysisSource("latest");
-        setRestoredAt(null);
-      } catch (e: any) {
-        setError(e?.message || "Failed to load analysis");
+      } catch (error: unknown) {
+        setError(resolveUnknownMessage(error) ?? "Failed to load analysis");
       } finally {
         setLoadingLatest(false);
       }
@@ -859,8 +880,8 @@ export default function ResultsPage() {
       const query = params.toString();
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load analysis");
+    } catch (error: unknown) {
+      setError(resolveUnknownMessage(error) ?? "Failed to load analysis");
     } finally {
       setLoadingLatest(false);
     }
@@ -911,8 +932,8 @@ export default function ResultsPage() {
 
       const data = await res.json();
       setCalibrationResult(data as CalibratedResult);
-    } catch (e: any) {
-      setCalibrationError(e?.message ?? "Calibration failed.");
+    } catch (error: unknown) {
+      setCalibrationError(resolveUnknownMessage(error) ?? "Calibration failed.");
       setCalibrationResult(null);
     } finally {
       setCalibrating(false);
@@ -991,10 +1012,10 @@ export default function ResultsPage() {
         a.remove();
         window.URL.revokeObjectURL(url);
       }
-    } catch (e: any) {
+    } catch (error: unknown) {
       updateDocumentState(targetDocType, {
         error: createClientError(
-          e?.message ?? `${targetDocumentConfig.capitalizedLabel} generation failed`,
+          resolveUnknownMessage(error) ?? `${targetDocumentConfig.capitalizedLabel} generation failed`,
           "document_error",
         ),
       });
@@ -1078,9 +1099,9 @@ export default function ResultsPage() {
       a.remove();
       window.URL.revokeObjectURL(url);
       return { success: true, auditId };
-    } catch (e: any) {
+    } catch (error: unknown) {
       const clientError = createClientError(
-        e?.message ?? `${targetDocumentConfig.capitalizedLabel} export failed`,
+        resolveUnknownMessage(error) ?? `${targetDocumentConfig.capitalizedLabel} export failed`,
         "document_error",
       );
       updateDocumentState(targetDocType, { error: clientError });
@@ -1088,37 +1109,6 @@ export default function ResultsPage() {
     } finally {
       setExportState(null);
     }
-  }
-
-  async function exportBothDocuments() {
-    if (isExportingBoth) return;
-    setExportBothError(null);
-    setExportBothSuccessAuditIds(null);
-    setIsExportingBoth(true);
-
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    const resumeResult = await exportDocument("docx", "resume");
-    if (!resumeResult.success) {
-      setExportBothError(resumeResult.error ?? null);
-      setIsExportingBoth(false);
-      return;
-    }
-
-    const coverResult = await exportDocument("docx", "cover-letter");
-    if (!coverResult.success) {
-      setExportBothError(coverResult.error ?? null);
-      setIsExportingBoth(false);
-      return;
-    }
-
-    setExportBothSuccessAuditIds({
-      resume: resumeResult.auditId ?? null,
-      coverLetter: coverResult.auditId ?? null,
-    });
-    setIsExportingBoth(false);
   }
 
   useEffect(() => {
@@ -1286,7 +1276,7 @@ export default function ResultsPage() {
             <div className="flex flex-wrap gap-3">
               <FormButton
                 onClick={() => void handleGenerateBothDocuments()}
-                disabled={!readyForDocument || loading || isExportingBoth || isGeneratingBoth}
+                disabled={!readyForDocument || loading || isGeneratingBoth}
               >
                 {isGeneratingBoth ? "Generating..." : "Generate tailored resume and cover letter"}
               </FormButton>
@@ -1462,101 +1452,6 @@ export default function ResultsPage() {
           </details>
         </section>
 
-        {exportBothSuccessDetails ? (
-          <Alert intent="success" title="Resume and cover letter exported.">
-            <details
-              style={{
-                marginTop: 8,
-                cursor: "pointer",
-                fontSize: 12,
-                color: "rgba(226,232,240,0.7)",
-              }}
-            >
-              <summary>Copy details</summary>
-              <pre
-                style={{
-                  marginTop: 8,
-                  fontSize: 11,
-                  whiteSpace: "pre-wrap",
-                  backgroundColor: "rgba(15,23,42,0.6)",
-                  padding: 8,
-                  borderRadius: 6,
-                }}
-              >
-                {exportBothSuccessJson}
-              </pre>
-              {hasClipboardAPI && (
-                <button
-                  type="button"
-                  onClick={() => copyTextToClipboard(exportBothSuccessJson)}
-                  className="mt-2"
-                  style={{
-                    border: "1px solid rgba(148,163,184,0.4)",
-                    borderRadius: 6,
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    backgroundColor: "transparent",
-                    color: "rgba(226,232,240,0.9)",
-                  }}
-                >
-                  Copy details
-                </button>
-              )}
-            </details>
-            <p className="mt-2 text-xs text-slate-400">
-              Resume audit ID: {exportBothSuccessDetails.resumeAuditId ?? "Not available"}. Cover letter audit ID:{" "}
-              {exportBothSuccessDetails.coverLetterAuditId ?? "Not available"}.
-            </p>
-          </Alert>
-        ) : null}
-
-        {exportBothError ? (
-          <Alert intent="error" title="Unable to export documents">
-            <p className="text-sm text-slate-100" style={{ margin: 0 }}>
-              {exportBothError.message}
-            </p>
-            <details
-              style={{
-                marginTop: 8,
-                cursor: "pointer",
-                fontSize: 12,
-                color: "rgba(226,232,240,0.7)",
-              }}
-            >
-              <summary>Copy details</summary>
-              <pre
-                style={{
-                  marginTop: 8,
-                  fontSize: 11,
-                  whiteSpace: "pre-wrap",
-                  backgroundColor: "rgba(15,23,42,0.6)",
-                  padding: 8,
-                  borderRadius: 6,
-                }}
-              >
-                {exportBothErrorJson}
-              </pre>
-              {hasClipboardAPI && (
-                <button
-                  type="button"
-                  onClick={() => copyTextToClipboard(exportBothErrorJson)}
-                  className="mt-2"
-                  style={{
-                    border: "1px solid rgba(148,163,184,0.4)",
-                    borderRadius: 6,
-                    padding: "6px 10px",
-                    fontSize: 12,
-                    backgroundColor: "transparent",
-                    color: "rgba(226,232,240,0.9)",
-                  }}
-                >
-                  Copy details
-                </button>
-              )}
-            </details>
-            <p className="mt-2 text-xs text-slate-400">Audit ID: {exportBothError.auditId ?? "Not available"}</p>
-          </Alert>
-        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
@@ -1627,14 +1522,14 @@ export default function ResultsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <FormButton onClick={() => void generateDocument(false)} disabled={!readyForDocument || loading || isExportingBoth}>
+            <FormButton onClick={() => void generateDocument(false)} disabled={!readyForDocument || loading}>
               {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
             </FormButton>
 
             <FormButton
               variant="secondary"
               onClick={() => void generateDocument(true)}
-              disabled={!readyForDocument || !oneTapEligible || loading || isExportingBoth}
+              disabled={!readyForDocument || !oneTapEligible || loading}
               title={
                 readyForDocument
                   ? oneTapEligible
@@ -1654,8 +1549,7 @@ export default function ResultsPage() {
               disabled={
                 !readyForDocument ||
                 !oneTapEligible ||
-                (exportState?.docType === documentType && exportState.format === "docx") ||
-                isExportingBoth
+                (exportState?.docType === documentType && exportState.format === "docx")
               }
             >
               {exportState?.docType === documentType && exportState.format === "docx"
@@ -1669,8 +1563,7 @@ export default function ResultsPage() {
               disabled={
                 !readyForDocument ||
                 !oneTapEligible ||
-                (exportState?.docType === documentType && exportState.format === "pdf") ||
-                isExportingBoth
+                (exportState?.docType === documentType && exportState.format === "pdf")
               }
             >
               {exportState?.docType === documentType && exportState.format === "pdf"
@@ -1770,7 +1663,7 @@ export default function ResultsPage() {
                 <ComplianceFlagPanel
                   title="Compliance warnings"
                   description={`${documentConfig.capitalizedLabel} generated with compliance notices.`}
-                  flags={documentWarningFlags as any}
+                  flags={documentWarningFlags}
                   auditId={documentAuditId}
                   baselineVersionHash={documentBaselineHash}
                   intent="warning"

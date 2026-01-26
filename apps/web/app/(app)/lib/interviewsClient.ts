@@ -59,7 +59,7 @@ export async function promoteInterviewAcceptedAdditions(interviewId: string) {
   });
 }
 
-export function computeInterviewExpandedFit(_: unknown) {
+export function computeInterviewExpandedFit() {
   // If you already have a real implementation elsewhere, wire it later.
   // This exists to unblock build and keeps behavior safe.
   return null;

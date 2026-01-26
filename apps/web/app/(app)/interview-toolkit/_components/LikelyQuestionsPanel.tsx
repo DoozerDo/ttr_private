@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import {
@@ -30,7 +30,6 @@ interface LikelyQuestionsPanelProps {
 }
 
 export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
-  const questions = useMemo(() => transformSignalsToInterviewQuestions(signals), [signals]);
   const signalFingerprint = useMemo(
     () =>
       signals
@@ -42,6 +41,12 @@ export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
     [signals],
   );
 
+  return <LikelyQuestionsPanelStateful key={signalFingerprint} signals={signals} />;
+}
+
+function LikelyQuestionsPanelStateful({ signals }: LikelyQuestionsPanelProps) {
+  const questions = useMemo(() => transformSignalsToInterviewQuestions(signals), [signals]);
+
   const [timeMode, setTimeMode] = useState<TimeModeValue>("15");
   const [showMore, setShowMore] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(createInitialGroupState);
@@ -49,19 +54,12 @@ export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
   const [copiedQuestionId, setCopiedQuestionId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setExpandedGroups(createInitialGroupState());
-    setPinnedQuestionIds([]);
-    setShowMore(false);
-    setCopiedQuestionId(null);
-    setCopyError(null);
-  }, [signalFingerprint]);
-
-  useEffect(() => {
-    if (timeMode !== "30") {
+  const handleTimeModeChange = (value: TimeModeValue) => {
+    setTimeMode(value);
+    if (value !== "30") {
       setShowMore(false);
     }
-  }, [timeMode]);
+  };
 
   const activeMode = TIME_MODES.find((mode) => mode.value === timeMode) ?? TIME_MODES[1];
   const shouldShowAll = timeMode === "30" || showMore;
@@ -227,7 +225,7 @@ export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
                   ? "border-sky-500 bg-slate-900 text-white"
                   : "border-white/20 text-slate-300 hover:border-white/40"
               }`}
-              onClick={() => setTimeMode(mode.value)}
+              onClick={() => handleTimeModeChange(mode.value)}
             >
               {mode.label}
             </button>

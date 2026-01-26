@@ -40,20 +40,18 @@ export default async function AppLayout({ children }: AppLayoutProps) {
   const payload = decodeJwt(token);
   const email = payload?.email ?? null;
 
-  const tier = normalizeTier((payload as any)?.subscriptionTier);
+  const tier = normalizeTier(payload?.subscriptionTier);
 
   const bootstrapProfile: UserProfile | null =
     email
       ? ({
-          id: (payload as any)?.sub ?? "",
+          id: payload?.sub ?? "",
           email,
-          subscriptionTier: (payload as any)?.subscriptionTier,
-          role: (payload as any)?.role,
-          entitlements: computeEffectiveEntitlements(
-            (payload as any)?.entitlements,
-            tier,
-          ),
-        } as any)
+          subscriptionTier:
+            typeof payload?.subscriptionTier === "string" ? payload.subscriptionTier : null,
+          role: typeof payload?.role === "string" ? payload.role : null,
+          entitlements: computeEffectiveEntitlements(payload?.entitlements, tier),
+        })
       : null;
 
   const finalProfile =

@@ -465,7 +465,9 @@ export default function StarStoriesPage() {
                 border: "1px solid rgba(248,113,113,0.4)",
               }}
             >
-              <p style={{ margin: 0, fontWeight: 600 }}>Delete "{pendingDelete.title}"?</p>
+              <p style={{ margin: 0, fontWeight: 600 }}>
+                Delete &ldquo;{pendingDelete.title}&rdquo;?
+              </p>
               <p style={{ margin: "4px 0 10px", color: "rgba(226,232,240,0.75)" }}>
                 This action cannot be undone.
               </p>

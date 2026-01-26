@@ -22,6 +22,17 @@ const defaultEntitlements: StructuredEntitlements = {
   source: "real",
 };
 
+function resolveUnknownErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as { message?: unknown };
+  if (typeof candidate.message === "string" && candidate.message.trim()) {
+    return candidate.message;
+  }
+  return undefined;
+}
+
 function isPaidTier(tier: SubscriptionTier): boolean {
   return tier !== "FREE";
 }
@@ -105,18 +116,15 @@ export function EntitlementsProvider({
         if (!current) return current;
 
         const tierCandidate =
-          (current as any)?.subscriptionTier ?? (current as any)?.entitlements?.tier;
+          current.subscriptionTier ?? current.entitlements?.tier;
 
         return {
           ...current,
-          entitlements: computeEffectiveEntitlements(
-            (current as any)?.entitlements,
-            tierCandidate,
-          ),
+          entitlements: computeEffectiveEntitlements(current.entitlements, tierCandidate),
         };
       });
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to refresh entitlements");
+    } catch (error: unknown) {
+      setError(resolveUnknownErrorMessage(error) ?? "Failed to refresh entitlements");
     } finally {
       setLoading(false);
     }

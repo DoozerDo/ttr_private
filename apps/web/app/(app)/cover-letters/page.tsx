@@ -7,6 +7,7 @@ import { Alert } from "@/components/Alert";
 import {
   ComplianceFlagPanel,
   ComplianceViolationPanel,
+  type ComplianceFlag,
 } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
@@ -42,6 +43,21 @@ const DOCUMENT_LABEL = "cover letter";
 const DOCUMENT_CAPITALIZED = "Cover letter";
 const DOWNLOAD_NAME = "cover-letter";
 const COPY_LABEL = "Copy cover letter text";
+
+function extractUnknownMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as { message?: unknown; error?: unknown; msg?: unknown; description?: unknown };
+  if (typeof candidate.message === "string" && candidate.message.trim().length) return candidate.message;
+  if (Array.isArray(candidate.message) && candidate.message.length) {
+    return candidate.message.filter((item): item is string => typeof item === "string").join(", ");
+  }
+  if (typeof candidate.error === "string") return candidate.error;
+  if (typeof candidate.msg === "string") return candidate.msg;
+  if (typeof candidate.description === "string") return candidate.description;
+  return undefined;
+}
 
 export default function CoverLettersPage() {
   const [analysisRecord, setAnalysisRecord] = useState<StoredAnalysisRecord | null>(null);
@@ -115,46 +131,50 @@ export default function CoverLettersPage() {
   );
 
   const documentResponse = (documentState.response as AnyObject | null) ?? null;
-  const rawFlags = Array.isArray(documentResponse?.compliance_flags)
-    ? (documentResponse?.compliance_flags as unknown[])
-    : [];
 
-  const warningFlags = useMemo(
-    () =>
-      rawFlags
-        .filter((flag) => {
-          const severity = ((flag as AnyObject | null)?.severity as string | undefined) ?? "warn";
-          return severity.toLowerCase() !== "block";
-        })
-        .map((flag) => {
-          const entry = flag as AnyObject | null;
-          const message =
-            typeof entry?.message === "string"
-              ? entry.message
-              : typeof entry?.msg === "string"
-                ? entry.msg
-                : typeof entry?.description === "string"
-                  ? entry.description
-                  : "";
-          return {
-            code:
-              typeof entry?.code === "string"
-                ? entry.code
-                : typeof entry?.flagCode === "string"
-                  ? entry.flagCode
-                  : undefined,
-            message,
-            severity:
-              typeof entry?.severity === "string"
-                ? entry.severity
-                : typeof entry?.flagSeverity === "string"
-                  ? entry.flagSeverity
-                  : undefined,
-          };
-        })
-        .filter((item) => item.message.length),
-    [rawFlags],
-  );
+  const warningFlags = useMemo<ComplianceFlag[]>(() => {
+    const flags = Array.isArray(documentResponse?.compliance_flags)
+      ? (documentResponse?.compliance_flags as unknown[])
+      : [];
+
+    const results: ComplianceFlag[] = [];
+    for (const flag of flags) {
+      if (!flag || typeof flag !== "object") continue;
+      const entry = flag as AnyObject;
+      const severity =
+        typeof entry.severity === "string"
+          ? entry.severity
+          : typeof entry.flagSeverity === "string"
+            ? entry.flagSeverity
+            : undefined;
+      if ((severity ?? "warn").toLowerCase() === "block") {
+        continue;
+      }
+      const message =
+        typeof entry.message === "string"
+          ? entry.message
+          : typeof entry.msg === "string"
+            ? entry.msg
+            : typeof entry.description === "string"
+              ? entry.description
+              : "";
+      if (!message.length) continue;
+      const code =
+        typeof entry.code === "string"
+          ? entry.code
+          : typeof entry.flagCode === "string"
+            ? entry.flagCode
+            : undefined;
+
+      results.push({
+        code,
+        message,
+        severity,
+      });
+    }
+
+    return results;
+  }, [documentResponse?.compliance_flags]);
 
   const documentPreviewText = useMemo(() => {
     if (!documentState.response) return "";
@@ -214,10 +234,12 @@ export default function CoverLettersPage() {
 
       const json = await res.json();
       setDocumentState((prev) => ({ ...prev, response: json }));
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message =
+        extractUnknownMessage(error) ?? `${DOCUMENT_CAPITALIZED} generation failed`;
       setDocumentState((prev) => ({
         ...prev,
-        error: error?.message ?? `${DOCUMENT_CAPITALIZED} generation failed`,
+        error: message,
       }));
     } finally {
       setLoadingDraft(false);
@@ -281,10 +303,11 @@ export default function CoverLettersPage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = extractUnknownMessage(error) ?? `${DOCUMENT_CAPITALIZED} export failed`;
       setDocumentState((prev) => ({
         ...prev,
-        error: error?.message ?? `${DOCUMENT_CAPITALIZED} export failed`,
+        error: message,
       }));
     } finally {
       setExportState(null);

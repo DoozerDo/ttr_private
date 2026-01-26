@@ -9,6 +9,26 @@ interface AuthFormProps {
   returnPath?: string | null;
 }
 
+function extractAuthApiMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as { message?: unknown; error?: unknown };
+  if (typeof candidate.message === "string" && candidate.message.length) {
+    return candidate.message;
+  }
+  if (Array.isArray(candidate.message)) {
+    const filtered = candidate.message.filter((item): item is string => typeof item === "string");
+    if (filtered.length) {
+      return filtered.join(", ");
+    }
+  }
+  if (typeof candidate.error === "string" && candidate.error.length) {
+    return candidate.error;
+  }
+  return undefined;
+}
+
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -44,7 +64,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         body: JSON.stringify({ email: trimmedEmail, password }),
       });
 
-      let data: any = null;
+      let data: unknown = null;
 
       // Try to parse JSON if there is a body; ignore parse errors
       const text = await response.text();
@@ -58,10 +78,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
 
       if (!response.ok) {
         const messageFromApi =
-          (typeof data?.message === "string" && data.message) ||
-          (Array.isArray(data?.message) && data.message.join(", ")) ||
-          (typeof data?.error === "string" && data.error) ||
-          (isLogin ? "Login failed" : "Registration failed");
+          extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
 
         setError(messageFromApi);
         return;

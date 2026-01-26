@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const API_ORIGIN = process.env.API_ORIGIN;
 const DEV_USER_ID = process.env.DEV_USER_ID;
@@ -7,7 +7,7 @@ if (!API_ORIGIN) {
   throw new Error("API_ORIGIN is not set");
 }
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   if (!DEV_USER_ID) {
     return NextResponse.json(
       { error: "Admin access required", detail: "Missing DEV_USER_ID" },

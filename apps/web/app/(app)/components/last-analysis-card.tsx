@@ -1,7 +1,7 @@
 // apps/web/app/components/last-analysis-card.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
@@ -17,6 +17,17 @@ function fitLabel(score: number) {
   if (score >= 75) return "Solid fit";
   if (score >= 60) return "Mixed fit";
   return "Weak fit";
+}
+
+function formatSavedTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString();
+  } catch {
+    return null;
+  }
 }
 
 export function LastAnalysisCard() {
@@ -46,17 +57,7 @@ export function LastAnalysisCard() {
     stored?.analysis?.overall_score ??
     null;
 
-  const lastUpdated = useMemo(() => {
-    if (!stored?.savedAt) return null;
-
-    try {
-      const d = new Date(stored.savedAt);
-      if (Number.isNaN(d.getTime())) return null;
-      return d.toLocaleString();
-    } catch {
-      return null;
-    }
-  }, [stored?.savedAt]);
+  const lastUpdated = formatSavedTimestamp(stored?.savedAt);
 
   const blockStyle: CSSProperties = {
     border: "1px dashed rgba(251,191,36,0.35)",

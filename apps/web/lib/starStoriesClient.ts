@@ -21,6 +21,20 @@ export type StarStoryFormPayload = {
   reflections?: string;
 };
 
+function resolveResponseMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as { message?: unknown; error?: unknown };
+  if (typeof candidate.message === "string" && candidate.message.length) {
+    return candidate.message;
+  }
+  if (typeof candidate.error === "string" && candidate.error.length) {
+    return candidate.error;
+  }
+  return undefined;
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...init });
 
@@ -29,9 +43,9 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const data = await res.json().catch(() => ({} as any));
-    const message = data?.message || data?.error || "Request failed";
-    throw new Error(message);
+    const payload = await res.json().catch(() => null);
+    const errorMessage = resolveResponseMessage(payload) ?? "Request failed";
+    throw new Error(errorMessage);
   }
 
   return (await res.json()) as T;
