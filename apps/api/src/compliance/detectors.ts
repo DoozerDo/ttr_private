@@ -57,7 +57,7 @@ const BASELINE_ROLE_SECTION_TYPES = new Set<string>([
   BaselineSectionType.EXPERIENCE,
   BaselineSectionType.SUMMARY,
 ]);
-const EXPERIENCE_HEADER_DELIMITERS = /[-@|\/]+/;
+const EXPERIENCE_HEADER_DELIMITERS = /[-@|/]+/;
 
 const ROLE_CONTEXT_PATTERN =
   /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4})/gi;
@@ -431,7 +431,7 @@ function extractCompanyFromHeaderLine(line: string): string | null {
     }
   }
 
-  const companySeparatorMatch = /^(.+?)\s+[-–—@|\/]+\s+(.+)$/i.exec(trimmed);
+  const companySeparatorMatch = /^(.+?)\s+[-–—@|/]+\s+(.+)$/i.exec(trimmed);
   if (companySeparatorMatch) {
     const [, firstPart, secondPart] = companySeparatorMatch;
     if (looksLikeCompanyName(firstPart)) {
@@ -948,13 +948,13 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
   });
 }
 
-const TECHNOLOGY_TOKEN_PATTERN = /\b[A-Za-z0-9][-A-Za-z0-9.\+#_]{1,}\b/g;
+const TECHNOLOGY_TOKEN_PATTERN = /\b[A-Za-z0-9][-A-Za-z0-9.#_+]{1,}\b/g;
 
 function isTechnologyTokenCandidate(value: string): boolean {
   const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
   if (cleaned.length < 3) return false;
 
-  if (/[.#\+#-]/.test(value)) return true;
+  if (/[.#+-]/.test(value)) return true;
   if (/\d/.test(cleaned)) return true;
 
   const remainder = cleaned.slice(1);
@@ -993,7 +993,7 @@ export function computeTechnologyConfidence(token: string): number {
   score += Math.min(0.35, normalized.length / 20);
   if (/[A-Z]/.test(normalized)) score += 0.2;
   if (/[0-9]/.test(normalized)) score += 0.1;
-  if (/[\.+#_]/.test(normalized)) score += 0.1;
+  if (/[.+#_]/.test(normalized)) score += 0.1;
   if (/\./.test(normalized)) score += 0.05;
   return Math.min(0.98, score);
 }

@@ -17,7 +17,6 @@ import {
   IngestJobDescriptionInput,
   JobsService,
 } from './jobs.service';
-import { JobIngestionMethod } from './job.entity';
 
 @Controller('jobs')
 @UseGuards(AuthGuard('jwt'))

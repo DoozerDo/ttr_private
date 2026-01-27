@@ -34,6 +34,107 @@ const SAFE_RESPONSIBILITY =
 const SAFE_REQUIREMENT =
   'Strong background in cross-platform automation and observability.';
 
+type RegisterResponse = {
+  accessToken: string;
+  user: { id: string };
+};
+
+type LoginResponse = RegisterResponse;
+
+type IngestJobResponse = {
+  job: {
+    id: string;
+    normalizedResponsibilities?: string[];
+    normalizedRequirements?: string[];
+  };
+};
+
+type GeneratedDocResponse = {
+  generatedSections: Array<{ text: string }>;
+};
+
+type ComplianceFlagLike = {
+  code: string;
+  message: string;
+  severity?: string;
+};
+
+type AuditResponse = {
+  audit_id: string;
+  compliance_flags: ComplianceFlagLike[];
+  auditId?: string;
+  complianceFlags?: ComplianceFlagLike[];
+};
+
+type ComplianceBlockingResponseLike = {
+  ok?: boolean;
+  audit_id?: string;
+  auditId?: string;
+  compliance_flags?: ComplianceFlagLike[];
+  complianceFlags?: ComplianceFlagLike[];
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function assertIsObjectRecord(
+  value: unknown,
+): asserts value is Record<string, unknown> {
+  if (!isObject(value)) {
+    throw new Error('Expected object record.');
+  }
+}
+
+function getStringProp(record: Record<string, unknown>, key: string): string {
+  const candidate = record[key];
+  if (typeof candidate !== 'string') {
+    throw new Error(`Expected ${key} to be a string.`);
+  }
+  return candidate;
+}
+
+function assertHasId(value: unknown): asserts value is { id: string } {
+  assertIsObjectRecord(value);
+  getStringProp(value, 'id');
+}
+
+function assertRegisterResponse(
+  value: unknown,
+): asserts value is RegisterResponse {
+  assertIsObjectRecord(value);
+  getStringProp(value, 'accessToken');
+  assertIsObjectRecord(value.user);
+  assertHasId(value.user);
+}
+
+function assertIngestJobResponse(
+  value: unknown,
+): asserts value is IngestJobResponse {
+  assertIsObjectRecord(value);
+  const jobValue = value.job;
+  assertIsObjectRecord(jobValue);
+  getStringProp(jobValue, 'id');
+
+  const responsibilities = jobValue.normalizedResponsibilities;
+  if (
+    responsibilities &&
+    (!Array.isArray(responsibilities) ||
+      responsibilities.some((entry) => typeof entry !== 'string'))
+  ) {
+    throw new Error('Expected normalizedResponsibilities to be string array.');
+  }
+
+  const requirements = jobValue.normalizedRequirements;
+  if (
+    requirements &&
+    (!Array.isArray(requirements) ||
+      requirements.some((entry) => typeof entry !== 'string'))
+  ) {
+    throw new Error('Expected normalizedRequirements to be string array.');
+  }
+}
+
 describe('Compliance blocking for generation endpoints (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;

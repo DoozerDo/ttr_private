@@ -9,7 +9,9 @@ export class BaselinePromotionComplianceAction1910000000000 implements Migration
     );
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public down(_queryRunner: QueryRunner): Promise<void> {
     // Postgres enums do not allow removing values easily, so we leave the value in place.
+    void _queryRunner;
+    return Promise.resolve();
   }
 }

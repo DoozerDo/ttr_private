@@ -71,6 +71,11 @@ const CONTENT_TYPE_ERROR =
 const NORMALIZATION_WARNING_MESSAGE =
   'We could not fully parse this job description, but it was saved successfully.';
 
+const hasName = (value: unknown): value is { name: string } =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { name?: unknown }).name === 'string';
+
 @Injectable()
 export class JobsService {
   constructor(
@@ -338,8 +343,10 @@ export class JobsService {
       }
 
       if (
-        error instanceof Error &&
-        (error.name === 'AbortError' || (error as any)?.name === 'AbortError')
+        (error instanceof Error && error.name === 'AbortError') ||
+        (!(error instanceof Error) &&
+          hasName(error) &&
+          error.name === 'AbortError')
       ) {
         throw new BadRequestException(FETCH_TIMEOUT_MESSAGE);
       }

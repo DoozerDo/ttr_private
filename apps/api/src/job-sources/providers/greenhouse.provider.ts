@@ -80,8 +80,9 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
     const { responsibilities, requirements } =
       this.extractResponsibilitiesAndRequirements(sanitized);
     const applyUrl = this.extractApplyUrl(html, detail.url) ?? detail.url;
-    const externalId =
+    const candidateExternalId =
       detail.metadata?.externalId ?? this.extractExternalIdFromUrl(detail.url);
+    const externalId = formatExternalId(candidateExternalId);
 
     if (!externalId) {
       throw new BadRequestException(
@@ -98,7 +99,7 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
       requirements,
       applyUrl,
       sourceUrl: detail.url,
-      externalId: String(externalId),
+      externalId,
     };
   }
 
@@ -342,7 +343,7 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
       .split('\n')
       .find((line) => /^location[:\s]/i.test(line));
     if (locationLine) {
-      const parts = locationLine.split(/[:\-]/);
+      const parts = locationLine.split(/[-:]/);
       if (parts.length > 1) {
         return parts.slice(1).join(':').trim();
       }
@@ -431,4 +432,63 @@ export class GreenhouseJobSourceProvider implements JobSourceProvider {
     });
     return value;
   }
+}
+
+function formatExternalId(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (isRecord(value)) {
+    const candidate = getFirstStringish(value, [
+      'externalId',
+      'id',
+      'slug',
+      'value',
+    ]);
+    if (candidate) {
+      return candidate;
+    }
+
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized && serialized !== '{}' && serialized !== 'null') {
+        return serialized;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
+function getFirstStringish(
+  value: Record<string, unknown>,
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return String(candidate);
+    }
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

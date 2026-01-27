@@ -433,7 +433,7 @@ export class RealityCheckService {
         }
         default:
           throw new BadRequestException(
-            `Unsupported question type: ${question.type}`,
+            `Unsupported question type: ${String(question.type)}`,
           );
       }
 

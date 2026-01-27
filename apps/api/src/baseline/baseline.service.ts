@@ -111,7 +111,7 @@ export class BaselineService {
 
     // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
     // so we do not send invalid UTF-8 to Postgres.
-    return content.replace(/\u0000/g, '');
+    return content.replace(/[\u0000-\u001F\u007F]/g, '');
   }
 
   private buildSections(

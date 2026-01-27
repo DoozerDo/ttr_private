@@ -57,7 +57,7 @@ describe('InterviewsController', () => {
     const controller = new InterviewsController(service);
     const request = createMockRequest('user-1');
 
-    await controller.listInterviews(request as any);
+    await boundList(request as any);
 
     expect(service.listInterviewsForUser).toHaveBeenCalledWith('user-1');
   });
@@ -67,7 +67,8 @@ describe('InterviewsController', () => {
     const controller = new InterviewsController(service);
     const request = createMockRequest('user-1');
 
-    await controller.getInterview('interview-1', request as any);
+    const boundGet = controller.getInterview.bind(controller);
+    await boundGet('interview-1', request as any);
 
     expect(service.getInterviewForUser).toHaveBeenCalledWith(
       'interview-1',
@@ -81,7 +82,8 @@ describe('InterviewsController', () => {
     const request = createMockRequest('user-1');
     const body = { jobId: 'job-1', baselineId: 'baseline-1' };
 
-    await controller.startInterviewFromFitReview(body, request as any);
+    const boundStart = controller.startInterviewFromFitReview.bind(controller);
+    await boundStart(body, request as any);
 
     expect(service.startInterviewFromFitReview).toHaveBeenCalledWith(
       'user-1',
@@ -95,7 +97,8 @@ describe('InterviewsController', () => {
     const request = createMockRequest('user-1');
     const update = { status: 'confirmed' };
 
-    await controller.updateInterview('interview-1', update, request as any);
+    const boundUpdate = controller.updateInterview.bind(controller);
+    await boundUpdate('interview-1', update, request as any);
 
     expect(service.updateInterview).toHaveBeenCalledWith(
       'interview-1',
@@ -109,7 +112,8 @@ describe('InterviewsController', () => {
     const controller = new InterviewsController(service);
     const request = createMockRequest('user-1');
 
-    await controller.deleteInterview('interview-1', request as any);
+    const boundDelete = controller.deleteInterview.bind(controller);
+    await boundDelete('interview-1', request as any);
 
     expect(service.deleteInterview).toHaveBeenCalledWith(
       'interview-1',

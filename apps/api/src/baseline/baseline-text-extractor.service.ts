@@ -5,6 +5,11 @@ import type { Express } from 'express';
 import * as mammoth from 'mammoth';
 import pdf from 'pdf-parse';
 
+const extractRawText = mammoth.extractRawText as (options: {
+  buffer: Buffer;
+}) => Promise<unknown>;
+const parsePdf = pdf as (buffer: Buffer) => Promise<unknown>;
+
 @Injectable()
 export class BaselineTextExtractor {
   private readonly logger = new Logger(BaselineTextExtractor.name);
@@ -39,12 +44,18 @@ export class BaselineTextExtractor {
   }
 
   private async extractDocx(buffer: Buffer): Promise<string> {
-    const result = await mammoth.extractRawText({ buffer });
+    const result: unknown = await extractRawText({ buffer });
+    if (!isRawTextResult(result)) {
+      throw new Error('Unexpected docx extraction result');
+    }
     return result.value;
   }
 
   private async extractPdf(buffer: Buffer): Promise<string> {
-    const result = await pdf(buffer);
+    const result: unknown = await parsePdf(buffer);
+    if (!isExtractResult(result)) {
+      throw new Error('Unexpected pdf extraction result');
+    }
     return result.text;
   }
 
@@ -61,6 +72,25 @@ export class BaselineTextExtractor {
   }
 
   private fallbackToUtf8(buffer: Buffer): string {
-    return buffer.toString('utf8').replace(/\u0000/g, '');
+    const text = buffer.toString('utf8');
+    return [...text]
+      .filter((char) => char >= ' ' && char !== '\u007F')
+      .join('');
   }
+}
+
+function isExtractResult(value: unknown): value is { text: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).text === 'string'
+  );
+}
+
+function isRawTextResult(value: unknown): value is { value: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).value === 'string'
+  );
 }

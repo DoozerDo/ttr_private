@@ -7,6 +7,32 @@ const baseSentence =
 const repeatSentence = (sentence: string, count: number) =>
   Array(count).fill(sentence).join(' ');
 
+type SelectJobTextSelection = {
+  text: string;
+  wordCount: number;
+  source: string;
+};
+
+type SelectJobTextInvoker = (
+  job: FitScoreInput['job'],
+) => SelectJobTextSelection;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const assertSelection = (
+  value: unknown,
+): asserts value is SelectJobTextSelection => {
+  if (
+    !isObject(value) ||
+    typeof value.text !== 'string' ||
+    typeof value.wordCount !== 'number' ||
+    typeof value.source !== 'string'
+  ) {
+    throw new Error('Expected job text selection payload.');
+  }
+};
+
 const baseSections = [
   {
     type: 'EXPERIENCE',
@@ -143,7 +169,10 @@ describe('FitScoreEngine job text override', () => {
   };
 
   it('prefers jobTextOverride when present', async () => {
-    const spy = jest.spyOn(engine as any, 'selectJobText');
+    const spy = jest.spyOn(
+      engine as unknown as { selectJobText: SelectJobTextInvoker },
+      'selectJobText',
+    );
     const overrideToken = 'FULL RAW CONTEXT';
     const input = {
       ...baseJobInput,
@@ -154,13 +183,19 @@ describe('FitScoreEngine job text override', () => {
     };
 
     await engine.score(input);
-    const selection = spy.mock.results[0].value;
+    const result = spy.mock.results[0];
+    expect(result).toBeDefined();
+    const selection = result.value;
+    assertSelection(selection);
     expect(selection.text).toContain(overrideToken);
     spy.mockRestore();
   });
 
   it('falls back to normalized sections when override absent', async () => {
-    const spy = jest.spyOn(engine as any, 'selectJobText');
+    const spy = jest.spyOn(
+      engine as unknown as { selectJobText: SelectJobTextInvoker },
+      'selectJobText',
+    );
     const input = {
       ...baseJobInput,
       job: {
@@ -173,7 +208,10 @@ describe('FitScoreEngine job text override', () => {
     };
 
     await engine.score(input);
-    const selection = spy.mock.results[0].value;
+    const result = spy.mock.results[0];
+    expect(result).toBeDefined();
+    const selection = result.value;
+    assertSelection(selection);
     expect(selection.text).toContain('Normalized one');
     expect(selection.source).toBe('normalizedSections');
     spy.mockRestore();

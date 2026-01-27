@@ -45,10 +45,10 @@ describe('InterviewRecordsService', () => {
       ...mockInterview,
       ...data,
     })),
-    save: jest.fn(async (data: Interview) => data),
+    save: jest.fn((data: Interview) => Promise.resolve(data)),
     find: jest.fn(),
     findOne: jest.fn(),
-    remove: jest.fn(async (data: Interview) => data),
+    remove: jest.fn((data: Interview) => Promise.resolve(data)),
   });
 
   const createAcceptedAdditionsRepository = () => ({

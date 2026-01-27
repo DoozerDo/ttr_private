@@ -27,19 +27,19 @@ function buildRepository<T extends Record<string, any>>(
   let saved = initial;
 
   return {
-    findOne: jest.fn(async () => saved ?? null),
-    find: jest.fn(async () => []),
+    findOne: jest.fn(() => Promise.resolve(saved ?? null)),
+    find: jest.fn(() => Promise.resolve([])),
     create: jest.fn((payload: Partial<T>) => ({ ...payload }) as T),
-    save: jest.fn(async (payload: T) => {
+    save: jest.fn((payload: T) => {
       saved = {
         ...payload,
         id: payload['id'] ?? 'saved-id',
         createdAt: new Date(),
         updatedAt: new Date(),
       } as T;
-      return saved;
+      return Promise.resolve(saved);
     }),
-    remove: jest.fn(async (payload: T) => payload),
+    remove: jest.fn((payload: T) => Promise.resolve(payload)),
   };
 }
 
@@ -77,14 +77,16 @@ describe('CoverLettersService', () => {
   const complianceService = {
     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
     detectScopeInflation: jest.fn().mockReturnValue([]),
-    validateAndAudit: jest.fn(async (ctx: any) => ({
-      complianceFlags: ctx.extraFlags ?? [],
-      blocked: (ctx.extraFlags ?? []).some(
-        (flag: { severity: ComplianceFlagSeverity }) =>
-          flag.severity === ComplianceFlagSeverity.BLOCK,
-      ),
-      audit: { id: 'audit-1' },
-    })),
+    validateAndAudit: jest.fn((ctx: any) =>
+      Promise.resolve({
+        complianceFlags: ctx.extraFlags ?? [],
+        blocked: (ctx.extraFlags ?? []).some(
+          (flag: { severity: ComplianceFlagSeverity }) =>
+            flag.severity === ComplianceFlagSeverity.BLOCK,
+        ),
+        audit: { id: 'audit-1' },
+      }),
+    ),
   };
 
   const dataSource = {

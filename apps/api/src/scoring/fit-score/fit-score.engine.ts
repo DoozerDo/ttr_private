@@ -15,7 +15,6 @@ import {
   countWords,
   tokenize,
   clamp,
-  mapSimilarityToScore,
   buildJobPromptText,
 } from './fit-score.utils';
 import { evaluateToolCoverage } from './tool-extractor';
@@ -169,24 +168,21 @@ export class FitScoreEngine {
       EXPERIENCE_SECTION_TYPES,
     );
 
-    const experience = await this.scoreExperienceAlignment(
+    const experience = this.scoreExperienceAlignment(
       jobSelection.text,
       baselineExperienceText,
       baselineText,
     );
-    const leadership = await this.scoreLeadershipLevel(
+    const leadership = this.scoreLeadershipLevel(
       jobSelection.text,
       baselineExperienceText,
     );
-    const strategic = await this.scoreStrategicFit(
-      jobSelection.text,
-      baselineText,
-    );
+    const strategic = this.scoreStrategicFit(jobSelection.text, baselineText);
     const industry = await this.scoreIndustryContext(
       jobSelection.text,
       baselineText,
     );
-    const technical = await this.scoreTechnicalPlatformFit(
+    const technical = this.scoreTechnicalPlatformFit(
       jobSelection.text,
       baselineText,
     );
@@ -346,11 +342,11 @@ export class FitScoreEngine {
     };
   }
 
-  private async scoreExperienceAlignment(
+  private scoreExperienceAlignment(
     jobText: string,
     baselineExperienceText: string,
     baselineText: string,
-  ): Promise<DimensionWithDetail> {
+  ): DimensionWithDetail {
     const semanticScore = this.referenceCoverage(
       jobText,
       baselineExperienceText,
@@ -378,10 +374,10 @@ export class FitScoreEngine {
     return Math.min(10, matches * 4);
   }
 
-  private async scoreLeadershipLevel(
+  private scoreLeadershipLevel(
     jobText: string,
     baselineLeadershipText: string,
-  ): Promise<DimensionWithDetail> {
+  ): DimensionWithDetail {
     const semanticScore = this.referenceCoverage(
       jobText,
       baselineLeadershipText,
@@ -411,10 +407,10 @@ export class FitScoreEngine {
     };
   }
 
-  private async scoreStrategicFit(
+  private scoreStrategicFit(
     jobText: string,
     baselineText: string,
-  ): Promise<DimensionWithDetail> {
+  ): DimensionWithDetail {
     const semanticScore = this.referenceCoverage(jobText, baselineText);
 
     const normalizedJob = normalizeText(jobText);
@@ -486,10 +482,10 @@ export class FitScoreEngine {
     };
   }
 
-  private async scoreTechnicalPlatformFit(
+  private scoreTechnicalPlatformFit(
     jobText: string,
     baselineText: string,
-  ): Promise<TechnicalDimensionResult> {
+  ): TechnicalDimensionResult {
     const coverage = evaluateToolCoverage(jobText, baselineText);
     const finalScore = clamp(
       Math.round(

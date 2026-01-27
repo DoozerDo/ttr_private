@@ -2,133 +2,179 @@ import {
   BadRequestException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import {
-  BaselineIncludePolicy,
-  BaselineSectionType,
-} from '../baseline/baseline-section.entity';
+import { Repository } from 'typeorm';
+import { BaselineStatus, Baseline } from '../baseline/baseline.entity';
+import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
+import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ComplianceService } from '../compliance/compliance.service';
+import type { ValidateAndAuditResult } from '../compliance/compliance.service';
 import {
   ComplianceAction,
+  ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
 } from '../compliance/compliance.types';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
-import { ResumeService } from './resume.service';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import { ResumeService, GenerateResumeRequest } from './resume.service';
 
-const mockBaseline = {
+const mockBaseline: Baseline = {
   id: 'baseline-1',
   userId: 'user-1',
-  sections: [
-    {
-      id: 'section-1',
-      sectionType: BaselineSectionType.EXPERIENCE,
-      title: 'Example Co',
-      content: 'Delivered results with 10% uptime improvement.',
-      includePolicy: BaselineIncludePolicy.ALWAYS,
-      order: 0,
-    },
-  ],
+  version: 1,
+  originalFilename: 'resume.docx',
+  mimeType:
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  storagePath: '/tmp/resume.docx',
+  hash: null,
+  status: BaselineStatus.ACTIVE,
+  archivedAt: null,
+  sections: [],
+  versions: [],
+  createdAt: new Date(),
+  updatedAt: new Date(),
 };
 
-const mockBaselineVersion = {
+const mockBaselineVersion: BaselineVersion = {
   id: 'baseline-version-1',
+  baseline: mockBaseline,
   baselineId: 'baseline-1',
-  hash: 'hash-1',
+  versionNumber: 3,
+  fileHash: 'hash-1',
+  allowedCompanies: [],
+  allowedRoles: [],
+  allowedTechnologies: [],
+  allowedMetricTokens: [],
+  verifiedAdditions: [],
+  additionDiff: null,
+  promotedFromInterviewId: null,
+  blockPolicies: [],
+  storagePath: '/tmp/version-1',
+  createdAt: new Date(),
 };
 
-const mockJob = {
+const mockJob: Job = {
   id: 'job-1',
   userId: 'user-1',
   company: 'Example Co',
   rawDescription: 'Job description',
+  sourceUrl: null,
+  sourceProviderId: null,
+  sourceExternalId: null,
+  canonicalUrl: null,
+  dedupeHash: null,
+  normalizedResponsibilities: [],
+  normalizedRequirements: [],
+  jdIngestionMethod: JobIngestionMethod.PASTE,
+  jdParsedAt: new Date(),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  archivedAt: null,
+  isArchived: false,
 };
 
-const buildRepository = (overrides: Record<string, any> = {}) => ({
-  findOne: jest.fn().mockResolvedValue(null),
-  find: jest.fn().mockResolvedValue([]),
-  ...overrides,
-});
+const baseRequest: GenerateResumeRequest = {
+  baselineId: 'baseline-1',
+  baselineVersionId: 'baseline-version-1',
+  jobId: 'job-1',
+  oneTap: true,
+};
+
+type MockedComplianceService = jest.Mocked<ComplianceService>;
+
+const buildRepository = <T>(
+  overrides: Partial<Repository<T>> = {},
+): Repository<T> =>
+  ({
+    findOne: jest.fn().mockResolvedValue(null),
+    find: jest.fn().mockResolvedValue([]),
+    ...overrides,
+  }) as unknown as Repository<T>;
+
+const createComplianceServiceMock = (
+  writingFlags: ComplianceFlag[],
+  baselineVersionOverride: Partial<BaselineVersion> | null,
+  override: Partial<MockedComplianceService> = {},
+): MockedComplianceService => {
+  const auditResult: ValidateAndAuditResult = {
+    complianceFlags: writingFlags,
+    blocked: writingFlags.length > 0,
+    audit: {
+      id: 'audit-1',
+      baselineVersionId: baselineVersionOverride?.id ?? mockBaselineVersion.id,
+      baselineVersionHash:
+        baselineVersionOverride?.fileHash ??
+        baselineVersionOverride?.hash ??
+        mockBaselineVersion.fileHash,
+      outputHash: '',
+      action: ComplianceAction.RESUME_GENERATION,
+      actorId: 'user-1',
+      jobId: mockJob.id,
+      createdAt: new Date().toISOString(),
+    },
+  };
+
+  return {
+    enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
+    detectScopeInflation: jest.fn().mockReturnValue([]),
+    validateAndAudit: jest.fn().mockResolvedValue(auditResult),
+    ...override,
+  } as MockedComplianceService;
+};
 
 const buildService = (
   fitScore: number,
-  writingFlags: any[] = [],
-  baselineVersionOverride: Record<string, any> | null = mockBaselineVersion,
-  complianceOverride: Partial<ComplianceService> = {},
+  writingFlags: ComplianceFlag[] = [],
+  baselineVersionOverride: Partial<BaselineVersion> | null = mockBaselineVersion,
+  complianceOverride: Partial<MockedComplianceService> = {},
 ) => {
-  const baselineRepository = buildRepository({
+  const baselineRepository = buildRepository<Baseline>({
     findOne: jest.fn().mockResolvedValue(mockBaseline),
   });
-  const baselineVersionRepository = buildRepository({
+  const baselineVersionRepository = buildRepository<BaselineVersion>({
     findOne: jest.fn().mockResolvedValue(baselineVersionOverride),
   });
-  const baselineBlockPolicyRepository = buildRepository({
+  const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
     find: jest.fn().mockResolvedValue([]),
   });
-  const jobsRepository = buildRepository({
+  const jobsRepository = buildRepository<Job>({
     findOne: jest.fn().mockResolvedValue(mockJob),
   });
-  const fitAssessmentRepository = buildRepository({
+  const fitAssessmentRepository = buildRepository<FitAssessment>({
     findOne: jest.fn().mockResolvedValue({
       id: 'fit-1',
       overallScore: fitScore,
-    }),
+    } as FitAssessment),
   });
-  const complianceService = {
-    enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
-    detectScopeInflation: jest.fn().mockReturnValue([]),
-    validateAndAudit: jest.fn().mockResolvedValue({
-      complianceFlags: writingFlags,
-      blocked: writingFlags.length > 0,
-      audit: {
-        id: 'audit-1',
-        outputHash: '',
-        baselineVersionHash: baselineVersionOverride?.hash ?? 'hash-1',
-        baselineVersionId: baselineVersionOverride?.id ?? 'baseline-version-1',
-        action: ComplianceAction.RESUME_GENERATION,
-        actorId: 'user-1',
-        jobId: mockJob.id,
-        createdAt: new Date().toISOString(),
-      },
-    }),
-    ...complianceOverride,
-  } as unknown as ComplianceService;
+
+  const complianceService = createComplianceServiceMock(
+    writingFlags,
+    baselineVersionOverride,
+    complianceOverride,
+  );
+
+  const service = new ResumeService(
+    baselineRepository,
+    baselineVersionRepository,
+    baselineBlockPolicyRepository,
+    jobsRepository,
+    fitAssessmentRepository,
+    complianceService,
+  );
 
   return {
-    service: new ResumeService(
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      baselineRepository,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      baselineVersionRepository,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      baselineBlockPolicyRepository,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      jobsRepository,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      fitAssessmentRepository,
-      complianceService,
-    ),
+    service,
     complianceService,
   };
 };
 
 describe('ResumeService', () => {
-  const request = {
-    baselineId: 'baseline-1',
-    baselineVersionId: 'baseline-version-1',
-    jobId: 'job-1',
-    oneTap: true,
-  };
-
   it('rejects one-tap generation when fit score is below the threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 1);
 
     await expect(
-      service.generateResume('user-1', request),
+      service.generateResume('user-1', baseRequest),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
@@ -136,7 +182,7 @@ describe('ResumeService', () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 2);
 
     await expect(
-      service.generateResume('user-1', request),
+      service.generateResume('user-1', baseRequest),
     ).rejects.toMatchObject({
       response: {
         error: {
@@ -150,46 +196,49 @@ describe('ResumeService', () => {
     const { service } = buildService(95);
 
     await expect(
-      service.generateResume('user-1', { ...request, baselineVersionId: '' }),
+      service.generateResume('user-1', {
+        ...baseRequest,
+        baselineVersionId: '',
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('allows one-tap generation when fit score is at least the threshold', async () => {
+  it('allows one-tap generation when score meets threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD);
 
-    const result = await service.generateResume('user-1', request);
-
+    const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(true);
     expect(result.sections).toHaveLength(1);
   });
 
-  it('returns draft quality when fit score is below the threshold', async () => {
+  it('returns draft quality when fit score is below threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 4);
 
     const result = await service.generateResume('user-1', {
-      ...request,
+      ...baseRequest,
       oneTap: false,
     });
-
     expect(result.quality).toBe('draft');
   });
 
-  it('returns optimized quality when fit score is at least the threshold', async () => {
+  it('returns optimized quality when fit score is sufficient', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD + 2);
 
     const result = await service.generateResume('user-1', {
-      ...request,
+      ...baseRequest,
       oneTap: false,
     });
-
     expect(result.quality).toBe('optimized');
   });
 
-  it('exports DOCX content with headers and body', async () => {
+  it('exports DOCX content with headers and audit details', async () => {
     const { service } = buildService(95, []);
 
-    const exportResult = await service.exportResume('user-1', request, 'docx');
-
+    const exportResult = await service.exportResume(
+      'user-1',
+      baseRequest,
+      'docx',
+    );
     expect(exportResult.contentType).toBe(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
@@ -200,8 +249,7 @@ describe('ResumeService', () => {
   });
 
   it('blocks generation when baseline hash is missing', async () => {
-    const complianceService = {
-      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+    const complianceOverride: Partial<MockedComplianceService> = {
       validateAndAudit: jest.fn().mockResolvedValue({
         complianceFlags: [
           {
@@ -211,28 +259,37 @@ describe('ResumeService', () => {
           },
         ],
         blocked: true,
-        audit: { id: 'audit-1' },
-      }),
-    } as unknown as ComplianceService;
+        audit: {
+          id: 'audit-1',
+          baselineVersionId: 'baseline-version-1',
+          baselineVersionHash: null,
+          outputHash: '',
+          action: ComplianceAction.RESUME_GENERATION,
+          actorId: 'user-1',
+          jobId: 'job-1',
+          createdAt: new Date().toISOString(),
+        },
+      } as ValidateAndAuditResult),
+    };
 
     const { service } = buildService(
       95,
       [],
-      { ...mockBaselineVersion, hash: null },
-      complianceService,
+      { ...mockBaselineVersion, fileHash: null, hash: null },
+      complianceOverride,
     );
 
     await expect(
-      service.generateResume('user-1', request),
+      service.generateResume('user-1', baseRequest),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('audits resume export actions', async () => {
     const { service, complianceService } = buildService(95);
 
-    await service.exportResume('user-1', request, 'pdf');
+    await service.exportResume('user-1', baseRequest, 'pdf');
 
-    expect((complianceService as any).validateAndAudit).toHaveBeenCalledWith(
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: ComplianceAction.RESUME_EXPORT,
         actorId: 'user-1',
@@ -243,24 +300,23 @@ describe('ResumeService', () => {
     );
   });
 
-  it('blocks generation when invented metrics are present', async () => {
-    const inventedMetricFlag = [
+  it('blocks generation when invented metrics are flagged', async () => {
+    const inventedFlag: ComplianceFlag[] = [
       {
         code: ComplianceFlagCode.INVENTED_METRIC,
         severity: ComplianceFlagSeverity.BLOCK,
         message: 'Metric not in baseline.',
       },
     ];
-    const { service } = buildService(95, inventedMetricFlag);
+    const { service } = buildService(95, inventedFlag);
 
     await expect(
-      service.generateResume('user-1', request),
+      service.generateResume('user-1', baseRequest),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('blocks export when compliance flags are blocking', async () => {
-    const complianceService = {
-      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+  it('blocks export when compliance flags block', async () => {
+    const complianceOverride: Partial<MockedComplianceService> = {
       detectScopeInflation: jest.fn().mockReturnValue([]),
       validateAndAudit: jest.fn().mockResolvedValue({
         complianceFlags: [
@@ -270,23 +326,32 @@ describe('ResumeService', () => {
           },
         ],
         blocked: true,
-        audit: { id: 'audit-2' },
-      }),
-    } as unknown as ComplianceService;
+        audit: {
+          id: 'audit-2',
+          baselineVersionId: 'baseline-version-1',
+          baselineVersionHash: 'hash-1',
+          outputHash: '',
+          action: ComplianceAction.RESUME_EXPORT,
+          actorId: 'user-1',
+          jobId: 'job-1',
+          createdAt: new Date().toISOString(),
+        },
+      } as ValidateAndAuditResult),
+    };
     const { service } = buildService(
       95,
       [],
       mockBaselineVersion,
-      complianceService,
+      complianceOverride,
     );
 
     await expect(
-      service.exportResume('user-1', request, 'docx'),
+      service.exportResume('user-1', baseRequest, 'docx'),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('blocks generation when scope inflation is detected', async () => {
-    const scopeFlag = [
+    const scopeFlag: ComplianceFlag[] = [
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
         severity: ComplianceFlagSeverity.BLOCK,
@@ -295,17 +360,25 @@ describe('ResumeService', () => {
     ];
 
     const { service } = buildService(95, [], mockBaselineVersion, {
-      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
       detectScopeInflation: jest.fn().mockReturnValue(scopeFlag),
       validateAndAudit: jest.fn().mockResolvedValue({
         complianceFlags: scopeFlag,
         blocked: true,
-        audit: { id: 'audit-3' },
-      }),
+        audit: {
+          id: 'audit-3',
+          baselineVersionId: 'baseline-version-1',
+          baselineVersionHash: 'hash-1',
+          outputHash: '',
+          action: ComplianceAction.RESUME_GENERATION,
+          actorId: 'user-1',
+          jobId: 'job-1',
+          createdAt: new Date().toISOString(),
+        },
+      } as ValidateAndAuditResult),
     });
 
     await expect(
-      service.generateResume('user-1', request),
+      service.generateResume('user-1', baseRequest),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });

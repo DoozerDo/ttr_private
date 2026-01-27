@@ -46,7 +46,7 @@ describe('JobsService', () => {
             ? 'text/html; charset=utf-8'
             : null,
       },
-      arrayBuffer: async () => Buffer.from(html),
+      arrayBuffer: () => Promise.resolve(Buffer.from(html)),
     } as never);
 
     const result = await service.ingestJobDescription({

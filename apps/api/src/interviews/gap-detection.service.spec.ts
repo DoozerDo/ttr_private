@@ -195,7 +195,7 @@ describe('GapDetectionService', () => {
 
     const embeddingProvider: GapEmbeddingProvider = {
       isEnabled: () => true,
-      embed: jest.fn(async (text: string) => embeddingVectors[text] ?? [0, 0]),
+      embed: jest.fn((text: string) => embeddingVectors[text] ?? [0, 0]),
     };
 
     const job: Job = {
@@ -276,6 +276,7 @@ describe('GapDetectionService', () => {
     ]);
     baselineBlockPolicyRepository.find.mockResolvedValue([]);
 
+    const embedSpy = jest.spyOn(embeddingProvider, 'embed');
     const service = createService(
       jobRepository,
       baselineSectionRepository,
@@ -292,16 +293,12 @@ describe('GapDetectionService', () => {
 
     expect(result.gaps).toHaveLength(1);
     expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
-    expect(embeddingProvider.embed).toHaveBeenCalledWith(
-      'Optimize data pipelines',
-    );
-    expect(embeddingProvider.embed).toHaveBeenCalledWith(
-      'Customer support leadership',
-    );
-    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+    expect(embedSpy).toHaveBeenCalledWith('Optimize data pipelines');
+    expect(embedSpy).toHaveBeenCalledWith('Customer support leadership');
+    expect(embedSpy).toHaveBeenCalledWith(
       'Stream processing and pipeline optimization',
     );
-    expect(embeddingProvider.embed).toHaveBeenCalledWith(
+    expect(embedSpy).toHaveBeenCalledWith(
       'Backend architecture and api design',
     );
   });
@@ -322,7 +319,7 @@ describe('GapDetectionService', () => {
 
     const embeddingProvider: GapEmbeddingProvider = {
       isEnabled: () => true,
-      embed: jest.fn(async (text: string) => embeddingVectors[text] ?? [0, 0]),
+      embed: jest.fn((text: string) => embeddingVectors[text] ?? [0, 0]),
     };
 
     const job: Job = {

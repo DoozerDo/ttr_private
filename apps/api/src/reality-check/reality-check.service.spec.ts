@@ -1,16 +1,134 @@
+import { Repository } from 'typeorm';
 import { RealityCheckService } from './reality-check.service';
 import type {
   RealityCheckAnswer,
   RealityCheckQuestion,
 } from './reality-check.types';
+import { RealityCheckRepository } from './reality-check.repository';
+import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
+import { BaselineSection } from '../baseline/baseline-section.entity';
+import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import type { CxFitV2Result } from '../analysis/cx-fit-scoring-v2';
+import type { ToolCoverage } from '../scoring/fit-score/tool-extractor';
 
 describe('RealityCheckService', () => {
+  const realityCheckRepositoryStub = {
+    findLatestByJobAndBaseline: jest.fn(),
+    createRealityCheck: jest.fn(),
+  } satisfies Partial<RealityCheckRepository>;
+  const baselineRepositoryStub = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  } satisfies Partial<Repository<Baseline>>;
+  const jobRepositoryStub = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  } satisfies Partial<Repository<Job>>;
+
   const service = new RealityCheckService(
-    null as any,
-    null as any,
-    null as any,
-    null as any,
+    realityCheckRepositoryStub as RealityCheckRepository,
+    baselineRepositoryStub as Repository<Baseline>,
+    jobRepositoryStub as Repository<Job>,
   );
+
+  const job = new Job();
+  job.id = 'job-1';
+  job.userId = 'user-1';
+  job.title = 'Director';
+  job.company = 'ExampleCo';
+  job.rawDescription = '';
+  job.sourceUrl = 'https://example.com';
+  job.sourceProviderId = null;
+  job.sourceExternalId = null;
+  job.canonicalUrl = null;
+  job.dedupeHash = null;
+  job.normalizedResponsibilities = [];
+  job.normalizedRequirements = [];
+  job.jdIngestionMethod = JobIngestionMethod.PASTE;
+  job.jdParsedAt = new Date();
+  job.createdAt = new Date();
+  job.updatedAt = new Date();
+  job.archivedAt = null;
+  job.isArchived = false;
+
+  const baseline = new Baseline();
+  baseline.id = 'baseline-1';
+  baseline.userId = job.userId;
+  baseline.version = 1;
+  baseline.originalFilename = 'baseline.docx';
+  baseline.mimeType =
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  baseline.storagePath = '/tmp/baseline.docx';
+  baseline.hash = null;
+  baseline.status = BaselineStatus.ACTIVE;
+  baseline.archivedAt = null;
+  baseline.sections = [];
+  baseline.versions = [];
+  baseline.createdAt = new Date();
+  baseline.updatedAt = new Date();
+
+  const baseCxFit: CxFitV2Result = {
+    score: 20,
+    components: {
+      scope: 45,
+      leadership: 40,
+      domain: 0,
+      strategy: 0,
+      execution: 0,
+      tooling: 0,
+    },
+    adjustments: {
+      selfSimilarityApplied: false,
+      selfSimilarityFloor: 0,
+      stretchDampenerApplied: false,
+      stretchDampenerPoints: 0,
+      toolingFloorApplied: false,
+    },
+    bands: {
+      baselineBand: 'L1',
+      roleBand: 'L5',
+      bandDelta: 4,
+    },
+    debug: {
+      domainTagsBaseline: [],
+      domainTagsRole: [],
+      responsibilityOverlapPercent: 0,
+      baselineCoveragePercent: 0,
+    },
+  };
+
+  const baseToolCoverage: ToolCoverage = {
+    matchedRequired: [],
+    matchedPreferred: [],
+    missingRequired: [],
+    requiredCoverage: 0,
+    preferredCoverage: 0,
+  };
+
+  type TestRealityCheckContext = {
+    job: Job;
+    baseline: Baseline;
+    baselineSections: BaselineSection[];
+    jobText: string;
+    baselineText: string;
+    cxFit: CxFitV2Result;
+    toolCoverage: ToolCoverage;
+    missingSkillOptions: string[];
+  };
+
+  const buildContext = (
+    overrides: Partial<TestRealityCheckContext> = {},
+  ): TestRealityCheckContext => ({
+    job,
+    baseline,
+    baselineSections: [],
+    jobText: '',
+    baselineText: '',
+    cxFit: baseCxFit,
+    toolCoverage: baseToolCoverage,
+    missingSkillOptions: [],
+    ...overrides,
+  });
 
   const baseQuestions: RealityCheckQuestion[] = [
     {
@@ -78,53 +196,16 @@ describe('RealityCheckService', () => {
   });
 
   it('computes mismatch when strong signals exist without updates', () => {
-    const context = {
-      job: {} as any,
-      baseline: {} as any,
-      baselineSections: [],
-      jobText: '',
-      baselineText: '',
-      cxFit: {
-        score: 20,
-        components: {
-          scope: 45,
-          leadership: 40,
-          domain: 0,
-          strategy: 0,
-          execution: 0,
-          tooling: 0,
-        },
-        adjustments: {
-          selfSimilarityApplied: false,
-          selfSimilarityFloor: 0,
-          stretchDampenerApplied: false,
-          stretchDampenerPoints: 0,
-          toolingFloorApplied: false,
-        },
-        bands: {
-          baselineBand: 'L1',
-          roleBand: 'L5',
-          bandDelta: 4,
-        },
-        debug: {
-          domainTagsBaseline: [],
-          domainTagsRole: [],
-          responsibilityOverlapPercent: 0,
-          baselineCoveragePercent: 0,
-        },
-      },
+    const context = buildContext({
+      cxFit: baseCxFit,
       toolCoverage: {
-        matchedRequired: [],
-        matchedPreferred: [],
+        ...baseToolCoverage,
         missingRequired: ['aws', 'kubernetes', 'terraform'],
-        requiredCoverage: 0,
-        preferredCoverage: 0,
       },
-      missingSkillOptions: [],
-    };
+    });
 
     const outcome = service['computeOutcome'](
-      context as any,
+      context,
       baseQuestions,
       validAnswers,
     );
@@ -139,56 +220,28 @@ describe('RealityCheckService', () => {
       ...validAnswers.slice(1),
     ];
 
-    const context = {
-      job: {} as any,
-      baseline: {} as any,
-      baselineSections: [],
-      jobText: '',
-      baselineText: '',
+    const context = buildContext({
       cxFit: {
+        ...baseCxFit,
         score: 90,
         components: {
+          ...baseCxFit.components,
           scope: 85,
           leadership: 80,
-          domain: 0,
-          strategy: 0,
-          execution: 0,
-          tooling: 0,
-        },
-        adjustments: {
-          selfSimilarityApplied: false,
-          selfSimilarityFloor: 0,
-          stretchDampenerApplied: false,
-          stretchDampenerPoints: 0,
-          toolingFloorApplied: false,
         },
         bands: {
           baselineBand: 'L4',
           roleBand: 'L5',
           bandDelta: 1,
         },
-        debug: {
-          domainTagsBaseline: [],
-          domainTagsRole: [],
-          responsibilityOverlapPercent: 0,
-          baselineCoveragePercent: 0,
-        },
       },
       toolCoverage: {
-        matchedRequired: [],
-        matchedPreferred: [],
-        missingRequired: [],
+        ...baseToolCoverage,
         requiredCoverage: 1,
-        preferredCoverage: 0,
       },
-      missingSkillOptions: [],
-    };
+    });
 
-    const outcome = service['computeOutcome'](
-      context as any,
-      baseQuestions,
-      answers,
-    );
+    const outcome = service['computeOutcome'](context, baseQuestions, answers);
     expect(outcome.outcome).toBe('update_recommended');
     expect(outcome.triggeredBy).toContain('role_evolution');
     expect(outcome.suggestedBaselineSections).toContain('experience');
@@ -196,56 +249,28 @@ describe('RealityCheckService', () => {
 
   it('returns valid when no signals or triggers exist', () => {
     const answers = [...validAnswers];
-    const context = {
-      job: {} as any,
-      baseline: {} as any,
-      baselineSections: [],
-      jobText: '',
-      baselineText: '',
+    const context = buildContext({
       cxFit: {
+        ...baseCxFit,
         score: 90,
         components: {
+          ...baseCxFit.components,
           scope: 90,
           leadership: 85,
-          domain: 0,
-          strategy: 0,
-          execution: 0,
-          tooling: 0,
-        },
-        adjustments: {
-          selfSimilarityApplied: false,
-          selfSimilarityFloor: 0,
-          stretchDampenerApplied: false,
-          stretchDampenerPoints: 0,
-          toolingFloorApplied: false,
         },
         bands: {
           baselineBand: 'L5',
           roleBand: 'L5',
           bandDelta: 0,
         },
-        debug: {
-          domainTagsBaseline: [],
-          domainTagsRole: [],
-          responsibilityOverlapPercent: 0,
-          baselineCoveragePercent: 0,
-        },
       },
       toolCoverage: {
-        matchedRequired: [],
-        matchedPreferred: [],
+        ...baseToolCoverage,
         missingRequired: ['aws'],
-        requiredCoverage: 0,
-        preferredCoverage: 0,
       },
-      missingSkillOptions: [],
-    };
+    });
 
-    const outcome = service['computeOutcome'](
-      context as any,
-      baseQuestions,
-      answers,
-    );
+    const outcome = service['computeOutcome'](context, baseQuestions, answers);
     expect(outcome.outcome).toBe('valid');
   });
 });

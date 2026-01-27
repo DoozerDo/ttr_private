@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import type { Request, Response } from 'express';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -13,8 +14,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const res = ctx.getResponse<any>();
-    const req = ctx.getRequest<any>();
+    const res = ctx.getResponse<Response>();
+    const req = ctx.getRequest<Request>();
 
     const isHttp = exception instanceof HttpException;
     const status = isHttp
@@ -24,17 +25,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const path = req?.url ?? '';
     const method = req?.method ?? '';
 
+    const responseBody = isHttp ? exception.getResponse() : undefined;
     const message = isHttp
-      ? ((exception.getResponse() as any)?.message ?? exception.message)
+      ? resolveErrorMessage(responseBody, exception)
       : 'Internal server error';
-
-    const error = isHttp
-      ? ((exception.getResponse() as any)?.error ?? 'Error')
-      : 'Error';
+    const error = isHttp ? resolveErrorLabel(responseBody) : 'Error';
 
     const stack =
       exception && typeof exception === 'object' && 'stack' in exception
-        ? String((exception as any).stack)
+        ? safeStack(exception)
         : '';
 
     this.logger.error(
@@ -61,4 +60,38 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+function resolveErrorMessage(
+  responseBody: unknown,
+  exception: HttpException,
+): string {
+  if (isObjectRecord(responseBody)) {
+    const { message } = responseBody;
+    if (typeof message === 'string') {
+      return message;
+    }
+    if (Array.isArray(message)) {
+      return message.join(', ');
+    }
+  }
+  return exception.message;
+}
+
+function resolveErrorLabel(responseBody: unknown): string {
+  if (isObjectRecord(responseBody) && typeof responseBody.error === 'string') {
+    return responseBody.error;
+  }
+  return 'Error';
+}
+
+function safeStack(exception: unknown): string {
+  if (isObjectRecord(exception) && typeof exception.stack === 'string') {
+    return exception.stack;
+  }
+  return '';
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

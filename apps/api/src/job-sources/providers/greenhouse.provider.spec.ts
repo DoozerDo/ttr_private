@@ -46,12 +46,12 @@ describe('GreenhouseJobSourceProvider', () => {
   });
 
   it('extracts listings with external IDs from a board page', async () => {
-    (globalThis as any).fetch = jest.fn(async (url: string) => {
+    (globalThis as any).fetch = jest.fn((url: string) => {
       if (url === boardUrl) {
-        return {
+        return Promise.resolve({
           ok: true,
-          arrayBuffer: async () => Buffer.from(listingHtml),
-        };
+          arrayBuffer: () => Promise.resolve(Buffer.from(listingHtml)),
+        });
       }
       throw new Error('Unexpected fetch');
     });
@@ -69,12 +69,12 @@ describe('GreenhouseJobSourceProvider', () => {
   });
 
   it('limits listings when maxListings option is provided', async () => {
-    (globalThis as any).fetch = jest.fn(async (url: string) => {
+    (globalThis as any).fetch = jest.fn((url: string) => {
       if (url === boardUrl) {
-        return {
+        return Promise.resolve({
           ok: true,
-          arrayBuffer: async () => Buffer.from(listingHtml),
-        };
+          arrayBuffer: () => Promise.resolve(Buffer.from(listingHtml)),
+        });
       }
       throw new Error('Unexpected fetch');
     });

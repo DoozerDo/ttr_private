@@ -19,10 +19,10 @@ describe('StarStoriesService', () => {
 
   const createMockRepository = () => ({
     create: jest.fn((data: Partial<StarStory>) => ({ ...mockStory, ...data })),
-    save: jest.fn(async (data: StarStory) => data),
+    save: jest.fn((data: StarStory) => Promise.resolve(data)),
     find: jest.fn(),
     findOne: jest.fn(),
-    remove: jest.fn(async (data: StarStory) => data),
+    remove: jest.fn((data: StarStory) => Promise.resolve(data)),
   });
 
   const createService = (repository = createMockRepository()) =>

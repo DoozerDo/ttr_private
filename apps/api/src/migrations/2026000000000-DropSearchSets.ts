@@ -27,7 +27,9 @@ export class DropSearchSets2026000000000 implements MigrationInterface {
     await queryRunner.query('DROP TYPE IF EXISTS "search_sets_seniority_enum"');
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public down(_queryRunner: QueryRunner): Promise<void> {
     // Search Sets are intentionally removed from the Beta scope (see docs/spec_beta_v1.md Section 7).
+    void _queryRunner;
+    return Promise.resolve();
   }
 }
