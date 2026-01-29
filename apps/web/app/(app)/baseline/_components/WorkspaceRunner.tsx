@@ -312,7 +312,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           ? typedFlag.message
           : code ?? "Compliance issue";
       const title =
-        (code && complianceTitleMap[code]) || complianceTitleMap[typedFlag.code ?? ""] || "Compliance issue";
+        (code && complianceTitleMap[code]) ||
+        complianceTitleMap[typedFlag.code ?? ""] ||
+        "Compliance issue";
       const severity =
         typeof typedFlag.severity === "string" ? typedFlag.severity : "BLOCK";
       const confidence =
@@ -335,17 +337,27 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const canRun = Boolean(baselineId) && Boolean(jobId) && !isRunning;
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(result);
-  const isComplianceBlocked = runState === "compliance_blocked";
+
+  const isBlockedResult =
+    runState === "compliance_blocked" ||
+    result?.verdict === "blocked" ||
+    (result as { status?: string } | null)?.status === "compliance_blocked" ||
+    Boolean((result as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
+
+  const isComplianceBlocked = isBlockedResult;
+  const topComplianceFlags = complianceFlagList.slice(0, 3);
 
   const scoreValueText =
     isComplianceBlocked
-      ? "n/a"
+      ? "Blocked"
       : typeof result?.score === "number"
         ? result.score.toFixed(1)
         : "n/a";
+
   const scoreDisplay = (
     <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
   );
+
   const detailsToggleRow = (
     <div className="flex items-center justify-between gap-3">
       <p className="text-xs text-slate-400">Details are hidden by default.</p>
@@ -364,6 +376,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     jobId: latestJobId ?? jobId,
     baselineId: latestBaselineId ?? baselineId,
   });
+
   const handleResolveComplianceIssues = () => {
     if (!baselineId) return;
     const params = new URLSearchParams();
@@ -433,7 +446,8 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
         runState === "compliance_blocked" ? "Assessment blocked" : "Assessment complete",
       );
     } catch (runError: unknown) {
-      const message = extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
+      const message =
+        extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       setError(message);
       setLatestAssessmentId(null);
       setLatestJobId(null);
@@ -469,7 +483,14 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
-      setRunState("ok");
+
+      const loadedIsBlocked =
+        (nextResult as { status?: string } | null)?.status === "compliance_blocked" ||
+        nextResult?.verdict === "blocked" ||
+        Boolean((nextResult as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
+
+      setRunState(loadedIsBlocked ? "compliance_blocked" : "ok");
+
       const resolvedJobId =
         typeof nextResult.jobId === "string"
           ? nextResult.jobId
@@ -554,7 +575,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                 <div>
                   <p className="text-sm font-semibold text-white">Assessment blocked</p>
                   <p className="text-xs text-slate-400">
-                    Compliance must be resolved before scoring.
+                    Score is withheld until blocking issues are resolved.
                   </p>
                 </div>
                 <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">
@@ -564,18 +585,34 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
               {scoreDisplay}
 
-              <p className="text-xs text-slate-400">
-                Compliance issues must be resolved before scoring can proceed.
-              </p>
+              {topComplianceFlags.length ? (
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                    Top blockers
+                  </p>
+                  <ul className="space-y-1 text-xs text-slate-300">
+                    {topComplianceFlags.map((flag, index) => (
+                      <li key={`top-flag-${index}`}>
+                        <span className="font-semibold text-slate-200">{flag.title}</span>:{" "}
+                        {flag.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               {detailsToggleRow}
 
               {showDetails ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Compliance flags</p>
+                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                      Compliance flags
+                    </p>
                     <span className="text-xs text-slate-400">
-                      {hasComplianceFlags ? `${complianceFlagList.length} flagged` : "No details provided"}
+                      {hasComplianceFlags
+                        ? `${complianceFlagList.length} flagged`
+                        : "No details provided"}
                     </span>
                   </div>
 
@@ -591,7 +628,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                               {flag.severity?.toUpperCase() ?? "BLOCK"}
                             </span>
                             <div className="flex-1">
-                              <p className="text-sm font-semibold text-slate-100">{flag.title}</p>
+                              <p className="text-sm font-semibold text-slate-100">
+                                {flag.title}
+                              </p>
                               <p className="text-xs text-slate-300">{flag.message}</p>
                               {debugUiEnabled && (flag.code || flag.confidence !== undefined) ? (
                                 <p className="mt-1 text-[11px] text-amber-200">
@@ -607,7 +646,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-xs text-slate-400">Compliance flag details are hidden.</p>
+                    <p className="text-xs text-slate-400">
+                      Compliance flag details are hidden.
+                    </p>
                   )}
                 </div>
               ) : null}
@@ -631,91 +672,99 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
               {detailsToggleRow}
 
-          {showDetails ? (
-            <div className="space-y-3">
-              {dimensionEntries.length ? (
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                    Dimension scores
-                  </p>
-                  <div className="grid gap-1 text-xs text-slate-300">
-                    {dimensionEntries.map(([label, value], index) => (
-                      <p key={`${label}-${index}`}>
-                        {label}: {renderDimensionValue(value)}
+              {showDetails ? (
+                <div className="space-y-3">
+                  {dimensionEntries.length ? (
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                        Dimension scores
                       </p>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                      <div className="grid gap-1 text-xs text-slate-300">
+                        {dimensionEntries.map(([label, value], index) => (
+                          <p key={`${label}-${index}`}>
+                            {label}: {renderDimensionValue(value)}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
-              {complianceFlagList.length ? (
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                    Compliance flags
-                  </p>
-                  <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
-                    {complianceFlagList.map((flag, index) => (
-                      <li key={`flag-${index}`}>
-                        <span className="font-semibold text-slate-200">{flag.title}</span>: {flag.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {result?.scoringProof ? (
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                    Scoring proof
-                  </p>
-                  <div className="grid gap-1 text-xs text-slate-300">
-                    <p>Assessment ID: {result.scoringProof.assessmentId ?? "n/a"}</p>
-                    <p>
-                      Baseline chars scored:{" "}
-                      {formatProofNumber(result.scoringProof.baselineTextCharsScored)}
-                    </p>
-                    <p>
-                      Job chars scored: {formatProofNumber(result.scoringProof.jobTextCharsScored)}
-                    </p>
-                    <p>
-                      Normalized responsibilities:{" "}
-                      {(result.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
-                    </p>
-                    <p>
-                      Normalized requirements:{" "}
-                      {(result.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
-                    </p>
-                    <p>
-                      Job raw text characters:{" "}
-                      {(result.scoringProof.jobRawTextCharCount ?? 0).toLocaleString()}
-                    </p>
-                    <p className="break-words text-xs text-slate-300">
-                      Job raw text SHA256:{" "}
-                      {result.scoringProof.jobRawTextSha256 ?? "n/a"}
-                    </p>
-                    {result.scoringProof.jobRawTextTooShort ? (
-                      <p className="text-[11px] uppercase tracking-[0.35em] text-amber-300">
-                        {result.scoringProof.jobRawTextWarning ??
-                          "Raw job description is below the recommended length."}
+                  {complianceFlagList.length ? (
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                        Compliance flags
                       </p>
-                    ) : null}
-                    <p>
-                      Baseline truncated:{" "}
-                      {result.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
-                    </p>
-                    <p>
-                      Job truncated: {result.scoringProof.truncationAppliedJob ? "Yes" : "No"}
-                    </p>
-                  </div>
+                      <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
+                        {complianceFlagList.map((flag, index) => (
+                          <li key={`flag-${index}`}>
+                            <span className="font-semibold text-slate-200">
+                              {flag.title}
+                            </span>
+                            : {flag.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {result?.scoringProof ? (
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                        Scoring proof
+                      </p>
+                      <div className="grid gap-1 text-xs text-slate-300">
+                        <p>Assessment ID: {result.scoringProof.assessmentId ?? "n/a"}</p>
+                        <p>
+                          Baseline chars scored:{" "}
+                          {formatProofNumber(result.scoringProof.baselineTextCharsScored)}
+                        </p>
+                        <p>
+                          Job chars scored:{" "}
+                          {formatProofNumber(result.scoringProof.jobTextCharsScored)}
+                        </p>
+                        <p>
+                          Normalized responsibilities:{" "}
+                          {(result.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
+                        </p>
+                        <p>
+                          Normalized requirements:{" "}
+                          {(result.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
+                        </p>
+                        <p>
+                          Job raw text characters:{" "}
+                          {(result.scoringProof.jobRawTextCharCount ?? 0).toLocaleString()}
+                        </p>
+                        <p className="break-words text-xs text-slate-300">
+                          Job raw text SHA256: {result.scoringProof.jobRawTextSha256 ?? "n/a"}
+                        </p>
+                        {result.scoringProof.jobRawTextTooShort ? (
+                          <p className="text-[11px] uppercase tracking-[0.35em] text-amber-300">
+                            {result.scoringProof.jobRawTextWarning ??
+                              "Raw job description is below the recommended length."}
+                          </p>
+                        ) : null}
+                        <p>
+                          Baseline truncated:{" "}
+                          {result.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
+                        </p>
+                        <p>
+                          Job truncated:{" "}
+                          {result.scoringProof.truncationAppliedJob ? "Yes" : "No"}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
-            </div>
-          ) : null}
             </>
           )}
+
           {!isComplianceBlocked && runDebugInfo ? (
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-3 text-xs text-slate-300">
               <div className="flex items-center justify-between">
-                <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Debug</p>
+                <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">
+                  Debug
+                </p>
                 <button
                   type="button"
                   onClick={() => setShowDebugInfo((prev) => !prev)}
@@ -739,7 +788,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Baseline sections</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.baselineSelectedSectionCount} sections -{" "}
+                      {runDebugInfo.baselineSelectedSectionCount} sections{" "}
                       {formatProofNumber(runDebugInfo.baselineTotalChars)} chars
                     </span>
                   </div>
@@ -756,14 +805,14 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Responsibilities</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.normalizedResponsibilitiesCount.toLocaleString()} items -{" "}
+                      {runDebugInfo.normalizedResponsibilitiesCount.toLocaleString()} items{" "}
                       {formatProofNumber(runDebugInfo.normalizedResponsibilitiesChars)} chars
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Requirements</span>
                     <span className="text-slate-100">
-                      {runDebugInfo.normalizedRequirementsCount.toLocaleString()} items -{" "}
+                      {runDebugInfo.normalizedRequirementsCount.toLocaleString()} items{" "}
                       {formatProofNumber(runDebugInfo.normalizedRequirementsChars)} chars
                     </span>
                   </div>
@@ -791,6 +840,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
               ) : null}
             </div>
           ) : null}
+
           {!isComplianceBlocked && viewResultsHref ? (
             <div className="flex justify-end">
               <FormButton onClick={() => router.push(viewResultsHref)} disabled={isRunning}>
@@ -800,7 +850,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           ) : null}
         </div>
       ) : (
-        <p className="text-sm text-slate-400">Run a fit assessment to see your compatibility score.</p>
+        <p className="text-sm text-slate-400">
+          Run a fit assessment to see your compatibility score.
+        </p>
       )}
     </SetupModuleCard>
   );

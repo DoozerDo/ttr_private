@@ -272,13 +272,23 @@ export class ComplianceService {
       );
     }
 
-    const inventedFlags = this.collectInventedFlags({
-      baselineSections: payload.baselineSections,
-      generatedSections: payload.generatedSections,
-      job: payload.job,
-      baselineAllowlist,
-    });
-    rawFlags.push(...inventedFlags);
+    // IMPORTANT:
+    // FIT_SCORE validates inputs used for scoring, including raw job description text.
+    // We must NOT run "invented company/role/technology/metric" detectors on job text,
+    // because the job description is not model-generated output and will contain
+    // arbitrary company names, product names, and terms. Those detectors are meant
+    // for generated artifacts (resume, cover letter, follow-ups, exports).
+    const shouldRunInventedDetectors = payload.action !== ComplianceAction.FIT_SCORE;
+
+    if (shouldRunInventedDetectors) {
+      const inventedFlags = this.collectInventedFlags({
+        baselineSections: payload.baselineSections,
+        generatedSections: payload.generatedSections,
+        job: payload.job,
+        baselineAllowlist,
+      });
+      rawFlags.push(...inventedFlags);
+    }
 
     const finalFlags = rawFlags.map((flag) =>
       this.applyPolicy(payload.action, flag),
