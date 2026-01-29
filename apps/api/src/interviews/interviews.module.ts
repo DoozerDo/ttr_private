@@ -8,7 +8,6 @@ import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
 import { AnalysisService } from '../analysis/analysis.service';
 import { FitScoringService } from '../analysis/fit-scoring.service';
-import { LlmRubricScorerService } from '../analysis/llm-rubric-scorer.service';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { Job } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
@@ -62,7 +61,6 @@ import { BaselineVersionService } from '../baseline/baseline-version.service';
     BaselineVersionService,
     AnalysisService,
     FitScoringService,
-    LlmRubricScorerService,
   ],
   exports: [InterviewsService, InterviewRecordsService],
 })

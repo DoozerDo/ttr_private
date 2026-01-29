@@ -28,7 +28,6 @@ services:
       NODE_ENV: development
       TYPEORM_SYNCHRONIZE: "true"
       ENABLE_LLM_PARITY_SCORE: "true"
-      OPENAI_FIT_SCORE_MODEL: "gpt-4.1-mini"
     command: sh -c "npm install --no-audit --no-fund && npm run start:dev"
     volumes:
       - ../../apps/api:/usr/src/app

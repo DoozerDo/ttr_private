@@ -1,6 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
 import { FitScoreEngine } from '../scoring/fit-score/fit-score.engine';
-import { LlmRubricScorerService } from './llm-rubric-scorer.service';
 import { FitScoringService } from './fit-scoring.service';
 
 const baseSentence =
@@ -155,70 +154,3 @@ describe('FitScoringService', () => {
   });
 });
 
-describe('FitScoringService with LLM parity', () => {
-  let parityService: FitScoringService;
-  let llmMock: jest.Mocked<LlmRubricScorerService>;
-
-  beforeEach(() => {
-    process.env.ENABLE_LLM_PARITY_SCORE = 'true';
-    llmMock = { score: jest.fn() } as jest.Mocked<LlmRubricScorerService>;
-    parityService = new FitScoringService(undefined, llmMock);
-  });
-
-  afterEach(() => {
-    delete process.env.ENABLE_LLM_PARITY_SCORE;
-  });
-
-  it('returns the LLM score when parsing succeeds', async () => {
-    const parsed = {
-      scoringPromptVersion: 'v1',
-      score: 62,
-      verdict: 'Moderate',
-      dimensionScores: {
-        experience: 55,
-        leadership: 60,
-        technicalPlatform: 45,
-        industryContext: 50,
-        strategicBalance: 48,
-      },
-      notes: 'ok',
-    };
-
-    llmMock.score.mockResolvedValue({
-      ok: true,
-      parsed,
-      rawText: '{}',
-    });
-
-    const result = await parityService.score(buildInput());
-
-    expect(result.scoringMode).toBe('llm');
-    expect(result.overallScore).toBe(parsed.score);
-    expect(result.verdict).toBe(parsed.verdict);
-    expect(result.llmScore).toBe(parsed.score);
-    expect(result.llmVerdict).toBe(parsed.verdict);
-    expect(result.llmDimensionScores).toEqual(parsed.dimensionScores);
-    expect(result.scoringPromptVersion).toBe('v1');
-  });
-
-  it('falls back to engine scoring when the LLM result fails', async () => {
-    llmMock.score.mockResolvedValue({
-      ok: false,
-      reason: 'invalid json',
-      rawText: '',
-    });
-
-    const result = await parityService.score(buildInput());
-
-    expect(result.scoringMode).toBe('engine_fallback');
-    expect(result.overallScore).toBe(result.originalScore);
-    expect(result.llmScore).toBeNull();
-    expect(result.llmVerdict).toBeNull();
-    expect(result.complianceFlags).toEqual(
-      expect.arrayContaining([
-        'llm_scoring_failed',
-        expect.stringContaining('llm_scoring_failed_reason:invalid json'),
-      ]),
-    );
-  });
-});

@@ -15,7 +15,6 @@ import { CalibrationController } from './calibration.controller';
 import { FitScoresController } from './fit-scores.controller';
 import { AnalysisService } from './analysis.service';
 import { FitScoringService } from './fit-scoring.service';
-import { LlmRubricScorerService } from './llm-rubric-scorer.service';
 
 @Module({
   imports: [
@@ -33,6 +32,6 @@ import { LlmRubricScorerService } from './llm-rubric-scorer.service';
     ComplianceModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
-  providers: [AnalysisService, FitScoringService, LlmRubricScorerService],
+  providers: [AnalysisService, FitScoringService],
 })
 export class AnalysisModule {}
