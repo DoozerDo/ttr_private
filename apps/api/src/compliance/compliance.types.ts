@@ -6,6 +6,10 @@ export enum ComplianceAction {
   BASELINE_PROMOTION = 'baseline_promotion',
   APPLICATION_EXPORT = 'application_export',
   RESUME_EXPORT = 'resume_export',
+  JOB_TRACKER_CREATE = 'job_tracker_create',
+  JOB_TRACKER_UPDATE = 'job_tracker_update',
+  JOB_TRACKER_DELETE = 'job_tracker_delete',
+  JOB_TRACKER_EXPORT = 'job_tracker_export',
 }
 
 export enum ComplianceFlagCode {

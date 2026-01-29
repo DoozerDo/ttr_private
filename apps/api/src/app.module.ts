@@ -16,6 +16,7 @@ import { EmailModule } from './email/email.module';
 import { RealityCheckModule } from './reality-check/reality-check.module';
 import { ResumeModule } from './resume/resume.module';
 import { StarStoriesModule } from './star-stories/star-stories.module';
+import { JobTrackerModule } from './job-tracker/job-tracker.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module';
     ComplianceModule,
     InterviewsModule,
     JobsModule,
+    JobTrackerModule,
     ResumeModule,
     CoverLettersModule,
     EmailModule,

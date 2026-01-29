@@ -974,7 +974,7 @@ export default function InterviewSessionPage() {
             cta={
               <div className="flex flex-wrap gap-3">
                 <FormButton onClick={() => router.push("/results")}>Back to Results</FormButton>
-                <FormButton variant="secondary" onClick={() => router.push("/applications")}>
+                <FormButton variant="secondary" onClick={() => router.push("/job-tracker")}>
                   Back to Job Tracker
                 </FormButton>
               </div>
