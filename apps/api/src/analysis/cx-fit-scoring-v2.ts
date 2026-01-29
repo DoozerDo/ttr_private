@@ -20,34 +20,63 @@ type DomainTag =
   | 'Internal Delivery'
   | 'External Delivery';
 
+export type ScoringContractV1DimensionKey =
+  | 'role_scope_and_seniority'
+  | 'support_operations_and_process_rigor'
+  | 'tooling_and_platform_experience'
+  | 'domain_and_business_context'
+  | 'change_leadership_and_customer_advocacy';
+
+export type ScoringContractV1Weights = Record<ScoringContractV1DimensionKey, number>;
+
+export type ScoringContractV1PenaltyCode =
+  | 'scope_mismatch_downlevel'
+  | 'domain_mismatch_hard';
+
+export type ScoringContractV1Penalty = {
+  code: ScoringContractV1PenaltyCode;
+  points: number; // negative numbers
+  reason: string;
+};
+
 export type CxFitV2Result = {
+  // canonical
   score: number;
-  components: {
-    scope: number;
-    leadership: number;
-    domain: number;
-    strategy: number;
-    execution: number;
-    tooling: number;
+
+  // contract v1
+  rubric: {
+    id: 'scoring_contract_v1';
+    weights: ScoringContractV1Weights;
+    dimensionPercents: Record<ScoringContractV1DimensionKey, number>; // 0-100 each
+    dimensionPoints: Record<ScoringContractV1DimensionKey, number>; // 0-weight each
+    subtotal: number; // sum of dimensionPoints (pre penalties)
+    penalties: ScoringContractV1Penalty[];
+    finalBeforeClamp: number;
+    rounding: 'round_half_up_final_only';
   };
-  adjustments: {
-    selfSimilarityApplied: boolean;
-    selfSimilarityFloor: number;
-    stretchDampenerApplied: boolean;
-    stretchDampenerPoints: number;
-    toolingFloorApplied: boolean;
-  };
-  bands: {
+
+  // extra debug info (safe to log / show)
+  debug: {
     baselineBand: string;
     roleBand: string;
     bandDelta: number;
-  };
-  debug: {
-    domainTagsBaseline: string[];
-    domainTagsRole: string[];
+    domainTagsBaseline: DomainTag[];
+    domainTagsRole: DomainTag[];
     responsibilityOverlapPercent: number;
     baselineCoveragePercent: number;
+    toolingCoverage: {
+      requiredCoverage: number;
+      preferredCoverage: number;
+    };
   };
+};
+
+const WEIGHTS: ScoringContractV1Weights = {
+  role_scope_and_seniority: 25,
+  support_operations_and_process_rigor: 25,
+  tooling_and_platform_experience: 20,
+  domain_and_business_context: 15,
+  change_leadership_and_customer_advocacy: 15,
 };
 
 const RESPONSIBILITY_VECTORS = [
@@ -124,27 +153,7 @@ const RESPONSIBILITY_VECTORS = [
       'scorecards',
     ],
   },
-];
-
-const OWNERSHIP_TERMS = [
-  'accountable for',
-  'lead',
-  'govern',
-  'chair',
-  'direct',
-  'establish',
-  'design',
-  'operationalize',
-  'teams',
-  'outcomes',
-  'slas',
-  'mttr',
-  'mtta',
-  'backlog health',
-  'change governance',
-  'dashboards',
-  'runbooks',
-];
+] as const;
 
 const STRATEGY_PATTERNS: RegExp[] = [
   /operating model/,
@@ -154,6 +163,7 @@ const STRATEGY_PATTERNS: RegExp[] = [
   /key performance indicators/,
   /tooling roadmap/,
   /cross[- ]functional prioritization/,
+  /program(?:s)? (?:built|launched|led|owned)/,
 ];
 
 const EXECUTION_PATTERNS: RegExp[] = [
@@ -167,6 +177,20 @@ const EXECUTION_PATTERNS: RegExp[] = [
   /incident command/,
   /(cab|change advisory board)/,
   /dashboards? (?:built|launched|owned|maintained|delivered)/,
+];
+
+const CUSTOMER_ADVOCACY_PATTERNS: RegExp[] = [
+  /\bvoice of the customer\b/,
+  /\bvoc\b/,
+  /customer experience/,
+  /customer advocacy/,
+  /csat/,
+  /nps/,
+  /customer outcomes?/,
+  /reduce (?:contacts|time to resolution|steps)/,
+  /\bdeflection\b/,
+  /knowledge base/,
+  /self[- ]service/,
 ];
 
 const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
@@ -217,18 +241,6 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
   },
 ];
 
-const OWNERSHIP_GAP_INDICATORS = [
-  'budget authority',
-  'revenue ownership',
-  'utilization ownership',
-  'margin ownership',
-  'field services org',
-  'field services organization',
-  'field services organization ownership',
-  'budget owner',
-  'revenue owner',
-];
-
 const HARD_TOOL_GUARDS = ['servicenow', 'service desk'];
 
 const detectVectors = (text: string) =>
@@ -251,29 +263,21 @@ const countPatternMatches = (text: string, patterns: RegExp[]) =>
 
 const inferLeadershipBand = (text: string) => {
   let band = 3;
+
   const elevate = (value: number) => {
     band = Math.max(band, Math.min(value, 8));
   };
 
-  if (
-    /(?:budget authority|revenue ownership|p\s*&?\s*l|profit and loss)/.test(
-      text,
-    )
-  ) {
+  if (/(budget authority|revenue ownership|p\s*&?\s*l|profit and loss)/.test(text)) {
     elevate(8);
   }
   if (
     /(directs|oversees|lead(?:s|ing)?).*global/.test(text) ||
-    /(global (?:coverage|ops|operations|delivery|org|organization|service))/.test(
-      text,
-    )
+    /(global (?:coverage|ops|operations|delivery|org|organization|service))/.test(text)
   ) {
     elevate(7);
   }
-  if (
-    /enterprise[- ]wide/.test(text) ||
-    /global (?:org|organization|ops)/.test(text)
-  ) {
+  if (/enterprise[- ]wide/.test(text) || /global (?:org|organization|ops)/.test(text)) {
     elevate(7);
   }
   if (/(manages|managing|leads|leading).*(?:managers|leaders)/.test(text)) {
@@ -295,195 +299,248 @@ const inferLeadershipBand = (text: string) => {
   return band;
 };
 
-const computeDomainScore = (
-  baselineTags: DomainTag[],
-  roleTags: DomainTag[],
-) => {
+const computeDomainPercent = (baselineTags: DomainTag[], roleTags: DomainTag[]) => {
   const baselineSet = new Set(baselineTags);
   const roleSet = new Set(roleTags);
 
-  if (
-    baselineSet.size > 0 &&
-    roleSet.size > 0 &&
-    baselineSet.size === roleSet.size &&
-    [...baselineSet].every((tag) => roleSet.has(tag))
-  ) {
-    return 100;
-  }
+  if (roleSet.size === 0 && baselineSet.size === 0) return 60;
+  if (roleSet.size > 0 && baselineSet.size === 0) return 40;
 
-  if ([...roleSet].some((tag) => baselineSet.has(tag))) {
-    return 75;
-  }
-
+  const overlap = [...roleSet].filter((tag) => baselineSet.has(tag)).length;
+  if (overlap === roleSet.size && roleSet.size > 0) return 100;
+  if (overlap > 0) return 75;
   return 40;
+};
+
+// round half up, final only (contract)
+const roundHalfUp = (value: number) => {
+  // value should be non-negative for our scoring, but keep it safe
+  return value >= 0 ? Math.floor(value + 0.5) : -Math.floor(Math.abs(value) + 0.5);
+};
+
+const toWeightedPoints = (percent: number, weight: number) => {
+  const pct = clamp(Math.round(percent));
+  const raw = (pct / 100) * weight;
+  return raw;
 };
 
 export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
   const baselineText = input.baselineSections
     .map((section) => section.content ?? '')
     .join('\n');
+
   const jobSegments = [
     ...input.job.normalizedResponsibilities,
     ...input.job.normalizedRequirements,
   ]
     .filter(Boolean)
     .join(' ');
-  const jobText = [jobSegments, input.job.rawDescription]
-    .filter(Boolean)
-    .join('\n');
+
+  const jobText = [jobSegments, input.job.rawDescription].filter(Boolean).join('\n');
 
   const normalizedJobText = normalizeText(jobText);
   const normalizedBaselineText = normalizeText(baselineText);
 
+  // vector overlap stats
   const jobVectors = detectVectors(normalizedJobText);
   const baselineVectors = detectVectors(normalizedBaselineText);
-  const sharedVectors = jobVectors.filter((vector) =>
-    baselineVectors.includes(vector),
-  );
+  const sharedVectors = jobVectors.filter((vector) => baselineVectors.includes(vector));
+
   const responsibilityOverlapPercent =
-    jobVectors.length === 0
-      ? 0
-      : (sharedVectors.length / jobVectors.length) * 100;
+    jobVectors.length === 0 ? 0 : (sharedVectors.length / jobVectors.length) * 100;
+
   const baselineCoveragePercent =
-    baselineVectors.length === 0
-      ? 0
-      : (sharedVectors.length / baselineVectors.length) * 100;
-  const ownershipMatches = OWNERSHIP_TERMS.filter(
-    (term) =>
-      normalizedJobText.includes(term) && normalizedBaselineText.includes(term),
-  ).length;
-  const baseScope =
-    (responsibilityOverlapPercent + baselineCoveragePercent) / 2;
-  let scopeScore = clamp(
-    Math.round(baseScope + Math.min(15, ownershipMatches * 4)),
-  );
-  if (responsibilityOverlapPercent >= 70) {
-    scopeScore = Math.max(scopeScore, 80);
-  }
+    baselineVectors.length === 0 ? 0 : (sharedVectors.length / baselineVectors.length) * 100;
 
-  const domainTagsBaseline = detectDomainTags(normalizedBaselineText);
-  const domainTagsRole = detectDomainTags(normalizedJobText);
-  const domainScore = computeDomainScore(domainTagsBaseline, domainTagsRole);
-
+  // leadership band and scope gap
   const baselineBand = inferLeadershipBand(normalizedBaselineText);
   const roleBand = inferLeadershipBand(normalizedJobText);
   const bandDelta = Math.abs(baselineBand - roleBand);
-  const leadershipScore = bandDelta <= 1 ? 100 : bandDelta === 2 ? 80 : 60;
 
-  const strategyMatchesJob = countPatternMatches(
-    normalizedJobText,
-    STRATEGY_PATTERNS,
-  );
-  const strategyMatchesBaseline = countPatternMatches(
-    normalizedBaselineText,
-    STRATEGY_PATTERNS,
-  );
-  let strategyScore: number;
-  if (strategyMatchesJob === 0) {
-    strategyScore = strategyMatchesBaseline > 0 ? 50 : 0;
-  } else {
-    const ratio = Math.min(1, strategyMatchesBaseline / strategyMatchesJob);
-    strategyScore = Math.round(ratio * 100);
-  }
+  // domain
+  const domainTagsBaseline = detectDomainTags(normalizedBaselineText);
+  const domainTagsRole = detectDomainTags(normalizedJobText);
+  const domainPercent = computeDomainPercent(domainTagsBaseline, domainTagsRole);
 
-  const executionMatchesJob = countPatternMatches(
-    normalizedJobText,
-    EXECUTION_PATTERNS,
-  );
-  const executionMatchesBaseline = countPatternMatches(
-    normalizedBaselineText,
-    EXECUTION_PATTERNS,
-  );
-  let executionScore: number;
-  if (executionMatchesJob === 0) {
-    executionScore = executionMatchesBaseline > 0 ? 60 : 40;
-  } else {
-    const ratio = Math.min(1, executionMatchesBaseline / executionMatchesJob);
-    executionScore = Math.round(ratio * 100);
-  }
+  // strategy and execution signals
+  const strategyMatchesJob = countPatternMatches(normalizedJobText, STRATEGY_PATTERNS);
+  const strategyMatchesBaseline = countPatternMatches(normalizedBaselineText, STRATEGY_PATTERNS);
 
+  const executionMatchesJob = countPatternMatches(normalizedJobText, EXECUTION_PATTERNS);
+  const executionMatchesBaseline = countPatternMatches(normalizedBaselineText, EXECUTION_PATTERNS);
+
+  const advocacyMatchesJob = countPatternMatches(normalizedJobText, CUSTOMER_ADVOCACY_PATTERNS);
+  const advocacyMatchesBaseline = countPatternMatches(normalizedBaselineText, CUSTOMER_ADVOCACY_PATTERNS);
+
+  // tooling
   const toolingCoverage = evaluateToolCoverage(jobText, baselineText);
-  const rawToolingScore = clamp(
+  const rawToolingPercent = clamp(
     Math.round(
-      toolingCoverage.requiredCoverage * 70 +
-        toolingCoverage.preferredCoverage * 30,
+      toolingCoverage.requiredCoverage * 70 + toolingCoverage.preferredCoverage * 30,
     ),
   );
+
   const hasMissingHardTools = HARD_TOOL_GUARDS.some(
-    (term) =>
-      normalizedJobText.includes(term) &&
-      !normalizedBaselineText.includes(term),
+    (term) => normalizedJobText.includes(term) && !normalizedBaselineText.includes(term),
   );
-  const toolingScore = hasMissingHardTools ? 0 : rawToolingScore;
-  const toolingMismatchPenalty = hasMissingHardTools ? 15 : 0;
 
-  let totalScore =
-    scopeScore * 0.35 +
-    leadershipScore * 0.25 +
-    domainScore * 0.15 +
-    strategyScore * 0.1 +
-    executionScore * 0.1 +
-    toolingScore * 0.05;
-  totalScore -= toolingMismatchPenalty;
+  const toolingPercent = hasMissingHardTools ? 0 : rawToolingPercent;
 
-  let selfSimilarityApplied = false;
-  let selfSimilarityFloor = 0;
-  if (scopeScore >= 75 && leadershipScore >= 75 && domainScore >= 70) {
-    selfSimilarityApplied = true;
-    selfSimilarityFloor = 85;
-    totalScore = Math.max(totalScore, 85);
-  }
+  // ---- contract dimension percents (0-100) ----
+  // 1) role_scope_and_seniority (scope + seniority alignment)
+  // Mix vector overlap with band alignment.
+  const bandAlignmentPercent =
+    bandDelta <= 1 ? 100 : bandDelta === 2 ? 75 : bandDelta === 3 ? 55 : 40;
 
-  const missingOwnershipRequirements = OWNERSHIP_GAP_INDICATORS.filter(
-    (term) =>
-      normalizedJobText.includes(term) &&
-      !normalizedBaselineText.includes(term),
+  const scopeVectorPercent = clamp(
+    Math.round((responsibilityOverlapPercent + baselineCoveragePercent) / 2),
   );
-  let stretchDampenerApplied = false;
-  let stretchDampenerPoints = 0;
-  if (missingOwnershipRequirements.length > 0) {
-    stretchDampenerApplied = true;
-    stretchDampenerPoints = Math.min(
-      12,
-      5 + (missingOwnershipRequirements.length - 1) * 3,
+
+  const roleScopeAndSeniorityPercent = clamp(
+    Math.round(scopeVectorPercent * 0.6 + bandAlignmentPercent * 0.4),
+  );
+
+  // 2) support_operations_and_process_rigor
+  // Use execution and ops vectors overlap. Execution ratio is computed vs job asks.
+  let executionRatioPercent: number;
+  if (executionMatchesJob === 0) {
+    executionRatioPercent = executionMatchesBaseline > 0 ? 60 : 40;
+  } else {
+    executionRatioPercent = clamp(
+      Math.round(Math.min(1, executionMatchesBaseline / executionMatchesJob) * 100),
     );
-    totalScore -= stretchDampenerPoints;
   }
 
-  let finalScore = clamp(Math.round(totalScore));
-  let toolingFloorApplied = false;
-  if (scopeScore >= 70 && leadershipScore >= 70 && finalScore < 70) {
-    toolingFloorApplied = true;
-    finalScore = 70;
+  const opsRigorPercent = clamp(
+    Math.round(scopeVectorPercent * 0.55 + executionRatioPercent * 0.45),
+  );
+
+  // 3) tooling_and_platform_experience
+  const toolingAndPlatformPercent = toolingPercent;
+
+  // 4) domain_and_business_context
+  const domainAndContextPercent = domainPercent;
+
+  // 5) change_leadership_and_customer_advocacy
+  // Combine strategy ratio and advocacy ratio.
+  let strategyRatioPercent: number;
+  if (strategyMatchesJob === 0) {
+    strategyRatioPercent = strategyMatchesBaseline > 0 ? 50 : 0;
+  } else {
+    strategyRatioPercent = clamp(
+      Math.round(Math.min(1, strategyMatchesBaseline / strategyMatchesJob) * 100),
+    );
   }
+
+  let advocacyRatioPercent: number;
+  if (advocacyMatchesJob === 0) {
+    advocacyRatioPercent = advocacyMatchesBaseline > 0 ? 50 : 25;
+  } else {
+    advocacyRatioPercent = clamp(
+      Math.round(Math.min(1, advocacyMatchesBaseline / advocacyMatchesJob) * 100),
+    );
+  }
+
+  const changeLeadershipAndAdvocacyPercent = clamp(
+    Math.round(strategyRatioPercent * 0.55 + advocacyRatioPercent * 0.45),
+  );
+
+  const dimensionPercents: Record<ScoringContractV1DimensionKey, number> = {
+    role_scope_and_seniority: roleScopeAndSeniorityPercent,
+    support_operations_and_process_rigor: opsRigorPercent,
+    tooling_and_platform_experience: toolingAndPlatformPercent,
+    domain_and_business_context: domainAndContextPercent,
+    change_leadership_and_customer_advocacy: changeLeadershipAndAdvocacyPercent,
+  };
+
+  // ---- weighted points ----
+  const dimensionPoints: Record<ScoringContractV1DimensionKey, number> = {
+    role_scope_and_seniority: toWeightedPoints(
+      dimensionPercents.role_scope_and_seniority,
+      WEIGHTS.role_scope_and_seniority,
+    ),
+    support_operations_and_process_rigor: toWeightedPoints(
+      dimensionPercents.support_operations_and_process_rigor,
+      WEIGHTS.support_operations_and_process_rigor,
+    ),
+    tooling_and_platform_experience: toWeightedPoints(
+      dimensionPercents.tooling_and_platform_experience,
+      WEIGHTS.tooling_and_platform_experience,
+    ),
+    domain_and_business_context: toWeightedPoints(
+      dimensionPercents.domain_and_business_context,
+      WEIGHTS.domain_and_business_context,
+    ),
+    change_leadership_and_customer_advocacy: toWeightedPoints(
+      dimensionPercents.change_leadership_and_customer_advocacy,
+      WEIGHTS.change_leadership_and_customer_advocacy,
+    ),
+  };
+
+  const subtotal =
+    dimensionPoints.role_scope_and_seniority +
+    dimensionPoints.support_operations_and_process_rigor +
+    dimensionPoints.tooling_and_platform_experience +
+    dimensionPoints.domain_and_business_context +
+    dimensionPoints.change_leadership_and_customer_advocacy;
+
+  // ---- penalties (contract) ----
+  const penalties: ScoringContractV1Penalty[] = [];
+
+  // scope_mismatch_downlevel: apply when the role band is materially higher than baseline
+  if (roleBand - baselineBand >= 3) {
+    penalties.push({
+      code: 'scope_mismatch_downlevel',
+      points: -10,
+      reason: `Role seniority band L${roleBand} is 3+ levels above baseline band L${baselineBand}.`,
+    });
+  }
+
+  // domain_mismatch_hard: apply when we see explicit domain tags in role and essentially none matched
+  const roleHasDomainSignal = domainTagsRole.length > 0;
+  const baselineHasDomainSignal = domainTagsBaseline.length > 0;
+  const domainHardMismatch =
+    roleHasDomainSignal && (!baselineHasDomainSignal || domainAndContextPercent <= 40);
+
+  if (domainHardMismatch) {
+    penalties.push({
+      code: 'domain_mismatch_hard',
+      points: -5,
+      reason: `Role domain tags do not match baseline domain tags.`,
+    });
+  }
+
+  const penaltyTotal = penalties.reduce((sum, p) => sum + p.points, 0);
+  const finalBeforeClamp = subtotal + penaltyTotal;
+
+  // contract rounding: round half up, final only
+  const roundedFinal = roundHalfUp(finalBeforeClamp);
+  const finalScore = clamp(roundedFinal);
 
   return {
     score: finalScore,
-    components: {
-      scope: scopeScore,
-      leadership: leadershipScore,
-      domain: domainScore,
-      strategy: strategyScore,
-      execution: executionScore,
-      tooling: toolingScore,
+    rubric: {
+      id: 'scoring_contract_v1',
+      weights: WEIGHTS,
+      dimensionPercents,
+      dimensionPoints,
+      subtotal,
+      penalties,
+      finalBeforeClamp,
+      rounding: 'round_half_up_final_only',
     },
-    adjustments: {
-      selfSimilarityApplied,
-      selfSimilarityFloor,
-      stretchDampenerApplied,
-      stretchDampenerPoints,
-      toolingFloorApplied,
-    },
-    bands: {
+    debug: {
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
-    },
-    debug: {
       domainTagsBaseline,
       domainTagsRole,
-      responsibilityOverlapPercent: Math.round(responsibilityOverlapPercent),
-      baselineCoveragePercent: Math.round(baselineCoveragePercent),
+      responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
+      baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
+      toolingCoverage: {
+        requiredCoverage: toolingCoverage.requiredCoverage,
+        preferredCoverage: toolingCoverage.preferredCoverage,
+      },
     },
   };
 };

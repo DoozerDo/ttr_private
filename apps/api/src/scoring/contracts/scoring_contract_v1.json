@@ -1,0 +1,194 @@
+{
+  "contract_version": "scoring_contract_v1",
+  "total_weight": 100,
+
+  "dimensions": [
+    {
+      "id": "role_scope_and_seniority",
+      "weight": 25,
+      "description": "Alignment between the scope, seniority, and ownership level demonstrated in the baseline and what the role requires.",
+      "signals": {
+        "baseline_positive": [
+          "Head of Support",
+          "Director of Support",
+          "Global Support",
+          "Support Operations",
+          "Escalations ownership",
+          "Org design",
+          "Hiring and performance management",
+          "Executive reporting",
+          "Cross-functional leadership"
+        ],
+        "baseline_negative": [
+          "Individual contributor only",
+          "No people management",
+          "Single function ownership only"
+        ],
+        "job_positive": [
+          "Lead and scale",
+          "Own support function",
+          "Executive reporting",
+          "Cross-functional leadership"
+        ]
+      },
+      "scoring_rules": {
+        "strong_match": { "points": 25, "criteria": "Baseline clearly shows ownership of a multi-level support organization with leadership scope equal to or exceeding the role." },
+        "moderate_match": { "points": 18, "criteria": "Baseline shows senior leadership but with slightly narrower scope or fewer teams than role requires." },
+        "partial_match": { "points": 10, "criteria": "Baseline shows some leadership but mostly IC or team-lead level." },
+        "weak_match": { "points": 5, "criteria": "Baseline leadership experience is materially below role scope." },
+        "no_match": { "points": 0, "criteria": "Baseline does not demonstrate leadership or ownership at the required level." }
+      }
+    },
+
+    {
+      "id": "support_operations_and_process_rigor",
+      "weight": 25,
+      "description": "Depth of experience building, operating, and optimizing support processes and operating rhythms.",
+      "signals": {
+        "baseline_positive": [
+          "SLAs",
+          "CSAT",
+          "First response time",
+          "Time to resolution",
+          "Backlog management",
+          "QA reviews",
+          "Ticket audits",
+          "Operating rhythms",
+          "Incident management",
+          "Escalation frameworks"
+        ],
+        "job_positive": [
+          "KPIs",
+          "Operating rhythms",
+          "Quality assurance",
+          "Executive reporting",
+          "Root cause analysis"
+        ]
+      },
+      "scoring_rules": {
+        "strong_match": { "points": 25, "criteria": "Baseline shows end-to-end ownership of KPIs, SLAs, QA, and operational reporting." },
+        "moderate_match": { "points": 18, "criteria": "Baseline shows strong ops experience but missing one or two core areas." },
+        "partial_match": { "points": 10, "criteria": "Baseline shows exposure but not ownership of ops rigor." },
+        "weak_match": { "points": 5, "criteria": "Baseline mentions ops concepts without clear implementation responsibility." },
+        "no_match": { "points": 0, "criteria": "No evidence of structured support operations experience." }
+      }
+    },
+
+    {
+      "id": "tooling_and_platform_experience",
+      "weight": 20,
+      "description": "Hands-on experience selecting, implementing, and operating modern support tooling.",
+      "signals": {
+        "baseline_positive": [
+          "Zendesk",
+          "Freshdesk",
+          "Intercom",
+          "Jira Service Management",
+          "ServiceNow",
+          "Salesforce Service Cloud",
+          "Ticketing migration",
+          "Automation",
+          "Routing rules",
+          "Macros",
+          "Reporting dashboards"
+        ],
+        "job_positive": [
+          "Ticketing platform migration",
+          "Automation",
+          "Routing",
+          "Reporting"
+        ]
+      },
+      "scoring_rules": {
+        "strong_match": { "points": 20, "criteria": "Baseline shows direct ownership of ticketing platform selection, migration, and optimization." },
+        "moderate_match": { "points": 14, "criteria": "Baseline shows deep usage and admin experience but not full ownership of migration." },
+        "partial_match": { "points": 8, "criteria": "Baseline shows user-level or limited admin experience." },
+        "weak_match": { "points": 4, "criteria": "Baseline references tools without demonstrating depth." },
+        "no_match": { "points": 0, "criteria": "No relevant tooling experience mentioned." }
+      }
+    },
+
+    {
+      "id": "domain_and_business_context",
+      "weight": 15,
+      "description": "Alignment with the business domain and customer complexity of the role.",
+      "signals": {
+        "baseline_positive": [
+          "B2B SaaS",
+          "Enterprise customers",
+          "Subscription billing",
+          "Compliance",
+          "Financial systems",
+          "Accounting workflows"
+        ],
+        "job_positive": [
+          "Accounting",
+          "Billing",
+          "Compliance",
+          "Subscription complexity"
+        ]
+      },
+      "scoring_rules": {
+        "strong_match": { "points": 15, "criteria": "Baseline shows direct experience supporting accounting, billing, or compliance-heavy workflows." },
+        "moderate_match": { "points": 10, "criteria": "Baseline shows adjacent B2B SaaS experience with some financial exposure." },
+        "partial_match": { "points": 6, "criteria": "Baseline shows general SaaS support with no domain depth." },
+        "weak_match": { "points": 3, "criteria": "Baseline experience is mostly unrelated to the domain." },
+        "no_match": { "points": 0, "criteria": "No relevant domain alignment." }
+      }
+    },
+
+    {
+      "id": "change_leadership_and_customer_advocacy",
+      "weight": 15,
+      "description": "Ability to lead change, influence cross-functionally, and advocate for customers.",
+      "signals": {
+        "baseline_positive": [
+          "Change management",
+          "Cross-functional collaboration",
+          "Executive influence",
+          "Customer advocacy",
+          "Incident communications"
+        ],
+        "job_positive": [
+          "Voice of Support",
+          "Cross-functional planning",
+          "Customer-impacting incidents"
+        ]
+      },
+      "scoring_rules": {
+        "strong_match": { "points": 15, "criteria": "Baseline clearly demonstrates leading change and influencing across Product, Engineering, and Exec teams." },
+        "moderate_match": { "points": 10, "criteria": "Baseline shows collaboration but limited ownership of change initiatives." },
+        "partial_match": { "points": 6, "criteria": "Baseline shows participation but not leadership in change efforts." },
+        "weak_match": { "points": 3, "criteria": "Baseline mentions collaboration without concrete examples." },
+        "no_match": { "points": 0, "criteria": "No evidence of change leadership or advocacy." }
+      }
+    }
+  ],
+
+  "penalties": [
+    {
+      "id": "scope_mismatch_downlevel",
+      "description": "Baseline seniority is materially below the role level.",
+      "trigger": "Baseline shows only IC or team-lead scope while role requires head or director level ownership.",
+      "deduction": 10
+    },
+    {
+      "id": "domain_mismatch_hard",
+      "description": "Role requires regulated or accounting-heavy domain with no adjacent baseline experience.",
+      "trigger": "Job domain includes accounting or compliance and baseline shows none.",
+      "deduction": 5
+    }
+  ],
+
+  "normalization": {
+    "method": "sum_of_weighted_dimensions_minus_penalties",
+    "minimum_score": 0,
+    "maximum_score": 100
+  },
+
+  "rounding": {
+    "method": "round_half_up",
+    "precision": 0,
+    "apply_at": "final_score_only"
+  }
+}

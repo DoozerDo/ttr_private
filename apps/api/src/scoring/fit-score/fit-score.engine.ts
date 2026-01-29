@@ -1,97 +1,45 @@
-import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { FitAssessmentVerdict } from '../../analysis/fit-assessment.entity';
-import { GapEmbeddingProvider } from '../../interviews/gap-detection.service';
 import {
   FitScoreInput,
   FitScoreResult,
   FitScoreOptions,
   DimensionWeightOverrides,
-  FitScoreDebugPayload,
   FitScoreDimensionScores,
+  FitScoreDebugPayload,
   FitScoreDebugDimensionDetail,
 } from './fit-score.types';
-import {
-  normalizeText,
-  countWords,
-  tokenize,
-  clamp,
-  buildJobPromptText,
-} from './fit-score.utils';
-import { evaluateToolCoverage } from './tool-extractor';
+import { normalizeText, countWords, clamp, buildJobPromptText } from './fit-score.utils';
 import { buildStrengths, buildGaps } from './fit-score.explain';
 import { verdictFromScore } from './fit-verdict';
-import type { FitScoreVerdictLabel } from './fit-verdict';
 
-const EXPERIENCE_SECTION_TYPES = ['EXPERIENCE', 'PROJECT', 'SUMMARY'];
-const CX_PHRASES = [
-  'customer experience',
-  'cx operations',
-  'customer support operations',
-  'support operations',
-];
-const LEADERSHIP_MARKERS = [
-  'manage',
-  'managed',
-  'lead',
-  'led',
+const SENIORITY_KEYWORDS = [
+  'head of',
+  'director of',
   'director',
-  'senior manager',
-  'global',
-  'cross-functional',
-  'stakeholder',
-  'coaching',
+  'senior director',
+  'vice president',
+  'vp of',
+  'vp',
+  'lead and scale',
+  'own support function',
+  'executive reporting',
+  'cross-functional leadership',
+  'global support',
 ];
-const STRATEGIC_CUES = [
-  'strategy',
-  'strategic',
-  'roadmap',
-  'vision',
-  'portfolio',
-  'planning',
-  'architecture',
-];
-const STRONG_INDUSTRY_MARKERS = ['security', 'saas', 'b2b', 'enterprise'];
-const INCOMPATIBLE_INDUSTRY_MAP: Record<string, string[]> = {
-  healthcare: ['finance', 'banking', 'regulated'],
-  finance: ['healthcare', 'gaming', 'consumer'],
-  government: ['gaming'],
-  consumer: ['enterprise', 'b2b', 'saas'],
-  gaming: ['regulated', 'government'],
-};
 
-const STOPWORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'as',
-  'at',
-  'be',
-  'by',
-  'for',
-  'from',
-  'has',
-  'have',
-  'in',
-  'is',
-  'it',
-  'its',
-  'of',
-  'on',
-  'or',
-  'our',
-  'that',
-  'the',
-  'their',
-  'they',
-  'this',
-  'to',
-  'we',
-  'with',
-  'will',
-  'you',
-  'your',
-]);
+const BASELINE_DOWNLEVEL_INDICATORS = [
+  'individual contributor',
+  'individual contributor only',
+  'no people management',
+  'single function ownership only',
+  'team lead',
+  'team lead only',
+];
+
+const DOMAIN_KEYWORDS = ['accounting', 'compliance'];
 
 const DEFAULT_WEIGHTS: Record<keyof FitScoreDimensionScores, number> = {
   experienceAlignment: 0.3,
@@ -101,22 +49,85 @@ const DEFAULT_WEIGHTS: Record<keyof FitScoreDimensionScores, number> = {
   technicalPlatformFit: 0.1,
 };
 
-const combineSections = (
-  sections: FitScoreInput['baseline']['sections'],
-  types?: string[],
-) =>
-  sections
-    .filter((section) => section.content)
-    .filter((section) => {
-      if (!types?.length) return true;
-      const type = (section.type ?? '').toUpperCase();
-      return Boolean(type && types.includes(type));
-    })
-    .map((section) => section.content)
-    .join('\n');
+const CONTRACT_FILENAME = 'scoring_contract_v1.json';
 
-const hashForCache = (text: string) =>
-  createHash('sha256').update(text).digest('hex');
+type CxFitTier = 'strong_match' | 'moderate_match' | 'partial_match' | 'weak_match' | 'no_match';
+
+type EvidenceDetail = {
+  matchedSnippets: string[];
+  matchedTerms: string[];
+};
+
+interface ContractDimension {
+  id: string;
+  weight: number;
+  description: string;
+  signals: {
+    baseline_positive?: string[];
+    baseline_negative?: string[];
+    job_positive?: string[];
+  };
+  scoring_rules: Record<
+    CxFitTier,
+    {
+      points: number;
+      criteria: string;
+    }
+  >;
+}
+
+interface ContractPenalty {
+  id: string;
+  description: string;
+  trigger: string;
+  deduction: number;
+}
+
+interface ScoringContract {
+  contract_version: string;
+  total_weight: number;
+  dimensions: ContractDimension[];
+  penalties: ContractPenalty[];
+  normalization: {
+    method: string;
+    minimum_score: number;
+    maximum_score: number;
+  };
+  rounding: {
+    method: string;
+    precision: number;
+    apply_at: string;
+  };
+}
+
+interface DimensionState {
+  baselinePositiveMatches: string[];
+  baselineNegativeMatches: string[];
+  jobPositiveMatches: string[];
+  baselineEffective: number;
+  jobEffective: number;
+  jobSeniorityMatches: string[];
+}
+
+interface DimensionResult {
+  id: string;
+  points: number;
+  tier: CxFitTier;
+  evidence: EvidenceDetail;
+}
+
+interface PenaltyResult {
+  id: string;
+  deduction: number;
+  evidence: EvidenceDetail;
+}
+
+interface ResolvedContractPath {
+  contractPath: string;
+  attemptedPaths: string[];
+}
+
+let cachedContract: ScoringContract | null = null;
 
 export class FitScoreInputError extends Error {
   constructor(message: string) {
@@ -125,36 +136,14 @@ export class FitScoreInputError extends Error {
   }
 }
 
-type DimensionWithDetail = {
-  score: number;
-  detail: FitScoreDebugDimensionDetail;
-};
-
-type TechnicalDimensionResult = DimensionWithDetail & {
-  missingRequiredTools: string[];
-};
-
 export class FitScoreEngine {
-  private readonly embeddingProvider?: GapEmbeddingProvider;
-  private readonly embeddingsEnabled: boolean;
-  private readonly embeddingCache = new Map<string, number[]>();
-  private readonly embeddingModel: string;
-
-  constructor(embeddingProvider?: GapEmbeddingProvider) {
-    this.embeddingProvider = embeddingProvider;
-    this.embeddingsEnabled = Boolean(this.embeddingProvider?.isEnabled?.());
-    this.embeddingModel =
-      (this.embeddingProvider as unknown as { modelName?: string })
-        ?.modelName ??
-      (this.embeddingProvider as unknown as { model?: string })?.model ??
-      'default';
+  constructor(_embeddingProvider?: unknown) {
+    /* kept for backwards compatibility */
   }
 
-  async score(
-    input: FitScoreInput,
-    options?: FitScoreOptions,
-  ): Promise<FitScoreResult> {
+  async score(input: FitScoreInput, options?: FitScoreOptions): Promise<FitScoreResult> {
     const jobSelection = this.selectJobText(input.job);
+
     if (jobSelection.wordCount < 300) {
       throw new FitScoreInputError(
         'Job text must contain at least 300 words for reliable scoring.',
@@ -163,143 +152,96 @@ export class FitScoreEngine {
 
     const baselineText = combineSections(input.baseline.sections);
     const baselineWordCount = countWords(baselineText);
-    const baselineExperienceText = combineSections(
-      input.baseline.sections,
-      EXPERIENCE_SECTION_TYPES,
+    const contract = loadScoringContract();
+    const jobText = jobSelection.text;
+
+    const normalizedBaseline = normalizeText(baselineText);
+    const normalizedJob = normalizeText(jobText);
+    const jobTitle = extractFirstLine(jobText);
+    const normalizedTitle = normalizeText(jobTitle);
+
+    const jobSeniorityMatches = Array.from(
+      new Set([
+        ...detectIndicators(normalizedJob, SENIORITY_KEYWORDS),
+        ...detectIndicators(normalizedTitle, SENIORITY_KEYWORDS),
+      ]),
     );
 
-    const experience = this.scoreExperienceAlignment(
-      jobSelection.text,
-      baselineExperienceText,
+    const baselineDownMatches = detectIndicators(normalizedBaseline, BASELINE_DOWNLEVEL_INDICATORS);
+    const jobDomainMatches = detectIndicators(normalizedJob, DOMAIN_KEYWORDS);
+    const baselineDomainMatches = detectIndicators(normalizedBaseline, DOMAIN_KEYWORDS);
+
+    const dimensionResults = contract.dimensions.map((dimension) =>
+      scoreDimension(dimension, baselineText, jobText, jobSeniorityMatches),
+    );
+
+    const dimensionScoreMap = dimensionResults.reduce<Record<string, number>>((acc, result) => {
+      acc[result.id] = result.points;
+      return acc;
+    }, {});
+
+    const penalties = evaluatePenalties(
+      contract.penalties,
       baselineText,
-    );
-    const leadership = this.scoreLeadershipLevel(
-      jobSelection.text,
-      baselineExperienceText,
-    );
-    const strategic = this.scoreStrategicFit(jobSelection.text, baselineText);
-    const industry = await this.scoreIndustryContext(
-      jobSelection.text,
-      baselineText,
-    );
-    const technical = this.scoreTechnicalPlatformFit(
-      jobSelection.text,
-      baselineText,
+      jobText,
+      jobSeniorityMatches,
+      baselineDownMatches,
+      jobDomainMatches,
+      baselineDomainMatches,
     );
 
-    const dimensionScores: FitScoreDimensionScores = {
-      experienceAlignment: experience.score,
-      leadershipLevel: leadership.score,
-      strategicTacticalFit: strategic.score,
-      industryContext: industry.score,
-      technicalPlatformFit: technical.score,
-    };
+    const penaltiesApplied = penalties.map((penalty) => penalty.id);
 
-    const appliedWeights = this.applyDimensionWeights(options?.weights);
-    const weightSum =
-      Object.values(appliedWeights).reduce(
-        (total, value) => total + value,
-        0,
-      ) || 1;
-    const baseRawScore = clamp(
-      Math.round(
-        (dimensionScores.experienceAlignment *
-          appliedWeights.experienceAlignment +
-          dimensionScores.leadershipLevel * appliedWeights.leadershipLevel +
-          dimensionScores.strategicTacticalFit *
-            appliedWeights.strategicTacticalFit +
-          dimensionScores.industryContext * appliedWeights.industryContext +
-          dimensionScores.technicalPlatformFit *
-            appliedWeights.technicalPlatformFit) /
-          weightSum,
-      ),
+    const totalPenalty = penalties.reduce((sum, penalty) => sum + penalty.deduction, 0);
+    const rawScoreOfDimensions = dimensionResults.reduce((sum, result) => sum + result.points, 0);
+    const rawAfterPenalties = rawScoreOfDimensions - totalPenalty;
+
+    const finalRawScore = clamp(
+      rawAfterPenalties,
+      contract.normalization.minimum_score,
+      contract.normalization.maximum_score,
     );
-    const signalBoost = this.hasStrongSignal(dimensionScores) ? 20 : 0;
-    const rawScore = clamp(baseRawScore + signalBoost);
 
-    const missingRequiredToolsCount = technical.missingRequiredTools.length;
-    const penalty = Math.min(10, missingRequiredToolsCount * 3);
-    let finalScore = rawScore - penalty;
-    let leadershipOverrideApplied = false;
+    const finalRoundedScore = roundHalfUp(finalRawScore, contract.rounding.precision);
+    const mappedDimensionScores = mapContractDimensionScores(dimensionScoreMap);
 
-    if (
-      dimensionScores.leadershipLevel >= 80 &&
-      dimensionScores.strategicTacticalFit >= 75
-    ) {
-      finalScore = Math.max(finalScore, 70);
-      leadershipOverrideApplied = true;
-    }
+    const strengths = buildStrengths(jobText, baselineText, mappedDimensionScores);
+    const gaps = buildGaps([], mappedDimensionScores);
 
-    finalScore = clamp(finalScore);
-
-    const verdictLabel = verdictFromScore(finalScore);
-    const strengths = buildStrengths(
-      jobSelection.text,
-      baselineText,
-      dimensionScores,
-    );
-    const gaps = buildGaps(technical.missingRequiredTools, dimensionScores);
-    const summary =
-      'Weighted fit based on leadership, experience alignment, strategy, industry context, and tools. Tools are a modest factor; missing required tools apply a bounded penalty.';
+    const verdictLabel = verdictFromScore(finalRoundedScore);
+    const persistenceVerdict = this.mapPersistenceVerdict(verdictLabel);
 
     const debug: FitScoreDebugPayload | undefined = options?.debug
       ? {
-          weights: appliedWeights,
-          rawScore,
-          signalBoost,
-          finalScore,
-          missingRequiredToolsCount,
-          missingRequiredToolsPenalty: penalty,
-          leadershipOverrideApplied,
+          weights: this.applyDimensionWeights(options?.weights),
+          rawScore: finalRawScore,
+          finalScore: finalRoundedScore,
+          signalBoost: 0,
+          missingRequiredToolsCount: 0,
+          missingRequiredToolsPenalty: 0,
+          leadershipOverrideApplied: false,
           chosenTextSource: jobSelection.source,
           jobWordCount: jobSelection.wordCount,
           baselineWordCount,
           verdict: verdictLabel,
-          dimensionDetails: {
-            experienceAlignment: {
-              score: dimensionScores.experienceAlignment,
-              semanticScore: experience.detail.semanticScore,
-              keywordBoost: experience.detail.keywordBoost,
-            },
-            leadershipLevel: {
-              score: dimensionScores.leadershipLevel,
-              semanticScore: leadership.detail.semanticScore,
-              structuredScore: leadership.detail.structuredScore,
-            },
-            strategicTacticalFit: {
-              score: dimensionScores.strategicTacticalFit,
-              semanticScore: strategic.detail.semanticScore,
-              keywordBoost: strategic.detail.keywordBoost,
-            },
-            industryContext: {
-              score: dimensionScores.industryContext,
-              semanticScore: industry.detail.semanticScore,
-              keywordBoost: industry.detail.keywordBoost,
-              fallbackScore: industry.detail.fallbackScore,
-            },
-            technicalPlatformFit: {
-              score: dimensionScores.technicalPlatformFit,
-              semanticScore: technical.detail.semanticScore,
-              keywordBoost: technical.detail.keywordBoost,
-              fallbackScore: technical.detail.fallbackScore,
-            },
-          },
+          dimensionDetails: createDebugDetails(mappedDimensionScores),
         }
       : undefined;
 
     return {
-      overallScore: finalScore,
-      rawScore,
+      overallScore: finalRoundedScore,
+      rawScore: finalRawScore,
       verdict: verdictLabel,
-      persistenceVerdict: this.mapPersistenceVerdict(verdictLabel),
-      dimensionScores,
+      persistenceVerdict,
+      dimensionScores: mappedDimensionScores,
+      penaltiesApplied,
       strengths,
       gaps,
-      summary,
-      missingRequiredTools: technical.missingRequiredTools,
-      missingRequiredToolsCount,
-      missingRequiredToolsPenalty: penalty,
-      leadershipOverrideApplied,
+      summary: 'CX Fit rubric scored via scoring_contract_v1.',
+      missingRequiredTools: [],
+      missingRequiredToolsCount: 0,
+      missingRequiredToolsPenalty: 0,
+      leadershipOverrideApplied: false,
       complianceFlags: [],
       debug,
     };
@@ -334,6 +276,7 @@ export class FitScoreEngine {
         source: 'rawDescription',
       };
     }
+
     const jobPrompt = buildJobPromptText(job);
     return {
       text: jobPrompt.text,
@@ -342,171 +285,7 @@ export class FitScoreEngine {
     };
   }
 
-  private scoreExperienceAlignment(
-    jobText: string,
-    baselineExperienceText: string,
-    baselineText: string,
-  ): DimensionWithDetail {
-    const semanticScore = this.referenceCoverage(
-      jobText,
-      baselineExperienceText,
-    );
-    const cxBoost = this.computeCxBoost(jobText, baselineText);
-    const finalScore = clamp(semanticScore + cxBoost);
-
-    return {
-      score: finalScore,
-      detail: {
-        score: finalScore,
-        semanticScore,
-        keywordBoost: cxBoost,
-      },
-    };
-  }
-
-  private computeCxBoost(jobText: string, baselineText: string) {
-    const normalizedJob = normalizeText(jobText);
-    const normalizedBaseline = normalizeText(baselineText);
-    const matches = CX_PHRASES.filter(
-      (phrase) =>
-        normalizedJob.includes(phrase) && normalizedBaseline.includes(phrase),
-    ).length;
-    return Math.min(10, matches * 4);
-  }
-
-  private scoreLeadershipLevel(
-    jobText: string,
-    baselineLeadershipText: string,
-  ): DimensionWithDetail {
-    const semanticScore = this.referenceCoverage(
-      jobText,
-      baselineLeadershipText,
-    );
-
-    const normalizedJob = normalizeText(jobText);
-    const normalizedBaseline = normalizeText(baselineLeadershipText);
-    const jobCount = LEADERSHIP_MARKERS.filter((marker) =>
-      normalizedJob.includes(marker),
-    ).length;
-    const baselineCount = LEADERSHIP_MARKERS.filter((marker) =>
-      normalizedBaseline.includes(marker),
-    ).length;
-    const structuredScore =
-      jobCount === 0 ? 65 : clamp(Math.min(baselineCount / jobCount, 1) * 100);
-    const finalScore = clamp(
-      Math.round(semanticScore * 0.7 + structuredScore * 0.3),
-    );
-
-    return {
-      score: finalScore,
-      detail: {
-        score: finalScore,
-        semanticScore,
-        structuredScore,
-      },
-    };
-  }
-
-  private scoreStrategicFit(
-    jobText: string,
-    baselineText: string,
-  ): DimensionWithDetail {
-    const semanticScore = this.referenceCoverage(jobText, baselineText);
-
-    const normalizedJob = normalizeText(jobText);
-    const normalizedBaseline = normalizeText(baselineText);
-    const matchCount = STRATEGIC_CUES.filter(
-      (cue) => normalizedJob.includes(cue) && normalizedBaseline.includes(cue),
-    ).length;
-    const keywordBoost = Math.min(10, matchCount * 3);
-    const finalScore = clamp(semanticScore + keywordBoost);
-
-    return {
-      score: finalScore,
-      detail: {
-        score: finalScore,
-        semanticScore,
-        keywordBoost,
-      },
-    };
-  }
-
-  private async scoreIndustryContext(
-    jobText: string,
-    baselineText: string,
-  ): Promise<DimensionWithDetail> {
-    const normalizedJob = normalizeText(jobText);
-    const normalizedBaseline = normalizeText(baselineText);
-
-    let keywordScore = 50;
-    let strongMatches = 0;
-    let incompatiblePenalty = 0;
-
-    STRONG_INDUSTRY_MARKERS.forEach((marker) => {
-      if (normalizedJob.includes(marker)) {
-        if (normalizedBaseline.includes(marker)) {
-          keywordScore += 10;
-          strongMatches += 1;
-        }
-        const conflicts = INCOMPATIBLE_INDUSTRY_MAP[marker] ?? [];
-        if (
-          conflicts.some((conflict) => normalizedBaseline.includes(conflict))
-        ) {
-          incompatiblePenalty = -10;
-        }
-      }
-    });
-
-    keywordScore = Math.min(keywordScore, 90);
-
-    const semanticFallback = Math.round(
-      (await this.computeSemanticSimilarity(jobText, baselineText)) * 100,
-    );
-
-    const blendedScore =
-      strongMatches >= 2
-        ? clamp(keywordScore + incompatiblePenalty)
-        : clamp(
-            Math.round(keywordScore * 0.6 + semanticFallback * 0.4) +
-              incompatiblePenalty,
-          );
-
-    return {
-      score: blendedScore,
-      detail: {
-        score: blendedScore,
-        semanticScore: semanticFallback,
-        keywordBoost: keywordScore,
-        fallbackScore: semanticFallback,
-      },
-    };
-  }
-
-  private scoreTechnicalPlatformFit(
-    jobText: string,
-    baselineText: string,
-  ): TechnicalDimensionResult {
-    const coverage = evaluateToolCoverage(jobText, baselineText);
-    const finalScore = clamp(
-      Math.round(
-        coverage.requiredCoverage * 70 + coverage.preferredCoverage * 30,
-      ),
-    );
-    return {
-      score: finalScore,
-      missingRequiredTools: coverage.missingRequired,
-      detail: {
-        score: finalScore,
-        semanticScore: Math.round(coverage.requiredCoverage * 100),
-        keywordBoost: Math.round(coverage.preferredCoverage * 100),
-        fallbackScore: coverage.missingRequired.length,
-      },
-    };
-  }
-
-  private mapPersistenceVerdict(
-    label: FitScoreVerdictLabel,
-  ): FitAssessmentVerdict {
+  private mapPersistenceVerdict(label: string): FitAssessmentVerdict {
     if (label === 'Apply') {
       return FitAssessmentVerdict.APPLY;
     }
@@ -515,90 +294,419 @@ export class FitScoreEngine {
     }
     return FitAssessmentVerdict.SKIP;
   }
+}
 
-  private async computeSemanticSimilarity(
-    textA: string,
-    textB: string,
-  ): Promise<number> {
-    if (!textA || !textB) return 0;
-    const [firstEmbedding, secondEmbedding] = await Promise.all([
-      this.embedWithCache(textA),
-      this.embedWithCache(textB),
-    ]);
-    if (firstEmbedding && secondEmbedding) {
-      return this.cosineSimilarity(firstEmbedding, secondEmbedding);
-    }
-    return this.lexicalSimilarity(textA, textB);
+function combineSections(sections: FitScoreInput['baseline']['sections']) {
+  return sections
+    .filter((section) => section.content)
+    .map((section) => section.content)
+    .join('\n');
+}
+
+function resolveContractPath(): ResolvedContractPath {
+  const envPath = process.env.CX_FIT_CONTRACT_PATH?.trim();
+  const candidates: string[] = [];
+
+  if (envPath) {
+    candidates.push(path.isAbsolute(envPath) ? envPath : path.resolve(process.cwd(), envPath));
   }
 
-  private async embedWithCache(text: string): Promise<number[] | null> {
-    if (!this.embeddingsEnabled || !this.embeddingProvider) {
-      return null;
+  const distCandidate = path.resolve(
+    process.cwd(),
+    'dist',
+    'scoring',
+    'contracts',
+    CONTRACT_FILENAME,
+  );
+  const compiledCandidate = path.resolve(__dirname, '..', 'contracts', CONTRACT_FILENAME);
+  const srcCandidate = path.resolve(process.cwd(), 'src', 'scoring', 'contracts', CONTRACT_FILENAME);
+  const docsCandidate = path.resolve(process.cwd(), 'docs', CONTRACT_FILENAME);
+
+  [distCandidate, compiledCandidate, srcCandidate, docsCandidate].forEach((candidate) => {
+    if (!candidates.includes(candidate)) {
+      candidates.push(candidate);
     }
-    const key = `${this.embeddingModel}:${hashForCache(text)}`;
-    if (this.embeddingCache.has(key)) {
-      return this.embeddingCache.get(key) ?? null;
-    }
+  });
+
+  for (const candidate of candidates) {
     try {
-      const embedding = await this.embeddingProvider.embed(text);
-      this.embeddingCache.set(key, embedding);
-      return embedding;
+      if (fs.existsSync(candidate)) {
+        return {
+          contractPath: candidate,
+          attemptedPaths: candidates,
+        };
+      }
     } catch {
-      return null;
+      // ignore and continue
     }
   }
 
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (!a.length || !b.length || a.length !== b.length) {
-      return 0;
-    }
-    const dot = a.reduce((sum, value, index) => sum + value * b[index], 0);
-    const magnitudeA = Math.sqrt(
-      a.reduce((sum, value) => sum + value * value, 0),
+  const debugLines = candidates.map((p) => `- ${p}`).join('\n');
+  throw new Error(
+    `Could not locate ${CONTRACT_FILENAME}. Tried these paths:\n${debugLines}\n` +
+      `Set CX_FIT_CONTRACT_PATH to override.`,
+  );
+}
+
+function loadScoringContract(): ScoringContract {
+  if (cachedContract) return cachedContract;
+
+  const { contractPath } = resolveContractPath();
+  const raw = fs.readFileSync(contractPath, 'utf8');
+  const parsed = JSON.parse(raw) as ScoringContract;
+
+  if (!parsed.contract_version) {
+    throw new Error('Scoring contract must define contract_version');
+  }
+
+  if (!Array.isArray(parsed.dimensions) || parsed.dimensions.length === 0) {
+    throw new Error('Scoring contract must declare at least one dimension');
+  }
+
+  const totalDimensionWeight = parsed.dimensions.reduce(
+    (sum, dimension) => sum + (typeof dimension.weight === 'number' ? dimension.weight : 0),
+    0,
+  );
+  if (totalDimensionWeight !== 100) {
+    throw new Error(`Dimensions must sum to 100 weight (got ${totalDimensionWeight})`);
+  }
+
+  if (parsed.total_weight !== totalDimensionWeight) {
+    throw new Error(
+      `total_weight (${parsed.total_weight}) must equal the sum of dimension weights (${totalDimensionWeight})`,
     );
-    const magnitudeB = Math.sqrt(
-      b.reduce((sum, value) => sum + value * value, 0),
-    );
-    if (!magnitudeA || !magnitudeB) {
-      return 0;
+  }
+
+  if (!Array.isArray(parsed.penalties)) {
+    throw new Error('Scoring contract must include a penalties array');
+  }
+
+  parsed.penalties.forEach((penalty) => {
+    if (!penalty.id) {
+      throw new Error('Each penalty must have an id');
     }
-    return dot / (magnitudeA * magnitudeB);
-  }
-
-  private lexicalSimilarity(textA: string, textB: string): number {
-    const tokensA = new Set(tokenize(textA));
-    const tokensB = new Set(tokenize(textB));
-    if (!tokensA.size || !tokensB.size) {
-      return 0;
+    if (typeof penalty.deduction !== 'number') {
+      throw new Error(`Penalty ${penalty.id} must declare a numeric deduction value`);
     }
-    const overlap = [...tokensA].filter((token) => tokensB.has(token)).length;
-    const referenceSize = tokensB.size || tokensA.size;
-    return overlap / Math.max(referenceSize, 1);
+  });
+
+  if (parsed.rounding.method !== 'round_half_up') {
+    throw new Error('Contract rounding.method must be round_half_up');
+  }
+  if (parsed.rounding.apply_at !== 'final_score_only') {
+    throw new Error('Contract rounding.apply_at must be final_score_only');
   }
 
-  private normalizedTokens(text: string) {
-    return tokenize(text).filter((token) => !STOPWORDS.has(token));
-  }
+  cachedContract = parsed;
+  return cachedContract;
+}
 
-  private referenceCoverage(jobText: string, baselineText: string): number {
-    const normalizedJob = normalizeText(jobText);
-    if (!normalizedJob) return 0;
-    const baselineTokens = new Set(this.normalizedTokens(baselineText));
-    if (!baselineTokens.size) return 0;
-    let matches = 0;
-    for (const token of baselineTokens) {
-      if (normalizedJob.includes(token)) {
-        matches += 1;
+function scoreDimension(
+  dimension: ContractDimension,
+  baselineText: string,
+  jobText: string,
+  jobSeniorityMatches: string[],
+): DimensionResult {
+  const baselinePositives = matchPhrases(baselineText, dimension.signals.baseline_positive ?? []);
+  const baselineNegatives = matchPhrases(baselineText, dimension.signals.baseline_negative ?? []);
+  const jobPositives = matchPhrases(jobText, dimension.signals.job_positive ?? []);
+
+  const baselineEffective = Math.max(0, baselinePositives.length - baselineNegatives.length);
+  const jobEffective = jobPositives.length;
+
+  const state: DimensionState = {
+    baselinePositiveMatches: baselinePositives,
+    baselineNegativeMatches: baselineNegatives,
+    jobPositiveMatches: jobPositives,
+    baselineEffective,
+    jobEffective,
+    jobSeniorityMatches,
+  };
+
+  const evidence = createEvidenceDetail();
+  gatherEvidence(evidence, 'baseline', baselineText, baselinePositives);
+  gatherEvidence(evidence, 'baseline', baselineText, baselineNegatives, ' (negative signal)');
+  gatherEvidence(evidence, 'job', jobText, jobPositives);
+
+  const tier = determineTier(dimension.id, state);
+  const rule = dimension.scoring_rules[tier];
+  const points = rule?.points ?? 0;
+
+  return {
+    id: dimension.id,
+    points,
+    tier,
+    evidence,
+  };
+}
+
+const determineTier = ((id: string, state: DimensionState): CxFitTier => {
+  switch (id) {
+    case 'role_scope_and_seniority':
+      return evaluateRoleScopeState(state);
+    case 'support_operations_and_process_rigor':
+      return evaluateSupportOperationsState(state);
+    case 'tooling_and_platform_experience':
+      return evaluateToolingState(state);
+    case 'domain_and_business_context':
+      return evaluateDomainState(state);
+    case 'change_leadership_and_customer_advocacy':
+      return evaluateChangeLeadershipState(state);
+    default:
+      return evaluateGenericState(state);
+  }
+}) as (id: string, state: DimensionState) => CxFitTier;
+
+function evaluateRoleScopeState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 2 && (state.jobEffective >= 1 || state.jobSeniorityMatches.length > 0)) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 1 && (state.jobEffective >= 1 || state.jobSeniorityMatches.length > 0)) {
+    return 'moderate_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'partial_match';
+  }
+  if (state.jobEffective >= 1 || state.jobSeniorityMatches.length > 0) {
+    return 'weak_match';
+  }
+  return 'no_match';
+}
+
+function evaluateSupportOperationsState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 3 && state.jobEffective >= 1) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 2) {
+    return 'moderate_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'partial_match';
+  }
+  if (state.jobEffective >= 1) {
+    return 'weak_match';
+  }
+  return 'no_match';
+}
+
+function evaluateToolingState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 3) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 2) {
+    return 'moderate_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'partial_match';
+  }
+  if (state.jobEffective >= 1) {
+    return 'weak_match';
+  }
+  return 'no_match';
+}
+
+function evaluateDomainState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 2 && state.jobEffective >= 1) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 1 && state.jobEffective >= 1) {
+    return 'moderate_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'partial_match';
+  }
+  if (state.jobEffective >= 1) {
+    return 'weak_match';
+  }
+  return 'no_match';
+}
+
+function evaluateChangeLeadershipState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 2 && state.jobEffective >= 1) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 1 && state.jobEffective >= 1) {
+    return 'moderate_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'partial_match';
+  }
+  if (state.jobEffective >= 1) {
+    return 'weak_match';
+  }
+  return 'no_match';
+}
+
+function evaluateGenericState(state: DimensionState): CxFitTier {
+  if (state.baselineEffective >= 1 && state.jobEffective >= 1) {
+    return 'strong_match';
+  }
+  if (state.baselineEffective >= 1) {
+    return 'moderate_match';
+  }
+  if (state.jobEffective >= 1) {
+    return 'partial_match';
+  }
+  return 'no_match';
+}
+
+function evaluatePenalties(
+  penalties: ContractPenalty[],
+  baselineText: string,
+  jobText: string,
+  jobSeniorityMatches: string[],
+  baselineDownMatches: string[],
+  jobDomainMatches: string[],
+  baselineDomainMatches: string[],
+): PenaltyResult[] {
+  const triggered: PenaltyResult[] = [];
+
+  penalties.forEach((penalty) => {
+    if (penalty.id === 'scope_mismatch_downlevel') {
+      const jobHasSeniorScope = jobSeniorityMatches.length > 0;
+      const baselineDownlevel = baselineDownMatches.length > 0;
+      if (jobHasSeniorScope && baselineDownlevel) {
+        const evidence = createEvidenceDetail();
+        gatherEvidence(evidence, 'job', jobText, jobSeniorityMatches);
+        gatherEvidence(
+          evidence,
+          'baseline',
+          baselineText,
+          baselineDownMatches,
+          ' (downlevel indicator)',
+        );
+        triggered.push({
+          id: penalty.id,
+          deduction: penalty.deduction,
+          evidence,
+        });
       }
     }
-    return Math.round((matches / baselineTokens.size) * 100);
-  }
 
-  private hasStrongSignal(scores: FitScoreDimensionScores): boolean {
-    return (
-      scores.experienceAlignment >= 55 &&
-      scores.leadershipLevel >= 50 &&
-      scores.strategicTacticalFit >= 55
-    );
+    if (penalty.id === 'domain_mismatch_hard') {
+      if (jobDomainMatches.length > 0 && baselineDomainMatches.length === 0) {
+        const evidence = createEvidenceDetail();
+        gatherEvidence(evidence, 'job', jobText, jobDomainMatches);
+        const baselineSnippet =
+          baselineText.trim().length === 0
+            ? 'baseline | baseline text is empty; no accounting/compliance signals'
+            : 'baseline | no accounting or compliance terms detected';
+        if (!evidence.matchedSnippets.includes(baselineSnippet)) {
+          evidence.matchedSnippets.push(baselineSnippet);
+        }
+        if (!evidence.matchedTerms.includes('baseline_missing_domain')) {
+          evidence.matchedTerms.push('baseline_missing_domain');
+        }
+        triggered.push({
+          id: penalty.id,
+          deduction: penalty.deduction,
+          evidence,
+        });
+      }
+    }
+  });
+
+  return triggered;
+}
+
+function gatherEvidence(
+  evidence: EvidenceDetail,
+  source: 'baseline' | 'job',
+  text: string,
+  matches: string[],
+  suffix?: string,
+) {
+  matches.forEach((match) => {
+    const entry = suffix ? `${match}${suffix}` : match;
+    if (!evidence.matchedTerms.includes(entry)) {
+      evidence.matchedTerms.push(entry);
+    }
+    const snippetText = snippetForPhrase(text, match);
+    const labeledSnippet = `${source} | ${snippetText}${suffix ?? ''}`;
+    if (!evidence.matchedSnippets.includes(labeledSnippet)) {
+      evidence.matchedSnippets.push(labeledSnippet);
+    }
+  });
+}
+
+function snippetForPhrase(text: string, phrase: string): string {
+  const normalizedTextValue = normalizeText(text);
+  const normalizedPhrase = normalizeText(phrase);
+  const index = normalizedTextValue.indexOf(normalizedPhrase);
+  if (index === -1) {
+    return phrase;
   }
+  const lineStart = text.lastIndexOf('\n', index);
+  const lineEnd = text.indexOf('\n', index);
+  const snippet = text
+    .slice(lineStart === -1 ? 0 : lineStart + 1, lineEnd === -1 ? undefined : lineEnd)
+    .trim();
+  return snippet || phrase;
+}
+
+function matchPhrases(text: string, phrases: string[]): string[] {
+  const normalized = normalizeText(text);
+  const matches = new Set<string>();
+  phrases.forEach((phrase) => {
+    const trimmed = phrase.trim();
+    if (!trimmed) {
+      return;
+    }
+    const normalizedPhrase = normalizeText(trimmed);
+    if (normalized.includes(normalizedPhrase)) {
+      matches.add(trimmed);
+    }
+  });
+  return Array.from(matches);
+}
+
+function createEvidenceDetail(): EvidenceDetail {
+  return {
+    matchedSnippets: [],
+    matchedTerms: [],
+  };
+}
+
+function extractFirstLine(text: string): string {
+  const line = text.split(/\r?\n/).find((candidate) => candidate.trim().length > 0);
+  return line?.trim() ?? '';
+}
+
+function detectIndicators(text: string, keywords: string[]): string[] {
+  const matches = new Set<string>();
+  keywords.forEach((keyword) => {
+    if (text.includes(keyword)) {
+      matches.add(keyword);
+    }
+  });
+  return Array.from(matches);
+}
+
+function roundHalfUp(value: number, precision: number): number {
+  const factor = 10 ** precision;
+  return Math.floor(value * factor + 0.5) / factor;
+}
+
+function mapContractDimensionScores(
+  source: Record<string, number>,
+): FitScoreDimensionScores {
+  return {
+    experienceAlignment: source['support_operations_and_process_rigor'] ?? 0,
+    leadershipLevel: source['role_scope_and_seniority'] ?? 0,
+    strategicTacticalFit: source['change_leadership_and_customer_advocacy'] ?? 0,
+    industryContext: source['domain_and_business_context'] ?? 0,
+    technicalPlatformFit: source['tooling_and_platform_experience'] ?? 0,
+  };
+}
+
+function createDebugDetails(
+  scores: FitScoreDimensionScores,
+): Record<keyof FitScoreDimensionScores, FitScoreDebugDimensionDetail> {
+  return {
+    experienceAlignment: { score: scores.experienceAlignment },
+    leadershipLevel: { score: scores.leadershipLevel },
+    strategicTacticalFit: { score: scores.strategicTacticalFit },
+    industryContext: { score: scores.industryContext },
+    technicalPlatformFit: { score: scores.technicalPlatformFit },
+  };
 }

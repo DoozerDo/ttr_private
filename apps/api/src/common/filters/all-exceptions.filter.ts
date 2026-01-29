@@ -41,8 +41,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       stack,
     );
 
-    // If headers already went out, we cannot write a clean JSON body.
-    // End the response to avoid hanging sockets.
     if (res?.headersSent) {
       try {
         res.end();
@@ -52,13 +50,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
-    res.status(status).json({
+    const base = {
       statusCode: status,
       error,
       message,
       path,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    if (isHttp) {
+      const rb = exception.getResponse();
+
+      if (isObjectRecord(rb)) {
+        res.status(status).json({ ...base, ...rb });
+        return;
+      }
+
+      if (typeof rb === 'string') {
+        res.status(status).json({ ...base, message: rb });
+        return;
+      }
+    }
+
+    res.status(status).json(base);
   }
 }
 
@@ -79,8 +93,14 @@ function resolveErrorMessage(
 }
 
 function resolveErrorLabel(responseBody: unknown): string {
-  if (isObjectRecord(responseBody) && typeof responseBody.error === 'string') {
-    return responseBody.error;
+  if (isObjectRecord(responseBody)) {
+    const e = responseBody.error;
+    if (typeof e === 'string') {
+      return e;
+    }
+    if (isObjectRecord(e) && typeof e.code === 'string') {
+      return e.code;
+    }
   }
   return 'Error';
 }

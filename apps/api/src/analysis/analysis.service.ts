@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -37,6 +39,7 @@ import {
   FitScoringService,
 } from './fit-scoring.service';
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
+import type { CxFitV2Result } from './cx-fit-scoring-v2';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
@@ -215,9 +218,51 @@ type FitScoreResponse = {
   summary?: string;
   debug?: CompatibilityRunDebugPayload;
   scoringProof?: ScoringProofSnapshot;
+  baseline_version_hash?: string | null;
 
   // Added to match runtime return payload.
-  scoring_v2?: unknown;
+  scoring_v2?: CxFitV2Result;
+  status?: 'ok' | 'compliance_blocked' | 'error';
+};
+
+type RunFitAssessmentOkResponse = FitScoreResponse & {
+  status: 'ok';
+};
+
+type RunFitAssessmentComplianceBlockedResponse = {
+  status: 'compliance_blocked';
+  fit_score: null;
+  score: null;
+  overall_score: null;
+  overallScore: null;
+  verdict: 'blocked';
+  breakdown: null;
+  compliance: {
+    blocked: true;
+    flags: ComplianceFlag[];
+    message: string;
+  };
+  complianceFlags?: ComplianceFlag[];
+  compliance_flags?: Array<{ code: string; message?: string }>;
+  audit_id?: string | null;
+  auditId?: string | null;
+  baseline_version_hash?: string | null;
+  assessmentId?: string;
+  jobId?: string;
+  baselineId?: string;
+  baselineVersion?: number | null;
+  createdAt?: Date;
+};
+
+export type RunAssessmentResult =
+  | RunFitAssessmentOkResponse
+  | RunFitAssessmentComplianceBlockedResponse;
+
+type RunFitAssessmentPayload = RunFitAssessmentDto & {
+  job?: { id?: string; jobId?: string };
+  job_id?: string;
+  baseline_id?: string;
+  baseline_version_id?: number | string;
 };
 
 @Injectable()
@@ -259,6 +304,47 @@ export class AnalysisService {
       dimensionE: 1,
     },
   };
+
+  private clampPercent(value: number) {
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private leadershipLevelFromBandDelta(bandDelta: number) {
+    const raw = 100 - Math.min(100, bandDelta * 15);
+    return this.clampPercent(raw);
+  }
+
+  private mapCxFitV2ToLegacyDimensionScores(
+    cxFit: CxFitV2Result,
+  ): FitDimensionScores {
+    return {
+      experienceAlignment: this.clampPercent(
+        cxFit.rubric.dimensionPercents.role_scope_and_seniority,
+      ),
+      leadershipLevel: this.leadershipLevelFromBandDelta(cxFit.debug.bandDelta),
+      technicalPlatformFit: this.clampPercent(
+        cxFit.rubric.dimensionPercents.tooling_and_platform_experience,
+      ),
+      industryContext: this.clampPercent(
+        cxFit.rubric.dimensionPercents.domain_and_business_context,
+      ),
+      strategicTacticalFit: this.clampPercent(
+        cxFit.rubric.dimensionPercents.change_leadership_and_customer_advocacy,
+      ),
+    };
+  }
+
+  private deriveFitAssessmentVerdictFromScore(score: number) {
+    if (score >= 85) return FitAssessmentVerdict.APPLY;
+    if (score >= 70) return FitAssessmentVerdict.CONSIDER;
+    return FitAssessmentVerdict.SKIP;
+  }
+
+  private deriveFitScoreVerdictLabelFromScore(score: number) {
+    if (score >= 85) return 'Apply';
+    if (score >= 70) return 'Consider';
+    return 'Skip';
+  }
 
   private normalizeKeywords(text: string) {
     const tokens =
@@ -479,6 +565,16 @@ export class AnalysisService {
     }
 
     const result = await this.runFitAssessment(userId, payload);
+    if (result.status !== 'ok') {
+      return result;
+    }
+
+    if (!result.assessmentId) {
+      throw new InternalServerErrorException(
+        'Fit assessment run succeeded but assessmentId is missing',
+      );
+    }
+
     return this.getFitAssessmentById(userId, result.assessmentId);
   }
 
@@ -822,13 +918,6 @@ export class AnalysisService {
       .map((section) => section.content)
       .join('\n');
     const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
-    const baselineExtractedTextWords = countWords(baselineTextForDebug);
-    const baselineSectionsCharCounts = includedSections.map((section) => ({
-      type: section.type ?? null,
-      charCount: getCharCount(section.content ?? ''),
-    }));
-    const baselineContentHash =
-      baselineVersion.hash ?? baseline.hash ?? sha256(baselineTextForDebug);
 
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(
@@ -907,17 +996,6 @@ export class AnalysisService {
     const chosenText = jobTextForScoring.jobText;
     const chosenTextChars = getCharCount(chosenText);
 
-    const jobSource =
-      job?.jdIngestionMethod === JobIngestionMethod.URL ||
-      job?.jdIngestionMethod === JobIngestionMethod.SOURCE_PROVIDER ||
-      Boolean(jobPayload.sourceUrl)
-        ? 'url'
-        : job?.jdIngestionMethod === JobIngestionMethod.PASTE
-          ? 'paste'
-          : canonicalJobForHash.rawDescription
-            ? 'paste'
-            : 'unknown';
-
     const baselineForHash: Baseline = {
       ...baseline,
       sections: filteredSections,
@@ -929,22 +1007,103 @@ export class AnalysisService {
       dimensionWeights,
     );
 
-    const scoring = await this.fitScoringService.score(
-      {
-        job: canonicalJobForScoring,
-        baseline: {
-          version: baselineVersion.versionNumber ?? baseline.version ?? null,
-          sections: sectionPayload,
-        },
-      },
-      dimensionWeights,
-      { debug: allowDebug },
-    );
-
     const scoringV2 = scoreCxFitV2({
-      job: jobPayload,
+      job: {
+        rawDescription: canonicalJobForHash.rawDescription,
+        normalizedResponsibilities:
+          canonicalJobForHash.normalizedResponsibilities,
+        normalizedRequirements: canonicalJobForHash.normalizedRequirements,
+      },
       baselineSections: includedSections,
     });
+
+    if (
+      !scoringV2 ||
+      !scoringV2.rubric ||
+      !scoringV2.rubric.dimensionPercents ||
+      typeof scoringV2.score !== 'number' ||
+      !scoringV2.debug
+    ) {
+      // Guard against incomplete v2 responses to avoid unhandled exceptions later.
+      throw new InternalServerErrorException(
+        'CX Fit v2 scoring produced incomplete results',
+      );
+    }
+
+    const legacyDimensionScores =
+      this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
+    const responseVerdict =
+      this.deriveFitScoreVerdictLabelFromScore(scoringV2.score);
+    const persistenceVerdict =
+      this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
+
+    const scoring =
+      allowDebug
+        ? await this.fitScoringService.score(
+            {
+              job: canonicalJobForScoring,
+              baseline: {
+                version:
+                  baselineVersion.versionNumber ?? baseline.version ?? null,
+                sections: sectionPayload,
+              },
+            },
+            dimensionWeights,
+            { debug: allowDebug },
+          )
+        : undefined;
+
+    const strengths = allowDebug ? scoring?.strengths ?? [] : [];
+    const gaps = allowDebug ? scoring?.gaps ?? [] : [];
+    const complianceFlags = scoring?.complianceFlags ?? [];
+    const finalScore = scoringV2.score;
+
+    const generatedSectionsForCompliance = normalizedJobDescription
+      ? [{ title: 'Job Description', content: normalizedJobDescription }]
+      : undefined;
+
+    const compliance = await this.complianceService.validateAndAudit({
+      action: ComplianceAction.FIT_SCORE,
+      actorId: userId,
+      baselineVersion,
+      job: job ?? null,
+      outputHash: inputsHash,
+      baselineSections: complianceBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
+      extraFlags: scoring
+        ? this.mapComplianceStringsToFlags(scoring.complianceFlags)
+        : undefined,
+    });
+
+    if (compliance.blocked) {
+      throw new BadRequestException({
+        error: {
+          code: 'compliance_blocked',
+          message: 'Compliance validation failed.',
+          details: { compliance_flags: compliance.complianceFlags },
+        },
+      });
+    }
+
+    let savedAssessment: FitAssessment | null = null;
+    if (job) {
+      const assessment = this.fitAssessmentRepository.create({
+        userId,
+        jobId: job.id,
+        baselineId: baseline.id,
+        baselineVersion:
+          baselineVersion.versionNumber ?? baseline.version ?? null,
+        overallScore: finalScore,
+        verdict: persistenceVerdict,
+        dimensionScores: legacyDimensionScores,
+        strengths,
+        gaps,
+        complianceFlags,
+        inputsHash,
+      });
+
+      savedAssessment = await this.fitAssessmentRepository.save(assessment);
+    }
 
     const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
       ? this.buildCompatibilityDebugPayload({
@@ -960,8 +1119,8 @@ export class AnalysisService {
             normalizedResponsibilitiesStats.chars,
           normalizedRequirementsCount: normalizedRequirementsStats.count,
           normalizedRequirementsChars: normalizedRequirementsStats.chars,
-          dimensionScores: scoring.dimensionScores,
-          totalScore: scoring.overallScore,
+          dimensionScores: legacyDimensionScores,
+          totalScore: finalScore,
           jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
           jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
           jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
@@ -970,58 +1129,12 @@ export class AnalysisService {
         })
       : undefined;
 
-    const generatedSectionsForCompliance = normalizedJobDescription
-      ? [{ title: 'Job Description', content: normalizedJobDescription }]
-      : undefined;
-
-    let savedAssessment: FitAssessment | null = null;
-
-    if (job) {
-      const assessment = this.fitAssessmentRepository.create({
-        userId,
-        jobId: job.id,
-        baselineId: baseline.id,
-        baselineVersion:
-          baselineVersion.versionNumber ?? baseline.version ?? null,
-        overallScore: scoring.overallScore,
-        verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
-        dimensionScores: scoring.dimensionScores,
-        strengths: scoring.strengths,
-        gaps: scoring.gaps,
-        complianceFlags: scoring.complianceFlags,
-        inputsHash,
-      });
-
-      savedAssessment = await this.fitAssessmentRepository.save(assessment);
-    }
-
-    const compliance = await this.complianceService.validateAndAudit({
-      action: ComplianceAction.FIT_SCORE,
-      actorId: userId,
-      baselineVersion,
-      job: job ?? null,
-      outputHash: inputsHash,
-      baselineSections: complianceBaselineSections,
-      generatedSections: generatedSectionsForCompliance,
-      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
-    });
-
-    if (compliance.blocked) {
-      throw new BadRequestException({
-        error: {
-          code: 'compliance_blocked',
-          message: 'Compliance validation failed.',
-          details: { compliance_flags: compliance.complianceFlags },
-        },
-      });
-    }
-
     const breakdown = {
-      experience_alignment: scoring.dimensionScores.experienceAlignment,
-      leadership_level: scoring.dimensionScores.leadershipLevel,
-      technical_platform_fit: scoring.dimensionScores.technicalPlatformFit,
-      industry_context: scoring.dimensionScores.industryContext,
-      strategic_vs_tactical: scoring.dimensionScores.strategicTacticalFit,
+      experience_alignment: legacyDimensionScores.experienceAlignment,
+      leadership_level: legacyDimensionScores.leadershipLevel,
+      technical_platform_fit: legacyDimensionScores.technicalPlatformFit,
+      industry_context: legacyDimensionScores.industryContext,
+      strategic_vs_tactical: legacyDimensionScores.strategicTacticalFit,
     };
 
     const scoringProof: ScoringProofSnapshot = {
@@ -1040,13 +1153,14 @@ export class AnalysisService {
     };
 
     return {
-      fit_score: scoring.overallScore,
-      overall_score: scoring.overallScore,
-      verdict: scoring.verdict ?? 'consider',
+      status: 'ok',
+      fit_score: finalScore,
+      overall_score: finalScore,
+      verdict: responseVerdict,
       breakdown,
-      strengths: scoring.strengths,
-      gaps: scoring.gaps,
-      compliance_flags: this.coerceComplianceFlags(scoring.complianceFlags),
+      strengths,
+      gaps,
+      compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
       assessmentId: savedAssessment?.id,
@@ -1055,11 +1169,11 @@ export class AnalysisService {
       baselineVersion: savedAssessment?.baselineVersion,
       createdAt: savedAssessment?.createdAt,
       scoring_v2: scoringV2,
-      score: scoringV2.score,
-      overallScore: scoring.overallScore,
-      dimensionScores: scoring.dimensionScores,
-      complianceFlags: scoring.complianceFlags,
-      summary: scoring.summary,
+      score: finalScore,
+      overallScore: finalScore,
+      dimensionScores: legacyDimensionScores,
+      complianceFlags,
+      summary: scoring?.summary,
       ...(debugInfo ? { debug: debugInfo } : {}),
       scoringProof,
     };
@@ -1198,16 +1312,42 @@ export class AnalysisService {
     };
   }
 
-  async runFitAssessment(userId: string, payload: RunFitAssessmentDto) {
-    const baselineId = payload.baselineId?.trim();
-    const jobId = payload.jobId?.trim();
+  async runFitAssessment(
+    userId: string,
+    payload: RunFitAssessmentDto,
+  ): Promise<RunAssessmentResult> {
+    try {
+      const normalizedPayload = payload as RunFitAssessmentPayload;
+    const baselineCandidate =
+      normalizedPayload.baselineId ?? normalizedPayload.baseline_id;
+    const jobCandidate =
+      normalizedPayload.jobId ??
+      normalizedPayload.job?.id ??
+      normalizedPayload.job?.jobId ??
+      normalizedPayload.job_id;
 
-    if (!baselineId || !jobId) {
-      throw new BadRequestException('baselineId and jobId are required');
+    const baselineId = baselineCandidate?.trim();
+    const jobId = jobCandidate?.trim();
+
+    const missingFields: string[] = [];
+    if (!baselineId) missingFields.push('baselineId');
+    if (!jobId) missingFields.push('jobId');
+    if (missingFields.length) {
+      const message =
+        missingFields.length === 1
+          ? `${missingFields[0]} is required`
+          : `${missingFields.join(' and ')} are required`;
+      throw new BadRequestException(message);
     }
 
-    if (payload.baselineVersion !== undefined) {
-      const version = Number(payload.baselineVersion);
+    const baselineVersion =
+      payload.baselineVersion ??
+      (normalizedPayload.baseline_version_id !== undefined
+        ? Number(normalizedPayload.baseline_version_id)
+        : undefined);
+
+    if (baselineVersion !== undefined) {
+      const version = Number(baselineVersion);
       if (!Number.isInteger(version) || version < 1) {
         throw new BadRequestException(
           'baselineVersion must be a positive integer',
@@ -1215,8 +1355,11 @@ export class AnalysisService {
       }
     }
 
+    const resolvedBaselineId = baselineId!;
+    const resolvedJobId = jobId!;
+
     const baseline = await this.baselineRepository.findOne({
-      where: { id: baselineId, userId },
+      where: { id: resolvedBaselineId, userId },
       relations: ['sections'],
       order: { sections: { order: 'ASC' } },
     });
@@ -1233,7 +1376,7 @@ export class AnalysisService {
     }
 
     const job = await this.jobRepository.findOne({
-      where: { id: jobId, userId },
+      where: { id: resolvedJobId, userId },
     });
 
     if (!job) {
@@ -1248,7 +1391,7 @@ export class AnalysisService {
     const sectionPayload = includedSections;
 
     const baselineVersionValue =
-      payload.baselineVersion ?? baseline.version ?? 0;
+      baselineVersion ?? baseline.version ?? 0;
     const baselineForHash: Baseline = {
       ...baseline,
       sections: filteredSections,
@@ -1282,6 +1425,9 @@ export class AnalysisService {
     const normalizedRequirementsStats = this.buildNormalizedSegmentStats(
       normalizedRequirements,
     );
+    const normalizedJobDescription = this.complianceService.normalizeText(
+      canonicalJobForHash.rawDescription,
+    );
 
     if (jobTextForScoring.jobRawTextTooShort) {
       console.warn(
@@ -1290,20 +1436,6 @@ export class AnalysisService {
     }
 
     const jobTextCharsScored = getCharCount(jobTextForScoring.jobText);
-
-    const scoringProofBase = {
-      baselineTextCharsScored,
-      jobTextCharsScored,
-      truncationAppliedBaseline: false,
-      truncationAppliedJob: false,
-      normalizedResponsibilitiesCount: normalizedResponsibilities.length,
-      normalizedRequirementsCount: normalizedRequirements.length,
-      jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
-      jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
-      jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
-      jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-      jobTextSource: jobTextForScoring.jobTextSource,
-    };
 
     const calibration = await this.getCalibration(userId);
 
@@ -1315,21 +1447,48 @@ export class AnalysisService {
       baselineForHash,
       dimensionWeights,
     );
+
     const allowDebug = Boolean(payload.debug);
 
-    const scoring = await this.fitScoringService.score(
-      {
-        job: canonicalJobForScoring,
-        baseline: {
-          version: baseline.version ?? null,
-          sections: sectionPayload,
-        },
+    const scoringV2 = scoreCxFitV2({
+      job: {
+        rawDescription: canonicalJobForHash.rawDescription,
+        normalizedResponsibilities:
+          canonicalJobForHash.normalizedResponsibilities,
+        normalizedRequirements: canonicalJobForHash.normalizedRequirements,
       },
-      dimensionWeights,
-    );
+      baselineSections: includedSections,
+    });
 
-    const generatedSectionsForCompliance = scoring.summary
-      ? [{ title: 'Fit scoring summary', content: scoring.summary }]
+    const legacyDimensionScores =
+      this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
+    const responseVerdict =
+      this.deriveFitScoreVerdictLabelFromScore(scoringV2.score);
+    const persistenceVerdict =
+      this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
+
+    const debugScoring =
+      allowDebug
+        ? await this.fitScoringService.score(
+            {
+              job: canonicalJobForScoring,
+              baseline: {
+                version: baseline.version ?? null,
+                sections: sectionPayload,
+              },
+            },
+            dimensionWeights,
+            { debug: allowDebug },
+          )
+        : undefined;
+
+    const strengths = allowDebug ? debugScoring?.strengths ?? [] : [];
+    const gaps = allowDebug ? debugScoring?.gaps ?? [] : [];
+    const complianceFlags = debugScoring?.complianceFlags ?? [];
+    const finalScore = scoringV2.score;
+
+    const generatedSectionsForCompliance = normalizedJobDescription
+      ? [{ title: 'Job Description', content: normalizedJobDescription }]
       : undefined;
 
     const compliance = await this.complianceService.validateAndAudit({
@@ -1340,35 +1499,63 @@ export class AnalysisService {
       outputHash: inputsHash,
       baselineSections: complianceBaselineSections,
       generatedSections: generatedSectionsForCompliance,
-      extraFlags: this.mapComplianceStringsToFlags(scoring.complianceFlags),
+      extraFlags: debugScoring
+        ? this.mapComplianceStringsToFlags(debugScoring.complianceFlags)
+        : undefined,
     });
 
     if (compliance.blocked) {
-      throw new BadRequestException({
-        error: {
-          code: 'compliance_blocked',
+      const normalizedFlags = (compliance.complianceFlags ?? []).map(
+        (flag) =>
+          typeof flag === 'string'
+            ? {
+                code: flag,
+                message: flag,
+                severity: ComplianceFlagSeverity.BLOCK,
+              }
+            : flag,
+      );
+
+      return {
+        status: 'compliance_blocked',
+        fit_score: null,
+        score: null,
+        overall_score: null,
+        overallScore: null,
+        verdict: 'blocked',
+        breakdown: null,
+        compliance: {
+          blocked: true,
+          flags: normalizedFlags,
           message: 'Compliance validation failed.',
-          details: { compliance_flags: compliance.complianceFlags },
         },
-      });
+        complianceFlags: normalizedFlags,
+        compliance_flags: this.coerceComplianceFlags(normalizedFlags),
+        audit_id: compliance.audit.id,
+        auditId: compliance.audit.id,
+        baseline_version_hash:
+          compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
+      };
     }
 
     const assessment = this.fitAssessmentRepository.create({
       userId,
-      jobId,
+      jobId: resolvedJobId,
       baselineId: baseline.id,
-      baselineVersion: payload.baselineVersion ?? baseline.version ?? null,
-      overallScore: scoring.overallScore,
-      verdict: scoring.persistenceVerdict ?? FitAssessmentVerdict.CONSIDER,
-      dimensionScores: scoring.dimensionScores,
-      strengths: scoring.strengths,
-      gaps: scoring.gaps,
-      complianceFlags: scoring.complianceFlags,
+      baselineVersion: baselineVersion ?? baseline.version ?? null,
+      overallScore: finalScore,
+      verdict: persistenceVerdict,
+      dimensionScores: legacyDimensionScores,
+      strengths,
+      gaps,
+      complianceFlags,
       inputsHash,
     });
 
+    const savedAssessment = await this.fitAssessmentRepository.save(assessment);
+
     const baselineVersionHash = baseline.hash ?? null;
-    const jobIdentifier = job?.id ?? jobId ?? null;
+    const jobIdentifier = job?.id ?? resolvedJobId ?? null;
     const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
       ? this.buildCompatibilityDebugPayload({
           baselineId: baseline.id,
@@ -1383,8 +1570,8 @@ export class AnalysisService {
             normalizedResponsibilitiesStats.chars,
           normalizedRequirementsCount: normalizedRequirementsStats.count,
           normalizedRequirementsChars: normalizedRequirementsStats.chars,
-          dimensionScores: scoring.dimensionScores,
-          totalScore: scoring.overallScore,
+          dimensionScores: legacyDimensionScores,
+          totalScore: finalScore,
           jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
           jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
           jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
@@ -1393,32 +1580,65 @@ export class AnalysisService {
         })
       : undefined;
 
-    const saved = await this.fitAssessmentRepository.save(assessment);
-    return {
-      ok: true,
-      assessmentId: saved.id,
-      jobId: saved.jobId,
-      baselineId: saved.baselineId,
-      baselineVersion: saved.baselineVersion,
-      overallScore: saved.overallScore,
-      score: saved.overallScore,
-      verdict: saved.verdict,
-      dimensionScores: saved.dimensionScores,
-      strengths: saved.strengths,
-      gaps: saved.gaps,
-      complianceFlags: saved.complianceFlags,
-      summary: scoring.summary,
+    const breakdown = {
+      experience_alignment: legacyDimensionScores.experienceAlignment,
+      leadership_level: legacyDimensionScores.leadershipLevel,
+      technical_platform_fit: legacyDimensionScores.technicalPlatformFit,
+      industry_context: legacyDimensionScores.industryContext,
+      strategic_vs_tactical: legacyDimensionScores.strategicTacticalFit,
+    };
+
+    const scoringProof: ScoringProofSnapshot = {
+      assessmentId: savedAssessment.id,
+      baselineTextCharsScored: baselineTextCharsScored,
+      jobTextCharsScored: jobTextCharsScored,
+      truncationAppliedBaseline: false,
+      truncationAppliedJob: false,
+      normalizedResponsibilitiesCount: normalizedResponsibilities.length,
+      normalizedRequirementsCount: normalizedRequirements.length,
+      jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
+      jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
+      jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
+      jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+      jobTextSource: jobTextForScoring.jobTextSource,
+    };
+
+    const successResponse: RunFitAssessmentOkResponse = {
+      status: 'ok',
+      fit_score: finalScore,
+      overall_score: finalScore,
+      verdict: responseVerdict,
+      breakdown,
+      strengths,
+      gaps,
+      compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
+      assessmentId: savedAssessment.id,
+      jobId: savedAssessment.jobId,
+      baselineId: savedAssessment.baselineId,
+      baselineVersion: savedAssessment.baselineVersion,
+      createdAt: savedAssessment.createdAt,
+      scoring_v2: scoringV2,
+      score: finalScore,
+      overallScore: finalScore,
+      dimensionScores: legacyDimensionScores,
+      complianceFlags,
+      summary: debugScoring?.summary,
       ...(debugInfo ? { debug: debugInfo } : {}),
-      scoringProof: {
-        ...scoringProofBase,
-        assessmentId: saved.id,
-      },
+      scoringProof,
       baseline_version_hash:
         compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
-      createdAt: saved.createdAt,
     };
+    return successResponse;
+  } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        'Unexpected error while running fit assessment',
+      );
+    }
   }
 
   async runExpandedFitAssessment(
@@ -1776,3 +1996,4 @@ export class AnalysisService {
 // VERIFY:
 // - Calibration weights are fetched per user and default to 1.0 for missing dimensions.
 // - Inputs hash incorporates calibration to avoid stale assessments.
+

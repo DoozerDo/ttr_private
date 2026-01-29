@@ -8,7 +8,10 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { ComplianceAction } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  ComplianceFlagSeverity,
+} from '../compliance/compliance.types';
 import { ComplianceService } from '../compliance/compliance.service';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { User } from '../users/user.entity';
@@ -18,6 +21,7 @@ import { AnalysisService } from './analysis.service';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import type { CalibrationProfile } from './calibration-profiles';
+import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
@@ -390,6 +394,81 @@ describe('AnalysisService - fit scores contract', () => {
     expect(result.scoringProof?.jobTextSource).toBe('normalized_fallback');
     expect(result.scoringProof?.jobRawTextCharCount).toBe(0);
     expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
+  });
+
+  it('returns a compliance_blocked response when validation fails', async () => {
+    complianceService.validateAndAudit.mockResolvedValueOnce({
+      complianceFlags: [
+        {
+          code: 'missing-policy',
+          severity: ComplianceFlagSeverity.BLOCK,
+          message: 'Policy missing',
+        },
+      ],
+      blocked: true,
+      audit: {
+        id: 'audit-2',
+        outputHash: '',
+        baselineVersionHash: 'blocked-hash',
+        baselineVersionId: 'bv-1',
+        action: ComplianceAction.FIT_SCORE,
+        actorId: 'user-1',
+        jobId: null,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    const result = await service.runFitAssessment('user-1', {
+      baselineId: 'b-1',
+      jobId: 'job-1',
+      baselineVersion: 2,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'compliance_blocked',
+        score: null,
+        overall_score: null,
+        verdict: 'blocked',
+        compliance: {
+          blocked: true,
+          message: 'Compliance validation failed.',
+        },
+        audit_id: 'audit-2',
+        auditId: 'audit-2',
+      }),
+    );
+    expect(result.compliance?.flags).toHaveLength(1);
+    expect(result.complianceFlags?.[0]).toEqual(
+      expect.objectContaining({ code: 'missing-policy' }),
+    );
+    expect(result.compliance_flags?.[0]).toEqual(
+      expect.objectContaining({ code: 'missing-policy' }),
+    );
+  });
+
+  describe('runFitAssessment validation', () => {
+    it('returns a detailed error when baselineId is missing', async () => {
+      await expect(
+        service.runFitAssessment('user-1', {
+          baselineId: '',
+          jobId: 'job-1',
+        } as RunFitAssessmentDto),
+      ).rejects.toMatchObject({
+        response: { message: 'baselineId is required' },
+      });
+    });
+
+    it('returns a detailed error when jobId is missing', async () => {
+      await expect(
+        service.runFitAssessment('user-1', {
+          baselineId: 'b-1',
+          jobId: '',
+        } as RunFitAssessmentDto),
+      ).rejects.toMatchObject({
+        response: { message: 'jobId is required' },
+      });
+    });
   });
 
   describe('latest assessment refresh', () => {

@@ -23,13 +23,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const payload = await req.json();
     const response = await fetch(`${baseUrl}/analysis/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: await req.text(),
+      body: JSON.stringify({
+        baselineId: payload?.baselineId,
+        jobId: payload?.jobId,
+        debug: payload?.debug,
+      }),
     });
 
     return relayJsonResponse(response);

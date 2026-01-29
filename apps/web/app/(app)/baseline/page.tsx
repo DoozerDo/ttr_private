@@ -2,10 +2,8 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "@/lib/baselines";
-import { BaselineDashboard } from "./baseline-dashboard";
+import { BaselineWorkspace } from "./BaselineWorkspace";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
-import { JobsHub } from "./_components/JobsHub";
-import { WorkspaceRunner } from "./_components/WorkspaceRunner";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -120,20 +118,12 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
       subtitle="Target This Role compares your resume against a job description to generate a Compatibility/Fit Score. If your score is strong enough, your personalized resume and cover letter will be generated for you to use in the application process."
       contentWidth="wide"
     >
-      <div className="space-y-6">
-        <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
-          <BaselineDashboard
-            initialBaselines={baselines}
-            initialFetchError={baselineFetchError}
-            selectedBaselineId={selectedBaselineId}
-          />
-
-          <JobsHub selectedJobId={selectedJobId} />
-
-          <WorkspaceRunner baselineId={selectedBaselineId} jobId={selectedJobId} />
-        </div>
-
-      </div>
+      <BaselineWorkspace
+        initialBaselines={baselines}
+        initialFetchError={baselineFetchError}
+        initialBaselineId={selectedBaselineId}
+        initialJobId={selectedJobId}
+      />
     </InstrumentPanelShell>
   );
 }

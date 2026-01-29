@@ -528,9 +528,13 @@ export class RealityCheckService {
   private detectMismatchReasons(context: RealityCheckContext) {
     const reasons: string[] = [];
     const { cxFit, toolCoverage } = context;
-    const scopeScore = cxFit.components?.scope ?? 0;
-    const leadershipScore = cxFit.components?.leadership ?? 0;
-    const bandDelta = cxFit.bands?.bandDelta ?? 0;
+    const scopeScore = Math.round(
+      cxFit.rubric.dimensionPercents.role_scope_and_seniority,
+    );
+    const bandDelta = cxFit.debug.bandDelta;
+    const leadershipScore = Math.round(
+      Math.max(0, Math.min(100, 100 - Math.min(100, bandDelta * 15))),
+    );
     const missingToolCount = toolCoverage.missingRequired.length;
 
     if (bandDelta >= 3 && scopeScore < 65 && leadershipScore < 60) {

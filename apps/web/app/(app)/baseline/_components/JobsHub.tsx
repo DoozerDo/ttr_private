@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -30,9 +30,10 @@ function isArchived(job: JobDto): boolean {
 
 interface JobsHubProps {
   selectedJobId?: string | null;
+  onJobMissing?: () => void;
 }
 
-export function JobsHub({ selectedJobId }: JobsHubProps) {
+export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
   const [jobs, setJobs] = useState<JobDto[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,28 @@ export function JobsHub({ selectedJobId }: JobsHubProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const jobMissingNotified = useRef(false);
+
+  useEffect(() => {
+    if (!onJobMissing) {
+      jobMissingNotified.current = false;
+      return;
+    }
+
+    if (!selectedJobId) {
+      jobMissingNotified.current = false;
+      return;
+    }
+
+    if (isLoading) return;
+
+    const found = jobs.some((job) => job.id === selectedJobId);
+    if (!found && !jobMissingNotified.current) {
+      jobMissingNotified.current = true;
+      onJobMissing();
+    }
+  }, [isLoading, jobs, onJobMissing, selectedJobId]);
 
   const visibleJobs = useMemo(() => jobs.slice(0, 5), [jobs]);
   const selectedJobName = useMemo(

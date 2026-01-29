@@ -62,6 +62,7 @@ export type FitScoreResult = {
   verdict: FitScoreVerdictLabel;
   persistenceVerdict: FitAssessmentVerdict;
   dimensionScores: FitScoreDimensionScores;
+  penaltiesApplied: string[];
   strengths: string[];
   gaps: string[];
   summary: string;
