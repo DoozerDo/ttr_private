@@ -13,6 +13,10 @@
     "test:api": "npm -w apps/api run test",
     "check:beta-scope": "node scripts/check-beta-scope.js",
     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
-    "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1"
+    "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
+    "postinstall": "patch-package"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }
