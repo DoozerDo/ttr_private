@@ -34,6 +34,7 @@ type FitResultPayload = {
   verdict?: string | null;
   dimensionScores?: Record<string, DimensionScoreValue> | DimensionScoreValue[] | null;
   complianceFlags?: unknown[] | null;
+  compliance_flags?: unknown[] | null;
 
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -141,6 +142,86 @@ const extractErrorMessage = (payload: unknown): string | null => {
   return null;
 };
 
+const normalizeComplianceFlagsFromError = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null) return [];
+  return [value];
+};
+
+const buildComplianceBlockedPayload = (flags: unknown[]): FitResultPayload => ({
+  score: null,
+  verdict: "blocked",
+  complianceFlags: flags,
+  compliance_flags: flags.map((flag) =>
+    typeof flag === "string" ? { code: flag, message: flag } : flag,
+  ),
+});
+
+const parseAnalysisRunResponse = async (
+  response: Response,
+): Promise<{ payload: FitResultPayload; runState: "ok" | "compliance_blocked" }> => {
+  const text = await response.text();
+  let parsed: unknown = null;
+
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error("Unable to run compatibility scoring right now.");
+    }
+  }
+
+  if (response.ok) {
+    const payload = (parsed as FitResultPayload | null) ?? {};
+    return { payload, runState: "ok" };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const candidate = parsed as FitResultPayload;
+    if (candidate.verdict === "blocked") {
+      return { payload: candidate, runState: "compliance_blocked" };
+    }
+
+    const errorPayload = parsed as {
+      error?: {
+        code?: string;
+        message?: string;
+        details?: { compliance_flags?: unknown[] };
+      };
+    };
+
+    const normalizedDetailFlags = normalizeComplianceFlagsFromError(
+      errorPayload.error?.details?.compliance_flags,
+    );
+    const errorCode =
+      typeof errorPayload.error?.code === "string"
+        ? errorPayload.error.code.toLowerCase()
+        : "";
+    const hasBlockSeverity =
+      Array.isArray(normalizedDetailFlags) &&
+      normalizedDetailFlags.some((flag) => {
+        if (typeof flag !== "object" || flag === null) return false;
+        const severity = (flag as { severity?: string }).severity;
+        return typeof severity === "string" && severity.toLowerCase() === "block";
+      });
+
+    if (errorCode === "compliance_blocked" || hasBlockSeverity) {
+      return {
+        payload: buildComplianceBlockedPayload(normalizedDetailFlags),
+        runState: "compliance_blocked",
+      };
+    }
+
+    const message =
+      errorPayload.error?.message ??
+      extractErrorMessage(parsed) ??
+      "Unable to run compatibility scoring right now.";
+    throw new Error(message);
+  }
+
+  throw new Error("Unable to run compatibility scoring right now.");
+};
+
 const pickTimestamp = (payload: FitResultPayload | null): string | null => {
   if (!payload) return null;
 
@@ -180,6 +261,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [latestAssessmentId, setLatestAssessmentId] = useState<string | null>(null);
   const [latestJobId, setLatestJobId] = useState<string | null>(null);
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
+  const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
   const router = useRouter();
 
   const dimensionEntries = useMemo(
@@ -187,45 +269,121 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     [result],
   );
 
-  const flagList = useMemo(() => {
-    const flags = result?.complianceFlags;
-    if (!Array.isArray(flags)) return [];
-    return flags.map((flag) =>
-      typeof flag === "string" ? flag : (() => {
-        try {
-          return JSON.stringify(flag);
-        } catch {
-          return String(flag);
-        }
-      })(),
-    );
-  }, [result]);
+  const isDevMode = process.env.NODE_ENV !== "production";
+  const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
+  const runDebugInfo = debugUiEnabled && result?.debug ? result.debug : null;
+
+  const complianceTitleMap: Record<string, string> = {
+    invented_company: "Invented company reference",
+    invented_role: "Invented role or title",
+    invented_metric: "Invented metric",
+    invented_scope: "Invented scope or scale",
+    invented_timeline: "Invented timeline",
+  };
+
+  const complianceFlagList = useMemo(() => {
+    const rawFlags = result?.complianceFlags ?? result?.compliance_flags;
+    const normalizedFlags =
+      Array.isArray(rawFlags) ? rawFlags : rawFlags ? [rawFlags] : [];
+    return normalizedFlags.map((flag) => {
+      if (typeof flag === "string") {
+        return {
+          title: "Compliance issue",
+          message: flag,
+          severity: "BLOCK",
+          code: undefined,
+          confidence: undefined,
+        };
+      }
+
+      const typedFlag = flag as {
+        code?: string;
+        message?: string;
+        severity?: string;
+        confidence?: number;
+      };
+
+      const code =
+        typeof typedFlag.code === "string" && typedFlag.code.trim()
+          ? typedFlag.code
+          : undefined;
+      const message =
+        typeof typedFlag.message === "string" && typedFlag.message.trim()
+          ? typedFlag.message
+          : code ?? "Compliance issue";
+      const title =
+        (code && complianceTitleMap[code]) || complianceTitleMap[typedFlag.code ?? ""] || "Compliance issue";
+      const severity =
+        typeof typedFlag.severity === "string" ? typedFlag.severity : "BLOCK";
+      const confidence =
+        debugUiEnabled && typeof typedFlag.confidence === "number"
+          ? typedFlag.confidence
+          : undefined;
+
+      return {
+        title,
+        message,
+        severity,
+        code,
+        confidence,
+      };
+    });
+  }, [result, debugUiEnabled]);
+
+  const hasComplianceFlags = complianceFlagList.length > 0;
 
   const canRun = Boolean(baselineId) && Boolean(jobId) && !isRunning;
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(result);
+  const isComplianceBlocked = runState === "compliance_blocked";
 
   const scoreValueText =
-    typeof result?.score === "number" ? result.score.toFixed(1) : "n/a";
-
-  const isDevMode = process.env.NODE_ENV !== "production";
-  const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
-  const runDebugInfo = debugUiEnabled && result?.debug ? result.debug : null;
+    isComplianceBlocked
+      ? "n/a"
+      : typeof result?.score === "number"
+        ? result.score.toFixed(1)
+        : "n/a";
+  const scoreDisplay = (
+    <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
+  );
+  const detailsToggleRow = (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-xs text-slate-400">Details are hidden by default.</p>
+      <button
+        type="button"
+        onClick={() => setShowDetails((prev) => !prev)}
+        className="text-xs font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
+      >
+        {showDetails ? "Hide details" : "Show details"}
+      </button>
+    </div>
+  );
 
   const viewResultsHref = buildResultsUrl({
     assessmentId: latestAssessmentId,
     jobId: latestJobId ?? jobId,
     baselineId: latestBaselineId ?? baselineId,
   });
+  const handleResolveComplianceIssues = () => {
+    if (!baselineId) return;
+    const params = new URLSearchParams();
+    params.set("baselineId", baselineId);
+    if (jobId) {
+      params.set("jobId", jobId);
+    }
+    const query = params.toString();
+    router.push(query ? `/reality-check?${query}` : "/reality-check");
+  };
 
   const statusLine = useMemo(() => {
     if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
     if (!baselineId) return "Select a baseline to continue.";
     if (!jobId) return "Select a job to continue.";
     if (isRunning) return "Running compatibility score.";
+    if (isComplianceBlocked) return "Compliance must be resolved before scoring.";
     if (result) return "Compatibility score ready.";
     return "Ready to run compatibility scoring.";
-  }, [baselineId, jobId, isRunning, result]);
+  }, [baselineId, jobId, isRunning, isComplianceBlocked, result]);
 
   const runAssessment = async () => {
     if (!baselineId || !jobId || isRunning) return;
@@ -236,6 +394,8 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     setLatestAssessmentId(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
+    setShowDetails(false);
+    setRunState(null);
 
     try {
       const response = await fetch("/api/analysis/run", {
@@ -246,15 +406,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
         body: JSON.stringify({ baselineId, jobId, debug: debugUiEnabled }),
       });
 
-      const payload = await response.json();
-
-      if (!response.ok) {
-        const message = extractErrorMessage(payload) ?? "Unable to run compatibility scoring.";
-        throw new Error(message);
-      }
-
-      const nextResult = payload as FitResultPayload;
+      const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
       setResult(nextResult);
+      setRunState(runState);
       const resolvedJobId =
         typeof nextResult.jobId === "string"
           ? nextResult.jobId
@@ -275,13 +429,16 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
-      setCompleteBanner("Assessment complete");
+      setCompleteBanner(
+        runState === "compliance_blocked" ? "Assessment blocked" : "Assessment complete",
+      );
     } catch (runError: unknown) {
       const message = extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       setError(message);
       setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
+      setRunState(null);
     } finally {
       setIsRunning(false);
     }
@@ -312,6 +469,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
+      setRunState("ok");
       const resolvedJobId =
         typeof nextResult.jobId === "string"
           ? nextResult.jobId
@@ -339,6 +497,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
+      setRunState(null);
     } finally {
       setIsLoadingLastRun(false);
     }
@@ -359,7 +518,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
         <p className="text-sm text-slate-300">{statusLine}</p>
         <div className="text-xs text-slate-400">
           <div>Last run: {formatTimestamp(lastRunAt)}</div>
-          {completeBanner ? (
+          {completeBanner && (result || runState) ? (
             <div className="mt-1 inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
               {completeBanner}
             </div>
@@ -389,25 +548,88 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
       {showResult ? (
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200">
-          <div className="flex items-baseline justify-between">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Result</p>
-            <span className="text-xs text-slate-400">
-              {result?.verdict ?? "Verdict pending"}
-            </span>
-          </div>
+          {isComplianceBlocked ? (
+            <>
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white">Assessment blocked</p>
+                  <p className="text-xs text-slate-400">
+                    Compliance must be resolved before scoring.
+                  </p>
+                </div>
+                <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">
+                  blocked
+                </span>
+              </div>
 
-          <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
+              {scoreDisplay}
 
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-400">Details are hidden by default.</p>
-            <button
-              type="button"
-              onClick={() => setShowDetails((prev) => !prev)}
-              className="text-xs font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
-            >
-              {showDetails ? "Hide details" : "Show details"}
-            </button>
-          </div>
+              <p className="text-xs text-slate-400">
+                Compliance issues must be resolved before scoring can proceed.
+              </p>
+
+              {detailsToggleRow}
+
+              {showDetails ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Compliance flags</p>
+                    <span className="text-xs text-slate-400">
+                      {hasComplianceFlags ? `${complianceFlagList.length} flagged` : "No details provided"}
+                    </span>
+                  </div>
+
+                  {hasComplianceFlags ? (
+                    <ul className="space-y-2">
+                      {complianceFlagList.map((flag, index) => (
+                        <li
+                          key={`flag-${index}`}
+                          className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                        >
+                          <div className="flex gap-3">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-300">
+                              {flag.severity?.toUpperCase() ?? "BLOCK"}
+                            </span>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-slate-100">{flag.title}</p>
+                              <p className="text-xs text-slate-300">{flag.message}</p>
+                              {debugUiEnabled && (flag.code || flag.confidence !== undefined) ? (
+                                <p className="mt-1 text-[11px] text-amber-200">
+                                  {flag.code ? `Code: ${flag.code}` : null}
+                                  {flag.confidence !== undefined
+                                    ? ` Confidence: ${flag.confidence}`
+                                    : null}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-slate-400">Compliance flag details are hidden.</p>
+                  )}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-2">
+                <FormButton onClick={handleResolveComplianceIssues} disabled={!baselineId}>
+                  Resolve compliance issues
+                </FormButton>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Result</p>
+                <span className="text-xs text-slate-400">
+                  {result?.verdict ?? "Verdict pending"}
+                </span>
+              </div>
+
+              {scoreDisplay}
+
+              {detailsToggleRow}
 
           {showDetails ? (
             <div className="space-y-3">
@@ -426,14 +648,16 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
                 </div>
               ) : null}
 
-              {flagList.length ? (
+              {complianceFlagList.length ? (
                 <div className="space-y-1">
                   <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
                     Compliance flags
                   </p>
                   <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
-                    {flagList.map((flag, index) => (
-                      <li key={`flag-${index}`}>{flag}</li>
+                    {complianceFlagList.map((flag, index) => (
+                      <li key={`flag-${index}`}>
+                        <span className="font-semibold text-slate-200">{flag.title}</span>: {flag.message}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -486,7 +710,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
               ) : null}
             </div>
           ) : null}
-          {runDebugInfo ? (
+            </>
+          )}
+          {!isComplianceBlocked && runDebugInfo ? (
             <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-3 text-xs text-slate-300">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Debug</p>
@@ -565,7 +791,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
               ) : null}
             </div>
           ) : null}
-          {viewResultsHref ? (
+          {!isComplianceBlocked && viewResultsHref ? (
             <div className="flex justify-end">
               <FormButton onClick={() => router.push(viewResultsHref)} disabled={isRunning}>
                 View results
