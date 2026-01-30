@@ -10,6 +10,7 @@ import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import type { JobDto } from "@/lib/jobs";
 import { archiveJob, listJobs } from "@/lib/jobsClient";
 import { getJobDetailsHref } from "@/src/navigation/routes";
+import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
 import { OverflowMenu } from "./OverflowMenu";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { setJobTitle } from "./selectionStore";
@@ -38,6 +39,7 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [archivingJobId, setArchivingJobId] = useState<string | null>(null);
+  const [isIngestOpen, setIsIngestOpen] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -49,8 +51,10 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
     try {
       const result = await listJobs({ includeArchived: true });
       setJobs(result);
+      return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to load jobs");
+      return [];
     } finally {
       setIsLoading(false);
     }
@@ -98,7 +102,7 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
     const query = params.toString();
     const base = pathname ?? "/baseline";
     const target = query ? `${base}?${query}` : base;
-    router.push(target);
+    router.replace(target);
     router.refresh();
   };
 
@@ -122,102 +126,126 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
     }
   };
 
-  const navigateToAddJob = useCallback(() => {
-    router.push("/jobs/new");
-  }, [router]);
+  const navigateToAddJob = () => {
+    setIsIngestOpen(true);
+  };
 
   return (
-    <SetupModuleCard
-      label="JOB"
-      title="Job description"
-      description="Add a job description to score against your baseline."
-      primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
-    >
-      {error ? (
-        <Alert intent="error" title="Jobs error">
-          <p className="text-sm text-current">{error}</p>
-        </Alert>
-      ) : null}
+    <>
+      <SetupModuleCard
+        label="JOB"
+        title="Job description"
+        description="Add a job description to score against your baseline."
+        primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+      >
+        {error ? (
+          <Alert intent="error" title="Jobs error">
+            <p className="text-sm text-current">{error}</p>
+          </Alert>
+        ) : null}
 
-      {selectedJobName ? (
-        <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
-          Selected: {selectedJobName}
-        </p>
-      ) : null}
+        {selectedJobName ? (
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+            Selected: {selectedJobName}
+          </p>
+        ) : null}
 
-      {isLoading ? (
-        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-200">
-          Loading jobs
-        </div>
-      ) : visibleJobs.length === 0 ? (
-        <EmptyState
-          title="No jobs yet"
-          body="Add a job to start building your target workspace."
-          cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
-        />
-      ) : (
-        <div className="space-y-3">
-          {visibleJobs.map((job) => {
-            const archived = isArchived(job);
-            const isSelected = job.id === selectedJobId;
-            const cardClasses = [
-              "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
-              isSelected ? "ring-2 ring-amber-400/40" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
+        {isLoading ? (
+          <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-200">
+            Loading jobs
+          </div>
+        ) : visibleJobs.length === 0 ? (
+          <EmptyState
+            title="No jobs yet"
+            body="Add a job to start building your target workspace."
+            cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+          />
+        ) : (
+          <div className="space-y-3">
+            {visibleJobs.map((job) => {
+              const archived = isArchived(job);
+              const isSelected = job.id === selectedJobId;
+              const cardClasses = [
+                "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
+                isSelected ? "ring-2 ring-amber-400/40" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
 
-            return (
-              <div key={job.id} className={cardClasses}>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link
-                          href={getJobDetailsHref(job.id)}
-                          className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
-                        >
-                          <span className="block truncate">
-                            {job.title || "Untitled job"}
-                          </span>
-                        </Link>
-                        {archived ? (
-                          <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
-                            Archived
-                          </span>
+              return (
+                <div key={job.id} className={cardClasses}>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={getJobDetailsHref(job.id)}
+                            className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
+                          >
+                            <span className="block truncate">
+                              {job.title || "Untitled job"}
+                            </span>
+                          </Link>
+                          {archived ? (
+                            <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                              Archived
+                            </span>
+                          ) : null}
+                        </div>
+                        {job.company ? (
+                          <p className="text-xs text-slate-400">{job.company}</p>
                         ) : null}
                       </div>
-                      {job.company ? (
-                        <p className="text-xs text-slate-400">{job.company}</p>
-                      ) : null}
-                    </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <SecondaryActionLink href={getJobDetailsHref(job.id)}>
-                        View details
-                      </SecondaryActionLink>
-                      <FormButton
-                        variant="secondary"
-                        onClick={() => setJobSelection(job.id)}
-                        disabled={isSelected}
-                      >
-                        {isSelected ? "Selected" : "Select"}
-                      </FormButton>
-                      {!archived ? (
-                        <OverflowMenu
-                          onArchive={() => handleArchiveJob(job.id)}
-                          loading={archivingJobId === job.id}
-                          ariaLabel="Job overflow actions"
-                        />
-                      ) : null}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SecondaryActionLink href={getJobDetailsHref(job.id)}>
+                          View details
+                        </SecondaryActionLink>
+                        <FormButton
+                          variant="secondary"
+                          onClick={() => setJobSelection(job.id)}
+                          disabled={isSelected}
+                        >
+                          {isSelected ? "Selected" : "Select"}
+                        </FormButton>
+                        {!archived ? (
+                          <OverflowMenu
+                            onArchive={() => handleArchiveJob(job.id)}
+                            loading={archivingJobId === job.id}
+                            ariaLabel="Job overflow actions"
+                          />
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        )}
+      </SetupModuleCard>
+
+      {isIngestOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-950 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-slate-100">Add job</div>
+              <FormButton variant="secondary" onClick={() => setIsIngestOpen(false)}>
+                Close
+              </FormButton>
+            </div>
+
+            <JobIngestionForm
+              onCancel={() => setIsIngestOpen(false)}
+              onResolved={async (resolvedJobId) => {
+                setIsIngestOpen(false);
+                await load();
+                setJobSelection(resolvedJobId);
+              }}
+            />
+          </div>
         </div>
-      )}
-    </SetupModuleCard>
+      ) : null}
+    </>
   );
 }
