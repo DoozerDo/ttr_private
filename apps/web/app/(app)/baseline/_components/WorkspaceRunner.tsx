@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -268,20 +268,47 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
   const router = useRouter();
+  const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(baselineId);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(jobId);
+  const [inFlightPairKey, setInFlightPairKey] = useState<string | null>(null);
+  const [latestCompletedScore, setLatestCompletedScore] = useState<FitResultPayload | null>(
+    null,
+  );
   const journeyNavAppState = useJourneyNavAppState();
   const autoRunCombinationRef = useRef<string | null>(null);
   const autoRunCompletionTimerRef = useRef<number | null>(null);
   const autoRunInitiatedRef = useRef(false);
   const pendingCompletionKeyRef = useRef<string | null>(null);
+  const autoRunTriggerTimerRef = useRef<number | null>(null);
 
+  useLayoutEffect(() => {
+    setSelectedBaselineId(baselineId);
+  }, [baselineId]);
+
+  // DEV CHECKLIST (manual verification paths):
+  // 1) Selecting baseline+job auto-starts scoring after ~300ms with the running text visible.
+  // 2) When scoring succeeds, Compatibility scored banner shows and dismisses after ~1.8s.
+  // 3) After completion banner disappears, baseline/job selections clear and the Baseline rail resets.
+  // 4) A completed score keeps the result card visible and View results remains usable afterward.
+  // 5) Running scoring while a request is in flight does not start another run for the same pair.
+  // 6) Changing selections mid-flight causes the stale response to be ignored (no new banner).
+  // 7) Errors show the Scoring failed alert with a Retry scoring button that re-triggers scoring.
+  // 8) Compliance blocked results still show blockers and keep Compatibility scored behavior until resolved.
+  // 9) Loading last run via the link populates latestCompletedScore and keeps the card visible without auto-running.
+
+  useLayoutEffect(() => {
+    setSelectedJobId(jobId);
+  }, [jobId]);
+
+  const displayResult = latestCompletedScore ?? result;
   const dimensionEntries = useMemo(
-    () => (result ? formatDimensionEntries(result) : []),
-    [result],
+    () => (displayResult ? formatDimensionEntries(displayResult) : []),
+    [displayResult],
   );
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
-  const runDebugInfo = debugUiEnabled && result?.debug ? result.debug : null;
+  const runDebugInfo = debugUiEnabled && displayResult?.debug ? displayResult.debug : null;
 
   const complianceTitleMap: Record<string, string> = {
     invented_company: "Invented company reference",
@@ -292,7 +319,7 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
   };
 
   const complianceFlagList = useMemo(() => {
-    const rawFlags = result?.complianceFlags ?? result?.compliance_flags;
+    const rawFlags = displayResult?.complianceFlags ?? displayResult?.compliance_flags;
     const normalizedFlags =
       Array.isArray(rawFlags) ? rawFlags : rawFlags ? [rawFlags] : [];
     return normalizedFlags.map((flag) => {
@@ -340,18 +367,18 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
         confidence,
       };
     });
-  }, [result, debugUiEnabled]);
+  }, [displayResult, debugUiEnabled]);
 
   const hasComplianceFlags = complianceFlagList.length > 0;
 
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
-  const showResult = Boolean(result);
+  const showResult = Boolean(latestCompletedScore);
 
   const isBlockedResult =
     runState === "compliance_blocked" ||
-    result?.verdict === "blocked" ||
-    (result as { status?: string } | null)?.status === "compliance_blocked" ||
-    Boolean((result as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
+    displayResult?.verdict === "blocked" ||
+    (displayResult as { status?: string } | null)?.status === "compliance_blocked" ||
+    Boolean((displayResult as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
 
   const isComplianceBlocked = isBlockedResult;
   const topComplianceFlags = complianceFlagList.slice(0, 3);
@@ -359,12 +386,24 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
   const scoreValueText =
     isComplianceBlocked
       ? "Blocked"
-      : typeof result?.score === "number"
-        ? result.score.toFixed(1)
+      : typeof displayResult?.score === "number"
+        ? displayResult.score.toFixed(1)
         : "n/a";
 
   const scoreDisplay = (
     <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
+  );
+
+  const onScoreCompleted = useCallback(
+    (event: {
+      baselineId: string;
+      jobId: string;
+      scoreValue: number | null;
+      verdict: string | null;
+    }) => {
+      // Placeholder for future celebration hooks.
+    },
+    [],
   );
 
   const detailsToggleRow = (
@@ -398,18 +437,24 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
   };
 
   const statusLine = useMemo(() => {
-    if (!baselineId && !jobId && result) return "Latest compatibility score is ready.";
+    if (!baselineId && !jobId && latestCompletedScore) return "Latest compatibility score is ready.";
     if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
     if (!baselineId) return "Select a baseline to continue.";
     if (!jobId) return "Select a job to continue.";
     if (isRunning) return "Running compatibility score.";
     if (isComplianceBlocked) return "Compliance must be resolved before scoring.";
-    if (result) return "Compatibility score ready.";
+    if (displayResult) return "Compatibility score ready.";
     return "Ready to run compatibility scoring.";
-  }, [baselineId, jobId, isRunning, isComplianceBlocked, result]);
+  }, [baselineId, jobId, isRunning, isComplianceBlocked, displayResult, latestCompletedScore]);
 
   const runAssessment = useCallback(async () => {
-    if (!baselineId || !jobId || isRunning) return;
+    const baselineForRun = selectedBaselineId;
+    const jobForRun = selectedJobId;
+    if (!baselineForRun || !jobForRun || isRunning) return;
+
+    const pairKey = `${baselineForRun}:${jobForRun}`;
+    if (inFlightPairKey === pairKey) return;
+    setInFlightPairKey(pairKey);
 
     setIsRunning(true);
     setError(null);
@@ -426,35 +471,46 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ baselineId, jobId, debug: debugUiEnabled }),
+        body: JSON.stringify({ baselineId: baselineForRun, jobId: jobForRun, debug: debugUiEnabled }),
       });
 
       const { payload: nextResult, runState } = await parseAnalysisRunResponse(response);
+      if (selectedBaselineId !== baselineForRun || selectedJobId !== jobForRun) {
+        return;
+      }
       setResult(nextResult);
       setRunState(runState);
       const resolvedJobId =
         typeof nextResult.jobId === "string"
           ? nextResult.jobId
-          : typeof jobId === "string"
-            ? jobId
+          : typeof jobForRun === "string"
+            ? jobForRun
             : null;
       const resolvedBaselineId =
         typeof nextResult.baselineId === "string"
           ? nextResult.baselineId
-          : typeof baselineId === "string"
-            ? baselineId
+          : typeof baselineForRun === "string"
+            ? baselineForRun
             : null;
       setLatestJobId(resolvedJobId);
       setLatestBaselineId(resolvedBaselineId);
       setLatestAssessmentId(
         typeof nextResult.assessmentId === "string" ? nextResult.assessmentId : null,
       );
+      setLatestCompletedScore(nextResult);
+      onScoreCompleted({
+        baselineId: baselineForRun,
+        jobId: jobForRun,
+        scoreValue:
+          typeof nextResult.score === "number" ? nextResult.score : null,
+        verdict: typeof nextResult.verdict === "string" ? nextResult.verdict : null,
+      });
 
       const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
       setLastRunAt(ts);
-      setCompleteBanner(
-        runState === "compliance_blocked" ? "Assessment blocked" : "Assessment complete",
-      );
+      const completionText =
+        runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
+      setCompleteBanner(completionText);
     } catch (runError: unknown) {
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
@@ -465,9 +521,16 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
       setRunState(null);
       autoRunInitiatedRef.current = false;
     } finally {
+      setInFlightPairKey((current) => (current === pairKey ? null : current));
       setIsRunning(false);
     }
-  }, [baselineId, debugUiEnabled, isRunning, jobId]);
+  }, [
+    debugUiEnabled,
+    inFlightPairKey,
+    isRunning,
+    selectedBaselineId,
+    selectedJobId,
+  ]);
 
   const loadLastRun = async () => {
     if (!baselineId || !jobId || isLoadingLastRun) return;
@@ -494,6 +557,7 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
 
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
+      setLatestCompletedScore(nextResult);
 
       const loadedIsBlocked =
         (nextResult as { status?: string } | null)?.status === "compliance_blocked" ||
@@ -539,21 +603,63 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
     autoRunCombinationRef.current = null;
     autoRunInitiatedRef.current = false;
     pendingCompletionKeyRef.current = null;
+    setSelectedBaselineId(null);
+    setSelectedJobId(null);
+    setInFlightPairKey(null);
     journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
     onAutoRunComplete?.();
   }, [journeyNavAppState, onAutoRunComplete]);
 
   useEffect(() => {
-    if (!baselineId || !jobId || isRunning) return;
-    const comboKey = `${baselineId}:${jobId}`;
-    if (autoRunCombinationRef.current === comboKey) return;
-    autoRunCombinationRef.current = comboKey;
-    autoRunInitiatedRef.current = true;
-    void runAssessment();
-  }, [baselineId, isRunning, jobId, runAssessment]);
+    if (!selectedBaselineId || !selectedJobId) return;
+    const pairKey = `${selectedBaselineId}:${selectedJobId}`;
+    const alreadyCompleted =
+      latestBaselineId === selectedBaselineId &&
+      latestJobId === selectedJobId &&
+      Boolean(latestCompletedScore);
+    if (isRunning || inFlightPairKey === pairKey || alreadyCompleted) {
+      return;
+    }
+
+    if (autoRunTriggerTimerRef.current !== null) {
+      window.clearTimeout(autoRunTriggerTimerRef.current);
+      autoRunTriggerTimerRef.current = null;
+    }
+
+    const baselineSnapshot = selectedBaselineId;
+    const jobSnapshot = selectedJobId;
+    autoRunTriggerTimerRef.current = window.setTimeout(() => {
+      autoRunTriggerTimerRef.current = null;
+      if (
+        selectedBaselineId !== baselineSnapshot ||
+        selectedJobId !== jobSnapshot
+      ) {
+        return;
+      }
+      autoRunCombinationRef.current = pairKey;
+      autoRunInitiatedRef.current = true;
+      void runAssessment();
+    }, 300);
+
+    return () => {
+      if (autoRunTriggerTimerRef.current !== null) {
+        window.clearTimeout(autoRunTriggerTimerRef.current);
+        autoRunTriggerTimerRef.current = null;
+      }
+    };
+  }, [
+    inFlightPairKey,
+    isRunning,
+    latestBaselineId,
+    latestCompletedScore,
+    latestJobId,
+    runAssessment,
+    selectedBaselineId,
+    selectedJobId,
+  ]);
 
   useEffect(() => {
-    if (runState !== "ok" || !completeBanner || !result) return;
+    if (runState !== "ok" || !completeBanner || !displayResult) return;
     if (!autoRunInitiatedRef.current) return;
     if (autoRunCompletionTimerRef.current) {
       window.clearTimeout(autoRunCompletionTimerRef.current);
@@ -571,7 +677,7 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
       pendingCompletionKeyRef.current = null;
       setCompleteBanner(null);
       handleAutoRunFinalize();
-    }, 1500);
+    }, 1800);
 
     return () => {
       if (autoRunCompletionTimerRef.current) {
@@ -580,7 +686,7 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
       }
       pendingCompletionKeyRef.current = null;
     };
-  }, [completeBanner, handleAutoRunFinalize, result, runState]);
+  }, [completeBanner, handleAutoRunFinalize, displayResult, runState]);
 
   return (
     <SetupModuleCard
@@ -592,16 +698,33 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
         <p className="text-sm text-slate-300">{statusLine}</p>
         <div className="text-xs text-slate-400">
           <div>Last run: {formatTimestamp(lastRunAt)}</div>
-          {completeBanner && (result || runState) ? (
+          {completeBanner && (displayResult || runState) ? (
             <div className="mt-1 inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
               {completeBanner}
             </div>
           ) : null}
         </div>
       </div>
-      <p className="text-xs text-slate-400">
-        Compatibility scoring runs automatically when both selections are present.
-      </p>
+      {isRunning ? (
+        <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
+          Scoring compatibility.
+        </div>
+      ) : error ? (
+        <div className="space-y-3">
+          <Alert intent="error" title="Scoring failed">
+            <p className="text-sm text-current">{error}</p>
+          </Alert>
+          <div className="flex justify-end">
+            <FormButton onClick={runAssessment} disabled={isRunning}>
+              Retry scoring
+            </FormButton>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">
+          Compatibility scoring runs automatically when both selections are present.
+        </p>
+      )}
 
       {showLoadLastRun ? (
         <button
@@ -615,12 +738,6 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
         >
           {isLoadingLastRun ? "Loading last run..." : "Load last run"}
         </button>
-      ) : null}
-
-      {error ? (
-        <Alert intent="error" title="Compatibility score">
-          <p className="text-sm text-current">{error}</p>
-        </Alert>
       ) : null}
 
       {showResult ? (
@@ -717,12 +834,12 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
             </>
           ) : (
             <>
-              <div className="flex items-baseline justify-between">
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Result</p>
-                <span className="text-xs text-slate-400">
-                  {result?.verdict ?? "Verdict pending"}
-                </span>
-              </div>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Result</p>
+                    <span className="text-xs text-slate-400">
+                      {displayResult?.verdict ?? "Verdict pending"}
+                    </span>
+                  </div>
 
               {scoreDisplay}
 
@@ -763,49 +880,49 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
                     </div>
                   ) : null}
 
-                  {result?.scoringProof ? (
+                  {displayResult?.scoringProof ? (
                     <div className="space-y-1">
                       <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
                         Scoring proof
                       </p>
                       <div className="grid gap-1 text-xs text-slate-300">
-                        <p>Assessment ID: {result.scoringProof.assessmentId ?? "n/a"}</p>
+                        <p>Assessment ID: {displayResult.scoringProof.assessmentId ?? "n/a"}</p>
                         <p>
                           Baseline chars scored:{" "}
-                          {formatProofNumber(result.scoringProof.baselineTextCharsScored)}
+                          {formatProofNumber(displayResult.scoringProof.baselineTextCharsScored)}
                         </p>
                         <p>
                           Job chars scored:{" "}
-                          {formatProofNumber(result.scoringProof.jobTextCharsScored)}
+                          {formatProofNumber(displayResult.scoringProof.jobTextCharsScored)}
                         </p>
                         <p>
                           Normalized responsibilities:{" "}
-                          {(result.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
+                          {(displayResult.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
                         </p>
                         <p>
                           Normalized requirements:{" "}
-                          {(result.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
+                          {(displayResult.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
                         </p>
                         <p>
                           Job raw text characters:{" "}
-                          {(result.scoringProof.jobRawTextCharCount ?? 0).toLocaleString()}
+                          {(displayResult.scoringProof.jobRawTextCharCount ?? 0).toLocaleString()}
                         </p>
                         <p className="break-words text-xs text-slate-300">
-                          Job raw text SHA256: {result.scoringProof.jobRawTextSha256 ?? "n/a"}
+                          Job raw text SHA256: {displayResult.scoringProof.jobRawTextSha256 ?? "n/a"}
                         </p>
-                        {result.scoringProof.jobRawTextTooShort ? (
+                        {displayResult.scoringProof.jobRawTextTooShort ? (
                           <p className="text-[11px] uppercase tracking-[0.35em] text-amber-300">
-                            {result.scoringProof.jobRawTextWarning ??
+                            {displayResult.scoringProof.jobRawTextWarning ??
                               "Raw job description is below the recommended length."}
                           </p>
                         ) : null}
                         <p>
                           Baseline truncated:{" "}
-                          {result.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
+                          {displayResult.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
                         </p>
                         <p>
                           Job truncated:{" "}
-                          {result.scoringProof.truncationAppliedJob ? "Yes" : "No"}
+                          {displayResult.scoringProof.truncationAppliedJob ? "Yes" : "No"}
                         </p>
                       </div>
                     </div>
