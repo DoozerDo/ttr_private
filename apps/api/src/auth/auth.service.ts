@@ -65,9 +65,16 @@ export class AuthService {
 
     const { passwordHash, ...sanitizedUser } = user;
 
+    const stableId = sanitizedUser.id ?? user.id;
+
     return {
       accessToken,
-      user: { ...sanitizedUser, entitlements },
+      user: {
+        ...sanitizedUser,
+        id: stableId,
+        userId: stableId,
+        entitlements,
+      },
     };
   }
 }

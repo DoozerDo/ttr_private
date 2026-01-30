@@ -13,13 +13,23 @@ type JwtPayload = {
   subscriptionTier?: string;
 };
 
-const AUTH_COOKIE_NAME = 'ttr_token';
+const ACCESS_TOKEN_COOKIE = 'access_token';
+const LEGACY_ACCESS_TOKEN_COOKIE = 'ttr_token'; // keep legacy name while rolling out the new cookie
 
 function extractTokenFromCookie(
   req: Request | undefined | null,
 ): string | null {
   if (!req) {
     return null;
+  }
+
+  const cookieToken =
+    (typeof req.cookies?.[ACCESS_TOKEN_COOKIE] === 'string' &&
+      req.cookies?.[ACCESS_TOKEN_COOKIE]) ||
+    (typeof req.cookies?.[LEGACY_ACCESS_TOKEN_COOKIE] === 'string' &&
+      req.cookies?.[LEGACY_ACCESS_TOKEN_COOKIE]);
+  if (typeof cookieToken === 'string' && cookieToken.trim()) {
+    return cookieToken.trim();
   }
 
   const cookieHeader = req.headers?.cookie;
@@ -34,7 +44,12 @@ function extractTokenFromCookie(
     const separatorIndex = trimmed.indexOf('=');
     if (separatorIndex <= 0) continue;
     const name = trimmed.slice(0, separatorIndex).trim();
-    if (name !== AUTH_COOKIE_NAME) continue;
+    if (
+      name !== ACCESS_TOKEN_COOKIE &&
+      name !== LEGACY_ACCESS_TOKEN_COOKIE
+    ) {
+      continue;
+    }
     const value = trimmed.slice(separatorIndex + 1);
     return value ? decodeURIComponent(value) : null;
   }
@@ -79,6 +94,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       ...sanitizedUser,
       entitlements,
+      id: user.id,
+      userId: user.id,
     };
   }
 }
+
+// Verification steps for jwt strategy:
+// 1. Log in via the web UI and confirm `access_token` or legacy `ttr_token` cookie is set.
+// 2. Request /admin/users; JwtStrategy should read the cookie and populate req.user.
+// 3. AdminBypassGuard should then allow the request, returning the users list.

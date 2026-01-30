@@ -14,8 +14,10 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import type { AuthUserDto } from './dto/auth-response.dto';
 
-const AUTH_COOKIE_NAME = 'ttr_token';
-const AUTH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const AUTH_COOKIE_NAME = 'access_token';
+const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
+const NODE_ENV = process.env.NODE_ENV ?? 'development';
+const COOKIE_IS_SECURE = NODE_ENV === 'production';
 
 @Controller('auth')
 export class AuthController {
@@ -47,7 +49,7 @@ export class AuthController {
   logout(@Res({ passthrough: true }) res: Response) {
     res.cookie(AUTH_COOKIE_NAME, '', {
       httpOnly: true,
-      secure: true,
+      secure: COOKIE_IS_SECURE,
       sameSite: 'lax',
       path: '/',
       maxAge: 0,
@@ -64,7 +66,7 @@ export class AuthController {
   private setAuthCookie(res: Response, accessToken: string) {
     res.cookie(AUTH_COOKIE_NAME, accessToken, {
       httpOnly: true,
-      secure: true,
+      secure: COOKIE_IS_SECURE,
       sameSite: 'lax',
       path: '/',
       maxAge: AUTH_COOKIE_MAX_AGE_MS,

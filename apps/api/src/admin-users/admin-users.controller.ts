@@ -7,12 +7,13 @@ import {
   Patch,
   UseGuards,
 } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 
 import { AccountType } from '../users/account-type.enum';
 import { AdminUsersService } from './admin-users.service';
 import { AdminBypassGuard } from './admin-bypass.guard';
 
-@UseGuards(AdminBypassGuard)
+@UseGuards(AuthGuard('jwt'), AdminBypassGuard)
 @Controller('admin/users')
 export class AdminUsersController {
   constructor(private readonly adminUsersService: AdminUsersService) {}

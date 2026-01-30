@@ -1,16 +1,18 @@
 import { AuthForm } from "../_components/auth-form";
 import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
 
-type LoginPageProps = {
-  searchParams?: {
-    next?: string | string[] | undefined;
-  };
+type SearchParams = {
+  next?: string | string[];
 };
 
-export default function LoginPage({ searchParams }: LoginPageProps) {
-  const param = Array.isArray(searchParams?.next)
-    ? searchParams.next[0]
-    : searchParams?.next;
+type LoginPageProps = {
+  searchParams?: Promise<SearchParams> | SearchParams;
+};
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const sp = (await Promise.resolve(searchParams)) ?? {};
+
+  const param = Array.isArray(sp.next) ? sp.next[0] : sp.next;
   const safeNext = sanitizeReturnPath(param);
 
   return (

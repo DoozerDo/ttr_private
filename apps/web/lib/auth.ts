@@ -1,7 +1,7 @@
 import type { SubscriptionTier } from "./tiers";
 import type { Entitlements } from "@/src/lib/entitlements";
 
-export const AUTH_COOKIE_NAME = "ttr_token";
+export const AUTH_COOKIE_NAME = "access_token";
 
 export type JwtPayload = {
   sub?: string;

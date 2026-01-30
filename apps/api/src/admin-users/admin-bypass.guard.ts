@@ -41,8 +41,18 @@ export class AdminBypassGuard implements CanActivate {
 
       const isProd = nodeEnv === 'production';
 
-      authedUserId =
-        req?.user?.id != null ? String(req.user.id).trim() : '';
+      const normalizeCandidate = (value: unknown) =>
+        value != null ? String(value).trim() : '';
+
+      const userIdCandidate = normalizeCandidate(req?.user?.userId);
+      const idCandidate = normalizeCandidate(req?.user?.id);
+      const subCandidate = normalizeCandidate(req?.user?.sub);
+
+      const userCandidates = [userIdCandidate, idCandidate, subCandidate].filter(
+        Boolean,
+      );
+
+      authedUserId = userCandidates[0] ?? '';
 
       const rawDevHeader = req?.headers?.['x-dev-user-id'];
       const devUserId =
@@ -52,9 +62,22 @@ export class AdminBypassGuard implements CanActivate {
             ? String(rawDevHeader[0]).trim()
             : '';
 
-      candidateId = isProd ? authedUserId : devUserId || authedUserId;
+      const candidateFromUser = userCandidates[0] ?? '';
+      candidateId = isProd ? candidateFromUser : devUserId || candidateFromUser;
+
+      const reqUserKeys = req?.user ? Object.keys(req.user) : [];
+      const logDebugInfo = (reason: string) => {
+        if (isProd) {
+          return;
+        }
+        const keys = reqUserKeys.length ? reqUserKeys.join(',') : 'none';
+        this.logger.debug(
+          `AdminBypassGuard debug (${reason}) userKeys=[${keys}] route=${route}`,
+        );
+      };
 
       if (!candidateId) {
+        logDebugInfo('missing_candidate');
         if (isProd) {
           throw new ForbiddenException(
             'Admin access is restricted until authentication is configured.',
@@ -66,6 +89,7 @@ export class AdminBypassGuard implements CanActivate {
       const isAdmin = await this.adminUsersService.isAdmin(candidateId);
 
       if (!isAdmin) {
+        logDebugInfo('not_admin');
         throw new ForbiddenException('Admin access required');
       }
 

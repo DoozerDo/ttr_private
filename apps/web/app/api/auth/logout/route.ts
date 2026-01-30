@@ -1,9 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { forwardAuthRequest } from "../helpers";
 
-import { clearAuthCookie } from "../helpers";
+export const runtime = "nodejs";
 
-export async function POST() {
-  const response = NextResponse.json({ success: true });
-  clearAuthCookie(response);
-  return response;
+export async function POST(request: NextRequest) {
+  return forwardAuthRequest(request, "/auth/logout");
 }

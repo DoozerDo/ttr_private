@@ -42,11 +42,11 @@ describe('AuthController', () => {
 
     expect(authService.register).toHaveBeenCalledWith(dto);
     expect(res.cookie).toHaveBeenCalledWith(
-      'ttr_token',
+      'access_token',
       response.accessToken,
       expect.objectContaining({
         httpOnly: true,
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         path: '/',
       }),
@@ -70,11 +70,11 @@ describe('AuthController', () => {
 
     expect(authService.login).toHaveBeenCalledWith(dto);
     expect(res.cookie).toHaveBeenCalledWith(
-      'ttr_token',
+      'access_token',
       response.accessToken,
       expect.objectContaining({
         httpOnly: true,
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         path: '/',
       }),
@@ -88,11 +88,11 @@ describe('AuthController', () => {
     const result = controller.logout(res as any);
 
     expect(res.cookie).toHaveBeenCalledWith(
-      'ttr_token',
+      'access_token',
       '',
       expect.objectContaining({
         httpOnly: true,
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         path: '/',
         maxAge: 0,
