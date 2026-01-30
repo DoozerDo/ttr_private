@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { SetupModuleCard } from "./SetupModuleCard";
+import { JourneyStepId } from "@/src/lib/journeyNav";
+import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 
 type WorkspaceRunnerProps = {
   baselineId: string | null;
   jobId: string | null;
+  onAutoRunComplete?: () => void;
 };
 
 type DimensionScoreValue = number | string | null | undefined;
@@ -249,7 +252,9 @@ const formatTimestamp = (value: string | null): string => {
   }
 };
 
-export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
+const BASELINE_STEP_ID: JourneyStepId = "baselines";
+
+export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: WorkspaceRunnerProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -263,6 +268,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
   const router = useRouter();
+  const journeyNavAppState = useJourneyNavAppState();
+  const autoRunCombinationRef = useRef<string | null>(null);
+  const autoRunCompletionTimerRef = useRef<number | null>(null);
+  const autoRunInitiatedRef = useRef(false);
+  const pendingCompletionKeyRef = useRef<string | null>(null);
 
   const dimensionEntries = useMemo(
     () => (result ? formatDimensionEntries(result) : []),
@@ -334,7 +344,6 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
 
   const hasComplianceFlags = complianceFlagList.length > 0;
 
-  const canRun = Boolean(baselineId) && Boolean(jobId) && !isRunning;
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(result);
 
@@ -389,6 +398,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
   };
 
   const statusLine = useMemo(() => {
+    if (!baselineId && !jobId && result) return "Latest compatibility score is ready.";
     if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
     if (!baselineId) return "Select a baseline to continue.";
     if (!jobId) return "Select a job to continue.";
@@ -398,7 +408,7 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     return "Ready to run compatibility scoring.";
   }, [baselineId, jobId, isRunning, isComplianceBlocked, result]);
 
-  const runAssessment = async () => {
+  const runAssessment = useCallback(async () => {
     if (!baselineId || !jobId || isRunning) return;
 
     setIsRunning(true);
@@ -453,10 +463,11 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
       setLatestJobId(null);
       setLatestBaselineId(null);
       setRunState(null);
+      autoRunInitiatedRef.current = false;
     } finally {
       setIsRunning(false);
     }
-  };
+  }, [baselineId, debugUiEnabled, isRunning, jobId]);
 
   const loadLastRun = async () => {
     if (!baselineId || !jobId || isLoadingLastRun) return;
@@ -524,16 +535,58 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
     }
   };
 
+  const handleAutoRunFinalize = useCallback(() => {
+    autoRunCombinationRef.current = null;
+    autoRunInitiatedRef.current = false;
+    pendingCompletionKeyRef.current = null;
+    journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
+    onAutoRunComplete?.();
+  }, [journeyNavAppState, onAutoRunComplete]);
+
+  useEffect(() => {
+    if (!baselineId || !jobId || isRunning) return;
+    const comboKey = `${baselineId}:${jobId}`;
+    if (autoRunCombinationRef.current === comboKey) return;
+    autoRunCombinationRef.current = comboKey;
+    autoRunInitiatedRef.current = true;
+    void runAssessment();
+  }, [baselineId, isRunning, jobId, runAssessment]);
+
+  useEffect(() => {
+    if (runState !== "ok" || !completeBanner || !result) return;
+    if (!autoRunInitiatedRef.current) return;
+    if (autoRunCompletionTimerRef.current) {
+      window.clearTimeout(autoRunCompletionTimerRef.current);
+      autoRunCompletionTimerRef.current = null;
+    }
+    const completionKey = autoRunCombinationRef.current;
+    if (!completionKey) return;
+    pendingCompletionKeyRef.current = completionKey;
+    autoRunCompletionTimerRef.current = window.setTimeout(() => {
+      autoRunCompletionTimerRef.current = null;
+      if (autoRunCombinationRef.current !== completionKey) {
+        pendingCompletionKeyRef.current = null;
+        return;
+      }
+      pendingCompletionKeyRef.current = null;
+      setCompleteBanner(null);
+      handleAutoRunFinalize();
+    }, 1500);
+
+    return () => {
+      if (autoRunCompletionTimerRef.current) {
+        window.clearTimeout(autoRunCompletionTimerRef.current);
+        autoRunCompletionTimerRef.current = null;
+      }
+      pendingCompletionKeyRef.current = null;
+    };
+  }, [completeBanner, handleAutoRunFinalize, result, runState]);
+
   return (
     <SetupModuleCard
       label="COMPATIBILITY SCORE"
       title="Score this pairing"
-      description="Run a fit assessment to compare your selected baseline and job."
-      primaryAction={
-        <FormButton onClick={runAssessment} disabled={!canRun}>
-          {isRunning ? "Running..." : "Run compatibility score"}
-        </FormButton>
-      }
+      description="Scoring begins automatically once you have selected both a baseline and a job."
     >
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-slate-300">{statusLine}</p>
@@ -546,6 +599,9 @@ export function WorkspaceRunner({ baselineId, jobId }: WorkspaceRunnerProps) {
           ) : null}
         </div>
       </div>
+      <p className="text-xs text-slate-400">
+        Compatibility scoring runs automatically when both selections are present.
+      </p>
 
       {showLoadLastRun ? (
         <button

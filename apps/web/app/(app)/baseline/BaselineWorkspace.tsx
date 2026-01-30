@@ -75,6 +75,14 @@ export function BaselineWorkspace({
     [pathname, router, searchParams],
   );
 
+  const clearSelections = useCallback(() => {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.delete("baselineId");
+    params.delete("jobId");
+    const target = buildTargetUrl(params, pathname);
+    router.replace(target);
+  }, [pathname, router, searchParams]);
+
   useEffect(() => {
     if (!hasHydrated) return;
     if (!baselineId || baselineExists) {
@@ -116,7 +124,11 @@ export function BaselineWorkspace({
 
         <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
 
-        <WorkspaceRunner baselineId={baselineId} jobId={jobId} />
+        <WorkspaceRunner
+          baselineId={baselineId}
+          jobId={jobId}
+          onAutoRunComplete={clearSelections}
+        />
       </div>
     </div>
   );
