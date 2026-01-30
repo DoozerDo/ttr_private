@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Alert } from "@/components/Alert";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
+import { BaselineProgressRail } from "./_components/BaselineProgressRail";
 import { JobsHub } from "./_components/JobsHub";
 import { WorkspaceRunner } from "./_components/WorkspaceRunner";
 
@@ -47,6 +48,15 @@ export function BaselineWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const baselineClearedRef = useRef(false);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [railState, setRailState] = useState<{
+    isScoring: boolean;
+    isCompletionMoment: boolean;
+    isComplianceBlocked: boolean;
+  }>({
+    isScoring: false,
+    isCompletionMoment: false,
+    isComplianceBlocked: false,
+  });
 
   useEffect(() => {
     setHasHydrated(true);
@@ -115,20 +125,35 @@ export function BaselineWorkspace({
         </Alert>
       ) : null}
 
-      <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
-        <BaselineDashboard
-          initialBaselines={initialBaselines}
-          initialFetchError={initialFetchError}
-          selectedBaselineId={baselineId}
-        />
+      <div className="w-full grid grid-cols-1 gap-6">
+        <div className="w-full lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
+          <div className="lg:sticky lg:top-10">
+            <BaselineProgressRail
+              hasBaselineSelected={Boolean(baselineId)}
+              hasJobSelected={Boolean(jobId)}
+              isScoring={railState.isScoring}
+              isCompletionMoment={railState.isCompletionMoment}
+              isComplianceBlocked={railState.isComplianceBlocked}
+            />
+          </div>
 
-        <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
+          <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
+            <BaselineDashboard
+              initialBaselines={initialBaselines}
+              initialFetchError={initialFetchError}
+              selectedBaselineId={baselineId}
+            />
 
-        <WorkspaceRunner
-          baselineId={baselineId}
-          jobId={jobId}
-          onAutoRunComplete={clearSelections}
-        />
+            <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
+
+            <WorkspaceRunner
+              baselineId={baselineId}
+              jobId={jobId}
+              onAutoRunComplete={clearSelections}
+              onProgressStateChange={setRailState}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

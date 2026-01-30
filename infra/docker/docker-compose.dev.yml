@@ -23,8 +23,13 @@ services:
     image: ghcr.io/targetthisrole/targetthisrole-web:dev
     restart: unless-stopped
     environment:
+      NODE_OPTIONS: --max_old_space_size=4096
       NODE_ENV: production
       API_BASE_URL: http://api:3001
+      WATCHPACK_POLLING: "true"
+      WATCHPACK_POLLING_INTERVAL: "500"
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
       # IMPORTANT: your proxy strips /api before forwarding to api:3001
       # so the browser must call the API through the proxy path:
       NEXT_PUBLIC_API_BASE_URL: https://${APP_DOMAIN}/api

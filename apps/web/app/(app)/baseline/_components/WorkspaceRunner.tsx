@@ -9,10 +9,17 @@ import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 
+type ProgressState = {
+  isScoring: boolean;
+  isCompletionMoment: boolean;
+  isComplianceBlocked: boolean;
+};
+
 type WorkspaceRunnerProps = {
   baselineId: string | null;
   jobId: string | null;
   onAutoRunComplete?: () => void;
+  onProgressStateChange?: (state: ProgressState) => void;
 };
 
 type DimensionScoreValue = number | string | null | undefined;
@@ -254,7 +261,12 @@ const formatTimestamp = (value: string | null): string => {
 
 const BASELINE_STEP_ID: JourneyStepId = "baselines";
 
-export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: WorkspaceRunnerProps) {
+export function WorkspaceRunner({
+  baselineId,
+  jobId,
+  onAutoRunComplete,
+  onProgressStateChange,
+}: WorkspaceRunnerProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -280,6 +292,12 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
   const autoRunInitiatedRef = useRef(false);
   const pendingCompletionKeyRef = useRef<string | null>(null);
   const autoRunTriggerTimerRef = useRef<number | null>(null);
+  const reportProgressState = useCallback(
+    (payload: ProgressState) => {
+      onProgressStateChange?.(payload);
+    },
+    [onProgressStateChange],
+  );
 
   useLayoutEffect(() => {
     setSelectedBaselineId(baselineId);
@@ -456,6 +474,11 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
     if (inFlightPairKey === pairKey) return;
     setInFlightPairKey(pairKey);
 
+    reportProgressState({
+      isScoring: true,
+      isCompletionMoment: false,
+      isComplianceBlocked: false,
+    });
     setIsRunning(true);
     setError(null);
     setCompleteBanner(null);
@@ -510,6 +533,11 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
       setLastRunAt(ts);
       const completionText =
         runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
+      reportProgressState({
+        isScoring: false,
+        isCompletionMoment: runState !== "compliance_blocked",
+        isComplianceBlocked: runState === "compliance_blocked",
+      });
       setCompleteBanner(completionText);
     } catch (runError: unknown) {
       const message =
@@ -520,6 +548,11 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
       setLatestBaselineId(null);
       setRunState(null);
       autoRunInitiatedRef.current = false;
+      reportProgressState({
+        isScoring: false,
+        isCompletionMoment: false,
+        isComplianceBlocked: false,
+      });
     } finally {
       setInFlightPairKey((current) => (current === pairKey ? null : current));
       setIsRunning(false);
@@ -528,6 +561,7 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
     debugUiEnabled,
     inFlightPairKey,
     isRunning,
+    reportProgressState,
     selectedBaselineId,
     selectedJobId,
   ]);
@@ -565,6 +599,11 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
         Boolean((nextResult as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
 
       setRunState(loadedIsBlocked ? "compliance_blocked" : "ok");
+      reportProgressState({
+        isScoring: false,
+        isCompletionMoment: false,
+        isComplianceBlocked: loadedIsBlocked,
+      });
 
       const resolvedJobId =
         typeof nextResult.jobId === "string"
@@ -606,6 +645,11 @@ export function WorkspaceRunner({ baselineId, jobId, onAutoRunComplete }: Worksp
     setSelectedBaselineId(null);
     setSelectedJobId(null);
     setInFlightPairKey(null);
+    reportProgressState({
+      isScoring: false,
+      isCompletionMoment: false,
+      isComplianceBlocked: false,
+    });
     journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
     onAutoRunComplete?.();
   }, [journeyNavAppState, onAutoRunComplete]);
