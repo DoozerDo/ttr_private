@@ -25,8 +25,14 @@ export class AdminBypassGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    let req: any;
+    let candidateId = '';
+    let authedUserId = '';
+    let route = '';
+
     try {
-      const req = context.switchToHttp().getRequest<any>();
+      req = context.switchToHttp().getRequest<any>();
+      route = req?.url ?? req?.originalUrl ?? 'unknown';
 
       const nodeEnv =
         this.config.get<string>('NODE_ENV') ??
@@ -35,11 +41,9 @@ export class AdminBypassGuard implements CanActivate {
 
       const isProd = nodeEnv === 'production';
 
-      // Future auth integration path
-      const authedUserId =
+      authedUserId =
         req?.user?.id != null ? String(req.user.id).trim() : '';
 
-      // Dev-only header (ignored in production)
       const rawDevHeader = req?.headers?.['x-dev-user-id'];
       const devUserId =
         !isProd && typeof rawDevHeader === 'string'
@@ -48,9 +52,7 @@ export class AdminBypassGuard implements CanActivate {
             ? String(rawDevHeader[0]).trim()
             : '';
 
-      // In prod: only accept authenticated user id
-      // In dev: accept header first, then fallback to authenticated user id if present
-      const candidateId = isProd ? authedUserId : devUserId || authedUserId;
+      candidateId = isProd ? authedUserId : devUserId || authedUserId;
 
       if (!candidateId) {
         if (isProd) {
@@ -70,13 +72,16 @@ export class AdminBypassGuard implements CanActivate {
       return true;
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      this.logger.warn(`AdminBypassGuard denied: ${msg}`);
+      const actor = candidateId || authedUserId || 'unknown';
+      const reason = 'admin_bypass_denied';
+      this.logger.warn(
+        `AdminBypassGuard denied (${reason}) actor=${actor} route=${route}: ${msg}`,
+      );
 
       if (err instanceof ForbiddenException) {
         throw err;
       }
 
-      // Never crash the request path
       throw new ForbiddenException('Admin access required');
     }
   }

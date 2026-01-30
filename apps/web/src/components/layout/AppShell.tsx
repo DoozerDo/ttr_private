@@ -183,7 +183,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
       try {
         const response = await originalFetch(...args);
         if (!response.ok) {
-          console.warn("Fetch failed", {
+          console.debug("Fetch failed", {
             url: args[0],
             status: response.status,
             route: window.location.pathname,

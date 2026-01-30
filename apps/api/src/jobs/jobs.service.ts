@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -83,6 +84,8 @@ export class JobsService {
     private readonly jobRepository: Repository<Job>,
   ) {}
 
+  private readonly logger = new Logger(JobsService.name);
+
   async ingestJobDescription(
     input: IngestJobDescriptionInput,
   ): Promise<IngestJobDescriptionResult> {
@@ -103,7 +106,9 @@ export class JobsService {
       const extracted = extractTextFromHtml(html);
       const normalizedText = this.normalizeRawDescription(extracted);
       this.validateDescriptionLength(normalizedText);
-      const normalizedOutcome = this.normalizeSafely(normalizedText);
+      const normalizedOutcome = this.normalizeSafely(normalizedText, {
+        source: 'ingest-url',
+      });
       return {
         rawDescription: normalizedText,
         originalRawDescription: extracted,
@@ -116,7 +121,9 @@ export class JobsService {
     const rawText = pastedText!;
     const normalizedText = this.normalizeRawDescription(rawText);
     this.validateDescriptionLength(normalizedText);
-    const normalizedOutcome = this.normalizeSafely(normalizedText);
+    const normalizedOutcome = this.normalizeSafely(normalizedText, {
+      source: 'ingest-text',
+    });
 
     return {
       rawDescription: normalizedText,
@@ -137,7 +144,12 @@ export class JobsService {
     );
     this.validateDescriptionLength(normalizedInput);
 
-    const normalizedOutcome = this.normalizeSafely(normalizedInput);
+    const normalizedOutcome = this.normalizeSafely(normalizedInput, {
+      source: 'create-job',
+      jobId: payload.sourceExternalId ?? payload.sourceProviderId ?? 'pre-save',
+      title: payload.title ?? null,
+      company: payload.company ?? null,
+    });
     const responsibilities =
       payload.responsibilities && payload.responsibilities.length > 0
         ? sanitizeListItems(payload.responsibilities)
@@ -403,7 +415,15 @@ export class JobsService {
     }
   }
 
-  private normalizeSafely(rawDescription: string): {
+  private normalizeSafely(
+    rawDescription: string,
+    context?: {
+      jobId?: string;
+      title?: string | null;
+      company?: string | null;
+      source?: string;
+    },
+  ): {
     responsibilities: string[];
     requirements: string[];
     warning?: JobWarning;
@@ -415,7 +435,17 @@ export class JobsService {
         requirements: normalized.requirements,
       };
     } catch (error) {
-      console.error('Job normalization failed', error);
+      const errorName = error instanceof Error ? error.constructor.name : typeof error;
+      const rawMessage =
+        error instanceof Error ? error.message : String(error ?? 'unknown error');
+      const trimmedMessage = rawMessage.split('\n')[0].slice(0, 120);
+      const jobIdLabel = context?.jobId ?? 'pending';
+      const titleLabel = context?.title ?? 'unknown';
+      const companyLabel = context?.company ?? 'unknown';
+      const sourceLabel = context?.source ?? 'unspecified';
+      this.logger.warn(
+        `reason=normalization_failed_saved source=${sourceLabel} jobId=${jobIdLabel} title=${titleLabel} company=${companyLabel} error=${errorName}:${trimmedMessage}`,
+      );
       return {
         responsibilities: [],
         requirements: [],

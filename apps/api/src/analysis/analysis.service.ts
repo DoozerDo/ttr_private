@@ -4,6 +4,7 @@ import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -307,6 +308,28 @@ export class AnalysisService {
     private readonly fitScoringService: FitScoringService,
     private readonly complianceService: ComplianceService,
   ) {}
+
+  private readonly logger = new Logger(AnalysisService.name);
+  private readonly shortTextWarningKeys = new Set<string>();
+  private shortTextWarningRequestCounter = 0;
+
+  private nextShortTextWarningRequestRunId() {
+    return this.shortTextWarningRequestCounter++;
+  }
+
+  private buildShortTextWarningKey(jobKey: string, runId: number) {
+    return `${jobKey}:${runId}`;
+  }
+
+  private logShortTextWarningOnce(key: string, message: string) {
+    if (this.shortTextWarningKeys.has(key)) return;
+    this.shortTextWarningKeys.add(key);
+    this.logger.debug(message);
+  }
+
+  private clearShortTextWarningKey(key: string) {
+    this.shortTextWarningKeys.delete(key);
+  }
 
   private readonly defaultCalibration: {
     profileName: string;
@@ -987,8 +1010,12 @@ export class AnalysisService {
           };
     }
 
-    const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
-      this.buildCanonicalJobAssets(jobPayload);
+    const jobKey = job?.id ?? jobId ?? 'ad-hoc';
+    const requestRunId = this.nextShortTextWarningRequestRunId();
+    const shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
+    try {
+      const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
+        this.buildCanonicalJobAssets(jobPayload);
 
     const normalizedResponsibilities =
       canonicalJobForHash.normalizedResponsibilities;
@@ -1004,9 +1031,8 @@ export class AnalysisService {
     );
 
     if (jobTextForScoring.jobRawTextTooShort) {
-      console.warn(
-        `Raw job description for job ${job?.id ?? jobId ?? 'ad-hoc'} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
-      );
+      const warningMessage = `Raw job description for job ${jobKey} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`;
+      this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
     }
 
     const chosenText = jobTextForScoring.jobText;
@@ -1192,6 +1218,9 @@ export class AnalysisService {
       ...(debugInfo ? { debug: debugInfo } : {}),
       scoringProof,
     };
+    } finally {
+      this.clearShortTextWarningKey(shortTextWarningKey);
+    }
   }
 
   async analyzeForUser(
@@ -1241,96 +1270,107 @@ export class AnalysisService {
           where: { id: jobId, userId },
         })
       : null;
-    const jobDescription = job
-      ? job.rawDescription
-      : payload.jobDescription?.trim();
 
-    if (!jobDescription) {
-      throw new NotFoundException('Job not found');
-    }
-
-    const normalizedJobDescription =
-      this.complianceService.normalizeText(jobDescription);
-    const jobRawChars = getCharCount(jobDescription);
-    const jobRawTextTooShort = jobRawChars > 0 && jobRawChars < 3000;
-    if (jobRawTextTooShort) {
-      console.warn(
-        `Raw job description for baseline ${baselineId} is only ${jobRawChars} characters (<3,000).`,
-      );
-    }
-
-    const baselineText = this.buildBaselineText(includedSections);
-    const baselineKeywords = this.normalizeKeywords(baselineText);
-    const jobKeywords = this.normalizeKeywords(jobDescription);
-
-    const baselineSet = new Set(baselineKeywords.keys());
-    const jobSet = new Set(jobKeywords.keys());
-
-    const overlap = [...jobSet].filter((keyword) => baselineSet.has(keyword));
-    const gaps = [...jobSet].filter((keyword) => !baselineSet.has(keyword));
-
-    const overlapSorted = this.sortByFrequency(jobKeywords, overlap);
-    const gapsSorted = this.sortByFrequency(jobKeywords, gaps);
-
-    const total = jobSet.size;
-    const matched = overlap.length;
-    const score = total === 0 ? 0 : Math.round((matched / total) * 100);
-
-    const strengths = overlapSorted.slice(0, 8);
-    const gapList = gapsSorted.slice(0, 8);
-
-    const summary =
-      total === 0
-        ? 'No keywords found in the job description.'
-        : `Matched ${matched} of ${total} key terms from the job description.`;
-
-    const generatedSectionsForCompliance = normalizedJobDescription
-      ? [{ title: 'Job Description', content: normalizedJobDescription }]
-      : undefined;
-
-    const outputHash = sha256(
-      `${baseline.hash ?? ''}:${normalizedJobDescription}`,
+    const jobKey = job?.id ?? jobId ?? baselineId ?? 'ad-hoc';
+    const shortTextWarningKey = this.buildShortTextWarningKey(
+      jobKey,
+      this.nextShortTextWarningRequestRunId(),
     );
 
-    const compliance = await this.complianceService.validateAndAudit({
-      action: ComplianceAction.FIT_SCORE,
-      actorId: userId,
-      baselineVersion: { hash: baseline.hash } as BaselineVersion,
-      job,
-      outputHash,
-      baselineSections: complianceBaselineSections,
-      generatedSections: generatedSectionsForCompliance,
-    });
+    try {
+      const jobDescription = job
+        ? job.rawDescription
+        : payload.jobDescription?.trim();
 
-    if (compliance.blocked) {
-      throw new BadRequestException({
-        error: {
-          code: 'compliance_blocked',
-          message: 'Compliance validation failed.',
-          details: { compliance_flags: compliance.complianceFlags },
-        },
+      if (!jobDescription) {
+        throw new NotFoundException('Job not found');
+      }
+
+      const normalizedJobDescription =
+        this.complianceService.normalizeText(jobDescription);
+      const jobRawChars = getCharCount(jobDescription);
+      const jobRawTextTooShort = jobRawChars > 0 && jobRawChars < 3000;
+      if (jobRawTextTooShort) {
+        const warningMessage = `Raw job description for baseline ${baselineId} is only ${jobRawChars} characters (<3,000).`;
+        this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
+      }
+
+      const baselineText = this.buildBaselineText(includedSections);
+      const baselineKeywords = this.normalizeKeywords(baselineText);
+      const jobKeywords = this.normalizeKeywords(jobDescription);
+
+      const baselineSet = new Set(baselineKeywords.keys());
+      const jobSet = new Set(jobKeywords.keys());
+
+      const overlap = [...jobSet].filter((keyword) => baselineSet.has(keyword));
+      const gaps = [...jobSet].filter((keyword) => !baselineSet.has(keyword));
+
+      const overlapSorted = this.sortByFrequency(jobKeywords, overlap);
+      const gapsSorted = this.sortByFrequency(jobKeywords, gaps);
+
+      const total = jobSet.size;
+      const matched = overlap.length;
+      const score = total === 0 ? 0 : Math.round((matched / total) * 100);
+
+      const strengths = overlapSorted.slice(0, 8);
+      const gapList = gapsSorted.slice(0, 8);
+
+      const summary =
+        total === 0
+          ? 'No keywords found in the job description.'
+          : `Matched ${matched} of ${total} key terms from the job description.`;
+
+      const generatedSectionsForCompliance = normalizedJobDescription
+        ? [{ title: 'Job Description', content: normalizedJobDescription }]
+        : undefined;
+
+      const outputHash = sha256(
+        `${baseline.hash ?? ''}:${normalizedJobDescription}`,
+      );
+
+      const compliance = await this.complianceService.validateAndAudit({
+        action: ComplianceAction.FIT_SCORE,
+        actorId: userId,
+        baselineVersion: { hash: baseline.hash } as BaselineVersion,
+        job,
+        outputHash,
+        baselineSections: complianceBaselineSections,
+        generatedSections: generatedSectionsForCompliance,
       });
-    }
 
-    return {
-      ok: true,
-      baselineId: baseline.id,
-      score,
-      strengths,
-      gaps: gapList,
-      summary,
-      compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
-      audit_id: compliance.audit.id,
-      auditId: compliance.audit.id,
-      baseline_version_hash:
-        compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
-    };
+      if (compliance.blocked) {
+        throw new BadRequestException({
+          error: {
+            code: 'compliance_blocked',
+            message: 'Compliance validation failed.',
+            details: { compliance_flags: compliance.complianceFlags },
+          },
+        });
+      }
+
+      return {
+        ok: true,
+        baselineId: baseline.id,
+        score,
+        strengths,
+        gaps: gapList,
+        summary,
+        compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
+        audit_id: compliance.audit.id,
+        auditId: compliance.audit.id,
+        baseline_version_hash:
+          compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
+      };
+    } finally {
+      this.clearShortTextWarningKey(shortTextWarningKey);
+    }
   }
 
   async runFitAssessment(
     userId: string,
     payload: RunFitAssessmentDto,
   ): Promise<RunAssessmentResult> {
+    let shortTextWarningKey: string | undefined;
     try {
       const normalizedPayload = payload as RunFitAssessmentPayload;
       const baselineCandidate =
@@ -1398,6 +1438,10 @@ export class AnalysisService {
         throw new NotFoundException('Job not found');
       }
 
+      const jobKey = job.id;
+      const requestRunId = this.nextShortTextWarningRequestRunId();
+      shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
+
       const filteredSections = this.getIncludedSections(baseline.sections);
       const includedSections = filteredSections.map((section) => ({
         type: section.sectionType ?? section.type,
@@ -1443,10 +1487,9 @@ export class AnalysisService {
         canonicalJobForHash.rawDescription,
       );
 
-      if (jobTextForScoring.jobRawTextTooShort) {
-        console.warn(
-          `Raw job description for job ${job.id} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
-        );
+      if (jobTextForScoring.jobRawTextTooShort && shortTextWarningKey) {
+        const warningMessage = `Raw job description for job ${job.id} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`;
+        this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
       }
 
       const jobTextCharsScored = getCharCount(jobTextForScoring.jobText);
@@ -1681,6 +1724,10 @@ export class AnalysisService {
       throw new InternalServerErrorException(
         'Unexpected error while running fit assessment',
       );
+    } finally {
+      if (shortTextWarningKey) {
+        this.clearShortTextWarningKey(shortTextWarningKey);
+      }
     }
   }
 
@@ -1688,6 +1735,8 @@ export class AnalysisService {
     userId: string,
     payload: RunExpandedFitAssessmentDto,
   ) {
+    let shortTextWarningKey: string | undefined;
+    try {
     const baselineId = payload.baselineId?.trim();
     const jobId = payload.jobId?.trim();
 
@@ -1728,6 +1777,10 @@ export class AnalysisService {
     if (!job) {
       throw new NotFoundException('Job not found');
     }
+
+    const jobKey = job.id;
+    const requestRunId = this.nextShortTextWarningRequestRunId();
+    shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
 
     const interviewId = payload.interviewId?.trim();
     const interview = interviewId
@@ -1788,10 +1841,9 @@ export class AnalysisService {
         sourceUrl: job.sourceUrl ?? null,
       });
 
-    if (jobTextForScoring.jobRawTextTooShort) {
-      console.warn(
-        `Raw job description for job ${job.id} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`,
-      );
+    if (jobTextForScoring.jobRawTextTooShort && shortTextWarningKey) {
+      const warningMessage = `Raw job description for job ${jobKey} is only ${jobTextForScoring.jobRawTextCharCount} characters (<${RAW_TEXT_WARNING_THRESHOLD.toLocaleString()}).`;
+      this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
     }
 
     const inputsHash = this.buildInputsHash(
@@ -1889,6 +1941,11 @@ export class AnalysisService {
       baseline_version_hash:
         compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
     };
+    } finally {
+      if (shortTextWarningKey) {
+        this.clearShortTextWarningKey(shortTextWarningKey);
+      }
+    }
   }
 
   async getFitAssessments(userId: string, jobId?: string) {

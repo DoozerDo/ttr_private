@@ -83,7 +83,9 @@ export default function CalibratePage() {
         const parsed = JSON.parse(cachedProfiles) as Profile[];
         setCustomProfiles(parsed);
       } catch (error) {
-        console.warn("Unable to parse cached calibration profiles", error);
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("Unable to parse cached calibration profiles", error);
+        }
       }
     }
   }, []);

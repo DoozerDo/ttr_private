@@ -22,6 +22,7 @@ RUN npm install --no-save --include=optional --no-audit --no-fund \
 COPY . .
 
 # Build only the web workspace (validation)
+ENV TTR_SILENCE_BASELINE_BROWSER_MAPPING_WARNING=1
 RUN npm -w apps/web run build
 
 

@@ -14,12 +14,12 @@ export class DevUserGuard implements CanActivate {
   constructor(private readonly config: ConfigService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const nodeEnv =
+      this.config.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? 'development';
+    const isProd = nodeEnv === 'production';
+
     try {
       const request = context.switchToHttp().getRequest<any>();
-
-      const nodeEnv =
-        this.config.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? 'development';
-      const isProd = nodeEnv === 'production';
 
       const authedUserId =
         request?.user?.id != null ? String(request.user.id).trim() : '';
@@ -51,7 +51,12 @@ export class DevUserGuard implements CanActivate {
       return true;
     } catch (error: any) {
       const message = error?.message ?? String(error);
-      this.logger.warn(`DevUserGuard denied: ${message}`);
+      const shouldWarn = isProd || !(error instanceof ForbiddenException);
+      if (shouldWarn) {
+        this.logger.warn(`DevUserGuard denied: ${message}`);
+      } else {
+        this.logger.debug(`DevUserGuard denied: ${message}`);
+      }
 
       if (error instanceof ForbiddenException) {
         throw error;
