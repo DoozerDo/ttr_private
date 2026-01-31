@@ -13,6 +13,7 @@ type SetupModuleCardProps = {
   children: ReactNode;
   className?: string;
   containerStyle?: CSSProperties;
+  titleClassName?: string;
 };
 
 export function SetupModuleCard({
@@ -24,6 +25,7 @@ export function SetupModuleCard({
   children,
   className,
   containerStyle,
+  titleClassName,
 }: SetupModuleCardProps) {
   const mergedStyle = containerStyle
     ? { ...ttrComponents.basePanel, ...containerStyle }
@@ -42,7 +44,12 @@ export function SetupModuleCard({
       <header className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
         <div className="flex flex-col gap-1">
           <p style={ttrTypography.subtleLabel}>{label}</p>
-          <h2 style={{ ...ttrTypography.h2, margin: 0 }}>{title}</h2>
+          <h2
+            style={{ ...ttrTypography.h2, margin: 0 }}
+            className={titleClassName ?? undefined}
+          >
+            {title}
+          </h2>
           {description ? (
             <p style={{ ...ttrTypography.paragraph, margin: 0, color: "rgba(226,232,240,0.7)" }}>
               {description}

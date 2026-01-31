@@ -149,7 +149,7 @@ export function BaselineDashboard({
         (({
           isDuplicate: false,
           versionNumber: baselineRecord.version ?? 0,
-          message: `Baseline uploaded as version ${baselineRecord.version ?? 0}.`,
+          message: `Resume uploaded as version ${baselineRecord.version ?? 0}.`,
         } as BaselineUploadStatus));
 
       setUploadStatus(status);
@@ -171,7 +171,7 @@ export function BaselineDashboard({
       markJourneyStepCompleted("baselines");
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
-      setError("Unable to upload baseline right now.");
+      setError("Unable to upload resume right now.");
     } finally {
       setIsUploading(false);
     }
@@ -184,12 +184,13 @@ export function BaselineDashboard({
 
   return (
     <SetupModuleCard
-      label="BASELINE"
-      title="Baseline"
+      label="RESUME"
+      title="Resume"
+      titleClassName="text-xl font-semibold tracking-tight text-slate-100"
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
         <FormButton onClick={triggerUploadClick} disabled={isUploading}>
-          {isUploading ? "Uploading..." : "Add baseline"}
+          {isUploading ? "Uploading..." : "Add resume"}
         </FormButton>
       }
     >
@@ -217,15 +218,9 @@ export function BaselineDashboard({
         disabled={isUploading}
       />
 
-      <div className="space-y-3 text-sm text-slate-300">
-        <p className="m-0">
-          Upload a PDF or DOCX, and weƒ?Tll keep it securely stored for future scoring.
-        </p>
-        {file ? (
-          <p className="text-xs text-slate-400">Selected: {file.name}</p>
-        ) : null}
-      </div>
-
+      {file ? (
+        <p className="text-xs text-slate-400">Selected: {file.name}</p>
+      ) : null}
       {selectedBaselineName ? (
         <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
           Selected: {selectedBaselineName}
@@ -249,7 +244,7 @@ export function BaselineDashboard({
       <div className="h-px bg-white/10" />
 
       {initialFetchError ? (
-        <Alert intent="error" title="Unable to load baselines">
+        <Alert intent="error" title="Unable to load resumes">
           <p className="text-sm text-current">{initialFetchError}</p>
         </Alert>
       ) : null}
@@ -257,7 +252,7 @@ export function BaselineDashboard({
       {sortedBaselines.length === 0 ? (
         initialFetchError ? null : (
           <p className="m-0 text-[13px] text-slate-400">
-            No baselines uploaded yet.
+            No resumes uploaded yet.
           </p>
         )
       ) : (
@@ -301,7 +296,7 @@ export function BaselineDashboard({
                       <OverflowMenu
                         onArchive={() => handleArchiveBaseline(baseline.id)}
                         loading={archivingBaselineId === baseline.id}
-                        ariaLabel="Baseline overflow actions"
+                        ariaLabel="Resume overflow actions"
                       />
                     ) : null}
                   </div>
@@ -317,3 +312,4 @@ export function BaselineDashboard({
     </SetupModuleCard>
   );
 }
+

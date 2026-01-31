@@ -30,7 +30,7 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "jobTracker",
-    label: "APPLICATION TRACKER",
+    label: "APPLICATION LOG",
     href: "/applications",
     requiresAuth: true,
     subtext: "What roles am I pursuing?",

@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useReducedMotion } from "framer-motion";
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactElement } from "react";
 
 import {
   JourneyNavState,
@@ -28,6 +28,89 @@ type JourneyNavV1Props = {
 const LOCKED_TOOLTIP = "Locked until previous steps are completed.";
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const renderStepIcon = (stepId: JourneyStepId): ReactElement | null => {
+  if (stepId === "baselines") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.5"
+        stroke="currentColor"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="8" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="5" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
+  if (stepId === "resume") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.6"
+        stroke="currentColor"
+        fill="none"
+      >
+        <path d="M6 4h8l5 5v11H6z" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M14 4v6h6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M8 11h8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M8 15h8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M8 19h5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (stepId === "jobTracker") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.4"
+        stroke="currentColor"
+        fill="none"
+      >
+        <rect
+          x="6"
+          y="4"
+          width="12"
+          height="16"
+          rx="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M9.5 8h5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M9.5 12h5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M9.5 16h3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5 6c1 0 1 1.5 0 1.5" strokeLinecap="round" />
+        <path d="M5 10c1 0 1 1.5 0 1.5" strokeLinecap="round" />
+        <path d="M5 14c1 0 1 1.5 0 1.5" strokeLinecap="round" />
+        <path d="M5 18c1 0 1 1.5 0 1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (stepId === "interviewToolkit") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.6"
+        stroke="currentColor"
+        fill="none"
+      >
+        <path d="M5 8h14v8H9l-4 4z" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M7 10h10" strokeLinecap="round" />
+        <path d="M7 14h6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  return null;
+};
 
 export function JourneyNavV1({
   state,
@@ -114,9 +197,16 @@ export function JourneyNavV1({
                 .filter(Boolean)
                 .join(" ");
 
+              const iconAreaClass = [
+                "journey-nav-icon-area",
+                isActive ? "ttr-active-ring-pulse" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+
               const stepContent = (
                 <>
-                  <span className="journey-nav-icon-area">
+                  <span className={iconAreaClass}>
                     {showPulse ? (
                       <span className="journey-nav-target-pulse" aria-hidden />
                     ) : null}
@@ -124,7 +214,7 @@ export function JourneyNavV1({
                     {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
 
                     <span className="journey-nav-icon-target" aria-hidden>
-                      {isActive ? <span className="journey-nav-icon-center" /> : null}
+                      {renderStepIcon(step.id)}
                     </span>
                   </span>
 
@@ -442,13 +532,11 @@ export function JourneyNavV1({
           z-index: 3;
         }
 
-        .journey-nav-icon-center {
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
-          background: var(--signal-burnt-orange);
-          box-shadow: 0 0 8px rgba(194, 77, 12, 0.75);
-          z-index: 4;
+        .journey-nav-icon-target svg {
+          position: absolute;
+          inset: 2px;
+          width: calc(100% - 4px);
+          height: calc(100% - 4px);
         }
 
         .journey-nav-step-label {

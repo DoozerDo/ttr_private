@@ -13,6 +13,7 @@ type ProgressState = {
   isScoring: boolean;
   isCompletionMoment: boolean;
   isComplianceBlocked: boolean;
+  isPreparingMatch: boolean;
 };
 
 type WorkspaceRunnerProps = {
@@ -272,7 +273,6 @@ export function WorkspaceRunner({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
   const [showDetails, setShowDetails] = useState(false);
-  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
   const [latestAssessmentId, setLatestAssessmentId] = useState<string | null>(null);
@@ -292,12 +292,46 @@ export function WorkspaceRunner({
   const autoRunInitiatedRef = useRef(false);
   const pendingCompletionKeyRef = useRef<string | null>(null);
   const autoRunTriggerTimerRef = useRef<number | null>(null);
+  const scoreSummaryRef = useRef<HTMLDivElement | null>(null);
+  const [scoreSummaryPop, setScoreSummaryPop] = useState(false);
+  const scorePopTimeoutRef = useRef<number | null>(null);
+  const [isPreparingMatch, setIsPreparingMatch] = useState(false);
+  const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
     (payload: ProgressState) => {
       onProgressStateChange?.(payload);
     },
     [onProgressStateChange],
   );
+  const triggerScoreSummaryPop = useCallback(() => {
+    if (scorePopTimeoutRef.current) {
+      window.clearTimeout(scorePopTimeoutRef.current);
+      scorePopTimeoutRef.current = null;
+    }
+
+    setScoreSummaryPop(false);
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(() => {
+        setScoreSummaryPop(true);
+        scorePopTimeoutRef.current = window.setTimeout(() => {
+          setScoreSummaryPop(false);
+          scorePopTimeoutRef.current = null;
+        }, 600);
+      });
+    } else {
+      setScoreSummaryPop(true);
+    }
+
+    if (scoreSummaryRef.current && typeof window !== "undefined") {
+      const rect = scoreSummaryRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
+      const mostlyVisible = visibleHeight >= rect.height * 0.7;
+      if (!mostlyVisible) {
+        scoreSummaryRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  }, []);
 
   useLayoutEffect(() => {
     setSelectedBaselineId(baselineId);
@@ -318,6 +352,14 @@ export function WorkspaceRunner({
     setSelectedJobId(jobId);
   }, [jobId]);
 
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && scorePopTimeoutRef.current) {
+        window.clearTimeout(scorePopTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const displayResult = latestCompletedScore ?? result;
   const dimensionEntries = useMemo(
     () => (displayResult ? formatDimensionEntries(displayResult) : []),
@@ -326,8 +368,6 @@ export function WorkspaceRunner({
 
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
-  const runDebugInfo = debugUiEnabled && displayResult?.debug ? displayResult.debug : null;
-
   const complianceTitleMap: Record<string, string> = {
     invented_company: "Invented company reference",
     invented_role: "Invented role or title",
@@ -425,8 +465,7 @@ export function WorkspaceRunner({
   );
 
   const detailsToggleRow = (
-    <div className="flex items-center justify-between gap-3">
-      <p className="text-xs text-slate-400">Details are hidden by default.</p>
+    <div className="flex justify-end">
       <button
         type="button"
         onClick={() => setShowDetails((prev) => !prev)}
@@ -456,14 +495,21 @@ export function WorkspaceRunner({
 
   const statusLine = useMemo(() => {
     if (!baselineId && !jobId && latestCompletedScore) return "Latest compatibility score is ready.";
-    if (!baselineId && !jobId) return "Select a baseline and a job to run scoring.";
-    if (!baselineId) return "Select a baseline to continue.";
+    if (!baselineId && !jobId) return "Select a resume and a job to run scoring.";
+    if (!baselineId) return "Select a resume to continue.";
     if (!jobId) return "Select a job to continue.";
     if (isRunning) return "Running compatibility score.";
     if (isComplianceBlocked) return "Compliance must be resolved before scoring.";
     if (displayResult) return "Compatibility score ready.";
     return "Ready to run compatibility scoring.";
   }, [baselineId, jobId, isRunning, isComplianceBlocked, displayResult, latestCompletedScore]);
+
+  const resultCardClasses = [
+    "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200 transition-all duration-300 ease-out",
+    scoreSummaryPop ? "score-summary-pop" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const runAssessment = useCallback(async () => {
     const baselineForRun = selectedBaselineId;
@@ -474,10 +520,14 @@ export function WorkspaceRunner({
     if (inFlightPairKey === pairKey) return;
     setInFlightPairKey(pairKey);
 
+    if (isPreparingMatch) {
+      setIsPreparingMatch(false);
+    }
     reportProgressState({
       isScoring: true,
       isCompletionMoment: false,
       isComplianceBlocked: false,
+      isPreparingMatch: false,
     });
     setIsRunning(true);
     setError(null);
@@ -537,8 +587,10 @@ export function WorkspaceRunner({
         isScoring: false,
         isCompletionMoment: runState !== "compliance_blocked",
         isComplianceBlocked: runState === "compliance_blocked",
+        isPreparingMatch: false,
       });
       setCompleteBanner(completionText);
+      triggerScoreSummaryPop();
     } catch (runError: unknown) {
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
@@ -552,6 +604,7 @@ export function WorkspaceRunner({
         isScoring: false,
         isCompletionMoment: false,
         isComplianceBlocked: false,
+        isPreparingMatch: false,
       });
     } finally {
       setInFlightPairKey((current) => (current === pairKey ? null : current));
@@ -603,6 +656,7 @@ export function WorkspaceRunner({
         isScoring: false,
         isCompletionMoment: false,
         isComplianceBlocked: loadedIsBlocked,
+        isPreparingMatch: false,
       });
 
       const resolvedJobId =
@@ -649,6 +703,7 @@ export function WorkspaceRunner({
       isScoring: false,
       isCompletionMoment: false,
       isComplianceBlocked: false,
+      isPreparingMatch: false,
     });
     journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
     onAutoRunComplete?.();
@@ -683,7 +738,7 @@ export function WorkspaceRunner({
       autoRunCombinationRef.current = pairKey;
       autoRunInitiatedRef.current = true;
       void runAssessment();
-    }, 300);
+    }, AUTO_RUN_DELAY_MS);
 
     return () => {
       if (autoRunTriggerTimerRef.current !== null) {
@@ -701,6 +756,33 @@ export function WorkspaceRunner({
     selectedBaselineId,
     selectedJobId,
   ]);
+
+  useEffect(() => {
+    if (!selectedBaselineId || !selectedJobId) {
+      if (isPreparingMatch) {
+        setIsPreparingMatch(false);
+        reportProgressState({
+          isScoring: false,
+          isCompletionMoment: false,
+          isComplianceBlocked: false,
+          isPreparingMatch: false,
+        });
+      }
+      return;
+    }
+
+    if (isRunning || isPreparingMatch) {
+      return;
+    }
+
+    setIsPreparingMatch(true);
+    reportProgressState({
+      isScoring: false,
+      isCompletionMoment: false,
+      isComplianceBlocked: false,
+      isPreparingMatch: true,
+    });
+  }, [isPreparingMatch, isRunning, reportProgressState, selectedBaselineId, selectedJobId]);
 
   useEffect(() => {
     if (runState !== "ok" || !completeBanner || !displayResult) return;
@@ -721,7 +803,7 @@ export function WorkspaceRunner({
       pendingCompletionKeyRef.current = null;
       setCompleteBanner(null);
       handleAutoRunFinalize();
-    }, 1800);
+    }, 3000);
 
     return () => {
       if (autoRunCompletionTimerRef.current) {
@@ -735,20 +817,16 @@ export function WorkspaceRunner({
   return (
     <SetupModuleCard
       label="COMPATIBILITY SCORE"
-      title="Score this pairing"
-      description="Scoring begins automatically once you have selected both a baseline and a job."
+      title="Compatibility Score"
+      titleClassName="text-xl font-semibold tracking-tight text-slate-100"
+      description="Scoring begins automatically once you have selected both a resume and a job."
     >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-300">{statusLine}</p>
-        <div className="text-xs text-slate-400">
-          <div>Last run: {formatTimestamp(lastRunAt)}</div>
-          {completeBanner && (displayResult || runState) ? (
-            <div className="mt-1 inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
-              {completeBanner}
-            </div>
-          ) : null}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-300">{statusLine}</p>
+          <div className="text-xs text-slate-400">
+            <div>Last run: {formatTimestamp(lastRunAt)}</div>
+          </div>
         </div>
-      </div>
       {isRunning ? (
         <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
           Scoring compatibility.
@@ -764,11 +842,7 @@ export function WorkspaceRunner({
             </FormButton>
           </div>
         </div>
-      ) : (
-        <p className="text-xs text-slate-400">
-          Compatibility scoring runs automatically when both selections are present.
-        </p>
-      )}
+      ) : null}
 
       {showLoadLastRun ? (
         <button
@@ -785,7 +859,14 @@ export function WorkspaceRunner({
       ) : null}
 
       {showResult ? (
-        <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200">
+        <div ref={scoreSummaryRef} className={resultCardClasses}>
+          {completeBanner && (displayResult || runState) ? (
+            <div className="flex justify-end">
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
+                {completeBanner}
+              </span>
+            </div>
+          ) : null}
           {isComplianceBlocked ? (
             <>
               <div className="flex items-baseline justify-between">
@@ -932,7 +1013,7 @@ export function WorkspaceRunner({
                       <div className="grid gap-1 text-xs text-slate-300">
                         <p>Assessment ID: {displayResult.scoringProof.assessmentId ?? "n/a"}</p>
                         <p>
-                          Baseline chars scored:{" "}
+                          Resume chars scored:{" "}
                           {formatProofNumber(displayResult.scoringProof.baselineTextCharsScored)}
                         </p>
                         <p>
@@ -961,7 +1042,7 @@ export function WorkspaceRunner({
                           </p>
                         ) : null}
                         <p>
-                          Baseline truncated:{" "}
+                          Resume truncated:{" "}
                           {displayResult.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
                         </p>
                         <p>
@@ -976,88 +1057,6 @@ export function WorkspaceRunner({
             </>
           )}
 
-          {!isComplianceBlocked && runDebugInfo ? (
-            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-3 text-xs text-slate-300">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">
-                  Debug
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowDebugInfo((prev) => !prev)}
-                  className="text-[11px] font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
-                >
-                  {showDebugInfo ? "Hide info" : "Show info"}
-                </button>
-              </div>
-              {showDebugInfo ? (
-                <div className="mt-2 space-y-1 text-[11px] text-slate-300">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Baseline ID</span>
-                    <span className="text-slate-100">{runDebugInfo.baselineId}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Baseline hash</span>
-                    <span className="text-slate-100">
-                      {runDebugInfo.baselineVersionHash ?? "n/a"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Baseline sections</span>
-                    <span className="text-slate-100">
-                      {runDebugInfo.baselineSelectedSectionCount} sections{" "}
-                      {formatProofNumber(runDebugInfo.baselineTotalChars)} chars
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Job ID</span>
-                    <span className="text-slate-100">{runDebugInfo.jobId ?? "n/a"}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Job raw text</span>
-                    <span className="text-slate-100">
-                      {formatProofNumber(runDebugInfo.jobRawChars)} chars
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Responsibilities</span>
-                    <span className="text-slate-100">
-                      {runDebugInfo.normalizedResponsibilitiesCount.toLocaleString()} items{" "}
-                      {formatProofNumber(runDebugInfo.normalizedResponsibilitiesChars)} chars
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Requirements</span>
-                    <span className="text-slate-100">
-                      {runDebugInfo.normalizedRequirementsCount.toLocaleString()} items{" "}
-                      {formatProofNumber(runDebugInfo.normalizedRequirementsChars)} chars
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Total score</span>
-                    <span className="text-slate-100">
-                      {typeof runDebugInfo.totalScore === "number"
-                        ? runDebugInfo.totalScore.toFixed(1)
-                        : "n/a"}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
-                      Dimension scores
-                    </p>
-                    <div className="grid gap-1 text-[11px] text-slate-300">
-                      {Object.entries(runDebugInfo.dimensionScores).map(([label, value]) => (
-                        <p key={label}>
-                          {label}: {renderDimensionValue(value)}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
           {!isComplianceBlocked && viewResultsHref ? (
             <div className="flex justify-end">
               <FormButton onClick={() => router.push(viewResultsHref)} disabled={isRunning}>
@@ -1071,6 +1070,29 @@ export function WorkspaceRunner({
           Run a fit assessment to see your compatibility score.
         </p>
       )}
+      <style jsx>{`
+        .score-summary-card {
+          transform-origin: center;
+        }
+
+        .score-summary-pop {
+          animation: score-pop 0.6s ease-out;
+          outline: 2px solid rgba(251, 191, 36, 0.8);
+          outline-offset: 6px;
+        }
+
+        @keyframes score-pop {
+          0% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.04);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+      `}</style>
     </SetupModuleCard>
   );
 }

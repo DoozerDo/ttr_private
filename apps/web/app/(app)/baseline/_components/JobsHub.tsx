@@ -133,9 +133,10 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
   return (
     <>
       <SetupModuleCard
-        label="JOB"
-        title="Job description"
-        description="Add a job description to score against your baseline."
+        label="JOB DESCRIPTION"
+        title="Job Description"
+        titleClassName="text-xl font-semibold tracking-tight text-slate-100"
+        description="Add a job description to score against your resume."
         primaryAction={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
       >
         {error ? (
