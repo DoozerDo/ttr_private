@@ -1,15 +1,24 @@
+// apps\web\app\api\admin\users\[id]\route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-const API_ORIGIN = process.env.API_ORIGIN;
 const DEV_USER_ID = process.env.DEV_USER_ID;
-
-if (!API_ORIGIN) {
-  throw new Error("API_ORIGIN is not set");
-}
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+function getApiOrigin() {
+  return process.env.API_ORIGIN;
+}
+
 export async function PATCH(request: NextRequest, context: RouteContext) {
+  const API_ORIGIN = getApiOrigin();
+
+  if (!API_ORIGIN) {
+    return NextResponse.json(
+      { error: "Server misconfigured", detail: "API_ORIGIN is not set" },
+      { status: 500 },
+    );
+  }
+
   try {
     if (!DEV_USER_ID) {
       return NextResponse.json(

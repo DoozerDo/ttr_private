@@ -1,17 +1,26 @@
+// apps\web\app\api\admin\users\route.ts
 import { NextResponse } from "next/server";
 
-const API_ORIGIN = process.env.API_ORIGIN;
 const DEV_USER_ID = process.env.DEV_USER_ID;
 
-if (!API_ORIGIN) {
-  throw new Error("API_ORIGIN is not set");
+function getApiOrigin() {
+  return process.env.API_ORIGIN;
 }
 
 export async function GET() {
+  const API_ORIGIN = getApiOrigin();
+
+  if (!API_ORIGIN) {
+    return NextResponse.json(
+      { error: "Server misconfigured", detail: "API_ORIGIN is not set" },
+      { status: 500 },
+    );
+  }
+
   if (!DEV_USER_ID) {
     return NextResponse.json(
       { error: "Admin access required", detail: "Missing DEV_USER_ID" },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
