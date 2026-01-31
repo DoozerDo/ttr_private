@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - develop
-      - action_fix
-
 
 permissions:
   contents: read
