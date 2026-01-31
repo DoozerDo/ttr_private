@@ -143,11 +143,13 @@ Contents:
     DATABASE_URL=postgresql://doadmin:REPLACE_ME@targetthisrole-dev-db-do-user-31851939-0.l.db.ondigitalocean.com:25060/defaultdb?sslmode=require
 
     # --- CORS / web ---
-    CORS_ORIGIN=http://64.225.53.196
+    CORS_ORIGIN=https://app.dev.targetthisrole.ai
 
     # --- Caddy / reverse proxy ---
     CADDY_EMAIL=do@targetthisrole.ai
-    APP_DOMAIN=64.225.53.196
+    APP_DOMAIN=app.dev.targetthisrole.ai
+
+    TYPEORM_SYNCHRONIZE=true
 
 5.
 docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml pull
@@ -185,3 +187,6 @@ docker compose down
 docker system prune -af
 docker volume prune -f
 df -h
+
+Restart Docker on DO: 
+docker compose restart
