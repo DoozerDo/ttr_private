@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
+import { ScoreGauge } from "@/components/ScoreGauge";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -441,16 +442,8 @@ export function WorkspaceRunner({
   const isComplianceBlocked = isBlockedResult;
   const topComplianceFlags = complianceFlagList.slice(0, 3);
 
-  const scoreValueText =
-    isComplianceBlocked
-      ? "Blocked"
-      : typeof displayResult?.score === "number"
-        ? displayResult.score.toFixed(1)
-        : "n/a";
-
-  const scoreDisplay = (
-    <p className="text-4xl font-semibold text-white">{scoreValueText}</p>
-  );
+  const gaugeScore =
+    typeof displayResult?.score === "number" ? displayResult.score : null;
 
   const onScoreCompleted = useCallback(
     (event: {
@@ -881,7 +874,9 @@ export function WorkspaceRunner({
                 </span>
               </div>
 
-              {scoreDisplay}
+              <div className="flex justify-center">
+                <ScoreGauge score={gaugeScore ?? 0} loading={isRunning} label="Compatibility Score" />
+              </div>
 
               {topComplianceFlags.length ? (
                 <div className="space-y-2">
@@ -959,14 +954,16 @@ export function WorkspaceRunner({
             </>
           ) : (
             <>
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Result</p>
+                <div className="flex items-baseline justify-between">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Verdict</p>
                     <span className="text-xs text-slate-400">
                       {displayResult?.verdict ?? "Verdict pending"}
                     </span>
                   </div>
 
-              {scoreDisplay}
+              <div className="flex justify-center">
+                <ScoreGauge score={gaugeScore ?? 0} loading={isRunning} label="Compatibility Score" />
+              </div>
 
               {detailsToggleRow}
 

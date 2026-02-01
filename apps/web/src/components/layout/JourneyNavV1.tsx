@@ -30,6 +30,36 @@ const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
 const renderStepIcon = (stepId: JourneyStepId): ReactElement | null => {
+  if (stepId === "results") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.5"
+        stroke="currentColor"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M4 12a8 8 0 0 1 16 0"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M12 12l4.5-5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M12 12h-3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
   if (stepId === "baselines") {
     return (
       <svg
@@ -46,7 +76,7 @@ const renderStepIcon = (stepId: JourneyStepId): ReactElement | null => {
     );
   }
 
-  if (stepId === "resume") {
+  if (stepId === "studio") {
     return (
       <svg
         viewBox="0 0 24 24"
@@ -170,14 +200,15 @@ export function JourneyNavV1({
     >
       <div key={pathname} className="journey-nav-clip-shell">
         <div className="journey-nav-inner relative">
-          <span className="journey-nav-line" aria-hidden />
-          <span
-            className="journey-nav-line-progress"
-            style={{ width: `${progressPercent}%` }}
-            aria-hidden
-          />
-
           <div className="journey-nav-step-grid">
+            <span className="journey-nav-line" aria-hidden />
+            <span
+              className="journey-nav-line-progress"
+              style={{
+                transform: `translateY(-50%) scaleX(${progressPercent / 100})`,
+              }}
+              aria-hidden
+            />
             {state.steps.map((step) => {
               const isActive = step.id === pathActiveStepId;
               const isCompleted = step.state === JourneyStepState.Completed;
@@ -276,6 +307,8 @@ export function JourneyNavV1({
           padding: 0;
           box-shadow: inset 0 1px 0 var(--metal-edge-highlight),
             0 18px 45px rgba(1, 1, 1, 0.65);
+          position: relative;
+          isolation: isolate;
         }
 
         .journey-nav-root::before,
@@ -298,21 +331,37 @@ export function JourneyNavV1({
 
         .journey-nav-inner {
           position: relative;
+          --journey-icon-size: 64px;
+          --journey-padding: 1.5rem;
+          --journey-line-y: calc(var(--journey-padding) + var(--journey-icon-size) / 2);
+        }
+
+        .journey-nav-step-grid {
+          position: relative;
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          pointer-events: none;
+          z-index: 1;
         }
 
         .journey-nav-line,
         .journey-nav-line-progress {
           position: absolute;
-          left: 1.5rem;
-          top: 50%;
+          left: calc(var(--journey-icon-size) / 2);
+          right: calc(var(--journey-icon-size) / 2);
+          top: var(--journey-line-y);
           height: 2px;
           border-radius: 999px;
-          transform: translateY(-50%);
           pointer-events: none;
+          z-index: 0;
         }
 
         .journey-nav-line {
-          right: 1.5rem;
+          transform: translateY(-50%);
+        }
+
+        .journey-nav-line {
           background: linear-gradient(
             90deg,
             rgba(10, 12, 17, 0.9),
@@ -322,10 +371,9 @@ export function JourneyNavV1({
         }
 
         .journey-nav-line-progress {
-          right: auto;
-          width: 0;
-          transition: width 0.18s ease-out;
-          z-index: 2;
+          transition: transform 0.18s ease-out;
+          z-index: 1;
+          transform-origin: left center;
           background: linear-gradient(
             90deg,
             rgba(21, 26, 33, 0.9),
@@ -353,6 +401,7 @@ export function JourneyNavV1({
           justify-content: space-between;
           gap: 1rem;
           pointer-events: none;
+          z-index: 1;
         }
 
         .journey-nav-step-button {
@@ -372,6 +421,8 @@ export function JourneyNavV1({
           padding: 0;
           margin: 0;
           pointer-events: auto;
+          position: relative;
+          z-index: 10;
         }
 
         .journey-nav-step-button:focus-visible {
@@ -402,16 +453,21 @@ export function JourneyNavV1({
           width: 64px;
           height: 64px;
           border-radius: 999px;
+          isolation: isolate;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: radial-gradient(
+          background-color: var(--surface-secondary);
+          background-image: radial-gradient(
             circle at 30% 30%,
             rgba(255, 255, 255, 0.08),
             rgba(8, 10, 15, 0.96) 65%
           );
+          background-blend-mode: normal;
           border: 2px solid var(--metal-edge-outer);
-          box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.05),
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+            inset 0 0 0 2px rgba(255, 255, 255, 0.03),
+            inset 0 2px 8px rgba(255, 255, 255, 0.05),
             inset 0 -6px 18px rgba(0, 0, 0, 0.8),
             0 9px 28px rgba(0, 0, 0, 0.65);
           overflow: visible;
@@ -420,26 +476,27 @@ export function JourneyNavV1({
           transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
             background 0.18s ease;
           pointer-events: none;
-        }
-
-        .journey-nav-icon-area::before,
-        .journey-nav-icon-area::after {
-          content: "";
-          position: absolute;
-          border-radius: 999px;
-          pointer-events: none;
-          z-index: 2;
+          z-index: 5;
         }
 
         .journey-nav-icon-area::before {
-          inset: 11%;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: 999px;
+          background: var(--surface-secondary);
+          pointer-events: none;
+          z-index: 0;
         }
-
         .journey-nav-icon-area::after {
+          content: "";
+          position: absolute;
           inset: 24%;
+          border-radius: 999px;
           border: 1px solid rgba(255, 255, 255, 0.04);
           opacity: 0.55;
+          pointer-events: none;
+          z-index: 1;
         }
 
         .journey-nav-target-pulse {
