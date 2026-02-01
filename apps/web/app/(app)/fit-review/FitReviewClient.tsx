@@ -12,6 +12,7 @@ import {
   StudyPacketError,
 } from "@/lib/interviewToolkit";
 import type { InterviewQuestion } from "@/lib/interviews";
+import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 import {
   LAST_ANALYSIS_STORAGE_KEY,
   readLastAnalysis,
@@ -37,6 +38,7 @@ type FitAssessment = {
   overallScore?: number;
   score?: number;
   summary?: string;
+  verdict?: string;
   dimensionScores?: FitDimensionScores;
   breakdown?: {
     experience_alignment?: number;
@@ -555,6 +557,60 @@ export default function FitReviewClient() {
     return { key, label, value };
   });
 
+  const verdictInfo = useMemo(
+    () => getVerdictDisplayOrDefault(displayAssessment?.verdict ?? null),
+    [displayAssessment?.verdict],
+  );
+
+  const verdictLabelStyle = useMemo(() => {
+    const baseStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 999,
+      padding: "5px 16px",
+      fontSize: 11,
+      fontWeight: 800,
+      letterSpacing: 1.5,
+      textTransform: "uppercase" as const,
+      lineHeight: 1,
+      whiteSpace: "normal",
+      textAlign: "center" as const,
+      maxWidth: 200,
+    };
+
+    switch (verdictInfo.label) {
+      case "Apply":
+        return {
+          ...baseStyle,
+          border: "1px solid rgba(16,185,129,0.45)",
+          background: "rgba(16,185,129,0.08)",
+          color: "#bbf7d0",
+        };
+      case "Consider":
+        return {
+          ...baseStyle,
+          border: "1px solid rgba(251,191,36,0.5)",
+          background: "rgba(251,191,36,0.12)",
+          color: "#fde68a",
+        };
+      case "Skip":
+        return {
+          ...baseStyle,
+          border: "1px solid rgba(248,113,113,0.5)",
+          background: "rgba(248,113,113,0.12)",
+          color: "#fecdd3",
+        };
+      default:
+        return {
+          ...baseStyle,
+          border: "1px solid rgba(255,255,255,0.15)",
+          background: "rgba(255,255,255,0.04)",
+          color: "rgba(241,245,249,0.85)",
+        };
+    }
+  }, [verdictInfo.label]);
+
   return (
     <InstrumentShell
       kicker="Fit Review"
@@ -594,7 +650,18 @@ export default function FitReviewClient() {
               />
 
               <div style={{ position: "relative", display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
-                <ScoreRing score={displayFitScore ?? 0} loading={loading} />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 8,
+                    flexShrink: 0,
+                  }}
+                >
+                  <ScoreRing score={displayFitScore ?? 0} loading={loading} />
+                  <span style={verdictLabelStyle}>{verdictInfo.label}</span>
+                </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -623,6 +690,29 @@ export default function FitReviewClient() {
                       View the latest compatibility score and signals for this role.
                     </p>
                   )}
+
+                  <div
+                    style={{
+                      marginTop: 6,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 10,
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <span style={verdictLabelStyle}>{verdictInfo.label}</span>
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "rgba(226,232,240,0.75)",
+                        fontSize: 13,
+                        flex: "1 1 200px",
+                        minWidth: 220,
+                      }}
+                    >
+                      {verdictInfo.description}
+                    </p>
+                  </div>
 
                   {displayBaselineId ? (
                     <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>

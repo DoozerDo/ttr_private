@@ -8,6 +8,33 @@ import { JobTrackerEntry } from './job-tracker-entry.entity';
 import { Repository } from 'typeorm';
 import { createHash } from 'crypto';
 
+const CANONICAL_STAGE_VALUES = ['Applied', 'Interviewing', 'Offer', 'Closed'] as const;
+type CanonicalStageValue = (typeof CANONICAL_STAGE_VALUES)[number];
+
+// Legacy stage values remain stored for backward compatibility but should export with canonical labels.
+const LEGACY_STAGE_TO_CANONICAL_STAGE: Record<string, CanonicalStageValue> = {
+  Prospecting: 'Applied',
+  Rejected: 'Closed',
+  Archived: 'Closed',
+} as const;
+
+function canonicalStageValue(stage?: string | null): CanonicalStageValue | null {
+  if (!stage) return null;
+  const trimmed = stage.trim();
+  if (CANONICAL_STAGE_VALUES.includes(trimmed as CanonicalStageValue)) {
+    return trimmed as CanonicalStageValue;
+  }
+  return LEGACY_STAGE_TO_CANONICAL_STAGE[
+    trimmed as keyof typeof LEGACY_STAGE_TO_CANONICAL_STAGE
+  ] ?? null;
+}
+
+function canonicalStageLabel(stage?: string | null): string {
+  if (!stage) return '';
+  const canonical = canonicalStageValue(stage);
+  return canonical ?? stage.trim();
+}
+
 @Injectable()
 export class JobTrackerService {
   constructor(
@@ -129,7 +156,7 @@ export class JobTrackerService {
       this.csvEscape(entry.id),
       this.csvEscape(entry.company),
       this.csvEscape(entry.roleTitle),
-      this.csvEscape(entry.stage),
+      this.csvEscape(canonicalStageLabel(entry.stage)),
       this.csvEscape(this.formatDate(entry.dateApplied)),
       this.csvEscape(entry.cxFitScore.toString()),
       this.csvEscape(entry.sourceUrl ?? ''),
