@@ -10,6 +10,7 @@
     "build:both": "npm run build:api && npm run build:web",
     "lint:web": "npm -w apps/web run lint",
     "lint:api": "npm -w apps/api run lint",
+    "lint": "npm run lint:api && npm run lint:web",
     "test:api": "npm -w apps/api run test",
     "check:beta-scope": "node scripts/check-beta-scope.js",
     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
