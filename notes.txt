@@ -108,7 +108,7 @@ UPDATE users SET "accountType" = 'paid' WHERE id = '56753a5f-11c1-4af5-acc5-774c
 UPDATE users SET "subscriptionTier" = 'PRO' WHERE id = '56753a5f-11c1-4af5-acc5-774c083f4538';
 
 
-INSERT INTO "admin_users" ("userId", "role") VALUES ('bf5bad96-738f-47a4-aea5-b1649968909b', 'admin');
+INSERT INTO "admin_users" ("userId", "role") VALUES ('b29d566c-b75e-4d03-9827-a480f8b8fc73', 'admin');
 INSERT INTO "admin_users" ("userId") VALUES ('doug@ttr.com');
 
 DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
@@ -157,22 +157,24 @@ docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker
 6.
 docker compose --env-file /opt/targetthisrole/.env -f /opt/targetthisrole/docker-compose.yml up -d
 
+
 DO DropLet Update Notes: 
+----------------------------------------------------------------------------------------------------
 ssh -i "$env:USERPROFILE\.ssh\id_ed25519_targetthisrole" root@167.99.126.94
 cd /opt/targetthisrole
+
 docker compose --env-file .env -f docker-compose.yml pull
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate
+# --- tiny guard (filesystem-ready) ---
+until docker compose exec api sh -lc "[ -f dist/data-source.js ]"; do
+  echo "Waiting for api filesystem to be ready..."
+  sleep 2
+done
+# -----------------------------------
+docker compose --env-file .env -f docker-compose.yml exec api sh -lc "ls -la dist/data-source.js && npx typeorm migration:run -d dist/data-source.js"
 docker compose --env-file .env -f docker-compose.yml ps
 docker compose --env-file .env -f docker-compose.yml images
-
-If you want migrations: FUCK MIGRATIONS 
-ssh root@167.99.126.94
-###cd /opt/targetthisrole
-###docker compose --env-file .env -f docker-compose.yml pull
-###docker compose --env-file .env -f docker-compose.yml up -d --force-recreate api
-###docker compose --env-file .env -f docker-compose.yml exec -T api npm run migration:run
-###docker compose --env-file .env -f docker-compose.yml up -d
-###docker compose --env-file .env -f docker-compose.yml ps
+----------------------------------------------------------------------------------------------------
 
 DO Docker Logs:
 docker compose --env-file .env -f docker-compose.yml logs -f --timestamps
@@ -190,3 +192,7 @@ df -h
 
 Restart Docker on DO: 
 docker compose restart
+
+
+Connect to DO DB: 
+  psql postgresql://doadmin:password@private-targetthisrole-dev-db-do-user-31851939-0.1.db.ondigitalocean.com:25060/defaultdb?sslmode=require
