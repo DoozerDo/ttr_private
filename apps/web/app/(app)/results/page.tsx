@@ -908,18 +908,36 @@ export default function ResultsPage() {
   const handleCalibrate = useCallback(async () => {
     if (!latest?.assessmentId) return;
 
+    const profileOption = selectedCalibrationProfile;
+    if (!profileOption?.weights) {
+      setCalibrationError("Calibration failed. The selected profile is missing weights.");
+      setCalibrationResult(null);
+      return;
+    }
+
     setCalibrating(true);
     setCalibrationError(null);
 
     try {
-      const res = await fetch(
-        `/api/analysis/fit-assessments/${encodeURIComponent(latest.assessmentId)}/calibrate`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ profile: calibrationProfile }),
-        },
-      );
+      const res = await fetch("/api/calibration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessmentId: latest.assessmentId,
+          profileName: calibrationProfile,
+          weights: profileOption.weights,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        await res.text();
+        setCalibrationError(
+          "Calibration failed. The server returned an unexpected response. This is usually a routing or auth issue.",
+        );
+        setCalibrationResult(null);
+        return;
+      }
 
       const payload = await readResponsePayload(res.clone());
 
@@ -938,7 +956,7 @@ export default function ResultsPage() {
     } finally {
       setCalibrating(false);
     }
-  }, [calibrationProfile, latest?.assessmentId]);
+  }, [calibrationProfile, latest?.assessmentId, selectedCalibrationProfile]);
 
   async function generateDocument(oneTap = false, targetDocType: DocumentType = documentType) {
     const targetDocumentConfig = DOCUMENT_CONFIG[targetDocType];

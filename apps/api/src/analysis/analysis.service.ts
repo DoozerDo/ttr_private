@@ -36,12 +36,21 @@ import {
 } from './fit-assessment.entity';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import type { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
+import { CalibrationDto } from './dto/calibration.dto';
 import {
   DimensionWeightOverrides,
   FitScoringService,
 } from './fit-scoring.service';
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
 import type { CxFitV2Result } from './cx-fit-scoring-v2';
+
+import {
+  DEFAULT_LEGACY_CALIBRATION_WEIGHTS,
+  isCalibrationWeights,
+  isLegacyCalibrationWeights,
+  mapLegacyToCalibrationWeights,
+  type LegacyCalibrationWeights,
+} from './calibration-weights';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
@@ -331,18 +340,9 @@ export class AnalysisService {
     this.shortTextWarningKeys.delete(key);
   }
 
-  private readonly defaultCalibration: {
-    profileName: string;
-    weights: CalibrationWeights;
-  } = {
+  private readonly defaultCalibration = {
     profileName: 'default',
-    weights: {
-      dimensionA: 1,
-      dimensionB: 1,
-      dimensionC: 1,
-      dimensionD: 1,
-      dimensionE: 1,
-    },
+    weights: mapLegacyToCalibrationWeights(DEFAULT_LEGACY_CALIBRATION_WEIGHTS),
   };
 
   private clampPercent(value: number) {
@@ -772,10 +772,7 @@ export class AnalysisService {
     return { ok: true, profileName, weights };
   }
 
-  async saveCalibration(
-    userId: string,
-    payload: { profileName?: string; weights?: CalibrationWeights | null },
-  ) {
+  async saveCalibration(userId: string, payload: CalibrationDto) {
     const profileName = payload.profileName?.trim();
 
     if (!profileName) {
@@ -786,6 +783,9 @@ export class AnalysisService {
       throw new BadRequestException('weights are required');
     }
 
+    const { legacy: legacyWeights, normalized: normalizedWeights } =
+      this.normalizeIncomingWeights(payload.weights);
+
     const user = await this.usersRepository.findOne({ where: { id: userId } });
 
     if (!user) {
@@ -793,11 +793,158 @@ export class AnalysisService {
     }
 
     user.calibrationProfileName = profileName;
-    user.calibrationWeights = payload.weights;
+    user.calibrationWeights = normalizedWeights;
 
     await this.usersRepository.save(user);
 
-    return { ok: true, profileName, weights: payload.weights };
+    const baseResponse = {
+      ok: true,
+      profileName,
+      weights: legacyWeights,
+    };
+
+    const assessmentId = payload.assessmentId?.trim();
+    if (!assessmentId) {
+      return baseResponse;
+    }
+
+    const calibrated = await this.calibrateAssessment(
+      userId,
+      assessmentId,
+      legacyWeights,
+      profileName,
+    );
+
+    return {
+      ...baseResponse,
+      ...calibrated,
+    };
+  }
+
+  private normalizeIncomingWeights(
+    weights: LegacyCalibrationWeights | CalibrationWeights,
+  ) {
+    let legacy: LegacyCalibrationWeights;
+
+    if (isLegacyCalibrationWeights(weights)) {
+      legacy = weights;
+    } else if (isCalibrationWeights(weights)) {
+      legacy = {
+        experienceAlignment: weights.dimensionA,
+        leadershipLevel: weights.dimensionC,
+        technicalPlatformFit: weights.dimensionB,
+        industryContext: weights.dimensionE,
+        strategicTacticalFit: weights.dimensionD,
+      };
+    } else {
+      throw new BadRequestException(
+        'weights must include the five calibration dimensions',
+      );
+    }
+
+    this.ensurePositiveLegacyWeights(legacy);
+
+    return {
+      legacy,
+      normalized: mapLegacyToCalibrationWeights(legacy),
+    };
+  }
+
+  private ensurePositiveLegacyWeights(weights: LegacyCalibrationWeights) {
+    (Object.entries(weights) as [keyof LegacyCalibrationWeights, number][]).forEach(
+      ([key, value]) => {
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new BadRequestException(
+            'weights must be finite numbers greater than 0',
+          );
+        }
+      },
+    );
+  }
+
+  private computeCalibratedScore(
+    dimensionScores: FitDimensionScores | null | undefined,
+    weights: LegacyCalibrationWeights,
+    baselineScore?: number | null,
+  ) {
+    const experienceAlignment = dimensionScores?.experienceAlignment ?? 0;
+    const leadershipLevel = dimensionScores?.leadershipLevel ?? 0;
+    const technicalPlatformFit = dimensionScores?.technicalPlatformFit ?? 0;
+    const industryContext = dimensionScores?.industryContext ?? 0;
+    const strategicTacticalFit = dimensionScores?.strategicTacticalFit ?? 0;
+
+    const totalWeight =
+      weights.experienceAlignment +
+      weights.leadershipLevel +
+      weights.technicalPlatformFit +
+      weights.industryContext +
+      weights.strategicTacticalFit;
+
+    if (!Number.isFinite(totalWeight) || totalWeight <= 0) {
+      return { overallScore: 0, delta: 0 };
+    }
+
+    const weightedSum =
+      experienceAlignment * weights.experienceAlignment +
+      leadershipLevel * weights.leadershipLevel +
+      technicalPlatformFit * weights.technicalPlatformFit +
+      industryContext * weights.industryContext +
+      strategicTacticalFit * weights.strategicTacticalFit;
+
+    const rawScore = weightedSum / totalWeight;
+    const clampedScore = Math.min(100, Math.max(0, rawScore));
+    const roundedScore = Math.round(clampedScore * 10) / 10;
+    const baseline = typeof baselineScore === 'number' ? baselineScore : 0;
+    let delta = Math.round((roundedScore - baseline) * 10) / 10;
+    if (Object.is(delta, -0)) {
+      delta = 0;
+    }
+
+    return { overallScore: roundedScore, delta };
+  }
+
+  private formatProfileLabel(profileName: string) {
+    return profileName
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map(
+        (segment) =>
+          `${segment.charAt(0).toUpperCase()}${segment.slice(1).toLowerCase()}`,
+      )
+      .join(' ');
+  }
+
+  async calibrateAssessment(
+    userId: string,
+    assessmentId: string,
+    legacyWeights: LegacyCalibrationWeights,
+    profileName: string,
+  ) {
+    const assessment = await this.fitAssessmentRepository.findOne({
+      where: { id: assessmentId, userId },
+    });
+
+    if (!assessment) {
+      throw new NotFoundException('Fit assessment not found');
+    }
+
+    const payload = await this.buildLatestAssessmentPayload(assessment);
+    const calibrated = this.computeCalibratedScore(
+      assessment.dimensionScores,
+      legacyWeights,
+      assessment.overallScore,
+    );
+
+    return {
+      ...payload,
+      overallScore: calibrated.overallScore,
+      score: calibrated.overallScore,
+      calibration: {
+        profile: profileName,
+        label: this.formatProfileLabel(profileName),
+        delta: calibrated.delta,
+      },
+    };
   }
 
   private buildJobPayloadFromParsed(job: FitScoreJobInput) {
