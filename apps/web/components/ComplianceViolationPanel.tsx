@@ -15,6 +15,7 @@ export type ComplianceFlagPanelProps = {
   auditId?: string;
   baselineVersionHash?: string | null;
   intent?: "error" | "warning";
+  showMeta?: boolean;
 };
 
 const INTENT_STYLES: Record<
@@ -32,6 +33,7 @@ export function ComplianceFlagPanel({
   auditId,
   baselineVersionHash,
   intent = "error",
+  showMeta = false,
 }: ComplianceFlagPanelProps) {
   if (!flags.length) {
     return null;
@@ -80,13 +82,13 @@ export function ComplianceFlagPanel({
         ))}
       </ul>
 
-      {auditId ? (
+      {showMeta && auditId ? (
         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
           Audit ID: {auditId}
         </div>
       ) : null}
 
-      {baselineVersionHash ? (
+      {showMeta && baselineVersionHash ? (
         <div style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>
           Baseline hash: {baselineVersionHash}
         </div>

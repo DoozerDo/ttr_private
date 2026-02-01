@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -115,6 +115,12 @@ type DocumentConfig = {
   exportPath: string;
   previewTitle: string;
   copyButtonLabel: string;
+};
+
+type DocumentPreviewSection = {
+  key: string;
+  title: string;
+  lines: string[];
 };
 
 const createDocumentState = (): DocumentState => ({
@@ -246,39 +252,35 @@ const getNextSteps = ({
   autoGenerateThreshold,
 }: NextStepArgs): NextStep[] => {
   const verdictInfo = getVerdictDisplayOrDefault(verdict);
-  const needsMoreInsight = score === null || score === undefined || score < autoGenerateThreshold;
-  const steps: NextStep[] = [];
+  const scoreLabel = typeof score === "number" ? score.toFixed(1) : "pending";
 
-  steps.push({
-    title: "Open Fit Review",
-    description: hasAnalysis
-      ? `Explore why this role received a ${verdictInfo.label.toLowerCase()} verdict and what to focus on next.`
-      : "Generate or load the latest analysis to surface Fit Review and tailored guidance.",
-  });
-
-  steps.push({
-    title: "Practice with Interview Toolkit",
-    description: "Pair Fit Review insights with the Interview Toolkit to tackle the most impactful gaps.",
-  });
-
-  if (needsMoreInsight) {
-    steps.push({
-      title: "Re-run the analysis",
+  return [
+    {
+      title: "Understand this verdict",
+      description: hasAnalysis
+        ? `Review the strengths, gaps, and dimension contributions above to see how we landed on the ${verdictInfo.label.toLowerCase()} verdict (${scoreLabel}).`
+        : "Load the latest analysis to reveal the verdict and supporting context.",
+    },
+    {
+      title: "Decide whether to apply",
       description:
-        "Address the gaps Fit Review outlines, rerun the analysis, and confirm your baseline still reflects the role.",
-    });
-  }
-
-  steps.push({
-    title: "Generate a resume",
-    description: needsMoreInsight
-      ? `Once your fit score hits ${autoGenerateThreshold} or higher, export a resume tailored to this opportunity.`
-      : hasResume
-        ? "Download or share the resume you already generated."
-        : "One tap export is available. Generate and share with confidence.",
-  });
-
-  return steps;
+        "Weigh the highlighted gaps against the role priorities and your timing, and open Fit Review if you want deeper context before moving forward.",
+    },
+    {
+      title: "Generate or polish a resume",
+      description: hasResume
+        ? "Check the draft below, copy the text if needed, or download a document tailored to this role."
+        : `Generate a resume draft here. One tap export is optimized once the score reaches ${autoGenerateThreshold}, but downloads remain available any time you are ready.`,
+    },
+    {
+      title: "Apply and log the progress",
+      description: "Capture the opportunity in your tracker, confirm next steps, and secure the application window.",
+    },
+    {
+      title: "Prepare for interviews",
+      description: "Once you've decided to apply, leverage the Interview Toolkit to practice around the gaps exposed above.",
+    },
+  ];
 };
 
 type AnyObject = Record<string, unknown>;
@@ -413,7 +415,6 @@ export default function ResultsPage() {
   const [latest, setLatest] = useState<LatestAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isGeneratingBoth, setIsGeneratingBoth] = useState(false);
   const [loadingLatest, setLoadingLatest] = useState(false);
   const [exportState, setExportState] = useState<
     { docType: DocumentType; format: "docx" | "pdf" } | null
@@ -425,6 +426,8 @@ export default function ResultsPage() {
     resume: createDocumentState(),
     "cover-letter": createDocumentState(),
   });
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const copyFeedbackTimeoutRef = useRef<number | null>(null);
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfile>("balanced");
@@ -437,6 +440,14 @@ export default function ResultsPage() {
   const [hasMounted, setHasMounted] = useState(false);
   useEffect(() => {
     setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    };
   }, []);
 
   const updateDocumentState = (type: DocumentType, updates: Partial<DocumentState>) => {
@@ -537,13 +548,6 @@ export default function ResultsPage() {
 
     return results;
   }, [documentResponse?.compliance_flags]);
-
-  const documentAuditId = (documentResponse?.audit_id as string | undefined) || undefined;
-
-  const documentBaselineHash =
-    (documentResponse?.baseline_version_hash as string | undefined) ||
-    (documentResponse?.baselineVersionHash as string | undefined) ||
-    undefined;
 
   const currentErrorDetails = {
     status: currentDocumentState.error?.status ?? null,
@@ -677,20 +681,62 @@ export default function ResultsPage() {
     return "0.0";
   }, [calibrationResult?.calibration?.delta]);
 
+  const calibrationConfidenceSummary = useMemo(() => {
+    if (!calibrationResult) {
+      return "Run a calibration when you want to pressure-test how confident you feel about this score.";
+    }
+    const delta = calibrationResult.calibration?.delta;
+    if (typeof delta !== "number") {
+      return "Calibration complete. Compare the adjusted score above.";
+    }
+    if (delta > 0) {
+      return `Confidence increased by ${delta.toFixed(1)} points.`;
+    }
+    if (delta < 0) {
+      return `Confidence decreased by ${Math.abs(delta).toFixed(1)} points.`;
+    }
+    return "Confidence steady.";
+  }, [calibrationResult]);
+
+  const calibrationConfidenceRecommendation = useMemo(() => {
+    if (!calibrationResult) {
+      return "Keep the stored score unchanged; revisit calibration when you want to try a different weighting.";
+    }
+    const delta = calibrationResult.calibration?.delta;
+    if (typeof delta !== "number") {
+      return "Compare the calibrated score before you export.";
+    }
+    if (delta > 0) {
+      return "Confidence is higher—move toward document generation while highlighting the strengths above.";
+    }
+    if (delta < 0) {
+      return "Confidence dipped—address the gaps highlighted above before exporting.";
+    }
+    return "Confidence is unchanged—proceed with the next action.";
+  }, [calibrationResult]);
+
   const dimensionEntries = useMemo(() => {
-    const scores = normalizeDimensionScores(latest);
+    const scores = normalizeDimensionScores(activeAnalysis ?? null);
     const keys = Object.keys(DIMENSION_LABELS) as Array<keyof FitDimensionScores>;
     return keys.map((key) => ({
       key,
       label: DIMENSION_LABELS[key],
       value: typeof scores[key] === "number" ? scores[key] : null,
     }));
-  }, [latest]);
+  }, [activeAnalysis]);
 
   const reasonSummary = useMemo(
     () => buildReasonSummary(latest?.strengths ?? [], latest?.gaps ?? []),
     [latest?.gaps, latest?.strengths],
   );
+  const highlightedStrengths = useMemo(() => {
+    const all = [...reasonSummary.primary, ...reasonSummary.extras];
+    return all.filter((item) => item.type === "strength").slice(0, 3);
+  }, [reasonSummary]);
+  const highlightedGaps = useMemo(() => {
+    const all = [...reasonSummary.primary, ...reasonSummary.extras];
+    return all.filter((item) => item.type === "gap").slice(0, 3);
+  }, [reasonSummary]);
 
   const complianceFlagList = useMemo(
     () => sortComplianceFlagsBySeverity(mapComplianceFlags(latest?.complianceFlags ?? undefined)),
@@ -699,47 +745,6 @@ export default function ResultsPage() {
 
   const topComplianceFlags = complianceFlagList.slice(0, 3);
   const hasMoreComplianceFlags = complianceFlagList.length > 3;
-
-  const latestAuditId = latest?.auditId ?? latest?.audit_id ?? null;
-  const baselineVersionIdentifier =
-    latest?.baselineVersionId ??
-    latest?.baselineVersionHash ??
-    (typeof latest?.baselineVersion === "number" ? `${latest.baselineVersion}` : null);
-
-  const metadataEntries = useMemo(() => {
-    const createdAtValue = latest?.createdAt;
-
-    const isoLooksValid =
-      createdAtValue && !Number.isNaN(new Date(createdAtValue).getTime());
-
-    // Deterministic on first render (server + initial client render): do not call toLocaleString yet.
-    const createdAtLabel = isoLooksValid
-      ? hasMounted
-        ? new Date(createdAtValue as string).toLocaleString()
-        : (createdAtValue as string)
-      : "Not available";
-
-    return [
-      { label: "Assessment ID", value: latest?.assessmentId ?? "Not available" },
-      { label: "Job", value: jobDescriptor ?? "Not available" },
-      { label: "Job ID", value: latest?.jobId ?? jobId ?? "Not available" },
-      { label: "Baseline ID", value: latest?.baselineId ?? baselineId ?? "Not available" },
-      { label: "Baseline version", value: baselineVersionIdentifier ?? "Not available" },
-      { label: "Audit ID", value: latestAuditId ?? "Not available" },
-      { label: "Run recorded", value: createdAtLabel },
-    ];
-  }, [
-    baselineId,
-    baselineVersionIdentifier,
-    hasMounted,
-    jobDescriptor,
-    jobId,
-    latest?.assessmentId,
-    latest?.baselineId,
-    latest?.createdAt,
-    latest?.jobId,
-    latestAuditId,
-  ]);
 
   const debugMode = debugUiEnabled;
 
@@ -757,6 +762,63 @@ export default function ResultsPage() {
     if (direct) return direct;
     return safeJsonPreview(currentDocumentState.response);
   }, [currentDocumentState.response]);
+
+  useEffect(() => {
+    if (copyFeedbackTimeoutRef.current) {
+      clearTimeout(copyFeedbackTimeoutRef.current);
+      copyFeedbackTimeoutRef.current = null;
+    }
+    setCopyFeedback(null);
+  }, [documentPreviewText, documentType]);
+
+  const documentPreviewSections = useMemo<DocumentPreviewSection[]>(() => {
+    if (!currentDocumentState.response || typeof currentDocumentState.response !== "object") {
+      return [];
+    }
+
+    const sectionsRaw = (currentDocumentState.response as AnyObject)["sections"];
+    if (!Array.isArray(sectionsRaw)) {
+      return [];
+    }
+
+    const sections = sectionsRaw as ResumeSectionLike[];
+
+    return sections
+      .map((section, index) => {
+        const title =
+          (
+            section?.title ??
+            section?.type ??
+            `Section ${index + 1}`
+          )?.toString().trim() || `Section ${index + 1}`;
+        const text = extractSectionText(section);
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0);
+
+        return {
+          key: `${title}-${index}`,
+          title,
+          lines,
+        };
+      })
+      .filter((section) => section.lines.length > 0)
+      .slice(0, 6);
+  }, [currentDocumentState.response]);
+
+  const handleCopyDraft = useCallback(async () => {
+    if (!documentPreviewText) return;
+    await copyTextToClipboard(documentPreviewText);
+    const message = `${documentConfig.capitalizedLabel} draft copied`;
+    setCopyFeedback(message);
+    if (copyFeedbackTimeoutRef.current) {
+      clearTimeout(copyFeedbackTimeoutRef.current);
+    }
+    if (typeof window !== "undefined") {
+      copyFeedbackTimeoutRef.current = window.setTimeout(() => setCopyFeedback(null), 3000);
+    }
+  }, [documentConfig.capitalizedLabel, documentPreviewText]);
 
   const loadAssessmentById = useCallback(
     async (assessmentId: string) => {
@@ -1042,17 +1104,6 @@ export default function ResultsPage() {
     }
   }
 
-  async function handleGenerateBothDocuments() {
-    if (!readyForDocument || isGeneratingBoth) return;
-    setIsGeneratingBoth(true);
-    try {
-      await generateDocument(false, "resume");
-      await generateDocument(false, "cover-letter");
-    } finally {
-      setIsGeneratingBoth(false);
-    }
-  }
-
   async function exportDocument(
     format: "docx" | "pdf",
     targetDocType: DocumentType = documentType,
@@ -1179,6 +1230,9 @@ export default function ResultsPage() {
                   <p className="max-w-2xl text-sm text-slate-200">{activeVerdictInfo.description}</p>
                   <p className="text-xs text-slate-400">{jobDescriptor}</p>
                   <p className="text-xs text-slate-400">{baselineDescriptor}</p>
+                  <p className="text-xs text-slate-400">
+                    The active score is the live lens we share on this page; the saved current score below stays the same until you rerun the analysis.
+                  </p>
                 </div>
               </div>
 
@@ -1212,11 +1266,18 @@ export default function ResultsPage() {
                         {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
                       </p>
                       <p className="text-sm text-slate-300">
-                        {calibrationDeltaText ? `${calibrationDeltaText} vs current score` : "Delta unavailable"}
+                        {calibrationConfidenceSummary}
+                        {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
                       </p>
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                        Recommendation
+                      </p>
+                      <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
                     </>
                   ) : (
-                    <p className="mt-2 text-sm text-slate-400">Run a calibration to compare the adjusted score.</p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Calibration reruns the analysis under a different lens without overwriting the stored score.
+                    </p>
                   )}
 
                   <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
@@ -1229,11 +1290,81 @@ export default function ResultsPage() {
                       className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
                     />
                     <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
-                      Use calibrated score for gating
+                      Apply this confidence lens for downstream actions
                     </span>
                   </label>
                 </div>
               </div>
+
+              <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Score explanation
+                  </p>
+                  <h2 className="text-lg font-semibold text-slate-100">Why this verdict?</h2>
+                  <p className="mt-1 text-sm text-slate-300">
+                    {latest?.summary
+                      ? latest.summary
+                      : "Load the latest analysis to surface the strengths, gaps, and dimension contributions behind this score."}
+                  </p>
+                </div>
+                <p className="mt-3 text-sm text-slate-300">
+                  Dimension scores show how each area contributed to the verdict. Treat the lower scores as the best places to provide new or clarified evidence.
+                </p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {dimensionEntries.map((dimension) => (
+                    <div
+                      key={dimension.key}
+                      className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                        {dimension.label}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-white">
+                        {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">Strengths</p>
+                    <div className="mt-3 space-y-3">
+                      {highlightedStrengths.length ? (
+                        highlightedStrengths.map((item, index) => (
+                          <div key={`${item.message}-${index}`} className="space-y-1">
+                            <p className="text-sm font-semibold text-white">{item.message}</p>
+                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Confidence</p>
+                            <p className="text-sm text-slate-300">Lean on this strength as you tailor your story.</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-slate-400">Generate or load an analysis to see the confirming signals.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">Gaps</p>
+                    <div className="mt-3 space-y-3">
+                      {highlightedGaps.length ? (
+                        highlightedGaps.map((item, index) => (
+                          <div key={`${item.message}-${index}`} className="space-y-1">
+                            <p className="text-sm font-semibold text-white">{item.message}</p>
+                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Action</p>
+                            <p className="text-sm text-slate-300">
+                              Clarify how your experience addresses this area or build new evidence before exporting.
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-slate-400">
+                          No gaps surfaced yet; run the latest analysis to highlight where to focus.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </section>
 
               <div className="mt-5 space-y-3">
                 <div>
@@ -1280,106 +1411,18 @@ export default function ResultsPage() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Next action
-              </p>
-              <h2 className="text-2xl font-semibold text-white">Continue shaping your story</h2>
-              <p className="text-sm text-slate-300">
-                Generate tailored documents, review what influenced the verdict, or run the analysis again.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <FormButton
-                onClick={() => void handleGenerateBothDocuments()}
-                disabled={!readyForDocument || loading || isGeneratingBoth}
-              >
-                {isGeneratingBoth ? "Generating..." : "Generate tailored resume and cover letter"}
-              </FormButton>
-              <FormButton variant="secondary" onClick={() => router.push("/interview-toolkit")}>
-                View interview toolkit
-              </FormButton>
-              <FormButton variant="ghost" onClick={() => router.push("/analyze")}>
-                Run again
-              </FormButton>
-            </div>
-          </div>
-        </section>
-
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Why you got this score
+                System constraints
               </p>
-              <h2 className="text-lg font-semibold text-slate-100">Insights</h2>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Top 3</span>
-          </div>
-
-          {reasonSummary.primary.length ? (
-            <div className="mt-3 space-y-3">
-              {reasonSummary.primary.map((item, index) => (
-                <div
-                  key={`${item.message}-${item.type}-${index}`}
-                  className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-                >
-                  <span
-                    className={`text-[11px] font-semibold uppercase tracking-[0.3em] ${
-                      item.type === "strength" ? "text-emerald-300" : "text-amber-300"
-                    }`}
-                  >
-                    {item.type === "strength" ? "Strength" : "Gap"}
-                  </span>
-                  <p className="text-sm text-slate-100">{item.message}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">
-              Load an analysis to see the strengths and gaps that shaped this score.
-            </p>
-          )}
-
-          <details className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-              Supporting evidence and extra context
-            </summary>
-            <div className="mt-3 space-y-3 text-sm text-slate-200">
-              {reasonSummary.extras.length
-                ? reasonSummary.extras.map((item, index) => (
-                    <div key={`${item.message}-${item.type}-${index}`}>
-                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                        {item.type === "strength" ? "Strength" : "Gap"}
-                      </p>
-                      <p>{item.message}</p>
-                    </div>
-                  ))
-                : null}
-              {latest?.summary ? (
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Summary</p>
-                  <p>{latest.summary}</p>
-                </div>
-              ) : null}
-              {!reasonSummary.extras.length && !latest?.summary ? (
-                <p className="text-sm text-slate-500">No additional context available yet.</p>
-              ) : null}
-            </div>
-          </details>
-        </section>
-
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Compliance flags
+              <h2 className="text-lg font-semibold text-slate-100">Resume truth & boundary checks</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                These signals reflect system-enforced boundaries that determine what we can safely describe or generate. They are not personal judgments, only guidance about output limits.
               </p>
-              <h2 className="text-lg font-semibold text-slate-100">Integrity checks</h2>
             </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Sorted by severity</span>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Sorted by impact</span>
           </div>
 
           {topComplianceFlags.length ? (
@@ -1387,20 +1430,20 @@ export default function ResultsPage() {
               {topComplianceFlags.map((flag) => (
                 <li key={flag.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
                   <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                    <span>{flag.severity === "block" ? "Critical" : "Advisory"}</span>
+                    <span>{flag.severity === "block" ? "Required boundary" : "Advisory boundary"}</span>
                   </div>
                   <p className="mt-2 text-sm text-slate-100">{flag.message}</p>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-3 text-sm text-slate-400">No compliance flags detected for this run.</p>
+            <p className="mt-3 text-sm text-slate-400">No constraints triggered on this run.</p>
           )}
 
           {hasMoreComplianceFlags ? (
             <details className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
               <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-                Show all {complianceFlagList.length} compliance flags
+                Show all {complianceFlagList.length} flags
               </summary>
               <ul className="mt-3 space-y-2 text-sm text-slate-200">
                 {complianceFlagList.map((flag) => (
@@ -1409,7 +1452,7 @@ export default function ResultsPage() {
                     className="rounded-xl border border-white/10 bg-slate-950/50 p-3"
                   >
                     <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      {flag.severity === "block" ? "Critical" : "Advisory"}
+                      {flag.severity === "block" ? "Required boundary" : "Advisory boundary"}
                     </p>
                     <p className="text-sm text-slate-100">{flag.message}</p>
                   </li>
@@ -1419,67 +1462,18 @@ export default function ResultsPage() {
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <details className="space-y-4">
-            <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Advanced details
-                </p>
-                <h2 className="text-lg font-semibold text-white">Dimension scores & metadata</h2>
-              </div>
-              <span className="text-xs text-slate-400">Expand for hidden context</span>
-            </summary>
-            <div className="space-y-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Dimension scores
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  {dimensionEntries.map((dimension) => (
-                    <div
-                      key={dimension.key}
-                      className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
-                    >
-                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                        {dimension.label}
-                      </p>
-                      <p className="mt-1 text-lg font-semibold text-white">
-                        {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Run metadata
-                </p>
-                <dl className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {metadataEntries.map((entry) => (
-                    <div key={entry.label}>
-                      <dt className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                        {entry.label}
-                      </dt>
-                      <dd className="text-sm text-slate-100">{entry.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            </div>
-          </details>
-        </section>
-
-
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Next steps
+                Recommended next move
               </p>
-              <h2 className="text-lg font-semibold text-slate-100">Where to focus now</h2>
+              <h2 className="text-lg font-semibold text-slate-100">Follow this path</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                This sequence mirrors the real-life cadence: understand the verdict, decide if and how to apply, polish your materials, apply, then prep for interviews.
+              </p>
             </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Action plan</span>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Ordered flow</span>
           </div>
 
           <ol className="list-decimal space-y-4 pl-4 text-sm text-slate-300 marker:text-slate-500">
@@ -1491,11 +1485,9 @@ export default function ResultsPage() {
             ))}
           </ol>
 
-          <div className="flex justify-end">
-            <FormButton variant="ghost" onClick={() => router.push(fitReviewPath)} disabled={!latest?.jobId}>
-              Open Fit Review
-            </FormButton>
-          </div>
+          <p className="text-sm text-slate-300">
+            Tools in this flow include the document generation controls below and the Interview Toolkit mentioned in step 5.
+          </p>
         </section>
 
         {tierGateError ? (
@@ -1544,18 +1536,18 @@ export default function ResultsPage() {
               {loading ? "Generating..." : `Generate draft ${documentConfig.label}`}
             </FormButton>
 
-            <FormButton
-              variant="secondary"
-              onClick={() => void generateDocument(true)}
-              disabled={!readyForDocument || !oneTapEligible || loading}
-              title={
-                readyForDocument
-                  ? oneTapEligible
-                    ? `Generate an export-ready ${documentConfig.label} based on the latest analysis`
-                    : `Requires fit score of at least ${autoGenerateThreshold}`
-                  : "Load the latest analysis before using one tap"
-              }
-            >
+              <FormButton
+                variant="secondary"
+                onClick={() => void generateDocument(true)}
+                disabled={!readyForDocument || !oneTapEligible || loading}
+                title={
+                  readyForDocument
+                    ? oneTapEligible
+                      ? `Generate an export-ready ${documentConfig.label} based on the latest analysis`
+                      : `Optimized when the score reaches ${autoGenerateThreshold}`
+                    : "Load the latest analysis before using one tap"
+                }
+              >
               One tap export (optimized {documentConfig.pluralLabel})
             </FormButton>
           </div>
@@ -1566,7 +1558,6 @@ export default function ResultsPage() {
               onClick={() => void exportDocument("docx")}
               disabled={
                 !readyForDocument ||
-                !oneTapEligible ||
                 (exportState?.docType === documentType && exportState.format === "docx")
               }
             >
@@ -1580,7 +1571,6 @@ export default function ResultsPage() {
               onClick={() => void exportDocument("pdf")}
               disabled={
                 !readyForDocument ||
-                !oneTapEligible ||
                 (exportState?.docType === documentType && exportState.format === "pdf")
               }
             >
@@ -1592,12 +1582,10 @@ export default function ResultsPage() {
 
           <div className="space-y-2 text-sm text-slate-300">
             {oneTapEligible ? (
-              <p>
-                Your fit score meets the export threshold. Review the draft below and download this {documentConfig.label} when ready.
-              </p>
+              <p>One tap export is optimized for this draft. Review the preview below, then download when you are ready.</p>
             ) : (
               <p>
-                Your score is below {autoGenerateThreshold}. You can generate and review a draft now. Downloads unlock once you reach the export threshold for this {documentConfig.label}.
+                One tap export is tuned for scores above {autoGenerateThreshold}, but downloads remain available any time you are ready to export this {documentConfig.label}.
               </p>
             )}
           </div>
@@ -1682,37 +1670,57 @@ export default function ResultsPage() {
                   title="Compliance warnings"
                   description={`${documentConfig.capitalizedLabel} generated with compliance notices.`}
                   flags={documentWarningFlags}
-                  auditId={documentAuditId}
-                  baselineVersionHash={documentBaselineHash}
                   intent="warning"
                 />
               ) : null}
 
               <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  {documentConfig.previewTitle}
-                </p>
-                <p className="mt-1 text-sm text-slate-300">
-                  {documentConfig.capitalizedLabel} draft ready. Review below, then download when available.
-                </p>
-
-                <div className="mt-3 flex justify-end">
-                  <FormButton
-                    variant="secondary"
-                    onClick={() => {
-                      const text = documentPreviewText || "";
-                      if (!text) return;
-                      void navigator.clipboard.writeText(text);
-                    }}
-                    disabled={!documentPreviewText}
-                  >
-                    {documentConfig.copyButtonLabel}
-                  </FormButton>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      {documentConfig.previewTitle}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-300">
+                      {documentConfig.capitalizedLabel} draft ready. Review below, then download when available.
+                    </p>
+                  </div>
+                  {hasClipboardAPI ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <FormButton
+                        variant="secondary"
+                        onClick={() => void handleCopyDraft()}
+                        disabled={!documentPreviewText}
+                      >
+                        {documentConfig.copyButtonLabel}
+                      </FormButton>
+                      {copyFeedback ? <p className="text-xs text-emerald-300">{copyFeedback}</p> : null}
+                    </div>
+                  ) : null}
                 </div>
 
-                <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
-                  {documentPreviewText}
-                </pre>
+                {documentPreviewSections.length ? (
+                  <div className="mt-4 space-y-4 text-sm text-slate-200">
+                    {documentPreviewSections.map((section) => (
+                      <div
+                        key={section.key}
+                        className="space-y-2 border-b border-white/5 pb-3 last:border-none last:pb-0"
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{section.title}</p>
+                        <div className="space-y-1">
+                          {section.lines.map((line, lineIndex) => (
+                            <p key={`${section.key}-${lineIndex}`}>{line}</p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : documentPreviewText ? (
+                  <div className="mt-4 space-y-2 text-sm text-slate-200">
+                    <p className="whitespace-pre-line">{documentPreviewText}</p>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-slate-400">Preview unavailable.</p>
+                )}
               </div>
             </>
           ) : (
