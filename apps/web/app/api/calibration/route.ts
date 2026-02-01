@@ -28,6 +28,14 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
+  if (!body.profileName || typeof body.profileName !== "string") {
+    return NextResponse.json({ error: "profileName is required" }, { status: 400 });
+  }
+
+  if (!body.weights || typeof body.weights !== "object") {
+    return NextResponse.json({ error: "weights are required" }, { status: 400 });
+  }
+
   const response = await fetch(`${baseUrl}/calibration`, {
     method: "POST",
     headers: {
