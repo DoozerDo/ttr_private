@@ -20,6 +20,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { listBaselines } from "@/lib/baselines";
 import {
   fetchStudyPacket,
   StudyPacketError,
@@ -99,6 +100,16 @@ export default function InterviewToolkitPage() {
   const [packetDebugInfo, setPacketDebugInfo] = useState<{ status?: number; endpoint: string } | null>(
     null,
   );
+  const [fitBaselineVersionId, setFitBaselineVersionId] = useState<string | null>(null);
+  const [fitBaselineFetchState, setFitBaselineFetchState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+  const [fallbackBaselineVersionId, setFallbackBaselineVersionId] = useState<string | null>(
+    null,
+  );
+  const [fallbackBaselineState, setFallbackBaselineState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
 
   const [followUpNotes, setFollowUpNotes] = useState<string>("");
   const [followUp, setFollowUp] = useState<FollowUpPayload | null>(null);
@@ -213,8 +224,111 @@ export default function InterviewToolkitPage() {
     loadPacket();
   }, [selectedJobId, storyRefreshKey]);
 
+  useEffect(() => {
+    const assessmentId = packet?.fitSnapshot?.assessmentId?.trim();
+    if (!assessmentId) {
+      setFitBaselineVersionId(null);
+      setFitBaselineFetchState("idle");
+      return;
+    }
+
+    let canceled = false;
+
+    const fetchBaselineVersionId = async () => {
+      setFitBaselineFetchState("loading");
+
+      try {
+        const res = await fetch(
+          `/api/analysis/fit-assessments/${encodeURIComponent(assessmentId)}`,
+          { cache: "no-store" },
+        );
+
+        if (!res.ok) {
+          throw new Error("Unable to load the associated assessment");
+        }
+
+        const payload = (await res.json()) as { baselineVersionId?: string | null };
+        if (canceled) return;
+
+        const normalizedBaselineVersionId =
+          typeof payload?.baselineVersionId === "string"
+            ? payload.baselineVersionId.trim()
+            : "";
+        setFitBaselineVersionId(normalizedBaselineVersionId || null);
+        setFitBaselineFetchState("idle");
+      } catch (error) {
+        if (canceled) return;
+        console.error("Unable to resolve baseline version for follow-up", error);
+        setFitBaselineVersionId(null);
+        setFitBaselineFetchState("error");
+      }
+    };
+
+    fetchBaselineVersionId();
+
+    return () => {
+      canceled = true;
+    };
+  }, [packet?.fitSnapshot?.assessmentId]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadLatestBaselineVersion = async () => {
+      setFallbackBaselineState("loading");
+
+      try {
+        const baselines = await listBaselines();
+        if (canceled) return;
+
+        let latestBaselineVersionId: string | null = null;
+        let latestTimestamp = -Infinity;
+
+        for (const baseline of baselines) {
+          const versions = baseline.versions ?? [];
+          for (const version of versions) {
+            const timestamp = version.createdAt
+              ? Date.parse(version.createdAt)
+              : Number.NEGATIVE_INFINITY;
+            const normalizedTimestamp = Number.isFinite(timestamp)
+              ? timestamp
+              : Number.NEGATIVE_INFINITY;
+            if (normalizedTimestamp > latestTimestamp) {
+              latestTimestamp = normalizedTimestamp;
+              latestBaselineVersionId = version.id;
+            }
+          }
+        }
+
+        setFallbackBaselineVersionId(latestBaselineVersionId);
+        setFallbackBaselineState("ready");
+      } catch (error) {
+        if (canceled) return;
+        console.error("Unable to load baseline versions", error);
+        setFallbackBaselineVersionId(null);
+        setFallbackBaselineState("error");
+      }
+    };
+
+    loadLatestBaselineVersion();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  const resolvedBaselineVersionId = fitBaselineVersionId ?? fallbackBaselineVersionId;
+  const baselineSourcesResolved =
+    fitBaselineFetchState !== "loading" && fallbackBaselineState === "ready";
+  const showBaselineMissingAlert =
+    baselineSourcesResolved && !resolvedBaselineVersionId;
+  const showBaselineFallbackErrorAlert =
+    fallbackBaselineState === "error" && !resolvedBaselineVersionId;
+
   const handleGenerateFollowUp = async () => {
     if (!selectedJobId) return;
+
+    if (!resolvedBaselineVersionId) return;
 
     setFollowUpState("loading");
     setFollowUpError(null);
@@ -232,6 +346,7 @@ export default function InterviewToolkitPage() {
         body: JSON.stringify({
           jobId: selectedJobId,
           notes: followUpNotes,
+          baselineVersionId: resolvedBaselineVersionId,
         }),
       });
 
@@ -556,13 +671,28 @@ export default function InterviewToolkitPage() {
             <div className="flex flex-wrap items-center gap-3">
               <FormButton
                 onClick={handleGenerateFollowUp}
-                disabled={!selectedJobId || followUpState === "loading"}
+                disabled={
+                  !selectedJobId ||
+                  followUpState === "loading" ||
+                  !resolvedBaselineVersionId
+                }
               >
                 {followUpState === "loading"
                   ? "Generating..."
                   : "Generate follow up"}
               </FormButton>
             </div>
+            {showBaselineFallbackErrorAlert ? (
+              <Alert intent="warning">
+                Unable to load your saved baselines right now. Refresh or upload a
+                baseline to generate follow-up copy.
+              </Alert>
+            ) : showBaselineMissingAlert ? (
+              <Alert intent="warning">
+                Follow-up generation requires a baseline version. Create or select
+                a baseline before continuing.
+              </Alert>
+            ) : null}
             {followUpFailureMessage ? (
               <Alert intent="error">{followUpFailureMessage}</Alert>
             ) : null}

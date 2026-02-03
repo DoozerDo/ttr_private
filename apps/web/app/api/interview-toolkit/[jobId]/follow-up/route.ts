@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 
+type FollowUpRequestPayload = {
+  jobId: string;
+  notes?: string;
+  baselineVersionId: string;
+};
+
 export async function POST(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await context.params;
   const baseUrl = getApiBaseUrl();
@@ -13,7 +19,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ jobId:
 
   if (!auth.token) return auth.error;
 
-  const body = await req.json();
+  const body = (await req.json()) as FollowUpRequestPayload;
 
   const response = await fetch(`${baseUrl}/interview-toolkit/${encodeURIComponent(jobId)}/follow-up`, {
     method: "POST",

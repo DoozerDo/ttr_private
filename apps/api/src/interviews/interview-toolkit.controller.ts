@@ -40,7 +40,7 @@ export class InterviewToolkitController {
   @Post(':jobId/follow-up')
   async generateFollowUp(
     @Param('jobId') jobId: string,
-    @Body() body: { notes?: string; baselineVersionId?: string },
+    @Body() body: { notes?: string; baselineVersionId: string },
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
@@ -53,10 +53,15 @@ export class InterviewToolkitController {
       throw new BadRequestException('jobId is required');
     }
 
+    const baselineVersionId = body.baselineVersionId?.trim();
+    if (!baselineVersionId) {
+      throw new BadRequestException('baselineVersionId is required');
+    }
+
     return this.interviewToolkitService.generateFollowUp(
       userId,
       jobId.trim(),
-      body?.baselineVersionId,
+      baselineVersionId,
       body?.notes,
     );
   }
