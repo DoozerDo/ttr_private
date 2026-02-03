@@ -3,6 +3,7 @@ import {
   ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
+  JobApplicationContext,
 } from './compliance.types';
 
 type ScopeCategory = 'seniority' | 'ownership' | 'scale';
@@ -78,6 +79,14 @@ const CATEGORY_SEVERITY: Record<ScopeCategory, ComplianceFlagSeverity> = {
   ownership: ComplianceFlagSeverity.WARN,
 };
 
+const APPLICATION_SCOPE_WINDOW = 400;
+const APPLICATION_SCOPE_PHRASE_DISTANCE = 120;
+const APPLICATION_SCOPE_PATTERNS = [
+  /\bi am (?:writing to )?(?:excited to )?apply(?:ing)? for\b/,
+  /\bi am interested in (?:the )?(?:role|position|opportunity|job)\b/,
+  /\bthis role aligns with my\b/,
+];
+
 export class ScopeInflationDetector {
   private normalize(text: string) {
     return text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -146,10 +155,13 @@ export class ScopeInflationDetector {
     return fingerprint;
   }
 
-  private gatherCues(section: {
-    content?: string | null;
-    title?: string | null;
-  }): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
+  private gatherCues(
+    section: {
+      content?: string | null;
+      title?: string | null;
+    },
+    jobContext?: JobApplicationContext,
+  ): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
     const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
     if (!text) return [];
     const normalized = this.normalize(text);
@@ -165,7 +177,10 @@ export class ScopeInflationDetector {
       string[],
     ][]) {
       for (const cue of cues) {
-        if (normalized.includes(cue)) {
+        if (
+          normalized.includes(cue) &&
+          !this.isApplyingSentence(normalized, cue, jobContext)
+        ) {
           matches.push({
             category,
             cue,
@@ -178,12 +193,65 @@ export class ScopeInflationDetector {
     return matches;
   }
 
+  private shouldSkipCueDueToJobContext(
+    normalized: string,
+    cue: string,
+    jobContext?: JobApplicationContext,
+  ): boolean {
+    if (!jobContext?.allowedRoleTitles?.length) {
+      return false;
+    }
+    const lowerCue = cue.toLowerCase();
+    const window = normalized.slice(0, APPLICATION_SCOPE_WINDOW);
+    const candidateIndex = window.indexOf(lowerCue);
+    if (candidateIndex === -1) {
+      return false;
+    }
+
+    for (const pattern of APPLICATION_SCOPE_PATTERNS) {
+      pattern.lastIndex = 0;
+      const match = pattern.exec(window);
+      if (!match) {
+        continue;
+      }
+
+      const afterMatch = match.index + match[0].length;
+      if (
+        candidateIndex >= afterMatch &&
+        candidateIndex - afterMatch <= APPLICATION_SCOPE_PHRASE_DISTANCE
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isApplyingSentence(
+    normalized: string,
+    cue: string,
+    jobContext?: JobApplicationContext,
+  ): boolean {
+    const pattern = /\bi am (?:excited to )?apply(?:ing)? for\b/;
+    const match = pattern.exec(normalized);
+    if (match) {
+      const start = match.index + match[0].length;
+      const remainder = normalized.slice(start);
+      if (remainder.includes(cue.toLowerCase())) {
+        return true;
+      }
+    }
+
+    return this.shouldSkipCueDueToJobContext(normalized, cue, jobContext);
+  }
+
   detect(
     baselineSections: SectionShape[],
     generatedSections: Array<{
       title?: string | null;
       content?: string | null;
     }>,
+    jobContext?: JobApplicationContext,
   ): ComplianceFlag[] {
     const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
     const violations: Array<{
@@ -194,7 +262,7 @@ export class ScopeInflationDetector {
     }> = [];
 
     for (const section of generatedSections ?? []) {
-      const cues = this.gatherCues(section);
+      const cues = this.gatherCues(section, jobContext);
       for (const cue of cues) {
         if (!baselineFingerprint.cues[cue.category].has(cue.cue)) {
           const baselineEvidence =

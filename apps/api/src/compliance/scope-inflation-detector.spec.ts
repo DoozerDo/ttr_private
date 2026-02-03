@@ -81,4 +81,18 @@ describe('ScopeInflationDetector', () => {
     ]);
     expect(flags[0].confidence).toBeLessThan(0.6);
   });
+
+  it('ignores scope cues in safe "applying for" sentences', () => {
+    const flags = detector.detect(
+      [],
+      [
+        {
+          title: 'Generated Cover Letter',
+          content: 'Dear Hiring Team, I am applying for Head of Customer Services.',
+        },
+      ],
+    );
+
+    expect(flags).toHaveLength(0);
+  });
 });

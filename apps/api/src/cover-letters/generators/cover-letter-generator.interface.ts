@@ -33,6 +33,7 @@ export type CoverLetterGenerationInput = {
   closingTemplate: CoverLetterClosingTemplate;
   maxWords?: number;
   tone?: string;
+  safeMode?: boolean;
 };
 
 export type CoverLetterGenerationResult = {

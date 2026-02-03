@@ -29,13 +29,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const baselineStatements = this.extractBaselineStatements(baselineBlocks);
     const focusAreas = this.buildFocusAreas(job);
     const tone = input.tone?.trim() || null;
+    const safeMode = Boolean(input.safeMode);
 
-    const paragraphs = [
-      this.composeIntro(job, tone),
-      this.composeStrengths(baselineStatements, tone),
-      this.composeExecution(job, focusAreas, baselineStatements),
-      this.composeClosing(job, tone, input.closingTemplate.text),
-    ].filter((paragraph) => paragraph.length > 0);
+    const paragraphs = safeMode
+      ? [
+          this.composeSafeIntro(job, tone),
+          this.composeSafeStrengths(baselineStatements, tone),
+          this.composeSafeExecution(job),
+          this.composeSafeClosing(job, tone, input.closingTemplate.text),
+        ]
+      : [
+          this.composeIntro(job, tone),
+          this.composeStrengths(baselineStatements, tone),
+          this.composeExecution(job, focusAreas, baselineStatements),
+          this.composeClosing(job, tone, input.closingTemplate.text),
+        ];
 
     let content = paragraphs
       .map((paragraph) => paragraph.trim())
@@ -160,6 +168,13 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return `I am applying for ${roleDescriptor}. I prepared this cover letter directly from the approved baseline text and the responsibilities you provided, keeping every statement grounded in verified details.${toneLine} I will highlight the portions of my record that align with the description and avoid adding claims that are not supported.`;
   }
 
+  private composeSafeIntro(job: NormalizedJob, tone: string | null) {
+    const roleDescriptor = this.describeRole(job);
+    const toneLine = tone ? ` I will maintain a ${tone} tone throughout.` : '';
+
+    return `I am applying for ${roleDescriptor}. This letter relies solely on the approved baseline text and the responsibilities you shared, keeping every claim anchored to verified content and avoiding speculation.${toneLine}`;
+  }
+
   private composeStrengths(statements: string[], tone: string | null) {
     const toneLine = tone
       ? ` The same ${tone} style appears across these examples.`
@@ -172,6 +187,20 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const highlights = statements.slice(0, 3);
 
     return `Documented experience from the baseline includes ${this.formatList(highlights)}.${toneLine} These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.`;
+  }
+
+  private composeSafeStrengths(statements: string[], tone: string | null) {
+    const toneLine = tone
+      ? ` The same ${tone} style appears across these passages.`
+      : '';
+
+    if (statements.length === 0) {
+      return `The approved baseline emphasizes how I plan work, collaborate with teammates, and document outcomes in plain language.${toneLine} I will stick to that verified material when describing strengths.`;
+    }
+
+    const highlights = statements.slice(0, 2);
+
+    return `The allowed baseline highlights ${this.formatList(highlights)}.${toneLine} Each sentence comes directly from approved content so every strength remains verifiable.`;
   }
 
   private composeExecution(
@@ -198,6 +227,19 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
   }
 
+  private composeSafeExecution(job: NormalizedJob) {
+    const priorities =
+      job.responsibilities.length || job.requirements.length
+        ? this.formatList([...job.responsibilities, ...job.requirements].slice(0, 4))
+        : 'the listed responsibilities and requirements';
+
+    const companySentence = job.company
+      ? ` I will use the job posting at ${job.company} as a reference, matching each priority to the verified baseline excerpts before describing how I will proceed.`
+      : ' I will use the job posting as a reference, matching each priority to the verified baseline excerpts before describing how I will proceed.';
+
+    return `For priorities such as ${priorities}, I will rely on the approved baseline passages to describe how I plan to support the work without introducing claims that are outside those sections.${companySentence}`;
+  }
+
   private composeClosing(
     job: NormalizedJob,
     tone: string | null,
@@ -212,6 +254,22 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
 
     return `${closingTemplate} Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine}`.trim();
+  }
+
+  private composeSafeClosing(
+    job: NormalizedJob,
+    tone: string | null,
+    closingTemplate: string,
+  ) {
+    const roleDescriptor = this.describeRole(job);
+    const toneLine = tone
+      ? ` I will continue to communicate in the same ${tone} style.`
+      : '';
+    const companyLine = job.company
+      ? ` I appreciate your consideration and will gladly share any additional approved excerpts that help ${job.company} understand how the baseline content supports ${roleDescriptor}.`
+      : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
+
+    return `${closingTemplate} Thank you for reviewing how the verified baseline material supports ${roleDescriptor}.${toneLine}${companyLine}`.trim();
   }
 
   private describeRole(job: NormalizedJob) {

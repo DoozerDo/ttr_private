@@ -3,6 +3,7 @@ import {
   ComplianceFlagCode,
   ComplianceFlagSeverity,
   ComplianceTextSection,
+  JobApplicationContext,
 } from './compliance.types';
 import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
@@ -12,6 +13,7 @@ type DetectorPayload = {
   generatedSections?: ComplianceTextSection[] | null;
   job?: { title?: string | null; company?: string | null } | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
+  jobContext?: JobApplicationContext | null;
 };
 
 const COMPANY_CONTEXT_PATTERN =
@@ -163,6 +165,14 @@ const ROLE_KEYWORD_PATTERN = new RegExp(
   ).join('|')})\\b`,
   'i',
 );
+
+const APPLICATION_WINDOW = 400;
+const APPLICATION_PHRASE_DISTANCE = 120;
+const APPLICATION_PHRASE_PATTERNS = [
+  /\bi am (?:writing to )?(?:excited to )?apply(?:ing)? for\b/,
+  /\bi am interested in (?:the )?(?:role|position|opportunity|job)\b/,
+  /\bthis role aligns with my\b/,
+];
 
 // Header delimiters used for detecting "header-like" fragments when scanning text.
 const HEADER_DELIMITERS = new Set<string>([':', '-', '–', '—', '|', '/', '@']);
@@ -540,6 +550,101 @@ export function shouldUseForRoleDetection(
   return BASELINE_ROLE_SECTION_TYPES.has(sectionType);
 }
 
+function buildNormalizedGeneratedText(
+  sections: ComplianceTextSection[] | null | undefined,
+): string {
+  const text = (sections ?? [])
+    .map((section) => `${section.title ?? ''} ${section.content ?? ''}`)
+    .join(' ');
+
+  return normalizeCandidate(text).toLowerCase();
+}
+
+function collectJobContextNormalizedSet(
+  jobContext: JobApplicationContext | null | undefined,
+  field: keyof JobApplicationContext,
+  normalizer: (value: string) => string,
+): Set<string> {
+  const normalized = new Set<string>();
+  const values = jobContext?.[field] ?? [];
+  for (const value of values ?? []) {
+    const cleaned = normalizer(String(value ?? ''));
+    if (cleaned) {
+      normalized.add(cleaned);
+    }
+  }
+  return normalized;
+}
+
+function shouldSkipForJobContextApplication(
+  normalizedText: string,
+  candidate: string,
+): boolean {
+  if (!normalizedText || !candidate) return false;
+  const window = normalizedText.slice(0, APPLICATION_WINDOW);
+  const candidateIndex = window.indexOf(candidate);
+  if (candidateIndex === -1) {
+    return false;
+  }
+
+  for (const pattern of APPLICATION_PHRASE_PATTERNS) {
+    pattern.lastIndex = 0;
+    const match = pattern.exec(window);
+    if (!match) {
+      continue;
+    }
+
+    const afterMatch = match.index + match[0].length;
+    if (
+      candidateIndex >= afterMatch &&
+      candidateIndex - afterMatch <= APPLICATION_PHRASE_DISTANCE
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasWordBoundary(text: string, substring: string): boolean {
+  if (!text || !substring) return false;
+
+  let cursor = 0;
+  while (true) {
+    const index = text.indexOf(substring, cursor);
+    if (index === -1) {
+      return false;
+    }
+
+    const before = index === 0 || text[index - 1] === ' ';
+    const after =
+      index + substring.length === text.length ||
+      text[index + substring.length] === ' ';
+
+    if (before && after) {
+      return true;
+    }
+
+    cursor = index + 1;
+  }
+}
+
+function matchesJobContextValue(
+  normalizedCandidate: string,
+  allowedSet: Set<string>,
+): boolean {
+  if (!normalizedCandidate || !allowedSet.size) return false;
+
+  for (const allowed of allowedSet) {
+    if (!allowed) continue;
+    if (hasWordBoundary(normalizedCandidate, allowed)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 type MetricCandidate = {
   normalized: string;
   original: string;
@@ -821,6 +926,13 @@ function detectInventedEntity(options: {
   confidence?: number;
   confidenceFactory?: (token: string) => number;
   baselineSuffixAllowlist?: boolean;
+  jobContext?: JobApplicationContext | null;
+  jobContextField?: keyof JobApplicationContext;
+  contextualSkip?: (
+    normalized: string,
+    normalizedText: string,
+  ) => boolean;
+  generatedText?: string;
 }): ComplianceFlag[] {
   const normalizer = options.normalizer ?? normalizeTokenForComparison;
 
@@ -829,7 +941,28 @@ function detectInventedEntity(options: {
     options.candidateExtractor,
     normalizer,
   );
+  if (process.env.DEBUG_DETECTORS === 'true') {
+    console.log(
+      'generated candidates',
+      [...generated.keys()],
+      'from text',
+      buildNormalizedGeneratedText(options.generatedSections),
+    );
+  }
   if (!generated.size) return [];
+
+  const normalizedGeneratedText = (
+    options.generatedText ??
+    buildNormalizedGeneratedText(options.generatedSections)
+  ).toLowerCase();
+
+  const jobContextSet = options.jobContextField
+    ? collectJobContextNormalizedSet(
+        options.jobContext,
+        options.jobContextField,
+        normalizer,
+      )
+    : new Set<string>();
 
   const allowedNormalized = new Set<string>();
   const precomputed = options.baselineAllowlist ?? [];
@@ -889,6 +1022,14 @@ function detectInventedEntity(options: {
     }
     if (options.allowlist(normalized, original)) continue;
 
+    if (
+      options.contextualSkip &&
+      matchesJobContextValue(normalized, jobContextSet) &&
+      options.contextualSkip(normalized, normalizedGeneratedText)
+    ) {
+      continue;
+    }
+
     const confidence =
       typeof options.confidence === 'number'
         ? options.confidence
@@ -913,7 +1054,12 @@ export function detectInventedCompany(
   return detectInventedEntity({
     baselineSections: payload.baselineSections,
     generatedSections: payload.generatedSections,
-    allowedJobValues: payload.job?.company ? [payload.job.company] : [],
+    allowedJobValues: [
+      ...(payload.job?.company ? [payload.job.company] : []),
+      ...(payload.jobContext?.allowedCompanies ?? []),
+    ],
+    jobContext: payload.jobContext,
+    jobContextField: 'allowedCompanies',
     candidateExtractor: extractCompanyCandidatesFromText,
     allowlist: isCompanyAllowlisted,
     code: ComplianceFlagCode.INVENTED_COMPANY,
@@ -936,7 +1082,14 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
   return detectInventedEntity({
     baselineSections: baselineSectionsForRoles,
     generatedSections: payload.generatedSections,
-    allowedJobValues: payload.job?.title ? [payload.job.title] : [],
+    allowedJobValues: [
+      ...(payload.job?.title ? [payload.job.title] : []),
+      ...(payload.jobContext?.allowedRoleTitles ?? []),
+    ],
+    jobContext: payload.jobContext,
+    jobContextField: 'allowedRoleTitles',
+    contextualSkip: (normalized, normalizedText) =>
+      shouldSkipForJobContextApplication(normalizedText, normalized),
     candidateExtractor: extractRoleCandidatesFromText,
     allowlist: buildRoleAllowlist(baselineRoleTokens),
     code: ComplianceFlagCode.INVENTED_ROLE,

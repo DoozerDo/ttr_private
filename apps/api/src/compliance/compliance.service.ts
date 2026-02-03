@@ -9,6 +9,7 @@ import {
   ComplianceFlag,
   ComplianceFlagSeverity,
   ComplianceTextSection,
+  JobApplicationContext,
 } from './compliance.types';
 import { ComplianceAudit } from './compliance-audit.entity';
 import { ScopeInflationDetector } from './scope-inflation-detector';
@@ -31,6 +32,7 @@ export type ValidateAndAuditRequest = {
 
   baselineVersion?: BaselineVersion | null;
   job?: Job | null;
+  jobContext?: JobApplicationContext;
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
@@ -138,12 +140,14 @@ export class ComplianceService {
       content?: string | null;
       title?: string | null;
     }> | null;
+    jobContext?: JobApplicationContext | null;
   }): ComplianceFlag[] {
     const baselineSections = payload.baselineSections ?? [];
     const generatedSections = payload.generatedSections ?? [];
     return this.scopeInflationDetector.detect(
       baselineSections,
       generatedSections,
+      payload.jobContext ?? undefined,
     );
   }
 
@@ -286,6 +290,7 @@ export class ComplianceService {
         generatedSections: payload.generatedSections,
         job: payload.job,
         baselineAllowlist,
+        jobContext: payload.jobContext,
       });
       rawFlags.push(...inventedFlags);
     }
@@ -334,6 +339,10 @@ export class ComplianceService {
     generatedSections?: ComplianceTextSection[] | null;
     job?: Job | null;
     baselineAllowlist?: BaselineAllowlistSnapshot | null;
+    jobContext?: {
+      allowedCompanies?: string[];
+      allowedRoleTitles?: string[];
+    };
   }): ComplianceFlag[] {
     return [
       ...detectInventedCompany({
@@ -341,12 +350,14 @@ export class ComplianceService {
         generatedSections: payload.generatedSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
+        jobContext: payload.jobContext,
       }),
       ...detectInventedRole({
         baselineSections: payload.baselineSections,
         generatedSections: payload.generatedSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
+        jobContext: payload.jobContext,
       }),
       ...detectInventedMetric({
         baselineSections: payload.baselineSections,
@@ -359,6 +370,7 @@ export class ComplianceService {
         generatedSections: payload.generatedSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
+        jobContext: payload.jobContext,
       }),
     ];
   }

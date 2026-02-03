@@ -16,7 +16,10 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceService } from '../compliance/compliance.service';
-import { ComplianceAction } from '../compliance/compliance.types';
+import {
+  ComplianceAction,
+  JobApplicationContext,
+} from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
 import {
   COVER_LETTER_CLOSING_TEMPLATES,
@@ -132,7 +135,12 @@ export class CoverLettersService {
       closingTemplateKey,
     );
 
-    const generation = this.generator.generate({
+    const complianceBaselineSections = this.buildComplianceBaselineSections(
+      allowedBlocks,
+      jobContext,
+    );
+
+    let generation = this.generator.generate({
       baselineId: baseline.id,
       jobId: job.id,
       allowedBaselineBlocks: allowedBlocks,
@@ -142,62 +150,56 @@ export class CoverLettersService {
       tone: input.tone,
     });
 
-    const normalizedContent = this.complianceService.normalizeText(
+    const jobAllowlist: JobApplicationContext = {
+      allowedCompanies: jobContext.company ? [jobContext.company] : [],
+      allowedRoleTitles: jobContext.title ? [jobContext.title] : [],
+    };
+
+    let complianceResult = await this.evaluateCompliance(
       generation.content,
-    );
-
-    const complianceBaselineSections = this.buildComplianceBaselineSections(
       allowedBlocks,
-      jobContext,
+      complianceBaselineSections,
+      job,
+      baselineVersion,
+      userId,
+      jobAllowlist,
     );
 
-    const writingFlags = this.complianceService.enforceResumeWritingRules({
-      baselineSections: complianceBaselineSections,
-      generatedSections: [
-        { title: 'Cover Letter', content: generation.content },
-      ],
-    });
+    if (complianceResult.blocked) {
+      generation = this.generator.generate({
+        baselineId: baseline.id,
+        jobId: job.id,
+        allowedBaselineBlocks: allowedBlocks,
+        job: jobContext,
+        closingTemplate,
+        maxWords: input.maxWords,
+        tone: input.tone,
+        safeMode: true,
+      });
 
-    const scopeFlags = this.complianceService.detectScopeInflation({
-      baselineSections: allowedBlocks.map((block) => ({
-        title: block.title,
-        content: block.content,
-        sectionType: block.sectionType,
-      })),
-      generatedSections: [
-        { title: 'Cover Letter', content: generation.content },
-      ],
-    });
-
-    const { complianceFlags, blocked, audit } =
-      await this.complianceService.validateAndAudit({
-        action: ComplianceAction.COVER_LETTER_GENERATION,
-        actorId: userId,
-        baselineVersion,
+      complianceResult = await this.evaluateCompliance(
+        generation.content,
+        allowedBlocks,
+        complianceBaselineSections,
         job,
-        outputHash: createHash('sha256')
-          .update(normalizedContent)
-          .digest('hex'),
-        baselineSections: complianceBaselineSections,
-        generatedSections: [
-          { title: 'Cover Letter', content: normalizedContent },
-        ],
-        extraFlags: [...writingFlags, ...scopeFlags],
-        scopeInflationDetected: false,
-      });
+        baselineVersion,
+        userId,
+        jobAllowlist,
+      );
 
-    if (blocked) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            compliance_flags: complianceFlags,
-            audit_id: audit.id,
-            baseline_version_hash: audit.baselineVersionHash,
+      if (complianceResult.blocked) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'COMPLIANCE_VIOLATION',
+            message: 'Compliance validation failed.',
+            details: {
+              compliance_flags: complianceResult.complianceFlags,
+              audit_id: complianceResult.audit.id,
+              baseline_version_hash: complianceResult.audit.baselineVersionHash,
+            },
           },
-        },
-      });
+        });
+      }
     }
 
     const coverLetter = this.coverLetterRepository.create({
@@ -207,7 +209,7 @@ export class CoverLettersService {
       generatorType: 'template',
       generatorVersion: 'v1',
       closingTemplateKey,
-      content: normalizedContent,
+      content: complianceResult.normalizedContent,
       generationInputsHash,
     });
 
@@ -215,10 +217,10 @@ export class CoverLettersService {
 
     return {
       ...savedCoverLetter,
-      compliance_flags: complianceFlags,
-      audit_id: audit.id,
-      auditId: audit.id,
-      baseline_version_hash: audit.baselineVersionHash,
+      compliance_flags: complianceResult.complianceFlags,
+      audit_id: complianceResult.audit.id,
+      auditId: complianceResult.audit.id,
+      baseline_version_hash: complianceResult.audit.baselineVersionHash,
     };
   }
 
@@ -409,5 +411,55 @@ export class CoverLettersService {
     }
 
     return baselineSections;
+  }
+
+  private async evaluateCompliance(
+    content: string,
+    allowedBlocks: AllowedBaselineBlock[],
+    complianceBaselineSections: { title: string; content: string }[],
+    job: Job,
+    baselineVersion: BaselineVersion,
+    userId: string,
+    jobAllowlist: JobApplicationContext,
+  ) {
+    const normalizedContent = this.complianceService.normalizeText(content);
+    const writingFlags = this.complianceService.enforceResumeWritingRules({
+      baselineSections: complianceBaselineSections,
+      generatedSections: [{ title: 'Cover Letter', content }],
+    });
+    const scopeFlags = this.complianceService.detectScopeInflation({
+      baselineSections: allowedBlocks.map((block) => ({
+        title: block.title,
+        content: block.content,
+        sectionType: block.sectionType,
+      })),
+      generatedSections: [{ title: 'Cover Letter', content }],
+      jobContext: jobAllowlist,
+    });
+
+    const { complianceFlags, blocked, audit } =
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: userId,
+        baselineVersion,
+        job,
+        outputHash: createHash('sha256')
+          .update(normalizedContent)
+          .digest('hex'),
+        baselineSections: complianceBaselineSections,
+        generatedSections: [
+          { title: 'Cover Letter', content: normalizedContent },
+        ],
+        extraFlags: [...writingFlags, ...scopeFlags],
+        scopeInflationDetected: false,
+        jobContext: jobAllowlist,
+      });
+
+    return {
+      normalizedContent,
+      complianceFlags,
+      blocked,
+      audit,
+    };
   }
 }

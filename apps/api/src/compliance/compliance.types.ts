@@ -41,3 +41,8 @@ export type ComplianceTextSection = {
   content?: string | null;
   sectionType?: string | null;
 };
+
+export type JobApplicationContext = {
+  allowedCompanies?: string[];
+  allowedRoleTitles?: string[];
+};
