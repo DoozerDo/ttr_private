@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -39,6 +39,10 @@ type LatestAnalysis = {
   summary?: string | null;
   baselineId?: string;
   baselineVersionId?: string;
+  company?: string | null;
+  companyName?: string | null;
+  jobTitle?: string | null;
+  title?: string | null;
 };
 
 type DocumentState = {
@@ -46,6 +50,22 @@ type DocumentState = {
   error: string | null;
   tierGateError: TierGateError | null;
   complianceError: ParsedComplianceError | null;
+};
+
+type CoverLetterJobContextPayload = {
+  allowedCompanies?: string[];
+  allowedRoleTitles?: string[];
+};
+
+type CoverLetterPayload = {
+  jobId?: string;
+  baselineId?: string;
+  baselineVersionId?: string;
+  closingTemplateKey?: string;
+  oneTap?: boolean;
+  documentType: "cover_letter";
+  jobContext?: CoverLetterJobContextPayload;
+  [key: string]: unknown;
 };
 
 type ResumeSection = {
@@ -62,6 +82,24 @@ function createDocumentState(): DocumentState {
     tierGateError: null,
     complianceError: null,
   };
+}
+
+function normalizeCoverLetterContextValue(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const collapsed = trimmed.replace(/\s+/g, " ").toLowerCase();
+  return collapsed || undefined;
+}
+
+function collectNormalizedContextValues(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeCoverLetterContextValue(value);
+    if (!normalized) continue;
+    seen.add(normalized);
+  }
+  return Array.from(seen);
 }
 
 function normalizeAuditId(value: unknown): string | undefined {
@@ -137,6 +175,51 @@ function formatPreview(payload: unknown): string {
   } catch {
     return "Preview unavailable.";
   }
+}
+
+function readContentValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : undefined;
+  }
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const candidate = record.content;
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    return trimmed.length ? trimmed : undefined;
+  }
+  return undefined;
+}
+
+function extractCoverLetterText(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const record = payload as Record<string, unknown>;
+  const candidateFields: unknown[] = [
+    record.content,
+    record.letter,
+    record.coverLetter,
+    record.draft,
+    record.generated,
+  ];
+  for (const candidate of candidateFields) {
+    const value = readContentValue(candidate);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function buildCoverLetterParagraphs(payload: unknown): string[] {
+  const text = extractCoverLetterText(payload);
+  if (!text) return [];
+  return text
+    .split(/\r?\n\s*\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 }
 
 function normalizeHeader(value?: string): string {
@@ -345,6 +428,35 @@ export default function StudioPage() {
 
   const [autoGenerateThreshold] = useAutoGenerateThreshold();
 
+  const selectedJob = useMemo(
+    () => jobs.find((job) => job.id === selectedJobId),
+    [jobs, selectedJobId],
+  );
+
+  const coverLetterJobContext = useMemo(() => {
+    const jobWithExtras = selectedJob as Job & {
+      companyName?: string | null;
+      jobTitle?: string | null;
+    };
+    const companies = collectNormalizedContextValues([
+      selectedJob?.company,
+      jobWithExtras?.companyName,
+      analysis?.company,
+      analysis?.companyName,
+    ]);
+    const roleTitles = collectNormalizedContextValues([
+      selectedJob?.title,
+      jobWithExtras?.jobTitle,
+      analysis?.jobTitle,
+      analysis?.title,
+    ]);
+    if (!companies.length && !roleTitles.length) return undefined;
+    const context: CoverLetterJobContextPayload = {};
+    if (companies.length) context.allowedCompanies = companies;
+    if (roleTitles.length) context.allowedRoleTitles = roleTitles;
+    return context;
+  }, [selectedJob, analysis]);
+
   const analysisScore = useMemo(() => {
     const value = analysis?.overallScore ?? analysis?.score;
     if (typeof value === "number") return value;
@@ -377,7 +489,6 @@ export default function StudioPage() {
   const verdictLabel = useMemo(() => mapVerdict(analysis?.verdict), [analysis?.verdict]);
   const analysisSummary = analysis?.summary;
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
-  const coverPreviewText = useMemo(() => formatPreview(coverState.response), [coverState.response]);
   const resumeStructuredPreview = useMemo(
     () => buildResumePreview(resumeState.response),
     [resumeState.response],
@@ -386,6 +497,25 @@ export default function StudioPage() {
     () => coverLetterClosingTemplates.find((template) => template.key === closingTemplateKey),
     [closingTemplateKey],
   );
+  const coverLetterParagraphs = useMemo(
+    () => buildCoverLetterParagraphs(coverState.response),
+    [coverState.response],
+  );
+
+  function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
+    const payload: CoverLetterPayload = {
+      jobId: selectedJobId,
+      baselineId: selectedBaselineId,
+      baselineVersionId: selectedBaselineVersionId,
+      closingTemplateKey,
+      documentType: "cover_letter",
+      oneTap,
+    };
+    if (coverLetterJobContext) {
+      payload.jobContext = coverLetterJobContext;
+    }
+    return payload;
+  }
 
   useEffect(() => {
     let canceled = false;
@@ -681,12 +811,7 @@ export default function StudioPage() {
     setCoverState(createDocumentState());
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
-    const payload = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
-      closingTemplateKey,
-    };
+    const payload = buildCoverLetterPayload(false);
     try {
       const response = await fetch("/api/cover-letters", {
         method: "POST",
@@ -730,13 +855,7 @@ export default function StudioPage() {
     setCoverState(createDocumentState());
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
-    const payload = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
-      closingTemplateKey,
-      oneTap: true,
-    };
+    const payload = buildCoverLetterPayload(true);
     try {
       const response = await fetch(
         `/api/cover-letters/export?format=${encodeURIComponent(format)}`,
@@ -1079,9 +1198,33 @@ export default function StudioPage() {
                 auditId={coverAuditId}
               />
             ) : null}
-            <pre className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
-              {coverPreviewText}
-            </pre>
+            <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
+              {coverLetterParagraphs.length ? (
+                <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
+                  {coverLetterParagraphs.map((paragraph, index) => {
+                    const lines = paragraph.split(/\r?\n/);
+                    const isGreeting = index === 0 && /^dear\b/i.test(lines[0] ?? "");
+                    return (
+                      <p
+                        key={`cover-letter-paragraph-${index}`}
+                        className={`m-0 text-sm leading-[1.7] tracking-normal text-slate-100 ${
+                          isGreeting ? "font-semibold text-slate-50" : "text-slate-200"
+                        }`}
+                      >
+                        {lines.map((line, lineIndex) => (
+                          <Fragment key={`line-${index}-${lineIndex}`}>
+                            {line}
+                            {lineIndex < lines.length - 1 ? <br /> : null}
+                          </Fragment>
+                        ))}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400">Preview unavailable.</p>
+              )}
+            </div>
           </div>
         ) : (
           <EmptyState

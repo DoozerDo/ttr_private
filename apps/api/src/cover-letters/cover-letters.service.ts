@@ -151,10 +151,19 @@ export class CoverLettersService {
       tone: input.tone,
     });
 
-    const jobAllowlist: JobApplicationContext = {
+    const requestedJobContext = this.normalizeRequestedJobContext(
+      input.jobContext,
+    );
+
+    const fallbackJobContext: JobApplicationContext = {
       allowedCompanies: jobContext.company ? [jobContext.company] : [],
       allowedRoleTitles: jobContext.title ? [jobContext.title] : [],
     };
+
+    const jobContextAllowlist = requestedJobContext ?? fallbackJobContext;
+    const documentTypeForCompliance = this.normalizeRequestedDocumentType(
+      input.documentType ?? input.documentTypeKey,
+    );
 
     let complianceResult = await this.evaluateCompliance(
       generation.content,
@@ -163,7 +172,8 @@ export class CoverLettersService {
       job,
       baselineVersion,
       userId,
-      jobAllowlist,
+      jobContextAllowlist,
+      documentTypeForCompliance,
     );
 
     if (complianceResult.blocked) {
@@ -185,7 +195,8 @@ export class CoverLettersService {
         job,
         baselineVersion,
         userId,
-        jobAllowlist,
+        jobContextAllowlist,
+        documentTypeForCompliance,
       );
 
       if (complianceResult.blocked) {
@@ -317,6 +328,78 @@ export class CoverLettersService {
       .filter((value) => value.length > 0);
   }
 
+  private normalizeRequestedJobContext(
+    context?: JobApplicationContext | null,
+  ): JobApplicationContext | undefined {
+    if (!context) return undefined;
+
+    const allowedCompanies = this.normalizeJobContextValues(
+      context.allowedCompanies,
+    );
+    const allowedRoleTitles = this.normalizeJobContextValues(
+      context.allowedRoleTitles,
+    );
+
+    if (!allowedCompanies.length && !allowedRoleTitles.length) {
+      return undefined;
+    }
+
+    const normalized: JobApplicationContext = {};
+    if (allowedCompanies.length) {
+      normalized.allowedCompanies = allowedCompanies;
+    }
+    if (allowedRoleTitles.length) {
+      normalized.allowedRoleTitles = allowedRoleTitles;
+    }
+    return normalized;
+  }
+
+  private normalizeJobContextValues(values?: string[] | null): string[] {
+    if (!Array.isArray(values)) return [];
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+
+    for (const raw of values) {
+      const cleaned = this.normalizeJobContextField(raw);
+      if (!cleaned) continue;
+      if (seen.has(cleaned)) continue;
+      seen.add(cleaned);
+      normalized.push(cleaned);
+    }
+
+    return normalized;
+  }
+
+  private normalizeJobContextField(value?: string | null): string | undefined {
+    if (!value) return undefined;
+    const collapsed = value
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+    return collapsed.length ? collapsed : undefined;
+  }
+
+  private normalizeRequestedDocumentType(
+    value?: DocumentType | string | null,
+  ): DocumentType {
+    if (value === DocumentType.COVER_LETTER) {
+      return DocumentType.COVER_LETTER;
+    }
+
+    const normalized =
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!normalized) {
+      return DocumentType.COVER_LETTER;
+    }
+
+    const normalizedKey = normalized.replace(/[^a-z]/g, '_');
+    if (normalizedKey === 'cover_letter' || normalizedKey === 'coverletter') {
+      return DocumentType.COVER_LETTER;
+    }
+
+    return DocumentType.COVER_LETTER;
+  }
+
   private computeGenerationInputsHash(
     baselineId: string,
     jobId: string,
@@ -421,7 +504,8 @@ export class CoverLettersService {
     job: Job,
     baselineVersion: BaselineVersion,
     userId: string,
-    jobAllowlist: JobApplicationContext,
+    jobContextAllowlist: JobApplicationContext,
+    documentType: DocumentType,
   ) {
     const normalizedContent = this.complianceService.normalizeText(content);
     const writingFlags = this.complianceService.enforceResumeWritingRules({
@@ -435,8 +519,8 @@ export class CoverLettersService {
         sectionType: block.sectionType,
       })),
       generatedSections: [{ title: 'Cover Letter', content }],
-      jobContext: jobAllowlist,
-      documentType: DocumentType.COVER_LETTER,
+      jobContext: jobContextAllowlist,
+      documentType,
     });
 
     const { complianceFlags, blocked, audit } =
@@ -454,8 +538,8 @@ export class CoverLettersService {
         ],
         extraFlags: [...writingFlags, ...scopeFlags],
         scopeInflationDetected: false,
-        jobContext: jobAllowlist,
-        documentType: DocumentType.COVER_LETTER,
+        jobContext: jobContextAllowlist,
+        documentType,
       });
 
     return {

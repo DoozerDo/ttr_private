@@ -44,6 +44,21 @@ const DOCUMENT_CAPITALIZED = "Cover letter";
 const DOWNLOAD_NAME = "cover-letter";
 const COPY_LABEL = "Copy cover letter text";
 
+type CoverLetterJobContextPayload = {
+  allowedCompanies?: string[];
+  allowedRoleTitles?: string[];
+};
+
+type CoverLetterPayload = {
+  jobId?: string | null;
+  baselineId?: string | null;
+  baselineVersionId?: string | null;
+  oneTap: boolean;
+  documentType: "COVER_LETTER";
+  jobContext?: CoverLetterJobContextPayload;
+  [key: string]: unknown;
+};
+
 function extractUnknownMessage(value: unknown): string | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -104,6 +119,60 @@ export default function CoverLettersPage() {
       ]),
     [analysisRecord],
   );
+
+  const jobTitle = useMemo(
+    () =>
+      readStringFromPaths(analysisRecord, [
+        ["jobTitle"],
+        ["analysis", "jobTitle"],
+        ["analysis", "job_title"],
+        ["analysis", "job", "title"],
+        ["analysis", "job", "jobTitle"],
+        ["analysis", "job", "roleTitle"],
+      ]),
+    [analysisRecord],
+  );
+
+  const jobCompany = useMemo(
+    () =>
+      readStringFromPaths(analysisRecord, [
+        ["company"],
+        ["analysis", "company"],
+        ["analysis", "employer"],
+        ["analysis", "job", "company"],
+        ["analysis", "job", "companyName"],
+        ["analysis", "job", "company_name"],
+      ]),
+    [analysisRecord],
+  );
+
+  const jobContextPayload = useMemo(() => {
+    const title = normalizeJobContextValue(jobTitle);
+    const company = normalizeJobContextValue(jobCompany);
+    const context: CoverLetterJobContextPayload = {};
+    if (company) context.allowedCompanies = [company];
+    if (title) context.allowedRoleTitles = [title];
+    return Object.keys(context).length ? context : undefined;
+  }, [jobCompany, jobTitle]);
+
+  function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
+    const payload: CoverLetterPayload = {
+      jobId,
+      baselineVersionId,
+      oneTap,
+      documentType: "COVER_LETTER",
+    };
+
+    if (baselineId) {
+      payload.baselineId = baselineId;
+    }
+
+    if (jobContextPayload) {
+      payload.jobContext = jobContextPayload;
+    }
+
+    return payload;
+  }
 
   const readyForDocument = Boolean(jobId && baselineVersionId);
 
@@ -202,12 +271,7 @@ export default function CoverLettersPage() {
     }));
 
     try {
-      const payload: Record<string, unknown> = {
-        jobId,
-        baselineVersionId,
-        oneTap: false,
-      };
-      if (baselineId) payload.baselineId = baselineId;
+      const payload = buildCoverLetterPayload(false);
 
       const res = await fetch("/api/cover-letters", {
         method: "POST",
@@ -263,12 +327,7 @@ export default function CoverLettersPage() {
       complianceError: null,
     }));
 
-    const payload: Record<string, unknown> = {
-      jobId,
-      baselineVersionId,
-      oneTap: true,
-    };
-    if (baselineId) payload.baselineId = baselineId;
+    const payload = buildCoverLetterPayload(true);
 
     try {
       const res = await fetch(`/api/cover-letters/export?format=${encodeURIComponent(format)}`, {
@@ -562,6 +621,17 @@ function stringsOnly(arr: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function normalizeJobContextValue(value?: string | null): string | undefined {
+  if (!value) return undefined;
+
+  const cleaned = value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  return cleaned.length ? cleaned : undefined;
 }
 
 function extractSectionText(section: ResumeSectionLike): string {

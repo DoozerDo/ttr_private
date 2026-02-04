@@ -564,6 +564,34 @@ function buildNormalizedGeneratedText(
   return normalizeCandidate(text).toLowerCase();
 }
 
+function containsJobContextSubstring(
+  normalizedCandidate: string,
+  jobContextSet: Set<string>,
+): boolean {
+  if (!normalizedCandidate || !jobContextSet.size) return false;
+
+  for (const allowed of jobContextSet) {
+    if (!allowed) continue;
+    if (normalizedCandidate.includes(allowed)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isCoverLetterAboutPhrase(normalizedCandidate: string): boolean {
+  if (!normalizedCandidate) return false;
+  const trimmed = normalizedCandidate.trim();
+  if (!trimmed) return false;
+  return (
+    trimmed.startsWith('about ') ||
+    trimmed.startsWith('and about ') ||
+    trimmed === 'about' ||
+    trimmed === 'and about'
+  );
+}
+
 function collectJobContextNormalizedSet(
   jobContext: JobApplicationContext | null | undefined,
   field: keyof JobApplicationContext,
@@ -1092,6 +1120,31 @@ function detectInventedEntity(options: {
       continue;
     }
 
+    if (
+      options.documentType === DocumentType.COVER_LETTER &&
+      options.jobContextField &&
+      containsJobContextSubstring(normalized, jobContextSet)
+    ) {
+      continue;
+    }
+
+    if (
+      options.documentType === DocumentType.COVER_LETTER &&
+      options.jobContextField === 'allowedRoleTitles' &&
+      isCoverLetterAboutPhrase(normalized)
+    ) {
+      continue;
+    }
+
+    if (
+      options.documentType === DocumentType.COVER_LETTER &&
+      options.jobContextField &&
+      jobContextSet.size &&
+      !/[A-Z]/.test(original)
+    ) {
+      continue;
+    }
+
     const normalizedCandidateForSuppression = normalizeForSuppression(normalized);
     if (
       options.documentType === DocumentType.COVER_LETTER &&
@@ -1136,6 +1189,8 @@ export function detectInventedCompany(
     ],
     jobContext: payload.jobContext,
     jobContextField: 'allowedCompanies',
+    contextualSkip: (normalized, normalizedText) =>
+      shouldSkipForJobContextApplication(normalizedText, normalized),
     candidateExtractor: extractCompanyCandidatesFromText,
     allowlist: isCompanyAllowlisted,
     code: ComplianceFlagCode.INVENTED_COMPANY,

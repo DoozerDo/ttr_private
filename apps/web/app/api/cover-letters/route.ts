@@ -7,9 +7,23 @@ function shouldBypassTier() {
   return process.env.NODE_ENV === "development" || process.env.TTR_BETA_BYPASS === "true";
 }
 
-async function parseJsonBody(req: NextRequest) {
+type CoverLetterRouteBody = {
+  jobId?: string;
+  baselineId?: string;
+  baselineVersionId?: string;
+  closingTemplateKey?: string;
+  oneTap?: boolean;
+  jobContext?: {
+    allowedCompanies?: string[];
+    allowedRoleTitles?: string[];
+  };
+  documentType?: string;
+  [key: string]: unknown;
+};
+
+async function parseJsonBody(req: NextRequest): Promise<CoverLetterRouteBody | null> {
   try {
-    return await req.json();
+    return (await req.json()) as CoverLetterRouteBody;
   } catch {
     return null;
   }
