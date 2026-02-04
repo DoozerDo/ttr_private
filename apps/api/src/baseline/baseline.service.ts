@@ -10,17 +10,20 @@ import { EntityManager, Repository } from 'typeorm';
 import type { Express } from 'express';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { BaselineTextExtractor } from './baseline-text-extractor.service';
 import {
   BaselineSection,
   BaselineSectionType,
   BaselineIncludePolicy,
 } from './baseline-section.entity';
+import type { ParsedSection } from './baseline-parser.service';
 import { Baseline, BaselineStatus } from './baseline.entity';
+import { BaselineParsed } from './baseline-parsed.entity';
 import {
-  BaselineParserService,
-  ParsedSection,
-} from './baseline-parser.service';
+  BaselineIngestionResult,
+  BaselineIngestionService,
+  BaselineSourceFormat,
+} from './baseline-ingestion.service';
+import { BaselineSchema } from './baseline-schema';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
@@ -58,6 +61,11 @@ type PolicyState = {
   order: number;
 };
 
+type BaselineFileParseResult = {
+  sections: Partial<BaselineSection>[];
+  ingestion: BaselineIngestionResult;
+};
+
 type PolicySectionInput = {
   id: string;
   includePolicy?: BaselineIncludePolicy | null;
@@ -73,6 +81,7 @@ type BaselineUploadStatus = {
 export type BaselineCreationResult = {
   baseline: Baseline;
   uploadStatus: BaselineUploadStatus;
+  ingestion?: BaselineIngestionResult;
 };
 
 @Injectable()
@@ -86,8 +95,9 @@ export class BaselineService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-    private readonly baselineTextExtractor: BaselineTextExtractor,
-    private readonly baselineParser: BaselineParserService,
+    @InjectRepository(BaselineParsed)
+    private readonly baselineParsedRepository: Repository<BaselineParsed>,
+    private readonly baselineIngestionService: BaselineIngestionService,
   ) {}
 
   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
@@ -235,6 +245,13 @@ export class BaselineService {
     });
   }
 
+  async getLatestParsedBaseline(baselineId: string) {
+    return this.baselineParsedRepository.findOne({
+      where: { baselineId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   private normalizePoliciesFromSections(
     sections: PolicySectionInput[],
   ): PolicyState[] {
@@ -264,7 +281,7 @@ export class BaselineService {
   async createBaseline(
     userId: string,
     file: FileMetadata,
-    parsedSections?: Partial<BaselineSection>[],
+    parseResult: BaselineFileParseResult,
   ) {
     const fileHash = await this.computeFileHash(file.path);
 
@@ -294,7 +311,7 @@ export class BaselineService {
         userId,
         file,
         fileHash,
-        parsedSections,
+        parseResult,
       );
     });
   }
@@ -304,7 +321,7 @@ export class BaselineService {
     userId: string,
     file: FileMetadata,
     fileHash: string,
-    parsedSections?: Partial<BaselineSection>[],
+    parseResult?: BaselineFileParseResult,
   ): Promise<BaselineCreationResult> {
     const baseline = manager.create(Baseline, {
       userId,
@@ -314,7 +331,7 @@ export class BaselineService {
       hash: fileHash,
       status: BaselineStatus.ACTIVE,
       archivedAt: null,
-      sections: parsedSections?.map((section, index) => ({
+      sections: parseResult?.sections?.map((section, index) => ({
         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
         title: section.title ?? null,
         content: this.sanitizeSectionContent(section.content),
@@ -373,6 +390,10 @@ export class BaselineService {
     savedBaseline.version = nextVersionNumber;
     savedBaseline.versions = [savedVersion];
 
+    if (parseResult) {
+      await this.persistParsedBaseline(manager, savedBaseline, parseResult.ingestion);
+    }
+
     const finalBaseline = await manager.save(savedBaseline);
 
     return {
@@ -382,7 +403,36 @@ export class BaselineService {
         versionNumber: nextVersionNumber,
         message: `Baseline uploaded as version ${nextVersionNumber}.`,
       },
+      ingestion: parseResult?.ingestion,
     };
+  }
+
+  private async persistParsedBaseline(
+    manager: EntityManager,
+    baseline: Baseline,
+    ingestion: BaselineIngestionResult,
+  ) {
+    const ingestedAt = new Date().toISOString();
+    const parsedBaseline = BaselineSchema.parse({
+      ...ingestion.canonical,
+      baseline_id: baseline.id,
+      source_file_id: baseline.id,
+      source_format: ingestion.sourceFormat,
+      ingested_at: ingestedAt,
+      user_verified: false,
+    });
+
+    const parsedRecord = manager.create(BaselineParsed, {
+      baselineId: baseline.id,
+      sourceFileId: baseline.id,
+      schemaVersion: parsedBaseline.schema_version,
+      sourceFormat: parsedBaseline.source_format,
+      ingestedAt: new Date(parsedBaseline.ingested_at),
+      parsedJson: parsedBaseline,
+      flagsJson: parsedBaseline.system_generated_read_only,
+    });
+
+    await manager.save(parsedRecord);
   }
 
   private async handleDuplicateBaselineUpload(
@@ -574,11 +624,25 @@ export class BaselineService {
     return baseline;
   }
 
-  async buildSectionsFromFile(file: Express.Multer.File) {
-    const content = await this.baselineTextExtractor.extractText(file);
-    const parsedSections = this.baselineParser.parseBaseline(content);
+  async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
+    const ingestion = await this.baselineIngestionService.ingest(file);
+    const sections = this.buildSections(
+      ingestion.rawText,
+      ingestion.parsedSections,
+    );
 
-    return this.buildSections(content, parsedSections);
+    return {
+      sections,
+      ingestion,
+    };
+  }
+
+  private inferSourceFormat(mimeType?: string | null): BaselineSourceFormat {
+    const normalized = (mimeType ?? '').toLowerCase();
+    if (normalized.includes('pdf')) {
+      return 'pdf';
+    }
+    return 'docx';
   }
 
   async reparseBaselineForUser(baselineId: string, userId: string) {
@@ -597,8 +661,15 @@ export class BaselineService {
       ) ?? baseline.sections[0];
 
     const rawText = rawSection?.content ?? '';
-    const parsedSections = this.baselineParser.parseBaseline(rawText);
-    const rebuiltSections = this.buildSections(rawText, parsedSections);
+    const sourceFormat = this.inferSourceFormat(baseline.mimeType);
+    const ingestion = await this.baselineIngestionService.ingestFromText(
+      rawText,
+      sourceFormat,
+    );
+    const rebuiltSections = this.buildSections(
+      ingestion.rawText,
+      ingestion.parsedSections,
+    );
 
     return this.baselineRepository.manager.transaction(async (manager) => {
       await manager.delete(BaselineSection, { baselineId: baseline.id });
@@ -659,6 +730,8 @@ export class BaselineService {
 
       baseline.version = nextVersionNumber;
       baseline.versions = [savedVersion];
+
+      await this.persistParsedBaseline(manager, baseline, ingestion);
 
       return manager.save(baseline);
     });

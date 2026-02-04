@@ -8,12 +8,12 @@ import path from 'node:path';
 import { BaselineSection } from './baseline-section.entity';
 import { BaselineController } from './baseline.controller';
 import { Baseline } from './baseline.entity';
+import { BaselineParsed } from './baseline-parsed.entity';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineService } from './baseline.service';
-import { BaselineTextExtractor } from './baseline-text-extractor.service';
-import { BaselineParserService } from './baseline-parser.service';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersionService } from './baseline-version.service';
+import { BaselineIngestionService } from './baseline-ingestion.service';
 import { Interview } from '../interviews/interview.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
 
@@ -25,6 +25,7 @@ import { ComplianceModule } from '../compliance/compliance.module';
       Baseline,
       BaselineSection,
       BaselineVersion,
+      BaselineParsed,
       BaselineBlockPolicy,
       Interview,
     ]),
@@ -70,8 +71,7 @@ import { ComplianceModule } from '../compliance/compliance.module';
   providers: [
     BaselineService,
     BaselineVersionService,
-    BaselineTextExtractor,
-    BaselineParserService,
+    BaselineIngestionService,
   ],
   controllers: [BaselineController],
 })

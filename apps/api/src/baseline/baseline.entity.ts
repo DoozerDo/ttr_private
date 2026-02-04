@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BaselineParsed } from './baseline-parsed.entity';
 import { BaselineSection } from './baseline-section.entity';
 import { BaselineVersion } from './baseline-version.entity';
 
@@ -56,6 +57,9 @@ export class Baseline {
     cascade: true,
   })
   versions!: BaselineVersion[];
+
+  @OneToMany(() => BaselineParsed, (parsed) => parsed.baseline)
+  parsedRecords!: BaselineParsed[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

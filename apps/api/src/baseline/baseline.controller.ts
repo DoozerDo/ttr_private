@@ -43,7 +43,7 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const sections = await this.baselineService.buildSectionsFromFile(file);
+    const parseResult = await this.baselineService.buildSectionsFromFile(file);
 
     const result = await this.baselineService.createBaseline(
       userId,
@@ -52,10 +52,27 @@ export class BaselineController {
         mimetype: file.mimetype,
         path: file.path,
       },
-      sections,
+      parseResult,
     );
 
-    return result;
+    const canonical = result.ingestion?.canonical;
+    const systemFlags = canonical?.system_generated_read_only;
+
+    return {
+      baseline: result.baseline,
+      uploadStatus: result.uploadStatus,
+      baselineId: result.baseline.id,
+      schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
+      userVerified: canonical?.user_verified ?? false,
+      rolesCount: canonical?.experience.length ?? 0,
+      toolsCount:
+        canonical?.tooling_and_platforms?.tools.length ?? 0,
+      flagsSummary: {
+        missingFields: systemFlags?.missing_fields.length ?? 0,
+        lowConfidence:
+          systemFlags?.low_confidence_extractions.length ?? 0,
+      },
+    };
   }
 
   @Post(':id/reparse')

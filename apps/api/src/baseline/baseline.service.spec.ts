@@ -9,9 +9,8 @@ import {
   BaselineSectionType,
 } from './baseline-section.entity';
 import { BaselineVersion } from './baseline-version.entity';
-import { BaselineParserService } from './baseline-parser.service';
+import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineService } from './baseline.service';
-import { BaselineTextExtractor } from './baseline-text-extractor.service';
 
 describe('BaselineService - block policies', () => {
   let service: BaselineService;
@@ -59,15 +58,76 @@ describe('BaselineService - block policies', () => {
     updatedAt: new Date(),
   } as Baseline;
 
-  const baselineVersion: BaselineVersion = {
-    id: 'v-1',
-    baselineId: 'b-1',
-    versionNumber: 1,
+const baselineVersion: BaselineVersion = {
+  id: 'v-1',
+  baselineId: 'b-1',
+  versionNumber: 1,
     fileHash: 'hash-1',
     storagePath: '/tmp/resume.pdf',
-    baseline,
-    createdAt: new Date(),
-  } as BaselineVersion;
+  baseline,
+  createdAt: new Date(),
+} as BaselineVersion;
+
+const canonicalBaseline = {
+  identity: {
+    full_name: 'Test User',
+    current_title: null,
+    current_company: null,
+    location: null,
+  },
+  experience: [],
+  people_leadership: {
+    direct_reports: null,
+    managers_led: null,
+    global_teams: null,
+  },
+  operational_ownership: {
+    functions_owned: [],
+    process_design: null,
+    process_scaling: null,
+  },
+  tooling_and_platforms: {
+    tools: [],
+    ownership_level: 'unknown',
+  },
+  cross_functional_partnership: {
+    product: null,
+    engineering: null,
+    sales_cs: null,
+    executive: null,
+  },
+  customer_advocacy: {
+    executive_escalations: null,
+    voice_of_customer: null,
+    post_incident_rca: null,
+  },
+  scale_and_scope: {
+    customer_segment: 'unknown',
+    geo_scope: 'unknown',
+    org_stage: 'unknown',
+  },
+  metrics_and_outcomes: {
+    metrics_present: false,
+    metrics: [],
+  },
+  skills_and_tools: {
+    tools: [],
+    methodologies: [],
+    domains: [],
+  },
+  system_generated_read_only: {
+    missing_fields: [],
+    ambiguity_flags: [],
+    low_confidence_extractions: [],
+  },
+};
+
+const ingestionResult = {
+  rawText: 'raw',
+  parsedSections: [],
+  canonical: canonicalBaseline,
+  sourceFormat: 'docx' as const,
+};
 
   const transactionManager = {
     create: jest.fn((_: any, payload: any) => payload),
@@ -135,12 +195,17 @@ describe('BaselineService - block policies', () => {
           useValue: baselineBlockPolicyRepository,
         },
         {
-          provide: BaselineTextExtractor,
-          useValue: { extractText: jest.fn() },
+          provide: getRepositoryToken(BaselineParsed),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue(null),
+          },
         },
         {
-          provide: BaselineParserService,
-          useValue: { parseBaseline: jest.fn() },
+          provide: BaselineIngestionService,
+          useValue: {
+            ingest: jest.fn().mockResolvedValue(ingestionResult),
+            ingestFromText: jest.fn().mockResolvedValue(ingestionResult),
+          },
         },
       ],
     }).compile();
