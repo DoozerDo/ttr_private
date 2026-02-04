@@ -9,6 +9,7 @@ import {
   ComplianceFlag,
   ComplianceFlagSeverity,
   ComplianceTextSection,
+  DocumentType,
   JobApplicationContext,
 } from './compliance.types';
 import { ComplianceAudit } from './compliance-audit.entity';
@@ -36,6 +37,7 @@ export type ValidateAndAuditRequest = {
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
+  documentType?: DocumentType;
 
   outputHash: string;
 
@@ -141,6 +143,7 @@ export class ComplianceService {
       title?: string | null;
     }> | null;
     jobContext?: JobApplicationContext | null;
+    documentType?: DocumentType;
   }): ComplianceFlag[] {
     const baselineSections = payload.baselineSections ?? [];
     const generatedSections = payload.generatedSections ?? [];
@@ -148,6 +151,7 @@ export class ComplianceService {
       baselineSections,
       generatedSections,
       payload.jobContext ?? undefined,
+      payload.documentType,
     );
   }
 
@@ -161,6 +165,7 @@ export class ComplianceService {
       baselineSections: payload.baselineSections,
       generatedSections: payload.generatedSections,
       job: null,
+      documentType: DocumentType.UNKNOWN,
     });
   }
 
@@ -291,6 +296,7 @@ export class ComplianceService {
         job: payload.job,
         baselineAllowlist,
         jobContext: payload.jobContext,
+        documentType: payload.documentType,
       });
       rawFlags.push(...inventedFlags);
     }
@@ -339,10 +345,8 @@ export class ComplianceService {
     generatedSections?: ComplianceTextSection[] | null;
     job?: Job | null;
     baselineAllowlist?: BaselineAllowlistSnapshot | null;
-    jobContext?: {
-      allowedCompanies?: string[];
-      allowedRoleTitles?: string[];
-    };
+    jobContext?: JobApplicationContext;
+    documentType?: DocumentType;
   }): ComplianceFlag[] {
     return [
       ...detectInventedCompany({
@@ -351,6 +355,7 @@ export class ComplianceService {
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
+        documentType: payload.documentType,
       }),
       ...detectInventedRole({
         baselineSections: payload.baselineSections,
@@ -358,6 +363,7 @@ export class ComplianceService {
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
+        documentType: payload.documentType,
       }),
       ...detectInventedMetric({
         baselineSections: payload.baselineSections,

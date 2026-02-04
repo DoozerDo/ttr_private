@@ -42,6 +42,12 @@ export type ComplianceTextSection = {
   sectionType?: string | null;
 };
 
+export enum DocumentType {
+  COVER_LETTER = 'cover_letter',
+  RESUME = 'resume',
+  UNKNOWN = 'unknown',
+}
+
 export type JobApplicationContext = {
   allowedCompanies?: string[];
   allowedRoleTitles?: string[];

@@ -3,6 +3,7 @@ import {
   ComplianceFlagCode,
   ComplianceFlagSeverity,
   ComplianceTextSection,
+  DocumentType,
   JobApplicationContext,
 } from './compliance.types';
 import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
@@ -14,6 +15,7 @@ type DetectorPayload = {
   job?: { title?: string | null; company?: string | null } | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
   jobContext?: JobApplicationContext | null;
+  documentType?: DocumentType;
 };
 
 const COMPANY_CONTEXT_PATTERN =
@@ -173,6 +175,8 @@ const APPLICATION_PHRASE_PATTERNS = [
   /\bi am interested in (?:the )?(?:role|position|opportunity|job)\b/,
   /\bthis role aligns with my\b/,
 ];
+const APPLICATION_SUBSTRING_PREFIX =
+  /^(?:for\s+(?:the|a)?|about|as\s+(?:a|the)?)\s+/;
 
 // Header delimiters used for detecting "header-like" fragments when scanning text.
 const HEADER_DELIMITERS = new Set<string>([':', '-', '–', '—', '|', '/', '@']);
@@ -595,9 +599,61 @@ function shouldSkipForJobContextApplication(
     }
 
     const afterMatch = match.index + match[0].length;
+    const candidateEnd = candidateIndex + candidate.length;
+    const overlapDistance = Math.abs(candidateIndex - afterMatch);
+
+    if (
+      candidateEnd >= afterMatch &&
+      overlapDistance <= APPLICATION_PHRASE_DISTANCE
+    ) {
+      return true;
+    }
+
     if (
       candidateIndex >= afterMatch &&
       candidateIndex - afterMatch <= APPLICATION_PHRASE_DISTANCE
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function normalizeForSuppression(value: string): string {
+  const normalized = normalizeTokenForComparison(value);
+  if (!normalized) return '';
+  return normalized.replace(APPLICATION_SUBSTRING_PREFIX, '').trim();
+}
+
+function isMeaningfulCandidate(value: string): boolean {
+  if (!value) return false;
+  const cleaned = value.trim();
+  if (!cleaned) return false;
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  return cleaned.length >= 8 || words.length >= 2;
+}
+
+function shouldSuppressRoleForCoverLetter(options: {
+  rawCandidate: string;
+  normalizedCandidate: string;
+  normalizedText: string;
+  normalizedJobTitles: string[];
+}): boolean {
+  if (!isMeaningfulCandidate(options.normalizedCandidate)) return false;
+  if (
+    !shouldSkipForJobContextApplication(
+      options.normalizedText,
+      options.rawCandidate,
+    )
+  ) {
+    return false;
+  }
+
+  for (const jobTitle of options.normalizedJobTitles) {
+    if (
+      (jobTitle && jobTitle.includes(options.normalizedCandidate)) ||
+      options.normalizedCandidate.includes(jobTitle)
     ) {
       return true;
     }
@@ -933,6 +989,7 @@ function detectInventedEntity(options: {
     normalizedText: string,
   ) => boolean;
   generatedText?: string;
+  documentType?: DocumentType;
 }): ComplianceFlag[] {
   const normalizer = options.normalizer ?? normalizeTokenForComparison;
 
@@ -963,6 +1020,10 @@ function detectInventedEntity(options: {
         normalizer,
       )
     : new Set<string>();
+
+  const normalizedJobTitles = (options.jobContext?.allowedRoleTitles ?? [])
+    .map((title) => normalizeForSuppression(normalizer(title)))
+    .filter(Boolean);
 
   const allowedNormalized = new Set<string>();
   const precomputed = options.baselineAllowlist ?? [];
@@ -1023,9 +1084,24 @@ function detectInventedEntity(options: {
     if (options.allowlist(normalized, original)) continue;
 
     if (
+      options.documentType === DocumentType.COVER_LETTER &&
       options.contextualSkip &&
       matchesJobContextValue(normalized, jobContextSet) &&
       options.contextualSkip(normalized, normalizedGeneratedText)
+    ) {
+      continue;
+    }
+
+    const normalizedCandidateForSuppression = normalizeForSuppression(normalized);
+    if (
+      options.documentType === DocumentType.COVER_LETTER &&
+      normalizedJobTitles.length &&
+      shouldSuppressRoleForCoverLetter({
+        normalizedCandidate: normalizedCandidateForSuppression,
+        rawCandidate: normalized,
+        normalizedText: normalizedGeneratedText,
+        normalizedJobTitles,
+      })
     ) {
       continue;
     }
@@ -1069,6 +1145,7 @@ export function detectInventedCompany(
     baselineTokenExtractor: extractBaselineCompanyTokens,
     baselineAllowlist: payload.baselineAllowlist?.allowedCompanies ?? [],
     confidence: 0.95,
+    documentType: payload.documentType,
   });
 }
 
@@ -1098,6 +1175,7 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
     baselineAllowlist: baselineRoleTokens,
     baselineSuffixAllowlist: true,
     confidence: 0.95,
+    documentType: payload.documentType,
   });
 }
 

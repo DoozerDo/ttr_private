@@ -18,6 +18,7 @@ import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   ComplianceAction,
+  DocumentType,
   JobApplicationContext,
 } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
@@ -435,6 +436,7 @@ export class CoverLettersService {
       })),
       generatedSections: [{ title: 'Cover Letter', content }],
       jobContext: jobAllowlist,
+      documentType: DocumentType.COVER_LETTER,
     });
 
     const { complianceFlags, blocked, audit } =
@@ -453,6 +455,7 @@ export class CoverLettersService {
         extraFlags: [...writingFlags, ...scopeFlags],
         scopeInflationDetected: false,
         jobContext: jobAllowlist,
+        documentType: DocumentType.COVER_LETTER,
       });
 
     return {

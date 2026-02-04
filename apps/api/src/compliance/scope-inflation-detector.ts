@@ -3,6 +3,7 @@ import {
   ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
+  DocumentType,
   JobApplicationContext,
 } from './compliance.types';
 
@@ -252,8 +253,10 @@ export class ScopeInflationDetector {
       content?: string | null;
     }>,
     jobContext?: JobApplicationContext,
+    documentType?: DocumentType,
   ): ComplianceFlag[] {
     const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
+    void documentType;
     const violations: Array<{
       category: ScopeCategory;
       cue: string;

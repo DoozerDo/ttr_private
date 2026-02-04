@@ -1,33 +1,59 @@
-import { ComplianceFlagCode } from './compliance.types';
+import { ComplianceFlagCode, DocumentType } from './compliance.types';
 import { detectInventedRole } from './detectors';
 
-describe('compliance detectors job context allowlist', () => {
-  const coverLetterSections = [
-    {
-      title: 'Cover Letter',
-      content:
-        'Dear Hiring Team, I am applying for Head of Customer Services at Winona Health Industries.',
-    },
-  ];
+const jobContext = {
+  allowedRoleTitles: ['Head of Customer Services'],
+};
 
-  it('flags job role mention even when job context includes the role if not in an application sentence', () => {
+describe('compliance detectors job context allowlist cover letters', () => {
+  it('suppresses invented_role for cover letter opening text with application language', () => {
     const flags = detectInventedRole({
       generatedSections: [
         {
           title: 'Cover Letter',
-          content: 'Head of Customer Services gives the candidate perspective.',
+          content:
+            'Dear Hiring Team, I am applying for the Head of Customer Services role at Winona.',
         },
       ],
       baselineSections: [],
-      jobContext: {
-        allowedRoleTitles: ['Head of Customer Services'],
-      },
+      jobContext,
+      documentType: DocumentType.COVER_LETTER,
     });
 
-    expect(flags).toEqual([
-      expect.objectContaining({
-        code: ComplianceFlagCode.INVENTED_ROLE,
-      }),
-    ]);
+    expect(flags).toHaveLength(0);
+  });
+
+  it('still blocks when the same title appears outside application language in a cover letter', () => {
+    const flags = detectInventedRole({
+      generatedSections: [
+        {
+          title: 'Cover Letter',
+          content:
+            'As the Head of Customer Services, the candidate will manage teams across regions.',
+        },
+      ],
+      baselineSections: [],
+      jobContext,
+      documentType: DocumentType.COVER_LETTER,
+    });
+
+    expect(flags.length).toBeGreaterThan(0);
+  });
+
+  it('continues to flag the fragment when the document type is not cover letter', () => {
+    const flags = detectInventedRole({
+      generatedSections: [
+        {
+          title: 'Resume',
+          content:
+            'Dear Hiring Team, I am applying for the Head of Customer Services role.',
+        },
+      ],
+      baselineSections: [],
+      jobContext,
+      documentType: DocumentType.RESUME,
+    });
+
+    expect(flags.length).toBeGreaterThan(0);
   });
 });
