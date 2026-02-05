@@ -81,12 +81,18 @@ describe('AnalysisService - fit scores contract', () => {
     updatedAt: new Date(),
   };
 
+  /**
+   * IMPORTANT:
+   * AnalysisService now enforces "exactly one of raw JD text or parsed_jd".
+   * For Job records that include rawDescription, tests must not also supply
+   * normalized segments that the service would treat as parsed_jd.
+   */
   const defaultJobRecord: Partial<Job> = {
     id: 'job-1',
     userId: 'user-1',
     rawDescription: 'Lead operations with AWS focus.',
-    normalizedResponsibilities: ['Lead operations'],
-    normalizedRequirements: ['AWS expertise'],
+    normalizedResponsibilities: [],
+    normalizedRequirements: [],
     jdIngestionMethod: JobIngestionMethod.PASTE,
     title: 'Cloud Lead',
     company: 'ExampleCo',
@@ -340,8 +346,8 @@ describe('AnalysisService - fit scores contract', () => {
       id: 'job-1',
       userId: 'user-1',
       rawDescription: 'Lead operations with AWS focus.',
-      normalizedResponsibilities: ['Lead operations'],
-      normalizedRequirements: ['AWS expertise'],
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
       jdIngestionMethod: JobIngestionMethod.PASTE,
       title: 'Cloud Lead',
       company: 'ExampleCo',
@@ -361,8 +367,8 @@ describe('AnalysisService - fit scores contract', () => {
     expect(result.scoringProof?.baselineTextCharsScored).toBeGreaterThan(0);
     expect(result.scoringProof?.jobTextCharsScored).toBeGreaterThan(0);
     expect(result.scoringProof).toMatchObject({
-      normalizedResponsibilitiesCount: 1,
-      normalizedRequirementsCount: 1,
+      normalizedResponsibilitiesCount: 0,
+      normalizedRequirementsCount: 0,
       truncationAppliedBaseline: false,
       truncationAppliedJob: false,
     });
@@ -476,8 +482,8 @@ describe('AnalysisService - fit scores contract', () => {
       id: 'job-1',
       userId: 'user-1',
       rawDescription: '  Lead enterprise programs with narrative clarity.  ',
-      normalizedResponsibilities: ['Lead teams'],
-      normalizedRequirements: ['Executive-level experience'],
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
       title: 'Strategic Lead',
       company: 'ExampleCo',
       sourceUrl: 'https://example.com/jobs/leadership',
@@ -506,24 +512,26 @@ describe('AnalysisService - fit scores contract', () => {
     });
 
     it('buildInputsHash ignores normalized segments when raw description exists', () => {
-      const filteredSections = service['getIncludedSections'](
-        baseline.sections,
-      );
+      const rawDescription = refreshJobRecord.rawDescription;
+
+      const filteredSections = service['getIncludedSections'](baseline.sections);
       const sectionPayload = service['buildSectionPayload'](filteredSections);
+
       const { canonicalJobForHash: canonicalWith } = service[
         'buildCanonicalJobAssets'
       ]({
-        rawDescription: refreshJobRecord.rawDescription,
-        normalizedResponsibilities: refreshJobRecord.normalizedResponsibilities,
-        normalizedRequirements: refreshJobRecord.normalizedRequirements,
+        rawDescription,
+        normalizedResponsibilities: ['Lead teams'],
+        normalizedRequirements: ['Executive-level experience'],
         title: refreshJobRecord.title,
         company: refreshJobRecord.company,
         sourceUrl: refreshJobRecord.sourceUrl,
       });
+
       const { canonicalJobForHash: canonicalWithout } = service[
         'buildCanonicalJobAssets'
       ]({
-        rawDescription: refreshJobRecord.rawDescription,
+        rawDescription,
         normalizedResponsibilities: [],
         normalizedRequirements: [],
         title: refreshJobRecord.title,

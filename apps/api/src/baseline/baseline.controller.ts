@@ -15,9 +15,22 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Express } from 'express';
-import type { BaselineCreationResult } from './baseline.service';
 import { BaselineService } from './baseline.service';
 import { BaselineVersionService } from './baseline-version.service';
+
+type UploadBaselineResponse = {
+  baseline: any;
+  uploadStatus: any;
+  baselineId: string;
+  schemaVersion: string;
+  userVerified: boolean;
+  rolesCount: number;
+  toolsCount: number;
+  flagsSummary: {
+    missingFields: number;
+    lowConfidence: number;
+  };
+};
 
 @Controller('baselines')
 @UseGuards(AuthGuard('jwt'))
@@ -32,7 +45,7 @@ export class BaselineController {
   async uploadBaseline(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Req() request: Request & { user?: { id?: string } },
-  ): Promise<BaselineCreationResult> {
+  ): Promise<UploadBaselineResponse> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -65,12 +78,10 @@ export class BaselineController {
       schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
       userVerified: canonical?.user_verified ?? false,
       rolesCount: canonical?.experience.length ?? 0,
-      toolsCount:
-        canonical?.tooling_and_platforms?.tools.length ?? 0,
+      toolsCount: canonical?.tooling_and_platforms?.tools.length ?? 0,
       flagsSummary: {
         missingFields: systemFlags?.missing_fields.length ?? 0,
-        lowConfidence:
-          systemFlags?.low_confidence_extractions.length ?? 0,
+        lowConfidence: systemFlags?.low_confidence_extractions.length ?? 0,
       },
     };
   }
@@ -157,7 +168,6 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    // VERIFY: Ensure versions are only exposed for baselines owned by the requesting user.
     return this.baselineService.listBaselineVersionsForUser(id, userId);
   }
 

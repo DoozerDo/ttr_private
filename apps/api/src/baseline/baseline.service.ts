@@ -79,6 +79,7 @@ type BaselineUploadStatus = {
 };
 
 export type BaselineCreationResult = {
+  baselineId: string;
   baseline: Baseline;
   uploadStatus: BaselineUploadStatus;
   ingestion?: BaselineIngestionResult;
@@ -397,6 +398,7 @@ export class BaselineService {
     const finalBaseline = await manager.save(savedBaseline);
 
     return {
+      baselineId: finalBaseline.id,
       baseline: finalBaseline,
       uploadStatus: {
         isDuplicate: false,
@@ -522,6 +524,7 @@ export class BaselineService {
     });
 
     return {
+      baselineId: baseline.id,
       baseline: refreshedBaseline ?? baseline,
       uploadStatus: {
         isDuplicate: true,

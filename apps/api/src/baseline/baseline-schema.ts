@@ -88,7 +88,7 @@ const SystemGeneratedSchema = z.object({
     .default([]),
 });
 
-export const BaselineSchemaCore = z.object({
+const CanonicalBaselineSchemaCore = z.object({
   identity: IdentitySchema,
   experience: z.array(ExperienceEntrySchema),
   people_leadership: PeopleLeadershipSchema,
@@ -102,13 +102,23 @@ export const BaselineSchemaCore = z.object({
   system_generated_read_only: SystemGeneratedSchema,
 });
 
+/**
+ * Canonical baseline schema core.
+ * This is what scoring, compliance, and generation consume.
+ */
+export const BaselineSchemaCore = CanonicalBaselineSchemaCore.extend({
+  schema_version: z.string().default('baseline_schema_v1'),
+  user_verified: z.boolean().default(false),
+});
+
+/**
+ * Persisted baseline schema (adds storage metadata).
+ */
 export const BaselineSchema = BaselineSchemaCore.extend({
   baseline_id: z.string().uuid(),
   source_file_id: z.string().uuid(),
   source_format: z.enum(['docx', 'pdf']),
   ingested_at: z.string(),
-  user_verified: z.boolean().default(false),
-  schema_version: z.string().default('baseline_schema_v1'),
 });
 
 export type BaselineSchemaCoreShape = z.infer<typeof BaselineSchemaCore>;

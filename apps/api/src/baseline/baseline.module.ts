@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { diskStorage } from 'multer';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+
 import { BaselineSection } from './baseline-section.entity';
 import { BaselineController } from './baseline.controller';
 import { Baseline } from './baseline.entity';
@@ -14,6 +15,10 @@ import { BaselineService } from './baseline.service';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { BaselineVersionService } from './baseline-version.service';
 import { BaselineIngestionService } from './baseline-ingestion.service';
+
+import { BaselineParserService } from './baseline-parser.service';
+import { BaselineTextExtractor } from './baseline-text-extractor.service';
+
 import { Interview } from '../interviews/interview.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
 
@@ -56,9 +61,7 @@ import { ComplianceModule } from '../compliance/compliance.module';
 
           if (!allowedMimes.includes(file.mimetype)) {
             return cb(
-              new Error(
-                'Only PDF and DOCX uploads are supported for baselines',
-              ),
+              new Error('Only PDF and DOCX uploads are supported for baselines'),
               false,
             );
           }
@@ -71,8 +74,11 @@ import { ComplianceModule } from '../compliance/compliance.module';
   providers: [
     BaselineService,
     BaselineVersionService,
+    BaselineParserService,
+    BaselineTextExtractor,
     BaselineIngestionService,
   ],
   controllers: [BaselineController],
+  exports: [BaselineService],
 })
 export class BaselineModule {}
