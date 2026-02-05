@@ -23,7 +23,11 @@ import {
   BaselineIngestionService,
   BaselineSourceFormat,
 } from './baseline-ingestion.service';
-import { BaselineSchema } from './baseline-schema';
+import {
+  BaselineSchema,
+  BaselineSchemaCore,
+  BaselineSchemaCoreShape,
+} from './baseline-schema';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
@@ -72,17 +76,46 @@ type PolicySectionInput = {
   order?: number | null;
 };
 
-type BaselineUploadStatus = {
-  isDuplicate: boolean;
-  versionNumber: number;
-  message: string;
-};
+ type BaselineUploadStatus = {
+   isDuplicate: boolean;
+   versionNumber: number;
+   message: string;
+ };
 
 export type BaselineCreationResult = {
   baselineId: string;
   baseline: Baseline;
   uploadStatus: BaselineUploadStatus;
   ingestion?: BaselineIngestionResult;
+  normalization?: CanonicalNormalizationResult;
+};
+
+ type CanonicalNormalizationResult = {
+   canonical: BaselineSchemaCoreShape;
+   roleCount: number;
+   toolCount: number;
+   flagsSummary: {
+     missingFieldsCount: number;
+     ambiguityCount: number;
+     lowConfidenceCount: number;
+   };
+ };
+
+const normalizeExtractedToCanonicalV1 = (
+  raw: unknown,
+): CanonicalNormalizationResult => {
+  const canonical = BaselineSchemaCore.parse(raw);
+  const flags = canonical.system_generated_read_only;
+  return {
+    canonical,
+    roleCount: canonical.experience.length,
+    toolCount: canonical.skills_and_tools.tools.length,
+    flagsSummary: {
+      missingFieldsCount: flags.missing_fields.length,
+      ambiguityCount: flags.ambiguity_flags.length,
+      lowConfidenceCount: flags.low_confidence_extractions.length,
+    },
+  };
 };
 
 @Injectable()
@@ -290,21 +323,19 @@ export class BaselineService {
       throw new BadRequestException('Baseline file hash is required');
     }
 
-    return this.baselineRepository.manager.transaction(async (manager) => {
-      const existingBaseline = await manager.findOne(Baseline, {
-        where: { userId, hash: fileHash },
-        relations: ['sections', 'versions'],
-        order: { versions: { versionNumber: 'DESC', createdAt: 'DESC' } },
+    const duplicate = await this.findDuplicateBaseline(userId, fileHash);
+    if (duplicate) {
+      throw new ConflictException({
+        error: {
+          code: 'BASELINE_DUPLICATE',
+          message:
+            'This baseline already exists. Select the existing baseline instead of uploading again.',
+          existingBaselineId: duplicate.id,
+        },
       });
+    }
 
-      if (existingBaseline) {
-        return this.handleDuplicateBaselineUpload(
-          manager,
-          existingBaseline,
-          file,
-        );
-      }
-
+    return this.baselineRepository.manager.transaction(async (manager) => {
       await this.enforceBaselineLimit(manager, userId);
 
       return this.createBaselineRecord(
@@ -314,6 +345,20 @@ export class BaselineService {
         fileHash,
         parseResult,
       );
+    });
+  }
+
+  private async findDuplicateBaseline(
+    userId: string,
+    hash: string,
+  ): Promise<Baseline | null> {
+    return this.baselineRepository.findOne({
+      where: {
+        userId,
+        hash,
+        status: BaselineStatus.ACTIVE,
+      },
+      order: { createdAt: 'DESC' },
     });
   }
 
@@ -391,13 +436,24 @@ export class BaselineService {
     savedBaseline.version = nextVersionNumber;
     savedBaseline.versions = [savedVersion];
 
+        let normalization: CanonicalNormalizationResult | undefined;
+    if (parseResult?.ingestion?.canonical) {
+      normalization = normalizeExtractedToCanonicalV1(
+        parseResult.ingestion.canonical,
+      );
+      parseResult.ingestion.canonical = normalization.canonical;
+    }
+
     if (parseResult) {
-      await this.persistParsedBaseline(manager, savedBaseline, parseResult.ingestion);
+      await this.persistParsedBaseline(
+        manager,
+        savedBaseline,
+        parseResult.ingestion,
+      );
     }
 
     const finalBaseline = await manager.save(savedBaseline);
-
-    return {
+return {
       baselineId: finalBaseline.id,
       baseline: finalBaseline,
       uploadStatus: {
@@ -405,6 +461,7 @@ export class BaselineService {
         versionNumber: nextVersionNumber,
         message: `Baseline uploaded as version ${nextVersionNumber}.`,
       },
+      normalization,
       ingestion: parseResult?.ingestion,
     };
   }
@@ -435,103 +492,6 @@ export class BaselineService {
     });
 
     await manager.save(parsedRecord);
-  }
-
-  private async handleDuplicateBaselineUpload(
-    manager: EntityManager,
-    baseline: Baseline,
-    file: FileMetadata,
-  ): Promise<BaselineCreationResult> {
-    if (!baseline.id) {
-      throw new BadRequestException(
-        'Duplicate baseline upload failed: missing baseline id',
-      );
-    }
-    const latestVersion =
-      baseline.versions?.[0] ??
-      (await this.getLatestVersionForBaseline(baseline.id));
-
-    const nextVersionNumber =
-      (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
-
-    const policyState = this.normalizePoliciesFromSections(
-      (baseline.sections ?? []) as PolicySectionInput[],
-    );
-    const additions = latestVersion?.verifiedAdditions ?? [];
-    const versionHash = this.buildVersionHash(
-      baseline.hash,
-      policyState,
-      additions,
-    );
-    const allowlistSnapshot = buildBaselineAllowlistSnapshot(
-      baseline.sections ?? [],
-    );
-
-    const versionRecord = manager.create(BaselineVersion, {
-      versionNumber: nextVersionNumber,
-      fileHash: versionHash,
-      storagePath: file.path,
-      verifiedAdditions: additions,
-      additionDiff: latestVersion?.additionDiff ?? null,
-      promotedFromInterviewId: latestVersion?.promotedFromInterviewId ?? null,
-      allowedCompanies: allowlistSnapshot.allowedCompanies,
-      allowedRoles: allowlistSnapshot.allowedRoles,
-      allowedTechnologies: allowlistSnapshot.allowedTechnologies,
-      allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
-    });
-
-    versionRecord.baselineId = baseline.id;
-    versionRecord.baseline = baseline;
-
-    const savedVersion = await manager.save(versionRecord);
-
-    const latestPolicies = latestVersion
-      ? await this.baselineBlockPolicyRepository.find({
-          where: { baselineVersionId: latestVersion.id },
-          order: { order: 'ASC' },
-        })
-      : [];
-
-    const policyEntities = latestPolicies.map((policy) =>
-      manager.create(BaselineBlockPolicy, {
-        baselineVersionId: savedVersion.id,
-        baselineSectionId: policy.baselineSectionId,
-        includePolicy: policy.includePolicy,
-        order: policy.order,
-      }),
-    );
-
-    await manager.save(policyEntities);
-
-    await manager.update(
-      Baseline,
-      { id: baseline.id },
-      {
-        version: nextVersionNumber,
-        storagePath: file.path,
-        mimeType: file.mimetype,
-        originalFilename: file.originalname,
-      },
-    );
-
-    const refreshedBaseline = await manager.findOne(Baseline, {
-      where: { id: baseline.id },
-      relations: ['sections', 'versions'],
-      order: {
-        sections: { order: 'ASC' },
-        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
-      },
-    });
-
-    return {
-      baselineId: baseline.id,
-      baseline: refreshedBaseline ?? baseline,
-      uploadStatus: {
-        isDuplicate: true,
-        versionNumber: nextVersionNumber,
-        message: `Baseline already exists. Added version ${nextVersionNumber}.`,
-      },
-    };
   }
 
   async listBaselinesForUser(userId: string, includeArchived = false) {

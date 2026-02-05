@@ -18,6 +18,7 @@ import {
 } from '../baseline/baseline-section.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineSchema, BaselineSchemaCoreShape } from '../baseline/baseline-schema';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   ComplianceAction,
@@ -506,12 +507,123 @@ export class AnalysisService {
     }));
   }
 
+  private buildCanonicalSectionPayload(
+    canonical: BaselineSchemaCoreShape,
+  ): Array<{ type?: string; content: string }> {
+    const sections: Array<{ type?: string; content: string }> = [];
+
+    const identityParts = [
+      canonical.identity.full_name?.trim(),
+      canonical.identity.current_title?.trim(),
+      canonical.identity.current_company?.trim(),
+      canonical.identity.location?.trim(),
+    ].filter((part): part is string => Boolean(part));
+
+    if (identityParts.length) {
+      sections.push({
+        type: BaselineSectionType.SUMMARY,
+        content: identityParts.join(' | '),
+      });
+    }
+
+    for (const entry of canonical.experience) {
+      const lines: string[] = [];
+      if (entry.company_name?.trim()) {
+        lines.push(entry.company_name.trim());
+      }
+      if (entry.role_title?.trim()) {
+        lines.push(entry.role_title.trim());
+      }
+      const dateRangeParts: string[] = [];
+      if (entry.start_date) {
+        dateRangeParts.push(entry.start_date);
+      }
+      if (entry.end_date) {
+        dateRangeParts.push(entry.end_date);
+      }
+      if (dateRangeParts.length) {
+        lines.push(dateRangeParts.join(' to '));
+      }
+      if (entry.scope_summary?.trim()) {
+        lines.push(entry.scope_summary.trim());
+      }
+
+      const content = lines.join('\n').trim();
+      if (content) {
+        sections.push({
+          type: BaselineSectionType.EXPERIENCE,
+          content,
+        });
+      }
+    }
+
+    const skillLines: string[] = [];
+    if (canonical.skills_and_tools.tools.length) {
+      skillLines.push(`Tools: ${canonical.skills_and_tools.tools.join(', ')}`);
+    }
+    if (canonical.skills_and_tools.methodologies.length) {
+      skillLines.push(
+        `Methodologies: ${canonical.skills_and_tools.methodologies.join(', ')}`,
+      );
+    }
+    if (canonical.skills_and_tools.domains.length) {
+      skillLines.push(`Domains: ${canonical.skills_and_tools.domains.join(', ')}`);
+    }
+
+    if (skillLines.length) {
+      sections.push({
+        type: BaselineSectionType.SKILLS,
+        content: skillLines.join('\n'),
+      });
+    }
+
+    return sections;
+  }
+
+  private getCanonicalBaselineForScoring(
+    baseline: Baseline,
+  ): BaselineSchemaCoreShape {
+    const records = baseline.parsedRecords ?? [];
+    const latest = records
+      .slice()
+      .sort(
+        (a, b) =>
+          (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0),
+      )[0];
+
+    if (!latest) {
+      throw new BadRequestException({
+        error: {
+          code: 'baseline_canonical_missing',
+          message:
+            'Baseline is missing canonical data. Please re-ingest the baseline document before scoring.',
+        },
+      });
+    }
+
+    try {
+      const canonical = BaselineSchema.parse(latest.parsedJson);
+      return canonical;
+    } catch (error) {
+      this.logger.warn(
+        `Canonical baseline validation failed for ${baseline.id}: ${error}`,
+      );
+      throw new BadRequestException({
+        error: {
+          code: 'baseline_canonical_invalid',
+          message:
+            'Baseline canonical data is invalid. Please re-ingest the baseline document before scoring.',
+        },
+      });
+    }
+  }
+
   private buildInputsHash(
     job: FitScoreInput['job'],
     baseline: Baseline,
+    sections: Array<{ type?: string; content: string }>,
     dimensionWeights: DimensionWeightOverrides,
   ) {
-    const sectionPayload = this.buildSectionPayload(baseline.sections ?? []);
     const payload = {
       job: {
         rawDescription: job.rawDescription,
@@ -523,7 +635,7 @@ export class AnalysisService {
       baseline: {
         id: baseline.id,
         version: baseline.version ?? null,
-        sections: sectionPayload,
+        sections,
       },
       calibration: dimensionWeights,
     };
@@ -534,7 +646,7 @@ export class AnalysisService {
   private async loadBaselineWithSections(userId: string, baselineId: string) {
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
-      relations: ['sections'],
+      relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' } },
     });
 
@@ -569,11 +681,14 @@ export class AnalysisService {
     job: Job,
     baseline: Baseline,
   ) {
+      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const canonicalSections = this.buildCanonicalSectionPayload(
+      canonicalBaseline,
+    );
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(
       calibration.weights,
     );
-    const includedSections = this.getIncludedSections(baseline.sections);
     const { canonicalJobForHash } = this.buildCanonicalJobAssets({
       rawDescription: job.rawDescription,
       normalizedResponsibilities: job.normalizedResponsibilities ?? [],
@@ -584,11 +699,12 @@ export class AnalysisService {
     });
     const baselineForHash: Baseline = {
       ...baseline,
-      sections: includedSections,
+      version: baseline.version ?? 0,
     };
     return this.buildInputsHash(
       canonicalJobForHash,
       baselineForHash,
+      canonicalSections,
       dimensionWeights,
     );
   }
@@ -1012,7 +1128,7 @@ export class AnalysisService {
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
       where: { id: baselineVersionId },
-      relations: ['baseline'],
+      relations: ['baseline', 'baseline.parsedRecords'],
     });
 
     if (!baselineVersion || !baselineVersion.baseline) {
@@ -1025,7 +1141,7 @@ export class AnalysisService {
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineVersion.baselineId, userId },
-      relations: ['sections'],
+      relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' } },
     });
 
@@ -1090,17 +1206,21 @@ export class AnalysisService {
       type: section.sectionType ?? section.type,
       content: section.content,
     }));
-    const sectionPayload = includedSections;
+      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const canonicalSections = this.buildCanonicalSectionPayload(
+      canonicalBaseline,
+    );
+    const sectionPayload = canonicalSections;
 
     const complianceBaselineSections =
-      this.complianceService.normalizeSectionsForOutput(includedSections);
+      this.complianceService.normalizeSectionsForOutput(sectionPayload);
 
-    const baselineProofText = includedSections
+    const baselineProofText = sectionPayload
       .map((section) => section.content ?? '')
       .join('\n');
     const baselineTextCharsScored = getCharCount(baselineProofText);
 
-    const baselineTextForDebug = includedSections
+    const baselineTextForDebug = sectionPayload
       .map((section) => section.content)
       .join('\n');
     const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
@@ -1187,12 +1307,12 @@ export class AnalysisService {
 
     const baselineForHash: Baseline = {
       ...baseline,
-      sections: filteredSections,
       version: baselineVersion.versionNumber ?? baseline.version,
     };
     const inputsHash = this.buildInputsHash(
       canonicalJobForHash,
       baselineForHash,
+      sectionPayload,
       dimensionWeights,
     );
 
@@ -1203,8 +1323,8 @@ export class AnalysisService {
           canonicalJobForHash.normalizedResponsibilities,
         normalizedRequirements: canonicalJobForHash.normalizedRequirements,
       },
-      baselineSections: includedSections,
-    });
+        baselineSections: sectionPayload,
+      });
 
     if (
       !scoringV2 ||
@@ -1388,7 +1508,7 @@ export class AnalysisService {
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
-      relations: ['sections'],
+      relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' } },
     });
 
@@ -1562,7 +1682,7 @@ export class AnalysisService {
 
       const baseline = await this.baselineRepository.findOne({
         where: { id: resolvedBaselineId, userId },
-        relations: ['sections'],
+        relations: ['sections', 'parsedRecords'],
         order: { sections: { order: 'ASC' } },
       });
 
@@ -1594,7 +1714,11 @@ export class AnalysisService {
         type: section.sectionType ?? section.type,
         content: section.content,
       }));
-      const sectionPayload = includedSections;
+      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+      const canonicalSections = this.buildCanonicalSectionPayload(
+        canonicalBaseline,
+      );
+      const sectionPayload = canonicalSections;
 
       const baselineVersionValue = baselineVersion ?? baseline.version ?? 0;
       const baselineForHash: Baseline = {
@@ -1604,9 +1728,9 @@ export class AnalysisService {
       };
 
       const complianceBaselineSections =
-        this.complianceService.normalizeSectionsForOutput(includedSections);
+        this.complianceService.normalizeSectionsForOutput(sectionPayload);
 
-      const baselineProofText = includedSections
+      const baselineProofText = sectionPayload
         .map((section) => section.content ?? '')
         .join('\n');
       const baselineTextCharsScored = getCharCount(baselineProofText);
@@ -1649,6 +1773,7 @@ export class AnalysisService {
       const inputsHash = this.buildInputsHash(
         canonicalJobForHash,
         baselineForHash,
+        sectionPayload,
         dimensionWeights,
       );
 
@@ -1661,7 +1786,7 @@ export class AnalysisService {
             canonicalJobForHash.normalizedResponsibilities,
           normalizedRequirements: canonicalJobForHash.normalizedRequirements,
         },
-        baselineSections: includedSections,
+        baselineSections: sectionPayload,
       });
 
       if (
@@ -1688,10 +1813,10 @@ export class AnalysisService {
           ? await this.fitScoringService.score(
               {
                 job: canonicalJobForScoring,
-                baseline: {
-                  version: baseline.version ?? null,
-                  sections: sectionPayload,
-                },
+              baseline: {
+                version: baseline.version ?? null,
+                sections: sectionPayload,
+              },
               },
               dimensionWeights,
               { debug: allowDebug },
@@ -1973,10 +2098,11 @@ export class AnalysisService {
       calibration.weights,
     );
 
-    const sectionPayload = includedSections.map((section) => ({
-      type: section.sectionType ?? section.type,
-      content: section.content,
-    }));
+    const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const canonicalSections = this.buildCanonicalSectionPayload(
+      canonicalBaseline,
+    );
+    const sectionPayload = canonicalSections;
 
     const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
       this.buildCanonicalJobAssets({
@@ -1996,6 +2122,7 @@ export class AnalysisService {
     const inputsHash = this.buildInputsHash(
       canonicalJobForHash,
       baselineForHash,
+      sectionPayload,
       dimensionWeights,
     );
 

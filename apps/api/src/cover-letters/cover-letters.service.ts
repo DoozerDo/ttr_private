@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -213,6 +214,8 @@ export class CoverLettersService {
         });
       }
     }
+
+    await this.ensureNoDuplicateCoverLetter(userId, baseline.id, job.id);
 
     const coverLetter = this.coverLetterRepository.create({
       userId,
@@ -495,6 +498,32 @@ export class CoverLettersService {
     }
 
     return baselineSections;
+  }
+
+  private async ensureNoDuplicateCoverLetter(
+    userId: string,
+    baselineId: string,
+    jobId: string,
+  ) {
+    const existing = await this.coverLetterRepository.findOne({
+      where: {
+        userId,
+        baselineId,
+        jobId,
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (existing) {
+      throw new ConflictException({
+        error: {
+          code: 'COVER_LETTER_DUPLICATE',
+          message:
+            'A cover letter for this baseline and job already exists. Select the existing one instead of generating another.',
+          existingCoverLetterId: existing.id,
+        },
+      });
+    }
   }
 
   private async evaluateCompliance(

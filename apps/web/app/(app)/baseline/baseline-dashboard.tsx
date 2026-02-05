@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton, SecondaryActionLink } from "@/components/FormButton";
@@ -36,6 +36,28 @@ const isBaselineUploadResponse = (
       "uploadStatus" in value,
   );
 
+const getDuplicateUploadMessage = (data: unknown): string | null => {
+  if (!data || typeof data !== "object") return null;
+
+  const maybeCode = (data as { code?: unknown }).code;
+  const errorBody = (data as { error?: Record<string, unknown> }).error;
+  const duplicateCode =
+    (typeof maybeCode === "string" ? maybeCode : undefined) ??
+    (typeof errorBody?.code === "string" ? errorBody.code : undefined);
+
+  if (duplicateCode !== "BASELINE_DUPLICATE") return null;
+
+  if (typeof errorBody?.message === "string") {
+    return errorBody.message;
+  }
+
+  if (typeof (data as { message?: unknown }).message === "string") {
+    return (data as { message?: unknown }).message as string;
+  }
+
+  return "This file matches a resume you’ve already uploaded. Use the existing version to continue.";
+};
+
 export function BaselineDashboard({
   initialBaselines,
   initialFetchError,
@@ -45,6 +67,9 @@ export function BaselineDashboard({
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateErrorDetail, setDuplicateErrorDetail] = useState<string | null>(
+    null,
+  );
   const [uploadStatus, setUploadStatus] = useState<BaselineUploadStatus | null>(
     null,
   );
@@ -113,6 +138,7 @@ export function BaselineDashboard({
   const uploadBaselineFile = async (fileToUpload: File) => {
     if (isUploading) return;
     setError(null);
+    setDuplicateErrorDetail(null);
     setUploadStatus(null);
     setIsUploading(true);
 
@@ -134,6 +160,13 @@ export function BaselineDashboard({
       }
 
       if (!response.ok) {
+        const duplicateDetail = getDuplicateUploadMessage(data);
+        if (duplicateDetail) {
+          setError("Duplicate resume detected");
+          setDuplicateErrorDetail(duplicateDetail);
+          return;
+        }
+
         const message = data?.message || data?.error || "Upload failed";
         setError(typeof message === "string" ? message : "Upload failed");
         return;
@@ -172,15 +205,27 @@ export function BaselineDashboard({
     } catch (uploadError) {
       console.error("Upload failed", uploadError);
       setError("Unable to upload resume right now.");
+      setDuplicateErrorDetail(null);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const triggerUploadClick = () => {
+  const triggerUploadClick = useCallback(() => {
     if (isUploading) return;
     fileInputRef.current?.click();
-  };
+  }, [isUploading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleUploadRequest = () => {
+      triggerUploadClick();
+    };
+    window.addEventListener("baselineUploadAgainRequest", handleUploadRequest);
+    return () => {
+      window.removeEventListener("baselineUploadAgainRequest", handleUploadRequest);
+    };
+  }, [triggerUploadClick]);
 
   return (
     <SetupModuleCard
@@ -189,9 +234,9 @@ export function BaselineDashboard({
       titleClassName="text-xl font-semibold tracking-tight text-slate-100"
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
-        <FormButton onClick={triggerUploadClick} disabled={isUploading}>
-          {isUploading ? "Uploading..." : "Add resume"}
-        </FormButton>
+      <FormButton onClick={triggerUploadClick} disabled={isUploading}>
+        {isUploading ? "Uploading..." : "Add resume"}
+      </FormButton>
       }
     >
       <input
@@ -227,7 +272,16 @@ export function BaselineDashboard({
         </p>
       ) : null}
 
-      {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
+      {error ? (
+        <div style={ttrComponents.dangerBox}>
+          <p className="m-0 text-[13px]">{error}</p>
+          {duplicateErrorDetail ? (
+            <p className="m-0 text-[11px] text-slate-100/80">
+              {duplicateErrorDetail}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {uploadStatus ? (
         <div
           style={{

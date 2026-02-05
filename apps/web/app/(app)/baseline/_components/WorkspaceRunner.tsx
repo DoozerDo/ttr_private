@@ -154,6 +154,24 @@ const extractErrorMessage = (payload: unknown): string | null => {
   return null;
 };
 
+const isMissingCanonicalRunError = (error: unknown, message?: string | null): boolean => {
+  if (error && typeof error === "object") {
+    const candidateCode = (error as { code?: unknown }).code;
+    if (
+      typeof candidateCode === "string" &&
+      candidateCode.toLowerCase() === "baseline_canonical_missing"
+    ) {
+      return true;
+    }
+  }
+
+  if (message && message.toLowerCase().includes("missing canonical")) {
+    return true;
+  }
+
+  return false;
+};
+
 const normalizeComplianceFlagsFromError = (value: unknown): unknown[] => {
   if (Array.isArray(value)) return value;
   if (value === undefined || value === null) return [];
@@ -205,10 +223,9 @@ const parseAnalysisRunResponse = async (
     const normalizedDetailFlags = normalizeComplianceFlagsFromError(
       errorPayload.error?.details?.compliance_flags,
     );
-    const errorCode =
-      typeof errorPayload.error?.code === "string"
-        ? errorPayload.error.code.toLowerCase()
-        : "";
+    const errorCodeRaw =
+      typeof errorPayload.error?.code === "string" ? errorPayload.error.code : undefined;
+    const errorCode = errorCodeRaw?.toLowerCase() ?? "";
     const hasBlockSeverity =
       Array.isArray(normalizedDetailFlags) &&
       normalizedDetailFlags.some((flag) => {
@@ -228,7 +245,11 @@ const parseAnalysisRunResponse = async (
       errorPayload.error?.message ??
       extractErrorMessage(parsed) ??
       "Unable to run compatibility scoring right now.";
-    throw new Error(message);
+    const thrownError = new Error(message);
+    if (errorCode) {
+      (thrownError as Error & { code?: string }).code = errorCode;
+    }
+    throw thrownError;
   }
 
   throw new Error("Unable to run compatibility scoring right now.");
@@ -280,6 +301,7 @@ export function WorkspaceRunner({
   const [latestJobId, setLatestJobId] = useState<string | null>(null);
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
+  const [showUploadAgainCTA, setShowUploadAgainCTA] = useState(false);
   const router = useRouter();
   const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(baselineId);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(jobId);
@@ -332,6 +354,11 @@ export function WorkspaceRunner({
         scoreSummaryRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
+  }, []);
+
+  const requestBaselineUploadAgain = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("baselineUploadAgainRequest"));
   }, []);
 
   useLayoutEffect(() => {
@@ -530,6 +557,7 @@ export function WorkspaceRunner({
     setLatestBaselineId(null);
     setShowDetails(false);
     setRunState(null);
+    setShowUploadAgainCTA(false);
 
     try {
       const response = await fetch("/api/analysis/run", {
@@ -587,7 +615,9 @@ export function WorkspaceRunner({
     } catch (runError: unknown) {
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
+      const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
       setError(message);
+      setShowUploadAgainCTA(shouldShowUploadCTA);
       setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
@@ -617,6 +647,7 @@ export function WorkspaceRunner({
 
     setIsLoadingLastRun(true);
     setError(null);
+    setShowUploadAgainCTA(false);
     setCompleteBanner(null);
     setLatestAssessmentId(null);
     setLatestJobId(null);
@@ -829,10 +860,19 @@ export function WorkspaceRunner({
           <Alert intent="error" title="Scoring failed">
             <p className="text-sm text-current">{error}</p>
           </Alert>
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
             <FormButton onClick={runAssessment} disabled={isRunning}>
               Retry scoring
             </FormButton>
+            {showUploadAgainCTA ? (
+              <FormButton
+                variant="secondary"
+                onClick={requestBaselineUploadAgain}
+                disabled={isRunning}
+              >
+                Upload resume again
+              </FormButton>
+            ) : null}
           </div>
         </div>
       ) : null}
