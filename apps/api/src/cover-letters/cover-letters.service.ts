@@ -17,8 +17,12 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceService } from '../compliance/compliance.service';
+import type { ValidateAndAuditResult } from '../compliance/compliance.service';
+import { validateComplianceWithFallback } from '../compliance/compliance-error.utils';
 import {
   ComplianceAction,
+  ComplianceFlag,
+  ComplianceTextSection,
   DocumentType,
   JobApplicationContext,
 } from '../compliance/compliance.types';
@@ -35,6 +39,38 @@ import {
   CoverLetterGenerator,
 } from './generators/cover-letter-generator.interface';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
+
+type CoverLetterDraft = {
+  baseline: Baseline;
+  baselineVersion: BaselineVersion;
+  job: Job;
+  allowedBlocks: AllowedBaselineBlock[];
+  jobContext: {
+    id: string;
+    title: string | null;
+    company: string | null;
+    responsibilities: string[];
+    requirements: string[];
+  };
+  jobContextAllowlist: JobApplicationContext;
+  closingTemplateKey: string;
+  generationInputsHash: string;
+  complianceResult: {
+    normalizedContent: string;
+    complianceFlags: ComplianceFlag[];
+    blocked: boolean;
+    audit: ValidateAndAuditResult['audit'];
+  };
+};
+
+type ComplianceEvaluationResult = {
+  normalizedContent: string;
+  complianceFlags: ComplianceFlag[];
+  blocked: boolean;
+  audit: ValidateAndAuditResult['audit'];
+  writingFlags: ComplianceFlag[];
+  scopeFlags: ComplianceFlag[];
+};
 
 @Injectable()
 export class CoverLettersService {
@@ -60,6 +96,102 @@ export class CoverLettersService {
   }
 
   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
+    const draft = await this.buildCoverLetterDraft(userId, input);
+
+    await this.ensureNoDuplicateCoverLetter(
+      userId,
+      draft.baseline.id,
+      draft.job.id,
+      draft.generationInputsHash,
+    );
+
+    const coverLetter = this.coverLetterRepository.create({
+      userId,
+      baselineId: draft.baseline.id,
+      jobId: draft.job.id,
+      generatorType: 'template',
+      generatorVersion: 'v1',
+      closingTemplateKey: draft.closingTemplateKey,
+      content: draft.complianceResult.normalizedContent,
+      generationInputsHash: draft.generationInputsHash,
+    });
+
+    const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
+
+    return {
+      ...savedCoverLetter,
+      compliance_flags: draft.complianceResult.complianceFlags,
+      audit_id: draft.complianceResult.audit.id,
+      auditId: draft.complianceResult.audit.id,
+      baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+    };
+  }
+
+  async exportCoverLetter(
+    userId: string,
+    input: GenerateCoverLetterDto,
+    format: 'docx' | 'pdf',
+  ) {
+    const draft = await this.buildCoverLetterDraft(userId, input);
+    const text = draft.complianceResult.normalizedContent;
+    const buffer =
+      format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
+
+    const baselineSections = draft.allowedBlocks.map((block) => ({
+      title: block.title,
+      content: block.content,
+    }));
+    const generatedSections: ComplianceTextSection[] = [
+      { title: 'Cover Letter', content: text },
+    ];
+
+    const { complianceFlags, blocked, audit } =
+      await this.complianceService.validateAndAudit({
+        action: ComplianceAction.COVER_LETTER_EXPORT,
+        actorId: userId,
+        baselineVersion: draft.baselineVersion,
+        job: draft.job,
+        outputHash: createHash('sha256')
+          .update(`${format}:${text}`)
+          .digest('hex'),
+        baselineSections,
+        generatedSections,
+        extraFlags: draft.complianceResult.complianceFlags,
+        scopeInflationDetected: false,
+        jobContext: draft.jobContextAllowlist,
+        documentType: DocumentType.COVER_LETTER,
+      });
+
+    if (blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            compliance_flags: complianceFlags,
+            audit_id: audit.id,
+            baseline_version_hash: audit.baselineVersionHash,
+          },
+        },
+      });
+    }
+
+    return {
+      buffer,
+      contentType:
+        format === 'pdf'
+          ? 'application/pdf'
+          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      filename: `cover-letter.${format}`,
+      auditId: audit.id,
+      baselineVersionHash: audit.baselineVersionHash,
+    };
+  }
+
+  private async buildCoverLetterDraft(
+    userId: string,
+    input: GenerateCoverLetterDto,
+  ): Promise<CoverLetterDraft> {
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
@@ -198,44 +330,23 @@ export class CoverLettersService {
         userId,
         jobContextAllowlist,
         documentTypeForCompliance,
+        {
+          writingFlags: complianceResult.writingFlags,
+          scopeFlags: complianceResult.scopeFlags,
+        },
       );
-
-      if (complianceResult.blocked) {
-        throw new UnprocessableEntityException({
-          error: {
-            code: 'COMPLIANCE_VIOLATION',
-            message: 'Compliance validation failed.',
-            details: {
-              compliance_flags: complianceResult.complianceFlags,
-              audit_id: complianceResult.audit.id,
-              baseline_version_hash: complianceResult.audit.baselineVersionHash,
-            },
-          },
-        });
-      }
     }
 
-    await this.ensureNoDuplicateCoverLetter(userId, baseline.id, job.id);
-
-    const coverLetter = this.coverLetterRepository.create({
-      userId,
-      baselineId: baseline.id,
-      jobId: job.id,
-      generatorType: 'template',
-      generatorVersion: 'v1',
-      closingTemplateKey,
-      content: complianceResult.normalizedContent,
-      generationInputsHash,
-    });
-
-    const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
-
     return {
-      ...savedCoverLetter,
-      compliance_flags: complianceResult.complianceFlags,
-      audit_id: complianceResult.audit.id,
-      auditId: complianceResult.audit.id,
-      baseline_version_hash: complianceResult.audit.baselineVersionHash,
+      baseline,
+      baselineVersion,
+      job,
+      allowedBlocks,
+      jobContext,
+      jobContextAllowlist,
+      closingTemplateKey,
+      generationInputsHash,
+      complianceResult,
     };
   }
 
@@ -329,6 +440,39 @@ export class CoverLettersService {
     return (values ?? [])
       .map((value) => this.cleanText(value))
       .filter((value) => value.length > 0);
+  }
+
+  private buildPdfBuffer(content: string) {
+    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const escaped = sanitized
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
+    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
+    const pdfParts = [
+      '%PDF-1.4',
+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
+      `4 0 obj ${contentStream} endobj`,
+      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+      'xref',
+      '0 6',
+      '0000000000 65535 f ',
+      'trailer << /Size 6 /Root 1 0 R >>',
+      'startxref',
+      '0',
+      '%%EOF',
+    ];
+
+    return Buffer.from(pdfParts.join('\n'));
+  }
+
+  private buildDocxBuffer(content: string) {
+    const header = 'PK\u0003\u0004';
+    const body = `Cover Letter\n\n${content}`;
+    return Buffer.from(header + body, 'utf-8');
   }
 
   private normalizeRequestedJobContext(
@@ -504,6 +648,7 @@ export class CoverLettersService {
     userId: string,
     baselineId: string,
     jobId: string,
+    generationInputsHash?: string,
   ) {
     const existing = await this.coverLetterRepository.findOne({
       where: {
@@ -515,6 +660,12 @@ export class CoverLettersService {
     });
 
     if (existing) {
+      if (
+        generationInputsHash &&
+        existing.generationInputsHash === generationInputsHash
+      ) {
+        return;
+      }
       throw new ConflictException({
         error: {
           code: 'COVER_LETTER_DUPLICATE',
@@ -535,25 +686,33 @@ export class CoverLettersService {
     userId: string,
     jobContextAllowlist: JobApplicationContext,
     documentType: DocumentType,
-  ) {
+    reuseFlags?: {
+      writingFlags?: ComplianceFlag[];
+      scopeFlags?: ComplianceFlag[];
+    },
+  ): Promise<ComplianceEvaluationResult> {
     const normalizedContent = this.complianceService.normalizeText(content);
-    const writingFlags = this.complianceService.enforceResumeWritingRules({
-      baselineSections: complianceBaselineSections,
-      generatedSections: [{ title: 'Cover Letter', content }],
-    });
-    const scopeFlags = this.complianceService.detectScopeInflation({
-      baselineSections: allowedBlocks.map((block) => ({
-        title: block.title,
-        content: block.content,
-        sectionType: block.sectionType,
-      })),
-      generatedSections: [{ title: 'Cover Letter', content }],
-      jobContext: jobContextAllowlist,
-      documentType,
-    });
+    const writingFlags =
+      reuseFlags?.writingFlags ??
+      this.complianceService.enforceResumeWritingRules({
+        baselineSections: complianceBaselineSections,
+        generatedSections: [{ title: 'Cover Letter', content }],
+      });
+    const scopeFlags =
+      reuseFlags?.scopeFlags ??
+      this.complianceService.detectScopeInflation({
+        baselineSections: allowedBlocks.map((block) => ({
+          title: block.title,
+          content: block.content,
+          sectionType: block.sectionType,
+        })),
+        generatedSections: [{ title: 'Cover Letter', content }],
+        jobContext: jobContextAllowlist,
+        documentType,
+      });
 
     const { complianceFlags, blocked, audit } =
-      await this.complianceService.validateAndAudit({
+      await validateComplianceWithFallback(this.complianceService, {
         action: ComplianceAction.COVER_LETTER_GENERATION,
         actorId: userId,
         baselineVersion,
@@ -576,6 +735,8 @@ export class CoverLettersService {
       complianceFlags,
       blocked,
       audit,
+      writingFlags,
+      scopeFlags,
     };
   }
 }

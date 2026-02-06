@@ -97,12 +97,13 @@ describe('ResumeController tier gating', () => {
     expect(resumeService.generateResume).toHaveBeenCalled();
   });
 
-  it('blocks FREE tier resume export with TIER_GATED', async () => {
+  it('blocks FREE tier resume export with TIER_REQUIRED', async () => {
     const request = buildRequest(SubscriptionTier.FREE);
     const res = buildResponse();
 
-    await expect(
-      controller.exportResume(
+    let caughtError: unknown;
+    try {
+      await controller.exportResume(
         {
           baselineId: 'baseline-1',
           baselineVersionId: 'version-1',
@@ -110,9 +111,53 @@ describe('ResumeController tier gating', () => {
         },
         request,
         res,
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+      );
+    } catch (error) {
+      caughtError = error;
+    }
 
+    expect(caughtError).toBeInstanceOf(ForbiddenException);
+    const forbiddenError = caughtError as ForbiddenException & { getResponse: () => unknown };
+    expect(forbiddenError.getResponse()).toMatchObject({
+      code: 'TIER_REQUIRED',
+      message: 'Upgrade to Pro to download documents.',
+      details: {
+        requiredTier: SubscriptionTier.PRO,
+        currentTier: SubscriptionTier.FREE,
+        feature: 'EXPORT_RESUME',
+      },
+    });
     expect(resumeService.exportResume).not.toHaveBeenCalled();
+  });
+
+  it('allows PRO tier resume export and forwards the file', async () => {
+    const request = buildRequest(SubscriptionTier.PRO);
+    const res = buildResponse();
+    const file = {
+      buffer: Buffer.from('data'),
+      contentType: 'application/pdf',
+      filename: 'resume.pdf',
+      auditId: 'audit-1',
+      baselineVersionHash: 'hash-1',
+    };
+    resumeService.exportResume.mockResolvedValue(file);
+
+    await controller.exportResume(
+      {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'version-1',
+        jobId: 'job-1',
+      },
+      request,
+      res,
+    );
+
+    expect(resumeService.exportResume).toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith('X-Compliance-Audit-Id', file.auditId);
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Baseline-Version-Hash',
+      file.baselineVersionHash,
+    );
+    expect(res.send).toHaveBeenCalledWith(file.buffer);
   });
 });

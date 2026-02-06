@@ -1,15 +1,11 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
-import {
-  ComplianceFlagPanel,
-  ComplianceViolationPanel,
-  type ComplianceFlag,
-} from "@/components/ComplianceViolationPanel";
+import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -19,16 +15,12 @@ import {
   coverLetterClosingTemplates,
   defaultClosingTemplateKey,
 } from "@/lib/coverLetters";
-import {
-  formatErrorMessage,
-  parseComplianceError,
-  readResponsePayload,
-  type ParsedComplianceError,
-} from "@/lib/compliance/parseComplianceError";
+import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
+import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { listJobs } from "@/lib/jobsClient";
-import { useAutoGenerateThreshold } from "../lib/settings";
+import { useEntitlements } from "@/src/lib/entitlements";
 
 type Job = Awaited<ReturnType<typeof listJobs>>[number];
 
@@ -49,7 +41,6 @@ type DocumentState = {
   response: unknown | null;
   error: string | null;
   tierGateError: TierGateError | null;
-  complianceError: ParsedComplianceError | null;
 };
 
 type CoverLetterJobContextPayload = {
@@ -80,7 +71,6 @@ function createDocumentState(): DocumentState {
     response: null,
     error: null,
     tierGateError: null,
-    complianceError: null,
   };
 }
 
@@ -392,6 +382,7 @@ export default function StudioPage() {
   const [selectedBaselineVersionId, setSelectedBaselineVersionId] = useState("");
   const [baselineTouched, setBaselineTouched] = useState(false);
   const [versionTouched, setVersionTouched] = useState(false);
+  const [versionRefreshSignal, setVersionRefreshSignal] = useState(0);
 
   const baselineTouchedRef = useRef(baselineTouched);
   useEffect(() => {
@@ -426,12 +417,34 @@ export default function StudioPage() {
 
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
 
-  const [autoGenerateThreshold] = useAutoGenerateThreshold();
+  const { isPro } = useEntitlements();
 
   const selectedJob = useMemo(
     () => jobs.find((job) => job.id === selectedJobId),
     [jobs, selectedJobId],
   );
+
+  const selectedVersion = useMemo(
+    () => versions.find((version) => version.id === selectedBaselineVersionId),
+    [versions, selectedBaselineVersionId],
+  );
+  const selectedVersionLabel = selectedVersion?.versionNumber
+    ? `Version ${selectedVersion.versionNumber}`
+    : "";
+
+  const handleBlockPolicyVersionAdvance = useCallback(
+    (newVersionId: string, newHash: string | null) => {
+      if (newVersionId && newVersionId !== selectedBaselineVersionId) {
+        setSelectedBaselineVersionId(newVersionId);
+      }
+      setVersionRefreshSignal((prev) => prev + 1);
+    },
+    [selectedBaselineVersionId],
+  );
+
+  const refreshBlockPolicyList = useCallback(() => {
+    setVersionRefreshSignal((prev) => prev + 1);
+  }, []);
 
   const coverLetterJobContext = useMemo(() => {
     const jobWithExtras = selectedJob as Job & {
@@ -483,8 +496,7 @@ export default function StudioPage() {
     Boolean(selectedJobId && selectedBaselineId && selectedBaselineVersionId) &&
     analysisScore !== null;
 
-  const exportsUnlocked =
-    readyForDocuments && typeof analysisScore === "number" && analysisScore >= autoGenerateThreshold;
+  const canExportDocuments = readyForDocuments && isPro;
 
   const verdictLabel = useMemo(() => mapVerdict(analysis?.verdict), [analysis?.verdict]);
   const analysisSummary = analysis?.summary;
@@ -644,7 +656,7 @@ export default function StudioPage() {
     return () => {
       canceled = true;
     };
-  }, [selectedBaselineId, requestedBaselineVersionId]);
+  }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
 
   useEffect(() => {
     if (!selectedJobId) {
@@ -733,11 +745,6 @@ export default function StudioPage() {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
           return;
         }
-        const compliance = parseComplianceError({ status: response.status, payload: responsePayload });
-        if (compliance) {
-          setResumeState((current) => ({ ...current, complianceError: compliance }));
-          return;
-        }
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
       setResumeState((current) => ({ ...current, response: responsePayload }));
@@ -752,10 +759,17 @@ export default function StudioPage() {
   };
 
   const exportResume = async (format: "docx" | "pdf") => {
-    if (!exportsUnlocked) {
+    if (!readyForDocuments) {
       setResumeState((current) => ({
         ...current,
-        error: "Score must reach the export threshold before downloading.",
+        error: generationMessage ?? "Review prerequisites before generating a resume.",
+      }));
+      return;
+    }
+    if (!isPro) {
+      setResumeState((current) => ({
+        ...current,
+        error: "Upgrade to Pro to download documents.",
       }));
       return;
     }
@@ -775,20 +789,17 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const responsePayload = await readResponsePayload(response);
+
       if (!response.ok) {
+        const responsePayload = await readResponsePayload(response);
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
           return;
         }
-        const compliance = parseComplianceError({ status: response.status, payload: responsePayload });
-        if (compliance) {
-          setResumeState((current) => ({ ...current, complianceError: compliance }));
-          return;
-        }
         throw new Error(formatErrorMessage(responsePayload, "Resume export failed."));
       }
+
       const blob = await response.blob();
       downloadBlob(blob, `resume.${format}`);
     } catch (error) {
@@ -825,11 +836,6 @@ export default function StudioPage() {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
           return;
         }
-        const compliance = parseComplianceError({ status: response.status, payload: responsePayload });
-        if (compliance) {
-          setCoverState((current) => ({ ...current, complianceError: compliance }));
-          return;
-        }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
       setCoverState((current) => ({ ...current, response: responsePayload }));
@@ -844,10 +850,17 @@ export default function StudioPage() {
   };
 
   const exportCoverLetter = async (format: "docx" | "pdf") => {
-    if (!exportsUnlocked) {
+    if (!readyForDocuments) {
       setCoverState((current) => ({
         ...current,
-        error: "Score must reach the export threshold before downloading.",
+        error: generationMessage ?? "Review prerequisites before generating a cover letter.",
+      }));
+      return;
+    }
+    if (!isPro) {
+      setCoverState((current) => ({
+        ...current,
+        error: "Upgrade to Pro to download documents.",
       }));
       return;
     }
@@ -865,20 +878,17 @@ export default function StudioPage() {
           body: JSON.stringify(payload),
         },
       );
-      const responsePayload = await readResponsePayload(response);
+
       if (!response.ok) {
+        const responsePayload = await readResponsePayload(response);
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
           return;
         }
-        const compliance = parseComplianceError({ status: response.status, payload: responsePayload });
-        if (compliance) {
-          setCoverState((current) => ({ ...current, complianceError: compliance }));
-          return;
-        }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter export failed."));
       }
+
       const blob = await response.blob();
       downloadBlob(blob, `cover-letter.${format}`);
     } catch (error) {
@@ -999,6 +1009,18 @@ export default function StudioPage() {
         </div>
       </section>
 
+      {selectedBaselineId && selectedBaselineVersionId ? (
+        <BaselineBlockPolicyPanel
+          baselineId={selectedBaselineId}
+          baselineVersionId={selectedBaselineVersionId}
+          baselineVersionHash={selectedVersion?.fileHash ?? null}
+          baselineVersionLabel={selectedVersionLabel}
+          refreshSignal={versionRefreshSignal}
+          onVersionAdvance={handleBlockPolicyVersionAdvance}
+          onPoliciesSaved={refreshBlockPolicyList}
+        />
+      ) : null}
+
       <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -1006,7 +1028,7 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">CX fit score</h2>
           </div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Exports unlock at {autoGenerateThreshold}
+            {isPro ? "Downloads available for Pro+" : "Upgrade to Pro to download documents."}
           </p>
         </div>
 
@@ -1048,14 +1070,14 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={!exportsUnlocked || resumeExportFormat === "docx"}
+              disabled={!canExportDocuments || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("pdf")}
-              disabled={!exportsUnlocked || resumeExportFormat === "pdf"}
+              disabled={!canExportDocuments || resumeExportFormat === "pdf"}
             >
               {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1073,8 +1095,10 @@ export default function StudioPage() {
             {resumeState.tierGateError.message ?? "Resume export is limited by your subscription tier."}
           </Alert>
         ) : null}
-        {resumeState.complianceError ? (
-          <ComplianceViolationPanel error={resumeState.complianceError} />
+        {resumeWarningFlags.length ? (
+          <p className="text-sm text-amber-200">
+            Verification signals detected. Personalization may be limited. See Results for details.
+          </p>
         ) : null}
         {resumeState.error ? (
           <Alert intent="error" title="Resume unavailable">
@@ -1083,21 +1107,18 @@ export default function StudioPage() {
         ) : null}
 
         <p className="text-sm text-slate-300">
-          {exportsUnlocked
-            ? "Your score meets the export threshold."
-            : `Score must reach ${autoGenerateThreshold} before downloads unlock.`}
+          {isPro
+            ? "Downloads are available."
+            : "Upgrade to Pro to download documents."}
         </p>
 
         {resumeState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             {resumeWarningFlags.length ? (
-              <ComplianceFlagPanel
-                title="Compliance warnings"
-                description="The resume draft included these advisory flags."
-                flags={resumeWarningFlags}
-                intent="warning"
-                auditId={resumeAuditId}
-              />
+              <p className="text-sm text-amber-200">
+                Verification signals detected. Personalization may be limited. See
+                Results for details.
+              </p>
             ) : null}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
               {resumeStructuredPreview ?? (
@@ -1127,14 +1148,14 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("docx")}
-              disabled={!exportsUnlocked || coverExportFormat === "docx"}
+              disabled={!canExportDocuments || coverExportFormat === "docx"}
             >
               {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("pdf")}
-              disabled={!exportsUnlocked || coverExportFormat === "pdf"}
+              disabled={!canExportDocuments || coverExportFormat === "pdf"}
             >
               {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1172,8 +1193,10 @@ export default function StudioPage() {
               "Cover letter export is limited by your subscription tier."}
           </Alert>
         ) : null}
-        {coverState.complianceError ? (
-          <ComplianceViolationPanel error={coverState.complianceError} />
+        {coverWarningFlags.length ? (
+          <p className="text-sm text-amber-200">
+            Verification signals detected. Personalization may be limited. See Results for details.
+          </p>
         ) : null}
         {coverState.error ? (
           <Alert intent="error" title="Cover letter unavailable">
@@ -1182,22 +1205,13 @@ export default function StudioPage() {
         ) : null}
 
         <p className="text-sm text-slate-300">
-          {exportsUnlocked
-            ? "Your score meets the export threshold."
-            : `Score must reach ${autoGenerateThreshold} before downloads unlock.`}
+          {isPro
+            ? "Downloads are available."
+            : "Upgrade to Pro to download documents."}
         </p>
 
         {coverState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-            {coverWarningFlags.length ? (
-              <ComplianceFlagPanel
-                title="Compliance warnings"
-                description="The cover letter draft included these advisory flags."
-                flags={coverWarningFlags}
-                intent="warning"
-                auditId={coverAuditId}
-              />
-            ) : null}
             <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
               {coverLetterParagraphs.length ? (
                 <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">

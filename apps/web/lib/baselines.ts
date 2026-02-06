@@ -63,6 +63,25 @@ export interface BaselineBlockPolicyResponse {
   blocks: BaselineBlockDto[];
 }
 
+export interface BaselineBlockUpdateDto {
+  id: string;
+  include_tag: BaselineIncludePolicy;
+  order_index?: number | null;
+}
+
+export interface UpdateBaselineBlocksRequest {
+  baseline_version_id: string;
+  baseline_version_hash: string | null;
+  blocks: BaselineBlockUpdateDto[];
+}
+
+export interface UpdateBaselineBlocksResponse {
+  baseline_version_id: string;
+  updated_blocks: BaselineBlockDto[];
+  new_version_id: string;
+  hash: string;
+}
+
 export interface BaselineUploadStatus {
   isDuplicate: boolean;
   versionNumber: number;
@@ -76,7 +95,7 @@ export interface BaselineUploadResponse {
 
 const BASELINE_API_PATH = "/api/baselines";
 
-async function ensureJsonResponse(response: Response, action: string) {
+async function ensureJsonPayload<T>(response: Response, action: string) {
   if (!response.ok) {
     const statusText = response.statusText?.trim();
     const statusLabel = statusText
@@ -108,7 +127,11 @@ async function ensureJsonResponse(response: Response, action: string) {
     throw new Error(`Invalid response from ${action}`);
   }
 
-  return response.json() as Promise<BaselineDto>;
+  return response.json() as Promise<T>;
+}
+
+async function ensureJsonResponse(response: Response, action: string) {
+  return ensureJsonPayload<BaselineDto>(response, action);
 }
 
 async function fetchBaselineList(includeArchived = false) {
@@ -172,4 +195,39 @@ export async function restoreBaseline(id: string) {
     credentials: "include",
   });
   return ensureJsonResponse(response, "Restore");
+}
+
+export async function getBaselineBlocks(
+  baselineId: string,
+  baselineVersionId: string,
+): Promise<BaselineBlockPolicyResponse> {
+  const response = await fetch(
+    `${BASELINE_API_PATH}/${encodeURIComponent(baselineId)}/blocks?baseline_version_id=${encodeURIComponent(
+      baselineVersionId,
+    )}`,
+    {
+      credentials: "include",
+      cache: "no-store",
+    },
+  );
+  return ensureJsonPayload<BaselineBlockPolicyResponse>(
+    response,
+    "Fetch baseline blocks",
+  );
+}
+
+export async function updateBaselineBlockPolicies(
+  baselineId: string,
+  payload: UpdateBaselineBlocksRequest,
+): Promise<UpdateBaselineBlocksResponse> {
+  const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(baselineId)}/blocks`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return ensureJsonPayload<UpdateBaselineBlocksResponse>(
+    response,
+    "Update baseline blocks",
+  );
 }

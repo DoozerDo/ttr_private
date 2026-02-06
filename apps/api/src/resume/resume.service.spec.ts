@@ -4,6 +4,11 @@ import {
 } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { BaselineStatus, Baseline } from '../baseline/baseline.entity';
+import {
+  BaselineIncludePolicy,
+  BaselineSection,
+  BaselineSectionType,
+} from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
@@ -19,6 +24,18 @@ import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
 
+const baselineSection: BaselineSection = {
+  id: 'section-1',
+  baselineId: 'baseline-1',
+  sectionType: BaselineSectionType.EXPERIENCE,
+  title: 'Experience',
+  content: 'Delivered measurable results.',
+  includePolicy: BaselineIncludePolicy.ALWAYS,
+  order: 0,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
 const mockBaseline: Baseline = {
   id: 'baseline-1',
   userId: 'user-1',
@@ -30,7 +47,7 @@ const mockBaseline: Baseline = {
   hash: null,
   status: BaselineStatus.ACTIVE,
   archivedAt: null,
-  sections: [],
+  sections: [baselineSection],
   versions: [],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -42,6 +59,7 @@ const mockBaselineVersion: BaselineVersion = {
   baselineId: 'baseline-1',
   versionNumber: 3,
   fileHash: 'hash-1',
+  hash: 'hash-1',
   allowedCompanies: [],
   allowedRoles: [],
   allowedTechnologies: [],
@@ -118,6 +136,9 @@ const createComplianceServiceMock = (
   return {
     enforceResumeWritingRules: jest.fn().mockReturnValue(writingFlags),
     detectScopeInflation: jest.fn().mockReturnValue([]),
+    normalizeSectionsForOutput: jest
+      .fn()
+      .mockImplementation((sections) => sections),
     validateAndAudit: jest.fn().mockResolvedValue(auditResult),
     ...override,
   } as MockedComplianceService;
@@ -300,7 +321,7 @@ describe('ResumeService', () => {
     );
   });
 
-  it('blocks generation when invented metrics are flagged', async () => {
+  it('returns compliance flags when invented metrics are flagged', async () => {
     const inventedFlag: ComplianceFlag[] = [
       {
         code: ComplianceFlagCode.INVENTED_METRIC,
@@ -310,9 +331,9 @@ describe('ResumeService', () => {
     ];
     const { service } = buildService(95, inventedFlag);
 
-    await expect(
-      service.generateResume('user-1', baseRequest),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.compliance_blocked).toBe(true);
+    expect(result.compliance_flags).toEqual(inventedFlag);
   });
 
   it('blocks export when compliance flags block', async () => {
@@ -350,7 +371,7 @@ describe('ResumeService', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('blocks generation when scope inflation is detected', async () => {
+  it('returns compliance flags when scope inflation is detected', async () => {
     const scopeFlag: ComplianceFlag[] = [
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
@@ -377,8 +398,8 @@ describe('ResumeService', () => {
       } as ValidateAndAuditResult),
     });
 
-    await expect(
-      service.generateResume('user-1', baseRequest),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    const result = await service.generateResume('user-1', baseRequest);
+    expect(result.compliance_blocked).toBe(true);
+    expect(result.compliance_flags).toEqual(scopeFlag);
   });
 });

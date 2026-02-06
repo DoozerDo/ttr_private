@@ -7,19 +7,21 @@ import {
   Param,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Request } from 'express';
+import type { Request, Response } from 'express';
 import { CoverLettersService } from './cover-letters.service';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import {
-  assertFeatureAvailable,
   Entitlements,
   FeatureKey,
+  assertFeatureAvailable,
   resolveEntitlementsFromUser,
 } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { ensureExportTierAvailable } from '../tiers/export-tier-helpers';
 
 type TieredRequest = Request & {
   user?: {
@@ -28,6 +30,8 @@ type TieredRequest = Request & {
     entitlements?: Entitlements;
   };
 };
+
+type CoverLetterExportFormat = 'docx' | 'pdf';
 
 @Controller('cover-letters')
 @UseGuards(AuthGuard('jwt'))
@@ -66,6 +70,63 @@ export class CoverLettersController {
     const userId = this.requireUserId(request);
 
     return this.coverLettersService.deleteCoverLetter(userId, id);
+  }
+
+  @Post('export')
+  async exportCoverLetter(
+    @Body() body: GenerateCoverLetterDto,
+    @Req() request: TieredRequest,
+    @Res() res: Response,
+  ) {
+    return this.handleExport(body, request, res, 'docx');
+  }
+
+  @Post('export/:format')
+  async exportCoverLetterWithFormat(
+    @Param('format') formatParam: string,
+    @Body() body: GenerateCoverLetterDto,
+    @Req() request: TieredRequest,
+    @Res() res: Response,
+  ) {
+    const format = this.normalizeFormat(formatParam);
+    return this.handleExport(body, request, res, format);
+  }
+
+  private normalizeFormat(value: string): CoverLetterExportFormat {
+    const normalized = (value ?? '').toLowerCase().trim();
+    if (normalized === 'pdf') return 'pdf';
+    if (normalized === 'docx') return 'docx';
+    throw new BadRequestException('Invalid format. Use docx or pdf.');
+  }
+
+  private async handleExport(
+    body: GenerateCoverLetterDto,
+    request: TieredRequest,
+    res: Response,
+    format: CoverLetterExportFormat,
+  ) {
+    const userId = this.requireUserId(request);
+
+    const entitlements = resolveEntitlementsFromUser(request.user);
+    ensureExportTierAvailable(entitlements, FeatureKey.COVER_LETTER_EXPORT, 'EXPORT_COVER');
+
+    const file = await this.coverLettersService.exportCoverLetter(
+      userId,
+      body,
+      format,
+    );
+
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.filename}"`,
+    );
+    res.setHeader('Content-Length', String(file.buffer.byteLength));
+    res.setHeader('X-Compliance-Audit-Id', file.auditId);
+    if (file.baselineVersionHash) {
+      res.setHeader('X-Baseline-Version-Hash', file.baselineVersionHash);
+    }
+    res.send(file.buffer);
   }
 
   private requireUserId(request: TieredRequest) {

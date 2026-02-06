@@ -12,12 +12,12 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { ResumeService } from './resume.service';
 import {
-  assertFeatureAvailable,
   Entitlements,
   FeatureKey,
   resolveEntitlementsFromUser,
 } from '../features/feature-gates';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+import { ensureExportTierAvailable } from '../tiers/export-tier-helpers';
 
 type ResumeExportFormat = 'docx' | 'pdf';
 
@@ -131,7 +131,7 @@ export class ResumeController {
     const payload = this.parsePayload(body);
 
     const entitlements = resolveEntitlementsFromUser(request.user);
-    assertFeatureAvailable(entitlements, FeatureKey.RESUME_EXPORT);
+    ensureExportTierAvailable(entitlements, FeatureKey.RESUME_EXPORT, 'EXPORT_RESUME');
 
     const file = await this.resumeService.exportResume(userId, payload, format);
 

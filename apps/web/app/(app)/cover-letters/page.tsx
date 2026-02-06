@@ -21,7 +21,7 @@ import {
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { readLastAnalysis, type StoredAnalysisRecord } from "../lib/session";
-import { useAutoGenerateThreshold } from "../lib/settings";
+import { useEntitlements } from "@/src/lib/entitlements";
 
 type AnyObject = Record<string, unknown>;
 
@@ -80,7 +80,7 @@ export default function CoverLettersPage() {
   const [documentState, setDocumentState] = useState<DocumentState>(() => createDocumentState());
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [exportState, setExportState] = useState<{ format: "docx" | "pdf" } | null>(null);
-  const [autoGenerateThreshold] = useAutoGenerateThreshold();
+  const { isPro } = useEntitlements();
 
   useEffect(() => {
     const stored = readLastAnalysis();
@@ -177,11 +177,6 @@ export default function CoverLettersPage() {
   const readyForDocument = Boolean(jobId && baselineVersionId);
 
   const latestScore = useMemo(() => resolveAnalysisScore(analysisRecord), [analysisRecord]);
-
-  const oneTapEligible = useMemo(
-    () => (latestScore === null ? false : latestScore >= autoGenerateThreshold),
-    [autoGenerateThreshold, latestScore],
-  );
 
   const verdict = useMemo(() => {
     if (!analysisRecord) return null;
@@ -319,6 +314,14 @@ export default function CoverLettersPage() {
       return;
     }
 
+    if (!isPro) {
+      setDocumentState((prev) => ({
+        ...prev,
+        error: "Upgrade to Pro to download documents.",
+      }));
+      return;
+    }
+
     setExportState({ format });
     setDocumentState((prev) => ({
       ...prev,
@@ -437,7 +440,7 @@ export default function CoverLettersPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportDocument("docx")}
-              disabled={!readyForDocument || !oneTapEligible || exportState?.format === "docx"}
+              disabled={!readyForDocument || !isPro || exportState?.format === "docx"}
             >
               {exportState?.format === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
@@ -445,16 +448,16 @@ export default function CoverLettersPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportDocument("pdf")}
-              disabled={!readyForDocument || !oneTapEligible || exportState?.format === "pdf"}
+              disabled={!readyForDocument || !isPro || exportState?.format === "pdf"}
             >
               {exportState?.format === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
           </div>
 
           <p className="text-sm text-slate-300">
-            {oneTapEligible
-              ? "Your score meets the export threshold. Review the draft below and download when ready."
-              : `Score must reach ${autoGenerateThreshold} before downloads unlock.`}
+            {isPro
+              ? "Downloads are available."
+              : "Upgrade to Pro to download documents."}
           </p>
 
           {documentState.tierGateError ? (

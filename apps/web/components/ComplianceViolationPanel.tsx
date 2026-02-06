@@ -75,7 +75,6 @@ export function ComplianceFlagPanel({
       >
         {flags.map((flag, index) => (
           <li key={`${flag.code ?? flag.message}-${index}`}>
-            {flag.severity ? `[${flag.severity.toUpperCase()}] ` : ""}
             {flag.code ? `${flag.code}: ` : ""}
             {flag.message}
           </li>
@@ -102,14 +101,60 @@ type ComplianceViolationPanelProps = {
 };
 
 export function ComplianceViolationPanel({ error }: ComplianceViolationPanelProps) {
+  const violations = error.violations ?? [];
+  if (!violations.length) {
+    return null;
+  }
+
+  const blockFlags = violations.filter(
+    (flag) => (flag.severity ?? "").toLowerCase() === "block",
+  );
+  const notedFlags = violations.filter(
+    (flag) => (flag.severity ?? "").toLowerCase() !== "block",
+  );
+
+  const containerStyle = {
+    ...ttrComponents.warningBox,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 8,
+  };
+
   return (
-    <ComplianceFlagPanel
-      title="Compliance check failed"
-      description="The system blocked output because it detected unverified content."
-      flags={error.violations}
-      auditId={error.auditId}
-      baselineVersionHash={error.baselineVersionHash}
-      intent="error"
-    />
+    <div style={containerStyle}>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>Verification needed</div>
+
+      <div
+        style={{
+          ...(ttrTypography.paragraph as CSSProperties),
+          fontSize: 13,
+          margin: 0,
+        }}
+      >
+        The system paused to protect accuracy and avoid accidental misrepresentation.
+      </div>
+
+      {blockFlags.length ? (
+        <ComplianceFlagPanel
+          title="Needs verification"
+          description="Review these items before continuing."
+          flags={blockFlags}
+          intent="warning"
+          auditId={blockFlags.length ? error.auditId : undefined}
+          baselineVersionHash={blockFlags.length ? error.baselineVersionHash : null}
+          showMeta={false}
+        />
+      ) : null}
+
+      {notedFlags.length ? (
+        <ComplianceFlagPanel
+          title="Noted"
+          description="We documented these observations for your awareness."
+          flags={notedFlags}
+          intent="warning"
+          showMeta={false}
+        />
+      ) : null}
+    </div>
   );
 }

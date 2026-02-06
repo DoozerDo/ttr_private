@@ -1,13 +1,14 @@
 import { ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BaselineBlockPolicy } from './baseline-block-policy.entity';
-import { Baseline } from './baseline.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
   BaselineSectionType,
 } from './baseline-section.entity';
+import { Baseline } from './baseline.entity';
+import { BaselineBlockPolicy } from './baseline-block-policy.entity';
+import { BaselineParsed } from './baseline-parsed.entity';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineService } from './baseline.service';
@@ -240,5 +241,23 @@ const ingestionResult = {
         ],
       }),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('returns updated policy metadata and new version id', async () => {
+    const result = await service.updateBlockPolicies('user-1', 'b-1', {
+      baseline_version_id: 'v-1',
+      baseline_version_hash: 'hash-1',
+      blocks: [
+        { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
+        { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
+      ],
+    });
+
+    expect(result.new_version_id).toBeDefined();
+    expect(result.updated_blocks).toHaveLength(2);
+    expect(result.updated_blocks.find((block) => block.id === 's-2')?.include_tag).toBe(
+      BaselineIncludePolicy.NEVER,
+    );
+    expect(result.hash).toBeDefined();
   });
 });

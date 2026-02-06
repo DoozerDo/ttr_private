@@ -1,13 +1,11 @@
-import {
-  BadRequestException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import {
   BaselineIncludePolicy,
   BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import {
+  ComplianceAction,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
 } from '../compliance/compliance.types';
@@ -77,6 +75,7 @@ describe('CoverLettersService', () => {
   const complianceService = {
     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
     detectScopeInflation: jest.fn().mockReturnValue([]),
+    normalizeText: jest.fn((value: string) => value),
     validateAndAudit: jest.fn((ctx: any) =>
       Promise.resolve({
         complianceFlags: ctx.extraFlags ?? [],
@@ -84,7 +83,7 @@ describe('CoverLettersService', () => {
           (flag: { severity: ComplianceFlagSeverity }) =>
             flag.severity === ComplianceFlagSeverity.BLOCK,
         ),
-        audit: { id: 'audit-1' },
+        audit: { id: 'audit-1', baselineVersionHash: 'hash-1' },
       }),
     ),
   };
@@ -140,7 +139,7 @@ describe('CoverLettersService', () => {
     expect(second.audit_id).toBe('audit-1');
   });
 
-  it('blocks invented metrics through compliance checks', async () => {
+  it('returns compliance flags when invented metrics are flagged', async () => {
     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
       {
         code: ComplianceFlagCode.INVENTED_METRIC,
@@ -154,18 +153,22 @@ describe('CoverLettersService', () => {
       complianceService as any,
     );
 
-    await expect(
-      service.generateCoverLetter('user-1', {
-        baselineId: 'baseline-1',
-        baselineVersionId: 'baseline-version-1',
-        jobId: 'job-1',
-      }),
-    ).rejects.toThrow(UnprocessableEntityException);
+    const result = await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.compliance_flags).toHaveLength(1);
+    expect(result.compliance_flags?.[0].code).toBe(
+      ComplianceFlagCode.INVENTED_METRIC,
+    );
+    expect(result.content).toContain('Dear Hiring Team,');
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
   });
 
-  it('blocks cover letter generation when scope inflation is detected', async () => {
+  it('returns compliance flags when scope inflation is detected', async () => {
     complianceService.detectScopeInflation.mockReturnValueOnce([
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
@@ -179,13 +182,17 @@ describe('CoverLettersService', () => {
       complianceService as any,
     );
 
-    await expect(
-      service.generateCoverLetter('user-1', {
-        baselineId: 'baseline-1',
-        baselineVersionId: 'baseline-version-1',
-        jobId: 'job-1',
-      }),
-    ).rejects.toThrow(UnprocessableEntityException);
+    const result = await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.compliance_flags).toHaveLength(1);
+    expect(result.compliance_flags?.[0].code).toBe(
+      ComplianceFlagCode.SCOPE_INFLATION,
+    );
+    expect(result.content).toContain('Dear Hiring Team,');
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
   });
@@ -203,5 +210,31 @@ describe('CoverLettersService', () => {
         baselineVersionId: '',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('exports cover letter content with compliance audit headers', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
+
+    const result = await service.exportCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    }, 'docx');
+
+    expect(result.filename).toBe('cover-letter.docx');
+    expect(result.contentType).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    expect(result.baselineVersionHash).toBe('hash-1');
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: ComplianceAction.COVER_LETTER_EXPORT,
+        actorId: 'user-1',
+      }),
+    );
   });
 });

@@ -16,6 +16,7 @@ import {
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ComplianceService } from '../compliance/compliance.service';
+import { validateComplianceWithFallback } from '../compliance/compliance-error.utils';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
@@ -25,6 +26,10 @@ export type GenerateResumeRequest = {
   baselineVersionId?: string;
   jobId?: string | null;
   oneTap?: boolean;
+};
+
+export type GenerateResumeOptions = {
+  enforceOneTap?: boolean;
 };
 
 @Injectable()
@@ -131,7 +136,11 @@ export class ResumeService {
       .sort((a, b) => a.order - b.order);
   }
 
-  async generateResume(userId: string, request: GenerateResumeRequest) {
+  async generateResume(
+    userId: string,
+    request: GenerateResumeRequest,
+    options?: GenerateResumeOptions,
+  ) {
     const baselineId = request.baselineId?.trim();
     const baselineVersionId = request.baselineVersionId?.trim();
     const jobId = request.jobId?.trim();
@@ -175,7 +184,13 @@ export class ResumeService {
       policies,
     );
 
-    const sections = sectionsWithPolicies.map((section) => ({
+    const allowedSections = sectionsWithPolicies.filter(
+      (section) =>
+        (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
+        BaselineIncludePolicy.NEVER,
+    );
+
+    const sections = allowedSections.map((section) => ({
       id: section.id,
       type: section.sectionType,
       title: section.title,
@@ -204,7 +219,9 @@ export class ResumeService {
       ? await this.findLatestAssessment(userId, jobId)
       : null;
 
-    if (request.oneTap && jobId) {
+    const shouldEnforceOneTap = options?.enforceOneTap ?? true;
+
+    if (request.oneTap && jobId && shouldEnforceOneTap) {
       this.ensureOneTapAllowed(latestAssessment);
     }
 
@@ -229,32 +246,20 @@ export class ResumeService {
     const normalizedSections =
       this.complianceService.normalizeSectionsForOutput(sections);
 
-    const { complianceFlags, blocked, audit } =
-      await this.complianceService.validateAndAudit({
-        action: ComplianceAction.RESUME_GENERATION,
-        actorId: userId,
-        baselineVersion,
-        job,
-        outputHash,
-        scopeInflationDetected: false,
-        extraFlags: [...writingFlags, ...scopeFlags],
-        baselineSections: normalizedBaselineSections,
-        generatedSections: normalizedSections,
-      });
+      const { complianceFlags, blocked, audit } =
+        await validateComplianceWithFallback(this.complianceService, {
+          action: ComplianceAction.RESUME_GENERATION,
+          actorId: userId,
+          baselineVersion,
+          job,
+          outputHash,
+          scopeInflationDetected: false,
+          extraFlags: [...writingFlags, ...scopeFlags],
+          baselineSections: normalizedBaselineSections,
+          generatedSections: normalizedSections,
+        });
 
-    if (blocked) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'COMPLIANCE_VIOLATION',
-          message: 'Compliance validation failed.',
-          details: {
-            compliance_flags: complianceFlags,
-            audit_id: audit.id,
-            baseline_version_hash: audit.baselineVersionHash,
-          },
-        },
-      });
-    }
+    const complianceBlocked = blocked;
 
     const quality =
       latestAssessment &&
@@ -269,6 +274,7 @@ export class ResumeService {
       jobId: jobId ?? null,
       sections: normalizedSections,
       compliance_flags: complianceFlags,
+      compliance_blocked: complianceBlocked,
       audit_id: audit.id,
       auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
@@ -281,7 +287,9 @@ export class ResumeService {
     request: GenerateResumeRequest,
     format: 'docx' | 'pdf',
   ) {
-    const generation = await this.generateResume(userId, request);
+    const generation = await this.generateResume(userId, request, {
+      enforceOneTap: false,
+    });
     const text = this.buildResumeText(
       generation.sections.map((section) => ({
         title: section.title,

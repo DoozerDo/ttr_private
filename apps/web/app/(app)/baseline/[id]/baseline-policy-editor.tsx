@@ -7,18 +7,13 @@ import {
   BaselineIncludePolicy,
   BaselineVersionDto,
 } from "@/lib/baselines";
+import { BaselineBlockPolicyList } from "@/components/BaselineBlockPolicyList";
 
 type BaselinePolicyEditorProps = {
   baselineId: string;
   versions: BaselineVersionDto[];
   initialVersionId: string;
 };
-
-const includeTagOptions: Array<{ value: BaselineIncludePolicy; label: string }> = [
-  { value: "always", label: "Always" },
-  { value: "optional", label: "Optional" },
-  { value: "never", label: "Never" },
-];
 
 export function BaselinePolicyEditor({
   baselineId,
@@ -245,55 +240,12 @@ export function BaselinePolicyEditor({
 
       {loading ? (
         <p className="text-sm text-gray-700">Loading blocks...</p>
-      ) : blocks.length === 0 ? (
-        <p className="text-sm text-gray-700">No blocks available for this baseline.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {blocks
-            .slice()
-            .sort((a, b) => a.order_index - b.order_index)
-            .map((block) => (
-              <article
-                key={block.id}
-                className="flex h-full flex-col justify-between rounded-md border border-gray-100 bg-gray-50 p-4 shadow-sm"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="rounded-full bg-gray-200 px-2 py-1 text-xs font-semibold uppercase text-gray-800">
-                      {block.section_type}
-                    </span>
-                    <div className="flex gap-2">
-                      {includeTagOptions.map((option) => {
-                        const isActive = block.include_tag === option.value;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => updateBlockPolicy(block.id, option.value)}
-                            disabled={saving}
-                            className={`rounded-full px-3 py-1 text-xs font-semibold shadow-sm transition ${
-                              isActive
-                                ? "bg-blue-600 text-white"
-                                : "bg-white text-gray-800 hover:bg-gray-100"
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-900">
-                    {block.title || "Untitled block"}
-                  </p>
-                  <p className="line-clamp-4 whitespace-pre-wrap text-sm text-gray-800">
-                    {block.content}
-                  </p>
-                </div>
-                <p className="mt-3 text-xs text-gray-600">Order: {block.order_index}</p>
-              </article>
-            ))}
-        </div>
+        <BaselineBlockPolicyList
+          blocks={blocks}
+          onPolicyChange={updateBlockPolicy}
+          saving={saving}
+        />
       )}
     </section>
   );
