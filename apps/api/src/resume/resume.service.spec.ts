@@ -337,26 +337,29 @@ describe('ResumeService', () => {
   });
 
   it('blocks export when compliance flags block', async () => {
+    const blockedFlags: ComplianceFlag[] = [
+      {
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Metric not in baseline.',
+      },
+    ];
+    const auditRecord: ValidateAndAuditResult['audit'] = {
+      id: 'audit-2',
+      baselineVersionId: 'baseline-version-1',
+      baselineVersionHash: 'hash-1',
+      outputHash: '',
+      action: ComplianceAction.RESUME_EXPORT,
+      actorId: 'user-1',
+      jobId: 'job-1',
+      createdAt: new Date().toISOString(),
+    };
     const complianceOverride: Partial<MockedComplianceService> = {
       detectScopeInflation: jest.fn().mockReturnValue([]),
       validateAndAudit: jest.fn().mockResolvedValue({
-        complianceFlags: [
-          {
-            code: ComplianceFlagCode.INVENTED_METRIC,
-            severity: ComplianceFlagSeverity.BLOCK,
-          },
-        ],
+        complianceFlags: blockedFlags,
         blocked: true,
-        audit: {
-          id: 'audit-2',
-          baselineVersionId: 'baseline-version-1',
-          baselineVersionHash: 'hash-1',
-          outputHash: '',
-          action: ComplianceAction.RESUME_EXPORT,
-          actorId: 'user-1',
-          jobId: 'job-1',
-          createdAt: new Date().toISOString(),
-        },
+        audit: auditRecord,
       } as ValidateAndAuditResult),
     };
     const { service } = buildService(
@@ -366,9 +369,25 @@ describe('ResumeService', () => {
       complianceOverride,
     );
 
-    await expect(
-      service.exportResume('user-1', baseRequest, 'docx'),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    try {
+      await service.exportResume('user-1', baseRequest, 'docx');
+      throw new Error('expected export to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      expect(
+        (error as UnprocessableEntityException).getResponse(),
+      ).toMatchObject({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            compliance_flags: blockedFlags,
+            audit_id: auditRecord.id,
+            baseline_version_hash: auditRecord.baselineVersionHash,
+          },
+        },
+      });
+    }
   });
 
   it('returns compliance flags when scope inflation is detected', async () => {

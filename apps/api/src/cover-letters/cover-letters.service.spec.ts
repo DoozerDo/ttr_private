@@ -1,4 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import {
   BaselineIncludePolicy,
@@ -236,5 +239,77 @@ describe('CoverLettersService', () => {
         actorId: 'user-1',
       }),
     );
+  });
+
+  it('blocks export when compliance validation fails', async () => {
+    const blockedFlags: ComplianceFlag[] = [
+      {
+        code: ComplianceFlagCode.INVENTED_METRIC,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Metric not in baseline.',
+      },
+    ];
+    const auditRecord: ValidateAndAuditResult['audit'] = {
+      id: 'audit-2',
+      baselineVersionId: 'baseline-version-1',
+      baselineVersionHash: 'hash-2',
+      outputHash: '',
+      action: ComplianceAction.COVER_LETTER_EXPORT,
+      actorId: 'user-1',
+      jobId: 'job-1',
+      createdAt: new Date().toISOString(),
+    };
+    complianceService.validateAndAudit.mockImplementation(async (ctx: any) => {
+      if (ctx.action === ComplianceAction.COVER_LETTER_EXPORT) {
+        return {
+          complianceFlags: blockedFlags,
+          blocked: true,
+          audit: auditRecord,
+        } as ValidateAndAuditResult;
+      }
+
+      return {
+        complianceFlags: [],
+        blocked: false,
+        audit: {
+          id: 'audit-1',
+          baselineVersionId: ctx.baselineVersion?.id ?? 'baseline-version-1',
+          baselineVersionHash:
+            ctx.baselineVersion?.hash ?? ctx.baselineVersion?.fileHash ?? 'hash-1',
+          outputHash: ctx.outputHash ?? '',
+          action: ctx.action,
+          actorId: ctx.actorId ?? 'user-1',
+          jobId: ctx.job?.id ?? 'job-1',
+          createdAt: new Date().toISOString(),
+        },
+      } as ValidateAndAuditResult;
+    });
+
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
+
+    try {
+      await service.exportCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+      }, 'pdf');
+      throw new Error('expected export to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            compliance_flags: blockedFlags,
+            audit_id: auditRecord.id,
+            baseline_version_hash: auditRecord.baselineVersionHash,
+          },
+        },
+      });
+    }
   });
 });
