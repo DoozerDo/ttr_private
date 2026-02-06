@@ -2,6 +2,7 @@ import {
   BadRequestException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import JSZip from 'jszip';
 import { Repository } from 'typeorm';
 import { BaselineStatus, Baseline } from '../baseline/baseline.entity';
 import {
@@ -29,9 +30,52 @@ const baselineSection: BaselineSection = {
   baselineId: 'baseline-1',
   sectionType: BaselineSectionType.EXPERIENCE,
   title: 'Experience',
-  content: 'Delivered measurable results.',
+  content: `John Candidate
+San Francisco - (555) 555-5555 - john@example.com
+
+Senior Program Manager | Acme Corp | 2020 - 2023
+
+- Led automation efforts that reduced defects.
+- Mentored engineers and delivered measurable results.`,
   includePolicy: BaselineIncludePolicy.ALWAYS,
   order: 0,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const summarySection: BaselineSection = {
+  id: 'section-2',
+  baselineId: 'baseline-1',
+  sectionType: BaselineSectionType.SUMMARY,
+  title: 'Summary',
+  content: `Summary
+Experienced program manager leading cross-functional teams focused on measurable ops impact.
+- Delivered key orchestration initiatives.
+
+Skills
+Technical Strategy, Automation, Analytics, Coaching, Leadership, Stakeholder Management, Process Design
+`,
+  includePolicy: BaselineIncludePolicy.ALWAYS,
+  order: 1,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const extraSection: BaselineSection = {
+  id: 'section-3',
+  baselineId: 'baseline-1',
+  sectionType: BaselineSectionType.EXPERIENCE,
+  title: 'Experience',
+  content: `Experience
+Senior Consultant | Beta Co | 2017 - 2019
+- Released quarterly roadmap on time.
+- Coordinated with partners for cross-team alignment.
+
+Project Lead | Gamma Inc | 2014 - 2016
+- Guided product launches with cross-functional teams.
+- Standardized reporting across regions.`,
+  includePolicy: BaselineIncludePolicy.ALWAYS,
+  order: 2,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -47,7 +91,7 @@ const mockBaseline: Baseline = {
   hash: null,
   status: BaselineStatus.ACTIVE,
   archivedAt: null,
-  sections: [baselineSection],
+  sections: [baselineSection, summarySection, extraSection],
   versions: [],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -190,6 +234,54 @@ const buildService = (
   };
 };
 
+async function assertValidDocxZip(
+  buffer: Buffer,
+  options?: {
+    expectParagraphs?: boolean;
+    expectBullets?: boolean;
+    expectStyles?: boolean;
+    expectExperienceHeader?: boolean;
+    expectSectionHeaders?: boolean;
+    expectExperienceSpacing?: boolean;
+  },
+) {
+  expect(buffer.byteLength).toBeGreaterThan(1000);
+  expect(buffer[0]).toBe(0x50);
+  expect(buffer[1]).toBe(0x4b);
+  expect(buffer[2]).toBe(0x03);
+  expect(buffer[3]).toBe(0x04);
+  const zip = await JSZip.loadAsync(buffer);
+  const contentTypes = zip.file('[Content_Types].xml');
+  expect(contentTypes).toBeDefined();
+
+  if (options?.expectParagraphs || options?.expectBullets) {
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+    if (options?.expectParagraphs) {
+      const paragraphMatches = documentXml.match(/<w:p\b/g);
+      expect(paragraphMatches?.length ?? 0).toBeGreaterThan(10);
+    }
+    if (options?.expectStyles) {
+      expect(documentXml).toContain('<w:b');
+      expect(documentXml).toContain('<w:i');
+    }
+    if (options?.expectSectionHeaders) {
+      expect(documentXml).toContain('<w:pBdr');
+      expect(documentXml).toContain('w:before="160"');
+    }
+    if (options?.expectExperienceHeader) {
+      expect(documentXml).toContain('Senior Program Manager');
+      expect(documentXml).toContain('Beta Co | 2017 - 2019');
+    }
+    if (options?.expectExperienceSpacing) {
+      expect(documentXml).toContain('w:after="200"');
+    }
+    if (options?.expectBullets) {
+      expect(documentXml).toContain('<w:numId');
+      expect(documentXml).toContain('<w:ilvl');
+    }
+  }
+}
+
 describe('ResumeService', () => {
   it('rejects one-tap generation when fit score is below the threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD - 1);
@@ -229,7 +321,7 @@ describe('ResumeService', () => {
 
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(true);
-    expect(result.sections).toHaveLength(1);
+    expect(result.sections).toHaveLength(3);
   });
 
   it('returns draft quality when fit score is below threshold', async () => {
@@ -263,10 +355,27 @@ describe('ResumeService', () => {
     expect(exportResult.contentType).toBe(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
-    expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+    await assertValidDocxZip(exportResult.buffer, {
+      expectParagraphs: true,
+      expectBullets: true,
+      expectStyles: true,
+      expectExperienceHeader: true,
+      expectSectionHeaders: true,
+      expectExperienceSpacing: true,
+    });
     expect(exportResult.filename).toBe('resume.docx');
     expect(exportResult.auditId).toBe('audit-1');
     expect(exportResult.baselineVersionHash).toBe('hash-1');
+  });
+
+  it('exports PDF content with valid header', async () => {
+    const { service } = buildService(95, []);
+
+    const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
+    expect(exportResult.contentType).toBe('application/pdf');
+    expect(exportResult.filename).toBe('resume.pdf');
+    expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+    expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
   });
 
   it('blocks generation when baseline hash is missing', async () => {

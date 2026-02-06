@@ -2,6 +2,7 @@ import {
   BadRequestException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import JSZip from 'jszip';
 import { DataSource } from 'typeorm';
 import {
   BaselineIncludePolicy,
@@ -42,6 +43,16 @@ function buildRepository<T extends Record<string, any>>(
     }),
     remove: jest.fn((payload: T) => Promise.resolve(payload)),
   };
+}
+
+async function expectValidDocxZip(buffer: Buffer) {
+  expect(buffer.byteLength).toBeGreaterThan(1000);
+  expect(buffer[0]).toBe(0x50);
+  expect(buffer[1]).toBe(0x4b);
+  expect(buffer[2]).toBe(0x03);
+  expect(buffer[3]).toBe(0x04);
+  const zip = await JSZip.loadAsync(buffer);
+  expect(zip.file('[Content_Types].xml')).toBeDefined();
 }
 
 describe('CoverLettersService', () => {
@@ -231,6 +242,7 @@ describe('CoverLettersService', () => {
     expect(result.contentType).toBe(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
+    await expectValidDocxZip(result.buffer);
     expect(result.baselineVersionHash).toBe('hash-1');
 
     expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
@@ -239,6 +251,21 @@ describe('CoverLettersService', () => {
         actorId: 'user-1',
       }),
     );
+  });
+
+  it('exports PDF cover letter content with valid header', async () => {
+    const service = new CoverLettersService(dataSource, complianceService as any);
+
+    const result = await service.exportCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    }, 'pdf');
+
+    expect(result.filename).toBe('cover-letter.pdf');
+    expect(result.contentType).toBe('application/pdf');
+    expect(result.buffer.byteLength).toBeGreaterThan(10);
+    expect(result.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
   });
 
   it('blocks export when compliance validation fails', async () => {

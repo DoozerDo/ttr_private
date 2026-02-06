@@ -4,10 +4,12 @@ import {
   Controller,
   Delete,
   Get,
+  HttpStatus,
   Param,
   Post,
   Req,
   Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -76,7 +78,7 @@ export class CoverLettersController {
   async exportCoverLetter(
     @Body() body: GenerateCoverLetterDto,
     @Req() request: TieredRequest,
-    @Res() res: Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     return this.handleExport(body, request, res, 'docx');
   }
@@ -86,7 +88,7 @@ export class CoverLettersController {
     @Param('format') formatParam: string,
     @Body() body: GenerateCoverLetterDto,
     @Req() request: TieredRequest,
-    @Res() res: Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const format = this.normalizeFormat(formatParam);
     return this.handleExport(body, request, res, format);
@@ -104,7 +106,7 @@ export class CoverLettersController {
     request: TieredRequest,
     res: Response,
     format: CoverLetterExportFormat,
-  ) {
+  ): Promise<StreamableFile> {
     const userId = this.requireUserId(request);
 
     const entitlements = resolveEntitlementsFromUser(request.user);
@@ -126,7 +128,9 @@ export class CoverLettersController {
     if (file.baselineVersionHash) {
       res.setHeader('X-Baseline-Version-Hash', file.baselineVersionHash);
     }
-    res.send(file.buffer);
+    res.status(HttpStatus.CREATED);
+
+    return new StreamableFile(file.buffer);
   }
 
   private requireUserId(request: TieredRequest) {

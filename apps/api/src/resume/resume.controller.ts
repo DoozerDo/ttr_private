@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  HttpStatus,
   Param,
   Post,
   Req,
   Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -62,7 +64,7 @@ export class ResumeController {
   async exportResume(
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-    @Res() res: Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const format: ResumeExportFormat = body.format ?? 'docx';
     return this.handleExport(body, request, res, format);
@@ -73,7 +75,7 @@ export class ResumeController {
     @Param('format') formatParam: string,
     @Body() body: ResumeRequestBody,
     @Req() request: TieredResumeRequest,
-    @Res() res: Response,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const format = this.normalizeFormat(formatParam);
     return this.handleExport(body, request, res, format);
@@ -126,7 +128,7 @@ export class ResumeController {
     request: TieredResumeRequest,
     res: Response,
     format: ResumeExportFormat,
-  ) {
+  ): Promise<StreamableFile> {
     const userId = this.getUserId(request);
     const payload = this.parsePayload(body);
 
@@ -145,6 +147,8 @@ export class ResumeController {
     if (file.baselineVersionHash) {
       res.setHeader('X-Baseline-Version-Hash', file.baselineVersionHash);
     }
-    res.send(file.buffer);
+    res.status(HttpStatus.CREATED);
+
+    return new StreamableFile(file.buffer);
   }
 }

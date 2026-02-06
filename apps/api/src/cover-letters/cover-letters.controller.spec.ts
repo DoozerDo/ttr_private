@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, HttpStatus, StreamableFile } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CoverLettersController } from './cover-letters.controller';
 import { CoverLettersService } from './cover-letters.service';
@@ -33,10 +33,12 @@ const buildRequest = (tier: SubscriptionTier): TestTieredRequest => {
 };
 
 const buildResponse = (): Response => {
-  return {
+  const response: Partial<Response> = {
     setHeader: jest.fn(),
+    status: jest.fn().mockReturnThis(),
     send: jest.fn(),
-  } as unknown as Response;
+  };
+  return response as Response;
 };
 
 const baseDto: GenerateCoverLetterDto = {
@@ -92,7 +94,7 @@ describe('CoverLettersController export gating', () => {
     };
     coverLettersService.exportCoverLetter.mockResolvedValueOnce(file);
 
-    await controller.exportCoverLetter(baseDto, request, response);
+    const result = await controller.exportCoverLetter(baseDto, request, response);
 
     expect(coverLettersService.exportCoverLetter).toHaveBeenCalledWith(
       'user-1',
@@ -119,6 +121,8 @@ describe('CoverLettersController export gating', () => {
       'X-Baseline-Version-Hash',
       file.baselineVersionHash,
     );
-    expect(response.send).toHaveBeenCalledWith(file.buffer);
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.CREATED);
+    expect(response.send).not.toHaveBeenCalled();
+    expect(result).toBeInstanceOf(StreamableFile);
   });
 });

@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, HttpStatus, StreamableFile } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
@@ -68,10 +68,12 @@ const buildRequest = (tier: SubscriptionTier): TestTieredResumeRequest => {
 };
 
 const buildResponse = (): Response => {
-  return {
+  const response: Partial<Response> = {
     setHeader: jest.fn(),
+    status: jest.fn().mockReturnThis(),
     send: jest.fn(),
-  } as unknown as Response;
+  };
+  return response as Response;
 };
 
 describe('ResumeController tier gating', () => {
@@ -142,7 +144,7 @@ describe('ResumeController tier gating', () => {
     };
     resumeService.exportResume.mockResolvedValue(file);
 
-    await controller.exportResume(
+    const result = await controller.exportResume(
       {
         baselineId: 'baseline-1',
         baselineVersionId: 'version-1',
@@ -158,6 +160,8 @@ describe('ResumeController tier gating', () => {
       'X-Baseline-Version-Hash',
       file.baselineVersionHash,
     );
-    expect(res.send).toHaveBeenCalledWith(file.buffer);
+    expect(res.status).toHaveBeenCalledWith(HttpStatus.CREATED);
+    expect(res.send).not.toHaveBeenCalled();
+    expect(result).toBeInstanceOf(StreamableFile);
   });
 });

@@ -39,6 +39,16 @@ import {
   CoverLetterGenerator,
 } from './generators/cover-letter-generator.interface';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
+import '../docx-templates/templates';
+import {
+  DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+  getDocxTemplate,
+} from '../docx-templates/docx-template.registry';
+import { mapCoverLetterTextToModel } from '../docx-templates/mappers/cover-letter-text-to-model';
+import {
+  CoverLetterDocxModel,
+  DocxRenderContextBase,
+} from '../docx-templates/docx-template.types';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -134,8 +144,22 @@ export class CoverLettersService {
   ) {
     const draft = await this.buildCoverLetterDraft(userId, input);
     const text = draft.complianceResult.normalizedContent;
-    const buffer =
-      format === 'pdf' ? this.buildPdfBuffer(text) : this.buildDocxBuffer(text);
+    let buffer: Buffer;
+    if (format === 'pdf') {
+      buffer = this.buildPdfBuffer(text);
+    } else {
+      const model = mapCoverLetterTextToModel(text);
+      const template = getDocxTemplate<CoverLetterDocxModel>(
+        'cover_letter',
+        DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+      );
+      const renderContext: DocxRenderContextBase = {
+        templateKey: DEFAULT_COVER_LETTER_TEMPLATE_KEY,
+        font: 'Calibri',
+        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+      };
+      buffer = (await template.render(model, renderContext)).buffer;
+    }
 
     const baselineSections = draft.allowedBlocks.map((block) => ({
       title: block.title,
@@ -467,12 +491,6 @@ export class CoverLettersService {
     ];
 
     return Buffer.from(pdfParts.join('\n'));
-  }
-
-  private buildDocxBuffer(content: string) {
-    const header = 'PK\u0003\u0004';
-    const body = `Cover Letter\n\n${content}`;
-    return Buffer.from(header + body, 'utf-8');
   }
 
   private normalizeRequestedJobContext(
