@@ -29,6 +29,18 @@ describe('ComplianceService', () => {
     jest.clearAllMocks();
   });
 
+  it('preserves line breaks when normalizing section content', () => {
+    const sections = service.normalizeSectionsForOutput([
+      {
+        title: 'Experience',
+        content: 'Senior I/O Engineer\nGenoa Healthcare, August 2019 – March 2025\n• Built CI/CD pipelines.',
+      },
+    ]);
+
+    expect(sections[0]?.content).toContain('Senior I/O Engineer\nGenoa Healthcare');
+    expect(sections[0]?.content).toContain('\n• Built CI/CD pipelines.');
+  });
+
   it('flags stylized dash punctuation without mutating content', () => {
     const flags = service.enforceResumeWritingRules({
       rawContent: 'Delivered impact — and scale.',

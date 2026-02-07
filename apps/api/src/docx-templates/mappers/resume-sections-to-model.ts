@@ -70,7 +70,7 @@ const SECTION_TITLE_FALLBACK: Record<ResumeSectionKey, string> = {
   experience: 'Professional Experience',
   education: 'Education',
   certifications: 'Certifications',
-  other: 'Other',
+  other: 'Intro',
 };
 
 const SECTION_ORDER: ResumeSectionKey[] = [
@@ -126,17 +126,33 @@ function buildSectionBuckets(
   quarantined: string[],
 ): Map<ResumeSectionKey, ResumeDocxSection> {
   const buckets = new Map<ResumeSectionKey, ResumeDocxSection>();
+  const hasExplicitSummary = sections.some((section) => {
+    const key = resolveSectionKey(section.type);
+    return key === 'summary' && Boolean(normalizeContent(section.content));
+  });
+  let synthesizedSummaryFromOther = false;
 
   for (const section of sections) {
     if (shouldSkipSection(section)) {
       continue;
     }
 
-    const key = resolveSectionKey(section.type);
+    let key = resolveSectionKey(section.type);
     const contentWithoutHeader = removeHeaderLines(section.content, headerLines);
     if (!contentWithoutHeader) {
       continue;
     }
+
+    if (
+      key === 'other' &&
+      !hasExplicitSummary &&
+      !synthesizedSummaryFromOther &&
+      isLikelyIntroSection(contentWithoutHeader)
+    ) {
+      key = 'summary';
+      synthesizedSummaryFromOther = true;
+    }
+
     const items = buildSectionItems(key, contentWithoutHeader, quarantined);
     if (!items.length) {
       continue;
@@ -170,6 +186,20 @@ function buildSectionBuckets(
     }
   }
   return buckets;
+}
+
+function isLikelyIntroSection(content: string) {
+  const lines = splitLines(content);
+  if (!lines.length) return false;
+  if (lines.length > 10) return false;
+
+  const bulletLikeCount = lines.filter(
+    (line) => line.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(line),
+  ).length;
+  if (bulletLikeCount > 1) return false;
+
+  const longNarrativeLineCount = lines.filter((line) => line.length > 80).length;
+  return longNarrativeLineCount > 0;
 }
 
 function buildHeaderLineSet(header: ResumeDocxHeader) {
@@ -207,14 +237,41 @@ function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
 function shouldSkipSection(section: ResumeExportSection) {
   const content = normalizeContent(section.content);
   if (!content) return true;
-  return containsContactInfo(content);
+  return isLikelyContactOnlySection(content);
 }
 
-function containsContactInfo(content: string) {
-  const emailPattern =
-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+function isLikelyContactOnlySection(content: string) {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return true;
+  if (lines.length > 5) return false;
+
+  const contactLineCount = lines.filter((line) => isContactLine(line)).length;
+  if (!contactLineCount) return false;
+
+  const substantialNonContactCount = lines.filter(
+    (line) => !isContactLine(line) && line.length > 20,
+  ).length;
+
+  return substantialNonContactCount === 0;
+}
+
+function isContactLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+
+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
   const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
-  return emailPattern.test(content) || phonePattern.test(content);
+  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
+
+  return (
+    emailPattern.test(trimmed) ||
+    phonePattern.test(trimmed) ||
+    profilePattern.test(trimmed)
+  );
 }
 
 function buildHeader(
@@ -296,10 +353,14 @@ function looksLikeSentence(line: string) {
 function looksLikeContact(line: string) {
   const cleaned = line.trim();
   if (!cleaned) return false;
-  if (/@/.test(cleaned)) return true;
-  if (/\d{2,}/.test(cleaned)) return true;
-  if (cleaned.includes('-') && cleaned.includes(' ')) return true;
-  return false;
+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
+  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
+  return (
+    emailPattern.test(cleaned) ||
+    phonePattern.test(cleaned) ||
+    profilePattern.test(cleaned)
+  );
 }
 
 function extractHeaderLines(sections: ResumeExportSection[]) {
@@ -326,7 +387,7 @@ function buildSectionItems(
 ): ResumeSectionItem[] {
   switch (key) {
     case 'summary':
-      return buildSummaryItems(content, quarantined);
+      return buildSummaryItems(content);
     case 'skills':
       return buildSkillsItems(content, quarantined);
     case 'experience':
@@ -343,37 +404,20 @@ function buildSectionItems(
 
 function buildSummaryItems(
   content?: string | null,
-  quarantined: string[] = [],
 ): ResumeSummaryItem[] {
   const paragraphs = splitParagraphs(content);
-  const sentences: string[] = [];
-  paragraphs.forEach((paragraph) => {
-    sentences.push(...splitIntoSentences(paragraph));
-  });
-  const kept: string[] = [];
-  let totalLength = 0;
-  for (const sentence of sentences) {
-    const trimmed = sentence.trim();
-    if (!trimmed) continue;
-    if (kept.length >= 3 || totalLength + trimmed.length > 400) {
-      break;
-    }
-    kept.push(trimmed);
-    totalLength += trimmed.length;
-  }
-  const overflow = sentences.slice(kept.length);
-  overflow.forEach((sentence) => addQuarantinedLine(quarantined, sentence));
+  if (!paragraphs.length) return [];
+
+  const kept = paragraphs
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+
   if (!kept.length) return [];
   return [
     {
-      paragraphs: [kept.join(' ')],
+      paragraphs: kept,
     },
   ];
-}
-
-function splitIntoSentences(text: string) {
-  const matches = text.match(/[^.!?]+[.!?]*/g) ?? [];
-  return matches.map((segment) => segment.trim()).filter(Boolean);
 }
 
 function buildSkillsItems(content?: string | null, quarantined: string[] = []): ResumeSkillsItem[] {
@@ -565,13 +609,16 @@ function splitExperienceBlocks(content: string): string[] {
 
   lines.forEach((line, index) => {
     const next = lines[index + 1];
-    const startsNewRole =
+    const startsNewRoleFromTwoLineHeader =
       current.length > 0 &&
       isLikelyRoleLine(line) &&
       Boolean(next) &&
       looksLikeCompanyDateLine(next!);
 
-    if (startsNewRole) {
+    const startsNewRoleFromSingleLineHeader =
+      current.length > 0 && isStandaloneExperienceHeader(line);
+
+    if (startsNewRoleFromTwoLineHeader || startsNewRoleFromSingleLineHeader) {
       flush();
     }
 
@@ -580,6 +627,18 @@ function splitExperienceBlocks(content: string): string[] {
 
   flush();
   return blocks;
+}
+
+function isStandaloneExperienceHeader(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
+  if (!isExperienceHeader(trimmed)) return false;
+
+  const parsed = parseExperienceHeaderSegments(trimmed);
+  if (!parsed.role?.trim()) return false;
+
+  return Boolean(parsed.company || parsed.dateRange);
 }
 
 function isLikelyRoleLine(line: string) {

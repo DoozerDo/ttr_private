@@ -43,4 +43,109 @@ Genoa Healthcare, August 2019 – March 2025
     expect(first?.company).toBe('Genoa Healthcare');
     expect(first?.dateRange).toContain('2019');
   });
+
+  it('splits entries when each header already includes company and date on one line', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Professional Experience',
+        content: `Senior I/O Engineer (Sr. DevOps Engineer) | Genoa Healthcare | August 2019 – March 2025
+• Built CI/CD pipelines.
+
+Senior Lead IT Engineer | CenturyLink Cloud | July 2015 - August 2019
+• Led enterprise cloud support.
+
+Windows Systems Administrator | FriendFinder | April 2013 - July 2015
+• Maintained production systems.`,
+      },
+    ]);
+
+    const expSection = model.sections.find((section) => section.key === 'experience');
+    expect(expSection).toBeDefined();
+    expect(expSection?.items).toHaveLength(3);
+  });
+
+  it('retains other section content even when one line includes contact info', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.OTHER,
+        title: 'Other',
+        content: `Doug Canny
+IT Systems Engineer | DevOps | Automation
+doug@example.com
+IT professional with nearly 20 years of experience transitioning to cloud infrastructure.`,
+      },
+    ]);
+
+    const otherSection = model.sections.find((section) => section.key === 'other');
+    expect(otherSection).toBeDefined();
+    const firstItem = otherSection?.items[0] as { lines?: string[] } | undefined;
+    expect(firstItem?.lines?.join('\n')).toContain('nearly 20 years of experience');
+  });
+
+  it('keeps full summary text without truncating after a few sentences', () => {
+    const longSummary = [
+      'IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.',
+      'Proven expertise in CI/CD pipelines, infrastructure as code, and PowerShell scripting.',
+      'Adept at designing scalable automation solutions to enhance system performance and developer productivity.',
+      'Strong background in cloud computing, system administration, and deployment automation across enterprise environments.',
+    ].join(' ');
+
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        content: longSummary,
+      },
+    ]);
+
+    const summarySection = model.sections.find((section) => section.key === 'summary');
+    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
+
+    expect(summarySection).toBeDefined();
+    expect(summary?.paragraphs?.join(' ')).toContain('Strong background in cloud computing');
+  });
+
+  it('does not classify narrative lines with numbers as header contact lines', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.OTHER,
+        title: 'Other',
+        content: `Doug Canny
+IT Systems Engineer | DevOps | Automation
+IT professional with nearly 20 years of experience.
+Proven expertise in CI/CD pipelines.`,
+      },
+    ]);
+
+    expect(model.header.contactLines).toBeUndefined();
+    const otherSection = model.sections.find((section) => section.key === 'other');
+    const text = (otherSection?.items[0] as { lines?: string[] } | undefined)?.lines?.join(' ') ?? '';
+    expect(text).toContain('nearly 20 years of experience');
+  });
+
+  it('maps intro-like OTHER content into summary when no summary exists', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.OTHER,
+        title: 'Other',
+        content: `Doug Canny
+IT Systems Engineer | DevOps | Automation
+IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.`,
+      },
+      {
+        type: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        content: 'PowerShell, Terraform, AWS',
+      },
+    ]);
+
+    const summarySection = model.sections.find((section) => section.key === 'summary');
+    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
+    expect(summarySection).toBeDefined();
+    expect(summary?.paragraphs?.join(' ')).toContain('nearly 20 years of experience');
+
+    const otherSection = model.sections.find((section) => section.key === 'other');
+    expect(otherSection).toBeUndefined();
+  });
 });

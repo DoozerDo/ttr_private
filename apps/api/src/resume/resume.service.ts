@@ -119,6 +119,18 @@ export class ResumeService {
     return Buffer.from(pdfParts.join('\n'));
   }
 
+  private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {
+    const safeCompany = (company ?? 'resume')
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'resume';
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const yyyy = String(now.getFullYear());
+    return `${safeCompany}-${mm}-${dd}-${yyyy}.${format}`;
+  }
+
   private applyPoliciesToSections(
     sections: BaselineSection[],
     policies: BaselineBlockPolicy[],
@@ -334,11 +346,17 @@ export class ResumeService {
       buffer = (await template.render(model, renderContext)).buffer;
     }
 
+    const job = generation.jobId
+      ? await this.jobsRepository.findOne({
+          where: { id: generation.jobId, userId },
+        })
+      : null;
+
     const contentType =
       format === 'pdf'
         ? 'application/pdf'
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    const filename = `resume.${format}`;
+    const filename = this.buildExportFilename(format, job?.company);
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
       where: {
@@ -353,12 +371,6 @@ export class ResumeService {
     if (!baselineVersion.hash) {
       throw new BadRequestException('Baseline version hash missing');
     }
-
-    const job = generation.jobId
-      ? await this.jobsRepository.findOne({
-          where: { id: generation.jobId, userId },
-        })
-      : null;
 
     const { complianceFlags, blocked, audit } =
       await this.complianceService.validateAndAudit({

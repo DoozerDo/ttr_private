@@ -385,7 +385,7 @@ describe('ResumeService', () => {
     );
     expect(documentXml).toContain('SKILLS');
     expect(documentXml).toContain('EXPERIENCE');
-    expect(exportResult.filename).toBe('resume.docx');
+    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
     expect(exportResult.auditId).toBe('audit-1');
     expect(exportResult.baselineVersionHash).toBe('hash-1');
   });
@@ -417,7 +417,7 @@ describe('ResumeService', () => {
 
     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
     expect(exportResult.contentType).toBe('application/pdf');
-    expect(exportResult.filename).toBe('resume.pdf');
+    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
   });

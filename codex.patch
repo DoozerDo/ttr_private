@@ -1,607 +1,176 @@
-diff --git a/apps/api/src/baseline/baseline-parser.service.spec.ts b/apps/api/src/baseline/baseline-parser.service.spec.ts
-index cc63f3392963150a415ba0316636f38021b05097..27370a6eb9ae87a181d3528807d077b4539d8c2a 100644
---- a/apps/api/src/baseline/baseline-parser.service.spec.ts
-+++ b/apps/api/src/baseline/baseline-parser.service.spec.ts
-@@ -39,26 +39,50 @@ Great University`;
-     const rawText = 'Just a simple resume without headings.';
- 
-     const sections = service.parseBaseline(rawText);
- 
-     expect(sections).toHaveLength(1);
-     expect(sections[0]).toMatchObject({
-       sectionType: BaselineSectionType.OTHER,
-       order: 0,
-     });
-     expect(sections[0].content).toContain('simple resume');
-   });
- 
-   it('maps unknown headings to OTHER', () => {
-     const rawText = `Overview
- Line one
- 
- Random Header
- Line two`;
- 
-     const sections = service.parseBaseline(rawText);
- 
-     expect(sections).toHaveLength(2);
-     expect(sections[0].sectionType).toBe(BaselineSectionType.OTHER);
-     expect(sections[1].sectionType).toBe(BaselineSectionType.OTHER);
-   });
-+
-+  it('does not classify pre-heading profile text as Technical Skills', () => {
-+    const rawText = `Doug Canny IT Systems Engineer | DevOps | Automation
-+IT professional with nearly 20 years of experience.
-+
-+Technical Skills
-+PowerShell
-+Terraform
-+
-+Professional Experience
-+Company A | Senior Engineer | 2019 - 2025`;
-+
-+    const sections = service.parseBaseline(rawText);
-+
-+    expect(sections[0]).toMatchObject({
-+      sectionType: BaselineSectionType.OTHER,
-+    });
-+    expect(sections[0].content).toContain('20 years of experience');
-+
-+    expect(sections[1]).toMatchObject({
-+      sectionType: BaselineSectionType.SKILLS,
-+      title: 'Technical Skills',
-+    });
-+  });
- });
-diff --git a/apps/api/src/baseline/baseline-parser.service.ts b/apps/api/src/baseline/baseline-parser.service.ts
-index f0722ab42f4050883b31bc501f943f0655b87fa8..3f448b2bf0ee56208ecb988630dadc6612757516 100644
---- a/apps/api/src/baseline/baseline-parser.service.ts
-+++ b/apps/api/src/baseline/baseline-parser.service.ts
-@@ -85,52 +85,60 @@ export class BaselineParserService {
-       const trimmed = line.trim();
-       if (!trimmed) {
-         return null;
-       }
- 
-       if (trimmed.length > 80) {
-         return null;
-       }
- 
-       for (const matcher of headingMatches) {
-         if (matcher.pattern.test(trimmed)) {
-           return {
-             sectionType: matcher.type,
-             title: this.normalizeHeading(trimmed),
-           };
-         }
-       }
- 
-       return null;
-     };
- 
-     lines.forEach((line) => {
-       const heading = isHeadingLine(line);
- 
-       if (heading) {
--        if (currentHeading || buffer.length > 0) {
--          flushSection(heading, sections.length);
-+        if (currentHeading) {
-+          flushSection(null, sections.length);
-+          buffer = [];
-+        } else if (buffer.length > 0) {
-+          sections.push({
-+            sectionType: BaselineSectionType.OTHER,
-+            title: null,
-+            content: buffer.join('\n').trim(),
-+            order: sections.length,
-+          });
-           buffer = [];
-         }
-         currentHeading = heading;
-       } else {
-         buffer.push(line);
-       }
-     });
- 
-     if (buffer.length > 0 || currentHeading) {
-       flushSection(null, sections.length);
-     }
- 
-     if (sections.length === 0) {
-       return [
-         {
-           sectionType: BaselineSectionType.OTHER,
-           title: null,
-           content: normalizedText.trim(),
-           order: 0,
-         },
-       ];
-     }
- 
-     return sections.map((section, index) => ({
-       ...section,
-diff --git a/apps/api/src/baseline/baseline.service.spec.ts b/apps/api/src/baseline/baseline.service.spec.ts
-index 22ef44236d1cb7f9d90ded7983c65dff231453df..4a873e98441b792fdee130f18df6988a7a2194e6 100644
---- a/apps/api/src/baseline/baseline.service.spec.ts
-+++ b/apps/api/src/baseline/baseline.service.spec.ts
-@@ -239,25 +239,128 @@ const ingestionResult = {
-           { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
-           { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
-         ],
-       }),
-     ).rejects.toThrow(ConflictException);
-   });
- 
-   it('returns updated policy metadata and new version id', async () => {
-     const result = await service.updateBlockPolicies('user-1', 'b-1', {
-       baseline_version_id: 'v-1',
-       baseline_version_hash: 'hash-1',
-       blocks: [
-         { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
-         { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
-       ],
-     });
- 
-     expect(result.new_version_id).toBeDefined();
-     expect(result.updated_blocks).toHaveLength(2);
-     expect(result.updated_blocks.find((block) => block.id === 's-2')?.include_tag).toBe(
-       BaselineIncludePolicy.NEVER,
-     );
-     expect(result.hash).toBeDefined();
-   });
- });
-+
-+describe('BaselineService - reparse ingestion source', () => {
-+  let service: BaselineService;
-+  let baselineRepository: any;
-+  let ingestionService: any;
-+
-+  beforeEach(async () => {
-+    baselineRepository = {
-+      findOne: jest.fn(),
-+      manager: {
-+        transaction: jest.fn(async (cb: any) =>
-+          cb({
-+            create: jest.fn((_: any, payload: any) => payload),
-+            save: jest.fn(async (value: any) => value),
-+            delete: jest.fn(),
-+          }),
-+        ),
-+      },
-+    };
-+
-+    ingestionService = {
-+      ingest: jest.fn(),
-+      ingestFromText: jest.fn(),
-+    };
-+
-+    const module = await Test.createTestingModule({
-+      providers: [
-+        BaselineService,
-+        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
-+        { provide: getRepositoryToken(BaselineSection), useValue: { find: jest.fn() } },
-+        { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
-+        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
-+        { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
-+        { provide: BaselineIngestionService, useValue: ingestionService },
-+      ],
-+    }).compile();
-+
-+    service = module.get(BaselineService);
-+  });
-+
-+  it('preserves newlines in sanitizeSectionContent', () => {
-+    const sanitized = (service as any).sanitizeSectionContent('line 1\r\nline 2\n\tline 3\u0000');
-+    expect(sanitized).toContain('line 1\nline 2\n\tline 3');
-+    expect(sanitized).not.toContain('\u0000');
-+  });
-+
-+  it('re-ingests from storagePath file before falling back to raw section text', async () => {
-+    const canonical = { ...canonicalBaseline };
-+    ingestionService.ingest.mockResolvedValue({
-+      rawText: 'from file',
-+      parsedSections: [],
-+      canonical,
-+      sourceFormat: 'docx',
-+    });
-+
-+    const baselineRecord = {
-+      ...baseline,
-+      sections: [
-+        {
-+          ...sections[0],
-+          sectionType: BaselineSectionType.RAW,
-+          content: 'raw fallback text',
-+        },
-+      ],
-+    } as Baseline;
-+
-+    const result = await (service as any).reingestFromSourceFileOrFallback(
-+      baselineRecord,
-+      'raw fallback text',
-+      'pdf',
-+    );
-+
-+    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
-+    expect(ingestionService.ingestFromText).not.toHaveBeenCalled();
-+    expect(result.rawText).toBe('from file');
-+  });
-+
-+  it('falls back to ingestFromText when source file ingest throws', async () => {
-+    const canonical = { ...canonicalBaseline };
-+    ingestionService.ingest.mockRejectedValue(new Error('missing file'));
-+    ingestionService.ingestFromText.mockResolvedValue({
-+      rawText: 'fallback',
-+      parsedSections: [],
-+      canonical,
-+      sourceFormat: 'pdf',
-+    });
-+
-+    const baselineRecord = {
-+      ...baseline,
-+      storagePath: '/missing/path',
-+    } as Baseline;
-+
-+    const result = await (service as any).reingestFromSourceFileOrFallback(
-+      baselineRecord,
-+      'raw fallback text',
-+      'pdf',
-+    );
-+
-+    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
-+    expect(ingestionService.ingestFromText).toHaveBeenCalledWith('raw fallback text', 'pdf');
-+    expect(result.rawText).toBe('fallback');
-+  });
-+});
-diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
-index d52f97d3979a2a6e09698fd49649111c4f09828f..b79ff86f38a5da5b5c88863c703bb48a9bd220ba 100644
---- a/apps/api/src/baseline/baseline.service.ts
-+++ b/apps/api/src/baseline/baseline.service.ts
-@@ -131,53 +131,56 @@ export class BaselineService {
-     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-     @InjectRepository(BaselineParsed)
-     private readonly baselineParsedRepository: Repository<BaselineParsed>,
-     private readonly baselineIngestionService: BaselineIngestionService,
-   ) {}
- 
-   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
-     const count = await manager.count(Baseline, { where: { userId } });
- 
-     if (count >= BASELINE_LIMIT) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'limit_reached',
-           entity: 'baseline',
-           limit: BASELINE_LIMIT,
-         },
-       });
-     }
-   }
- 
-   private sanitizeSectionContent(content?: string | null) {
-     if (!content) {
-       return 'Uploaded file content';
-     }
- 
--    // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
--    // so we do not send invalid UTF-8 to Postgres.
--    return content.replace(/[\u0000-\u001F\u007F]/g, '');
-+    // Strip out null bytes and non-printable control chars while preserving
-+    // structural whitespace (newline/tab/carriage return) needed for parsing.
-+    return content
-+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-+      .replace(/\r\n/g, '\n')
-+      .replace(/\r/g, '\n');
-   }
- 
-   private buildSections(
-     rawText: string,
-     parsedSections: ParsedSection[],
-   ): Partial<BaselineSection>[] {
-     const sanitizedRaw = this.sanitizeSectionContent(rawText);
- 
-     const structuredSections = parsedSections.map((section, index) => ({
-       sectionType: section.sectionType,
-       title: section.title,
-       content: this.sanitizeSectionContent(section.content),
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       // ensure RAW stays first; fall back to index if section.order is undefined
-       order: (section.order ?? index) + 1,
-     }));
- 
-     return [
-       {
-         sectionType: BaselineSectionType.RAW,
-         title: 'Raw',
-         content: sanitizedRaw,
-         includePolicy: BaselineIncludePolicy.NEVER,
-         order: 0,
-       },
-@@ -601,54 +604,54 @@ return {
-   }
- 
-   private inferSourceFormat(mimeType?: string | null): BaselineSourceFormat {
-     const normalized = (mimeType ?? '').toLowerCase();
-     if (normalized.includes('pdf')) {
-       return 'pdf';
-     }
-     return 'docx';
-   }
- 
-   async reparseBaselineForUser(baselineId: string, userId: string) {
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       relations: ['sections'],
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     const rawSection =
-       baseline.sections.find(
-         (section) => section.sectionType === BaselineSectionType.RAW,
-       ) ?? baseline.sections[0];
- 
--    const rawText = rawSection?.content ?? '';
-     const sourceFormat = this.inferSourceFormat(baseline.mimeType);
--    const ingestion = await this.baselineIngestionService.ingestFromText(
--      rawText,
-+    const ingestion = await this.reingestFromSourceFileOrFallback(
-+      baseline,
-+      rawSection?.content ?? '',
-       sourceFormat,
-     );
-     const rebuiltSections = this.buildSections(
-       ingestion.rawText,
-       ingestion.parsedSections,
-     );
- 
-     return this.baselineRepository.manager.transaction(async (manager) => {
-       await manager.delete(BaselineSection, { baselineId: baseline.id });
- 
-       const rebuiltEntities = rebuiltSections.map((section, index) =>
-         manager.create(BaselineSection, {
-           ...section,
-           baselineId: baseline.id,
-           order: section.order ?? index,
-         }),
-       );
- 
-       await manager.save(rebuiltEntities);
- 
-       baseline.sections = rebuiltEntities;
- 
-       const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
-       const nextVersionNumber =
-         (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
-@@ -678,50 +681,73 @@ return {
-         allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
-       });
- 
-       const savedVersion = await manager.save(versionRecord);
- 
-       const policyEntities = policyState.map((policy) =>
-         manager.create(BaselineBlockPolicy, {
-           baselineVersionId: savedVersion.id,
-           baselineSectionId: policy.baselineSectionId,
-           includePolicy: policy.includePolicy,
-           order: policy.order,
-         }),
-       );
- 
-       await manager.save(policyEntities);
- 
-       baseline.version = nextVersionNumber;
-       baseline.versions = [savedVersion];
- 
-       await this.persistParsedBaseline(manager, baseline, ingestion);
- 
-       return manager.save(baseline);
-     });
-   }
- 
-+  private async reingestFromSourceFileOrFallback(
-+    baseline: Baseline,
-+    fallbackRawText: string,
-+    sourceFormat: BaselineSourceFormat,
-+  ): Promise<BaselineIngestionResult> {
-+    try {
-+      if (baseline.storagePath?.trim()) {
-+        return await this.baselineIngestionService.ingest({
-+          path: baseline.storagePath,
-+          originalname: baseline.originalFilename,
-+          mimetype: baseline.mimeType,
-+        } as Express.Multer.File);
-+      }
-+    } catch {
-+      // Fall through to previously persisted raw text.
-+    }
-+
-+    return this.baselineIngestionService.ingestFromText(
-+      fallbackRawText,
-+      sourceFormat,
-+    );
-+  }
-+
-   async listBaselineVersionsForUser(baselineId: string, userId: string) {
-     const baseline = await this.baselineRepository.findOne({
-       where: { id: baselineId, userId },
-       select: { id: true },
-     });
- 
-     if (!baseline) {
-       throw new NotFoundException('Baseline not found');
-     }
- 
-     // VERIFY: Confirm that descending order is the expected default for version history.
-     return this.baselineVersionRepository.find({
-       where: { baselineId },
-       order: { versionNumber: 'DESC', createdAt: 'DESC' },
-     });
-   }
- 
-   async listBlocksForBaselineVersion(
-     baselineId: string,
-     baselineVersionId: string,
-     userId: string,
-   ): Promise<BaselineBlocksResponse> {
-     if (!baselineVersionId?.trim()) {
-       throw new BadRequestException('baseline_version_id is required');
-     }
-diff --git a/apps/api/src/compliance/compliance.policy.ts b/apps/api/src/compliance/compliance.policy.ts
-index 103d2a32e2ae3d83ef0449b16029da1af567c0cd..e2f55a132590a8007793e210f99a0a952e611d29 100644
---- a/apps/api/src/compliance/compliance.policy.ts
-+++ b/apps/api/src/compliance/compliance.policy.ts
-@@ -37,31 +37,53 @@ const BASE_COMPLIANCE_POLICY: Record<
-   },
-   [ComplianceFlagCode.FICTIONAL_TECHNOLOGY]: {
-     severity: ComplianceFlagSeverity.WARN,
-     blockConfidenceThreshold: 0.85,
-   },
- };
- 
- const COMPLIANCE_ACTIONS = Object.values(
-   ComplianceAction,
- ) as ComplianceAction[];
- 
- export const COMPLIANCE_POLICY_MAP: Record<
-   ComplianceAction,
-   Record<ComplianceFlagCode, CompliancePolicyEntry>
- > = COMPLIANCE_ACTIONS.reduce(
-   (acc, action) => {
-     acc[action] = { ...BASE_COMPLIANCE_POLICY };
-     return acc;
-   },
-   {} as Record<
-     ComplianceAction,
-     Record<ComplianceFlagCode, CompliancePolicyEntry>
-   >,
- );
- 
-+// Export should be resilient for user-downloaded artifacts. We still emit
-+// compliance flags for visibility, but avoid hard-blocking on heuristic
-+// invention/style detections at export time.
-+COMPLIANCE_POLICY_MAP[ComplianceAction.RESUME_EXPORT] = {
-+  ...COMPLIANCE_POLICY_MAP[ComplianceAction.RESUME_EXPORT],
-+  [ComplianceFlagCode.INVENTED_COMPANY]: {
-+    severity: ComplianceFlagSeverity.WARN,
-+  },
-+  [ComplianceFlagCode.INVENTED_ROLE]: {
-+    severity: ComplianceFlagSeverity.WARN,
-+  },
-+  [ComplianceFlagCode.INVENTED_METRIC]: {
-+    severity: ComplianceFlagSeverity.WARN,
-+  },
-+  [ComplianceFlagCode.STYLIZED_PUNCTUATION]: {
-+    severity: ComplianceFlagSeverity.WARN,
-+  },
-+  [ComplianceFlagCode.FICTIONAL_TECHNOLOGY]: {
-+    severity: ComplianceFlagSeverity.WARN,
-+  },
-+};
-+
- export function resolveCompliancePolicy(
-   action: ComplianceAction,
-   code: ComplianceFlagCode,
- ): CompliancePolicyEntry | undefined {
-   return COMPLIANCE_POLICY_MAP[action]?.[code];
- }
 diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index 8e84a7da6ee0af3b6cc1d2a7ea9b7493dba00c60..7f0d75245989de6c6e7cb134278d805b21481cca 100644
+index 7f0d75245989de6c6e7cb134278d805b21481cca..d45e0a0bb87b2b4781eeb1c543017a3503d633c3 100644
 --- a/apps/api/src/compliance/compliance.service.spec.ts
 +++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -559,26 +559,65 @@ describe('ComplianceService', () => {
-       const result = await service.validateAndAudit({
-         action: ComplianceAction.RESUME_GENERATION,
-         actorId: 'user-tech-baseline',
-         baselineVersion: baselineVersionWithHash,
-         outputHash: 'out-tech-2',
-         baselineSections: [
-           {
-             title: 'Experience',
-             content: 'Led ImaginaryDB automation for multiple releases.',
-           },
-         ],
-         generatedSections: [
-           {
-             title: 'Experience',
-             content: 'Scaled ImaginaryDB automation globally.',
-           },
-         ],
-       });
+@@ -7,50 +7,62 @@ import {
+ import { BaselineSectionType } from '../baseline/baseline-section.entity';
  
-       const flags = result.complianceFlags.map((flag) => flag.code);
+ const buildAuditRepo = () => {
+   const create = jest.fn((payload) => payload);
+   const save = jest.fn(async (payload) => ({
+     id: 'audit-1',
+     createdAt: new Date(),
+     ...payload,
+   }));
  
-       expect(result.blocked).toBe(false);
-       expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+   return { create, save };
+ };
+ 
+ describe('ComplianceService', () => {
+   const repoMock = buildAuditRepo();
+   const service = new ComplianceService(
+     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+     // @ts-ignore: manual repository injection
+     repoMock,
+   );
+ 
+   beforeEach(() => {
+     jest.clearAllMocks();
+   });
+ 
++  it('preserves line breaks when normalizing section content', () => {
++    const sections = service.normalizeSectionsForOutput([
++      {
++        title: 'Experience',
++        content: 'Senior I/O Engineer\nGenoa Healthcare, August 2019 – March 2025\n• Built CI/CD pipelines.',
++      },
++    ]);
++
++    expect(sections[0]?.content).toContain('Senior I/O Engineer\nGenoa Healthcare');
++    expect(sections[0]?.content).toContain('\n• Built CI/CD pipelines.');
++  });
++
+   it('flags stylized dash punctuation without mutating content', () => {
+     const flags = service.enforceResumeWritingRules({
+       rawContent: 'Delivered impact — and scale.',
      });
+ 
+     expect(flags).toEqual([
+       expect.objectContaining({
+         code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
+         severity: ComplianceFlagSeverity.BLOCK,
+       }),
+     ]);
+   });
+ 
+   it('persists audit metadata with baseline version details', async () => {
+     const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
+     const job = { id: 'job-1' };
+ 
+     const result = await service.validateAndAudit({
+       action: ComplianceAction.RESUME_GENERATION,
+       actorId: 'user-1',
+       baselineVersion,
+       job,
+       outputHash: 'out-123',
+     });
+ 
+diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
+index c240bf8b25f759d7d15cc51c1c150239d60c9bf2..ab031d1a9121d82ca22936ee4bc26c55c62734a1 100644
+--- a/apps/api/src/compliance/compliance.service.ts
++++ b/apps/api/src/compliance/compliance.service.ts
+@@ -52,51 +52,57 @@ export type ValidateAndAuditRequest = {
+ export type ValidateAndAuditResult = {
+   blocked: boolean;
+   complianceFlags: ComplianceFlag[];
+   audit: {
+     id: string;
+     baselineVersionId: string | null;
+     outputHash: string;
+     action: ComplianceAction;
+     actorId: string;
+     baselineVersionHash: string | null;
+     jobId: string | null;
+     createdAt: string;
+   };
+ };
+ 
+ @Injectable()
+ export class ComplianceService {
+   private readonly scopeInflationDetector = new ScopeInflationDetector();
+ 
+   constructor(
+     @InjectRepository(ComplianceAudit)
+     private readonly auditsRepository: Repository<ComplianceAudit>,
+   ) {}
+ 
+   public normalizeText(input: string): string {
+-    return (input ?? '').replace(/\s+/g, ' ').trim();
++    const normalized = (input ?? '').replace(/\r\n?/g, '\n');
++    return normalized
++      .split('\n')
++      .map((line) => line.replace(/[\t ]+/g, ' ').trim())
++      .join('\n')
++      .replace(/\n{3,}/g, '\n\n')
++      .trim();
+   }
+ 
+   // Preserve section shape so downstream callers can still reference `title`, etc.
+   public normalizeSectionsForOutput<
+     T extends {
+       content?: string | null;
+       title?: string | null;
+       [key: string]: any;
+     },
+   >(sections: T[]): T[] {
+     if (!Array.isArray(sections)) return [];
+ 
+     return sections.map((s) => ({
+       ...s,
+       title: s?.title ?? null,
+       content: this.normalizeText(String(s?.content ?? '')),
+     }));
+   }
+ 
+   public enforceResumeWritingRules(payload: {
+     normalizedContent?: string;
+     rawContent?: string;
+     [key: string]: unknown;
+   }): ComplianceFlag[] {
+     const content = this.normalizeText(
+diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
+index ab928f41ed4a8398fbbbf395e9274133877251dc..5049a4846ff721d297b1d0bcbd142035f3708716 100644
+--- a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
++++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
+@@ -21,26 +21,131 @@ FriendFinder, April 2013 - July 2015
+       },
+     ]);
+ 
+     const expSection = model.sections.find((section) => section.key === 'experience');
+     expect(expSection).toBeDefined();
+     expect(expSection?.items).toHaveLength(3);
+   });
+ 
+   it('uses second line company/date to enrich a role-only header', () => {
+     const model = mapResumeSectionsToDocxModel([
+       {
+         type: BaselineSectionType.EXPERIENCE,
+         title: 'Professional Experience',
+         content: `Senior I/O Engineer (Sr. DevOps Engineer)
+ Genoa Healthcare, August 2019 – March 2025
+ • Built CI/CD pipelines.`,
+       },
+     ]);
+ 
+     const expSection = model.sections.find((section) => section.key === 'experience');
+     const first = expSection?.items[0] as { company?: string; dateRange?: string } | undefined;
+ 
+     expect(first?.company).toBe('Genoa Healthcare');
+     expect(first?.dateRange).toContain('2019');
    });
 +
-+  describe('resume export policy behavior', () => {
-+    it('downgrades invention/style detections to warnings for resume export', async () => {
-+      const result = await service.validateAndAudit({
-+        action: ComplianceAction.RESUME_EXPORT,
-+        actorId: 'user-export-policy',
-+        baselineVersion: baselineVersionWithHash,
-+        outputHash: 'out-export-policy',
-+        baselineSections: [
-+          {
-+            title: 'Experience',
-+            content: 'Built services using PostgreSQL and AWS.',
-+          },
-+        ],
-+        generatedSections: [
-+          {
-+            title: 'Experience',
-+            content:
-+              'Built services using ImaginaryDB and reduced cycle time by ten percent — globally.',
-+          },
-+        ],
-+      });
-+
-+      const metricFlag = result.complianceFlags.find(
-+        (flag) => flag.code === ComplianceFlagCode.INVENTED_METRIC,
-+      );
-+      const techFlag = result.complianceFlags.find(
-+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
-+      );
-+      const punctuationFlag = result.complianceFlags.find(
-+        (flag) => flag.code === ComplianceFlagCode.STYLIZED_PUNCTUATION,
-+      );
-+
-+      expect(metricFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-+      expect(punctuationFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-+      expect(result.blocked).toBe(false);
-+    });
-+  });
- });
-diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..ab928f41ed4a8398fbbbf395e9274133877251dc
---- /dev/null
-+++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
-@@ -0,0 +1,46 @@
-+import { BaselineSectionType } from '../../baseline/baseline-section.entity';
-+import { mapResumeSectionsToDocxModel } from './resume-sections-to-model';
-+
-+describe('mapResumeSectionsToDocxModel experience splitting', () => {
-+  it('splits multiple jobs in one EXPERIENCE section into separate entries', () => {
++  it('splits entries when each header already includes company and date on one line', () => {
 +    const model = mapResumeSectionsToDocxModel([
 +      {
 +        type: BaselineSectionType.EXPERIENCE,
 +        title: 'Professional Experience',
-+        content: `Senior I/O Engineer (Sr. DevOps Engineer)
-+Genoa Healthcare, August 2019 – March 2025
++        content: `Senior I/O Engineer (Sr. DevOps Engineer) | Genoa Healthcare | August 2019 – March 2025
 +• Built CI/CD pipelines.
 +
-+Senior Lead IT Engineer
-+CenturyLink Cloud, July 2015 - August 2019
++Senior Lead IT Engineer | CenturyLink Cloud | July 2015 - August 2019
 +• Led enterprise cloud support.
 +
-+Windows Systems Administrator
-+FriendFinder, April 2013 - July 2015
++Windows Systems Administrator | FriendFinder | April 2013 - July 2015
 +• Maintained production systems.`,
 +      },
 +    ]);
@@ -611,29 +180,107 @@ index 0000000000000000000000000000000000000000..ab928f41ed4a8398fbbbf395e9274133
 +    expect(expSection?.items).toHaveLength(3);
 +  });
 +
-+  it('uses second line company/date to enrich a role-only header', () => {
++  it('retains other section content even when one line includes contact info', () => {
 +    const model = mapResumeSectionsToDocxModel([
 +      {
-+        type: BaselineSectionType.EXPERIENCE,
-+        title: 'Professional Experience',
-+        content: `Senior I/O Engineer (Sr. DevOps Engineer)
-+Genoa Healthcare, August 2019 – March 2025
-+• Built CI/CD pipelines.`,
++        type: BaselineSectionType.OTHER,
++        title: 'Other',
++        content: `Doug Canny
++IT Systems Engineer | DevOps | Automation
++doug@example.com
++IT professional with nearly 20 years of experience transitioning to cloud infrastructure.`,
 +      },
 +    ]);
 +
-+    const expSection = model.sections.find((section) => section.key === 'experience');
-+    const first = expSection?.items[0] as { company?: string; dateRange?: string } | undefined;
-+
-+    expect(first?.company).toBe('Genoa Healthcare');
-+    expect(first?.dateRange).toContain('2019');
++    const otherSection = model.sections.find((section) => section.key === 'other');
++    expect(otherSection).toBeDefined();
++    const firstItem = otherSection?.items[0] as { lines?: string[] } | undefined;
++    expect(firstItem?.lines?.join('\n')).toContain('nearly 20 years of experience');
 +  });
-+});
++
++  it('keeps full summary text without truncating after a few sentences', () => {
++    const longSummary = [
++      'IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.',
++      'Proven expertise in CI/CD pipelines, infrastructure as code, and PowerShell scripting.',
++      'Adept at designing scalable automation solutions to enhance system performance and developer productivity.',
++      'Strong background in cloud computing, system administration, and deployment automation across enterprise environments.',
++    ].join(' ');
++
++    const model = mapResumeSectionsToDocxModel([
++      {
++        type: BaselineSectionType.SUMMARY,
++        title: 'Summary',
++        content: longSummary,
++      },
++    ]);
++
++    const summarySection = model.sections.find((section) => section.key === 'summary');
++    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
++
++    expect(summarySection).toBeDefined();
++    expect(summary?.paragraphs?.join(' ')).toContain('Strong background in cloud computing');
++  });
++
++  it('does not classify narrative lines with numbers as header contact lines', () => {
++    const model = mapResumeSectionsToDocxModel([
++      {
++        type: BaselineSectionType.OTHER,
++        title: 'Other',
++        content: `Doug Canny
++IT Systems Engineer | DevOps | Automation
++IT professional with nearly 20 years of experience.
++Proven expertise in CI/CD pipelines.`,
++      },
++    ]);
++
++    expect(model.header.contactLines).toBeUndefined();
++    const otherSection = model.sections.find((section) => section.key === 'other');
++    const text = (otherSection?.items[0] as { lines?: string[] } | undefined)?.lines?.join(' ') ?? '';
++    expect(text).toContain('nearly 20 years of experience');
++  });
++
++  it('maps intro-like OTHER content into summary when no summary exists', () => {
++    const model = mapResumeSectionsToDocxModel([
++      {
++        type: BaselineSectionType.OTHER,
++        title: 'Other',
++        content: `Doug Canny
++IT Systems Engineer | DevOps | Automation
++IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.`,
++      },
++      {
++        type: BaselineSectionType.SKILLS,
++        title: 'Skills',
++        content: 'PowerShell, Terraform, AWS',
++      },
++    ]);
++
++    const summarySection = model.sections.find((section) => section.key === 'summary');
++    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
++    expect(summarySection).toBeDefined();
++    expect(summary?.paragraphs?.join(' ')).toContain('nearly 20 years of experience');
++
++    const otherSection = model.sections.find((section) => section.key === 'other');
++    expect(otherSection).toBeUndefined();
++  });
+ });
 diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
-index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb662243cd0 100644
+index 5ee34a725ac3c9d48008954b35be0cb662243cd0..56199aa9c54bfd108a37d1b0984a6867c65d8a14 100644
 --- a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
 +++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
-@@ -60,60 +60,62 @@ const SECTION_TYPE_KEY_MAP: Record<BaselineSectionType, ResumeSectionKey> = {
+@@ -48,51 +48,51 @@ function splitInlineBullets(input: string): { description?: string; bullets: str
+       bullets: [],
+     };
+   }
+ 
+   const description = parts[0] || undefined;
+   const bullets = parts.slice(1);
+   return { description, bullets };
+ }
+ 
+ const SECTION_TYPE_KEY_MAP: Record<BaselineSectionType, ResumeSectionKey> = {
+   [BaselineSectionType.SUMMARY]: 'summary',
+   [BaselineSectionType.SKILLS]: 'skills',
    [BaselineSectionType.EXPERIENCE]: 'experience',
    [BaselineSectionType.EDUCATION]: 'education',
    [BaselineSectionType.PROJECT]: 'other',
@@ -647,7 +294,8 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
    experience: 'Professional Experience',
    education: 'Education',
    certifications: 'Certifications',
-   other: 'Other',
+-  other: 'Other',
++  other: 'Intro',
  };
  
  const SECTION_ORDER: ResumeSectionKey[] = [
@@ -659,8 +307,7 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
    'other',
  ];
  
--const BULLET_PATTERN = /^[\u2022✶*-]\s+(.*)$/;
-+const BULLET_PATTERN = /^[\u2022✶*-]\s*(.*)$/;
+ const BULLET_PATTERN = /^[\u2022✶*-]\s*(.*)$/;
  const bulletPrefixPattern = new RegExp('^\\s*' + BULLET_GLYPH + '\\s*');
  const cleanBullets = (bullets?: string[]) =>
    (bullets ?? [])
@@ -670,15 +317,11 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
  const EDUCATION_LINE_LIMIT = 140;
  const SKILL_VERB_PATTERN = /\b(with|including|designed|developed|managed|led|built|created|implemented|owned)\b/i;
  const ADDITIONAL_INFO_TITLE = 'Additional Information';
-+const DENSE_TEXT_NEWLINE = / {2,}/g;
-+const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
+ const DENSE_TEXT_NEWLINE = / {2,}/g;
+ const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
  
  function addQuarantinedLine(quarantined: string[], line: string) {
-   const trimmed = line.trim();
-   if (!trimmed) return;
-   if (quarantined[quarantined.length - 1] === trimmed) return;
-   quarantined.push(trimmed);
- }
+@@ -104,139 +104,196 @@ function addQuarantinedLine(quarantined: string[], line: string) {
  
  export function mapResumeSectionsToDocxModel(
    sections: ResumeExportSection[],
@@ -697,7 +340,117 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
      sections: orderedSections,
    };
  }
-@@ -200,74 +202,119 @@ function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
+ 
+ function buildSectionBuckets(
+   sections: ResumeExportSection[],
+   headerLines: Set<string>,
+   quarantined: string[],
+ ): Map<ResumeSectionKey, ResumeDocxSection> {
+   const buckets = new Map<ResumeSectionKey, ResumeDocxSection>();
++  const hasExplicitSummary = sections.some((section) => {
++    const key = resolveSectionKey(section.type);
++    return key === 'summary' && Boolean(normalizeContent(section.content));
++  });
++  let synthesizedSummaryFromOther = false;
+ 
+   for (const section of sections) {
+     if (shouldSkipSection(section)) {
+       continue;
+     }
+ 
+-    const key = resolveSectionKey(section.type);
++    let key = resolveSectionKey(section.type);
+     const contentWithoutHeader = removeHeaderLines(section.content, headerLines);
+     if (!contentWithoutHeader) {
+       continue;
+     }
++
++    if (
++      key === 'other' &&
++      !hasExplicitSummary &&
++      !synthesizedSummaryFromOther &&
++      isLikelyIntroSection(contentWithoutHeader)
++    ) {
++      key = 'summary';
++      synthesizedSummaryFromOther = true;
++    }
++
+     const items = buildSectionItems(key, contentWithoutHeader, quarantined);
+     if (!items.length) {
+       continue;
+     }
+ 
+     const bucket = buckets.get(key);
+     if (!bucket) {
+       buckets.set(key, {
+         key,
+         title: SECTION_TITLE_FALLBACK[key],
+         items: [...items],
+       });
+       continue;
+     }
+ 
+     bucket.items.push(...items);
+   }
+ 
+   if (quarantined.length) {
+     const infoItem: ResumeOtherItem = { lines: [...quarantined] };
+     const otherBucket = buckets.get('other');
+     if (!otherBucket) {
+       buckets.set('other', {
+         key: 'other',
+         title: ADDITIONAL_INFO_TITLE,
+         items: [infoItem],
+       });
+     } else {
+       otherBucket.title = ADDITIONAL_INFO_TITLE;
+       otherBucket.items.push(infoItem);
+     }
+   }
+   return buckets;
+ }
+ 
++function isLikelyIntroSection(content: string) {
++  const lines = splitLines(content);
++  if (!lines.length) return false;
++  if (lines.length > 10) return false;
++
++  const bulletLikeCount = lines.filter(
++    (line) => line.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(line),
++  ).length;
++  if (bulletLikeCount > 1) return false;
++
++  const longNarrativeLineCount = lines.filter((line) => line.length > 80).length;
++  return longNarrativeLineCount > 0;
++}
++
+ function buildHeaderLineSet(header: ResumeDocxHeader) {
+   const lines = new Set<string>();
+   const addLine = (value?: string) => {
+     const trimmed = value?.trim();
+     if (trimmed) {
+       lines.add(trimmed);
+     }
+   };
+   addLine(header.name);
+   addLine(header.title);
+   header.contactLines?.forEach(addLine);
+   return lines;
+ }
+ 
+ function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
+   if (!content) return content;
+   if (!headerLines?.size) return content;
+   const filtered = content
+     .split(/\r?\n/)
+     .filter((line) => {
+       const trimmed = line.trim();
+       if (!trimmed) {
+         return true;
+       }
+       return !headerLines.has(trimmed);
+     });
+   if (!filtered.length) {
      return undefined;
    }
    return filtered.join('\n');
@@ -706,14 +459,46 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
  function shouldSkipSection(section: ResumeExportSection) {
    const content = normalizeContent(section.content);
    if (!content) return true;
-   return containsContactInfo(content);
+-  return containsContactInfo(content);
++  return isLikelyContactOnlySection(content);
++}
++
++function isLikelyContactOnlySection(content: string) {
++  const lines = content
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter(Boolean);
++
++  if (!lines.length) return true;
++  if (lines.length > 5) return false;
++
++  const contactLineCount = lines.filter((line) => isContactLine(line)).length;
++  if (!contactLineCount) return false;
++
++  const substantialNonContactCount = lines.filter(
++    (line) => !isContactLine(line) && line.length > 20,
++  ).length;
++
++  return substantialNonContactCount === 0;
  }
  
- function containsContactInfo(content: string) {
-   const emailPattern =
-     /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+-function containsContactInfo(content: string) {
+-  const emailPattern =
+-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
++function isContactLine(line: string) {
++  const trimmed = line.trim();
++  if (!trimmed) return false;
++
++  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
    const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
-   return emailPattern.test(content) || phonePattern.test(content);
+-  return emailPattern.test(content) || phonePattern.test(content);
++  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
++
++  return (
++    emailPattern.test(trimmed) ||
++    phonePattern.test(trimmed) ||
++    profilePattern.test(trimmed)
++  );
  }
  
  function buildHeader(
@@ -723,87 +508,60 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
    const fallbackLines = extractHeaderLines(sections);
    const header: ResumeDocxHeader = {};
    header.name =
--    identity?.fullName?.trim() ||
--    (fallbackLines.length ? fallbackLines[0] : undefined);
-+    sanitizeHeaderName(identity?.fullName) ||
-+    extractFallbackName(fallbackLines[0]);
+     sanitizeHeaderName(identity?.fullName) ||
+     extractFallbackName(fallbackLines[0]);
  
    header.title =
--    identity?.currentTitle?.trim() ||
--    identity?.currentCompany?.trim() ||
--    fallbackLines.slice(1).find((line) => !looksLikeContact(line));
-+    sanitizeHeaderTitle(identity?.currentTitle) ||
-+    sanitizeHeaderTitle(identity?.currentCompany) ||
-+    fallbackLines
-+      .slice(1)
-+      .map((line) => sanitizeHeaderTitle(line))
-+      .find((line) => Boolean(line));
+     sanitizeHeaderTitle(identity?.currentTitle) ||
+     sanitizeHeaderTitle(identity?.currentCompany) ||
+     fallbackLines
+       .slice(1)
+       .map((line) => sanitizeHeaderTitle(line))
+       .find((line) => Boolean(line));
  
    const contactLines = new Set<string>();
    if (identity?.location?.trim()) {
      contactLines.add(identity.location.trim());
    }
    fallbackLines.slice(1).forEach((line) => {
-     if (looksLikeContact(line)) {
-       contactLines.add(line);
-     }
-   });
- 
-   header.contactLines = contactLines.size
-     ? Array.from(contactLines)
-     : undefined;
-   return header;
+@@ -274,130 +331,117 @@ function sanitizeHeaderTitle(value?: string | null) {
+   if (looksLikeSentence(trimmed)) return undefined;
+   if (trimmed.length > 80) return undefined;
+   return trimmed;
  }
  
-+
-+function sanitizeHeaderName(value?: string | null) {
-+  const trimmed = value?.trim();
-+  if (!trimmed) return undefined;
-+
-+  const firstSegment = trimmed.split('|')[0]?.trim() ?? trimmed;
-+  if (looksLikeSentence(firstSegment)) {
-+    return undefined;
-+  }
-+  if (firstSegment.length > 60) {
-+    return undefined;
-+  }
-+  return firstSegment;
-+}
-+
-+function sanitizeHeaderTitle(value?: string | null) {
-+  const trimmed = value?.trim();
-+  if (!trimmed) return undefined;
-+  if (trimmed.includes('|')) return undefined;
-+  if (looksLikeContact(trimmed)) return undefined;
-+  if (looksLikeSentence(trimmed)) return undefined;
-+  if (trimmed.length > 80) return undefined;
-+  return trimmed;
-+}
-+
-+function extractFallbackName(firstLine?: string) {
-+  if (!firstLine) return undefined;
-+  const normalized = firstLine.trim();
-+  if (!normalized) return undefined;
-+  const firstSegment = normalized.split('|')[0]?.trim() ?? normalized;
-+  if (looksLikeSentence(firstSegment)) return undefined;
-+  if (firstSegment.length > 60) return undefined;
-+  return firstSegment;
-+}
-+
-+function looksLikeSentence(line: string) {
-+  const trimmed = line.trim();
-+  if (!trimmed) return false;
-+  if (/[.!?]/.test(trimmed)) return true;
-+  return trimmed.split(/\s+/).length > 8;
-+}
-+
+ function extractFallbackName(firstLine?: string) {
+   if (!firstLine) return undefined;
+   const normalized = firstLine.trim();
+   if (!normalized) return undefined;
+   const firstSegment = normalized.split('|')[0]?.trim() ?? normalized;
+   if (looksLikeSentence(firstSegment)) return undefined;
+   if (firstSegment.length > 60) return undefined;
+   return firstSegment;
+ }
+ 
+ function looksLikeSentence(line: string) {
+   const trimmed = line.trim();
+   if (!trimmed) return false;
+   if (/[.!?]/.test(trimmed)) return true;
+   return trimmed.split(/\s+/).length > 8;
+ }
+ 
  function looksLikeContact(line: string) {
    const cleaned = line.trim();
    if (!cleaned) return false;
-   if (/@/.test(cleaned)) return true;
-   if (/\d{2,}/.test(cleaned)) return true;
-   if (cleaned.includes('-') && cleaned.includes(' ')) return true;
-   return false;
+-  if (/@/.test(cleaned)) return true;
+-  if (/\d{2,}/.test(cleaned)) return true;
+-  if (cleaned.includes('-') && cleaned.includes(' ')) return true;
+-  return false;
++  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
++  const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
++  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
++  return (
++    emailPattern.test(cleaned) ||
++    phonePattern.test(cleaned) ||
++    profilePattern.test(cleaned)
++  );
  }
  
  function extractHeaderLines(sections: ResumeExportSection[]) {
@@ -822,34 +580,74 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
    }
    return SECTION_TYPE_KEY_MAP[type as BaselineSectionType] ?? 'other';
  }
-@@ -308,143 +355,148 @@ function buildSummaryItems(
-   for (const sentence of sentences) {
-     const trimmed = sentence.trim();
-     if (!trimmed) continue;
-     if (kept.length >= 3 || totalLength + trimmed.length > 400) {
-       break;
-     }
-     kept.push(trimmed);
-     totalLength += trimmed.length;
+ 
+ function buildSectionItems(
+   key: ResumeSectionKey,
+   content: string | null | undefined,
+   quarantined: string[],
+ ): ResumeSectionItem[] {
+   switch (key) {
+     case 'summary':
+-      return buildSummaryItems(content, quarantined);
++      return buildSummaryItems(content);
+     case 'skills':
+       return buildSkillsItems(content, quarantined);
+     case 'experience':
+       return buildExperienceItems(content);
+     case 'education':
+       return buildEducationItems(content);
+     case 'certifications':
+       return buildCertificationItems(content);
+     case 'other':
+     default:
+       return buildOtherItems(content);
    }
-   const overflow = sentences.slice(kept.length);
-   overflow.forEach((sentence) => addQuarantinedLine(quarantined, sentence));
+ }
+ 
+ function buildSummaryItems(
+   content?: string | null,
+-  quarantined: string[] = [],
+ ): ResumeSummaryItem[] {
+   const paragraphs = splitParagraphs(content);
+-  const sentences: string[] = [];
+-  paragraphs.forEach((paragraph) => {
+-    sentences.push(...splitIntoSentences(paragraph));
+-  });
+-  const kept: string[] = [];
+-  let totalLength = 0;
+-  for (const sentence of sentences) {
+-    const trimmed = sentence.trim();
+-    if (!trimmed) continue;
+-    if (kept.length >= 3 || totalLength + trimmed.length > 400) {
+-      break;
+-    }
+-    kept.push(trimmed);
+-    totalLength += trimmed.length;
+-  }
+-  const overflow = sentences.slice(kept.length);
+-  overflow.forEach((sentence) => addQuarantinedLine(quarantined, sentence));
++  if (!paragraphs.length) return [];
++
++  const kept = paragraphs
++    .map((paragraph) => paragraph.trim())
++    .filter((paragraph) => paragraph.length > 0);
++
    if (!kept.length) return [];
    return [
      {
-       paragraphs: [kept.join(' ')],
+-      paragraphs: [kept.join(' ')],
++      paragraphs: kept,
      },
    ];
  }
  
- function splitIntoSentences(text: string) {
-   const matches = text.match(/[^.!?]+[.!?]*/g) ?? [];
-   return matches.map((segment) => segment.trim()).filter(Boolean);
- }
- 
+-function splitIntoSentences(text: string) {
+-  const matches = text.match(/[^.!?]+[.!?]*/g) ?? [];
+-  return matches.map((segment) => segment.trim()).filter(Boolean);
+-}
+-
  function buildSkillsItems(content?: string | null, quarantined: string[] = []): ResumeSkillsItem[] {
--  const lines = splitLines(content);
-+  const lines = splitLines(expandDenseText(content));
+   const lines = splitLines(expandDenseText(content));
    const groups: ResumeSkillsGroup[] = [];
    lines.forEach((line) => {
      const normalized = line.replace(/^(Skills|Technical Skills)/i, '').trim();
@@ -873,475 +671,307 @@ index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb6
        .split(/[,\u2022;]/)
        .map((segment) => segment.trim())
        .filter(Boolean);
-     if (segments.length) {
-       groups.push({
-         values: segments,
-       });
-     } else {
-       addQuarantinedLine(quarantined, normalized);
-     }
-   });
-   if (!groups.length) return [];
-   return [{ groups }];
- }
- 
- function buildExperienceItems(content?: string | null): ExperienceItem[] {
--  const normalized = normalizeContent(content);
-+  const normalized = expandDenseText(content);
-   if (!normalized) return [];
--  const blocks = normalized
--    .split(/\n{2,}/)
--    .map((block) => block.trim())
--    .filter(Boolean);
-+  const blocks = splitExperienceBlocks(normalized);
- 
-   const entries: ExperienceItem[] = [];
-   blocks.forEach((block) => {
-     const lines = splitLines(block);
-     if (!lines.length) return;
-     let roleLine = lines.shift()!;
-     let company: string | undefined;
-     let dateRange: string | undefined;
-     const bullets: string[] = [];
-     let description: string | undefined;
- 
-     const applyLabelParagraph = (labelLine: string) => {
-       const trimmedLabel = labelLine.trim().replace(/:+$/, '');
-       if (!description) {
-         description = labelLine.trim();
-         return;
-       }
-       bullets.unshift(`${trimmedLabel}:`);
-     };
- 
-     const handleHeaderRemainder = (remainder: string) => {
-       const trimmed = remainder.trim();
-       if (!trimmed) return;
-       if (!description && !bullets.length) {
-         description = trimmed;
-         return;
-       }
-       if (trimmed.includes('.') && !isFunctionalLabel(trimmed)) {
-         bullets.unshift(trimmed);
-         return;
-       }
-       applyLabelParagraph(trimmed);
-     };
- 
-     const initialHeader = sanitizeExperienceHeaderLine(roleLine);
-     let headerData = parseExperienceHeaderSegments(initialHeader.cleanedLine);
-     let headerInlineBullets = initialHeader.inlineBullets;
- 
-     if (!isExperienceHeader(initialHeader.cleanedLine) && lines.length) {
-       const peekHeader = sanitizeExperienceHeaderLine(lines[0]!);
-       if (isExperienceHeader(peekHeader.cleanedLine)) {
-         lines.shift();
-         headerData = parseExperienceHeaderSegments(peekHeader.cleanedLine);
-         headerInlineBullets = peekHeader.inlineBullets;
-       }
-     }
- 
-     roleLine = headerData.role;
-     company = headerData.company;
-     dateRange = headerData.dateRange;
-+
-+    if (lines.length && !company && !dateRange && looksLikeCompanyDateLine(lines[0]!)) {
-+      const combinedHeader = `${roleLine} | ${lines.shift()!}`;
-+      headerData = parseExperienceHeaderSegments(combinedHeader);
-+      roleLine = headerData.role;
-+      company = headerData.company;
-+      dateRange = headerData.dateRange;
-+    }
-     if (headerData.remainder) {
-       handleHeaderRemainder(headerData.remainder);
-     }
-     if (headerInlineBullets.length) {
-       bullets.push(...headerInlineBullets);
-     }
- 
-     while (lines.length) {
-       const line = lines.shift()!;
-       const trimmed = line.trim();
-       if (!trimmed) continue;
- 
-       const bulletMatch = trimmed.match(BULLET_PATTERN);
-       if (bulletMatch) {
-         bullets.push(bulletMatch[1]);
-         continue;
-       }
- 
-       if (trimmed.includes(BULLET_GLYPH)) {
-         const inline = splitInlineBullets(trimmed);
-         if (inline.description) {
-           if (isFunctionalLabel(inline.description)) {
-             applyLabelParagraph(inline.description);
-           } else if (!description && !bullets.length) {
-             description = inline.description;
-@@ -461,130 +513,232 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
-       if (isFunctionalLabel(trimmed)) {
-         applyLabelParagraph(trimmed);
-         continue;
-       }
- 
-       if (!description && !bullets.length) {
-         description = trimmed;
-         continue;
-       }
- 
-       if (!bullets.length) {
-         description = `${description} ${trimmed}`;
-         continue;
-       }
- 
-       bullets.push(trimmed);
-     }
- 
-     const sanitizedDescription =
-       description?.replace(new RegExp(BULLET_GLYPH, 'g'), '').trim() || undefined;
-     const sanitizedBullets = cleanBullets(bullets);
- 
-     entries.push({
-       role: roleLine,
-       company,
-+      location: headerData.location,
-+      dateRange,
-       description: sanitizedDescription,
-       bullets: sanitizedBullets,
-     });
+@@ -543,67 +587,82 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
    });
  
    return entries;
  }
  
+ 
+ function splitExperienceBlocks(content: string): string[] {
+   const lines = content
+     .split(/\r?\n/)
+     .map((line) => line.trim())
+     .filter(Boolean);
+ 
+   if (!lines.length) return [];
+ 
+   const blocks: string[] = [];
+   let current: string[] = [];
+ 
+   const flush = () => {
+     if (!current.length) return;
+     blocks.push(current.join('\n').trim());
+     current = [];
+   };
+ 
+   lines.forEach((line, index) => {
+     const next = lines[index + 1];
+-    const startsNewRole =
++    const startsNewRoleFromTwoLineHeader =
+       current.length > 0 &&
+       isLikelyRoleLine(line) &&
+       Boolean(next) &&
+       looksLikeCompanyDateLine(next!);
+ 
+-    if (startsNewRole) {
++    const startsNewRoleFromSingleLineHeader =
++      current.length > 0 && isStandaloneExperienceHeader(line);
 +
-+function splitExperienceBlocks(content: string): string[] {
-+  const lines = content
-+    .split(/\r?\n/)
-+    .map((line) => line.trim())
-+    .filter(Boolean);
-+
-+  if (!lines.length) return [];
-+
-+  const blocks: string[] = [];
-+  let current: string[] = [];
-+
-+  const flush = () => {
-+    if (!current.length) return;
-+    blocks.push(current.join('\n').trim());
-+    current = [];
-+  };
-+
-+  lines.forEach((line, index) => {
-+    const next = lines[index + 1];
-+    const startsNewRole =
-+      current.length > 0 &&
-+      isLikelyRoleLine(line) &&
-+      Boolean(next) &&
-+      looksLikeCompanyDateLine(next!);
-+
-+    if (startsNewRole) {
-+      flush();
-+    }
-+
-+    current.push(line);
-+  });
-+
-+  flush();
-+  return blocks;
-+}
-+
-+function isLikelyRoleLine(line: string) {
++    if (startsNewRoleFromTwoLineHeader || startsNewRoleFromSingleLineHeader) {
+       flush();
+     }
+ 
+     current.push(line);
+   });
+ 
+   flush();
+   return blocks;
+ }
+ 
++function isStandaloneExperienceHeader(line: string) {
 +  const trimmed = line.trim();
 +  if (!trimmed) return false;
 +  if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
-+  if (trimmed.includes('|')) return false;
-+  if (trimmed.includes(':')) return false;
-+  if (isDateRange(trimmed)) return false;
-+  if (trimmed.split(/\s+/).length > 10) return false;
-+  return ROLE_PREFIX_PATTERN.test(trimmed);
++  if (!isExperienceHeader(trimmed)) return false;
++
++  const parsed = parseExperienceHeaderSegments(trimmed);
++  if (!parsed.role?.trim()) return false;
++
++  return Boolean(parsed.company || parsed.dateRange);
 +}
 +
-+function looksLikeCompanyDateLine(line: string) {
-+  const trimmed = line.trim();
-+  if (!trimmed) return false;
-+  const hasMonth = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(trimmed);
-+  return isDateRange(trimmed) || (trimmed.includes(',') && (hasMonth || /\b\d{4}\b/.test(trimmed)));
-+}
-+
-+
+ function isLikelyRoleLine(line: string) {
+   const trimmed = line.trim();
+   if (!trimmed) return false;
+   if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
+   if (trimmed.includes('|')) return false;
+   if (trimmed.includes(':')) return false;
+   if (isDateRange(trimmed)) return false;
+   if (trimmed.split(/\s+/).length > 10) return false;
+   return ROLE_PREFIX_PATTERN.test(trimmed);
+ }
+ 
+ function looksLikeCompanyDateLine(line: string) {
+   const trimmed = line.trim();
+   if (!trimmed) return false;
+   const hasMonth = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(trimmed);
+   return isDateRange(trimmed) || (trimmed.includes(',') && (hasMonth || /\b\d{4}\b/.test(trimmed)));
+ }
+ 
+ 
  function sanitizeExperienceHeaderLine(line: string) {
    const inline = splitInlineBullets(line);
    const cleanedLine = inline.description?.trim() || line.trim();
    return {
      cleanedLine,
      inlineBullets: inline.bullets,
-   };
- }
+diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+index 472d6325316730fb6c60aeb55de62f2e25be11bb..5be38b444b50a2f6fcc197dd7f00959014511ec9 100644
+--- a/apps/api/src/resume/resume.service.spec.ts
++++ b/apps/api/src/resume/resume.service.spec.ts
+@@ -363,83 +363,83 @@ describe('ResumeService', () => {
+     const { service } = buildService(95, []);
  
- function parseExperienceHeaderSegments(line: string) {
-   const segments = line
-+    .replace(/,\s+/g, ' | ')
-     .split('|')
-     .map((part) => part.trim())
-     .filter(Boolean);
-   const role = segments.shift() || line.trim();
-   let remaining = [...segments];
-   let dateRange: string | undefined;
-   if (remaining.length && isDateRange(remaining[remaining.length - 1])) {
-     dateRange = remaining.pop();
-   }
-   let company: string | undefined;
-+  let location: string | undefined;
-   if (remaining.length) {
--    company = remaining.shift();
-+    const parsed = splitCompanyAndLocation(remaining.shift()!);
-+    company = parsed.company;
-+    location = parsed.location;
-   }
-   const remainderParts = [...remaining];
-   if (dateRange) {
-     const idx = line.lastIndexOf(dateRange);
-     if (idx >= 0) {
-       const trailing = line.slice(idx + dateRange.length).trim();
-       if (trailing) {
-         remainderParts.push(trailing);
-       }
-     }
-   }
-   const remainder = remainderParts.filter(Boolean).join(' | ') || undefined;
-   return {
-     role,
-     company,
-+    location,
-     dateRange,
-     remainder,
-   };
- }
- 
-+function splitCompanyAndLocation(segment: string) {
-+  const trimmed = segment.trim();
-+  if (!trimmed) {
-+    return { company: undefined, location: undefined };
-+  }
-+
-+  const divider = /\s[–—-]\s|\s·\s/;
-+  const parts = trimmed
-+    .split(divider)
-+    .map((part) => part.trim())
-+    .filter(Boolean);
-+  if (parts.length >= 2) {
-+    return {
-+      company: parts[0],
-+      location: parts.slice(1).join(' | '),
-+    };
-+  }
-+
-+  return {
-+    company: trimmed,
-+    location: undefined,
-+  };
-+}
-+
-+
-+function expandDenseText(content?: string | null) {
-+  const normalized = normalizeContent(content);
-+  if (!normalized) return normalized;
-+
-+  return normalized
-+    .replace(/•\s*/g, '\n• ')
-+    .replace(/([a-z0-9%])\s+([A-Z][A-Za-z][^\n]{3,45}(?:Experience|Education|Development))/g, '$1\n$2')
-+    .replace(DENSE_TEXT_NEWLINE, '\n')
-+    .replace(/\n{3,}/g, '\n\n')
-+    .trim();
-+}
-+
- function isFunctionalLabel(line: string) {
-   const trimmed = line.trim();
-   if (!trimmed) return false;
-   if (trimmed.length > 60) return false;
-   if (/[.?!]/.test(trimmed)) return false;
-   const keywords = ['CI/CD', 'Key Achievements', 'Automation', 'Infrastructure', 'Cloud', 'IaC'];
-   const lower = trimmed.toLowerCase();
-   const hasKeyword = keywords.some((keyword) => lower.includes(keyword.toLowerCase()));
-   return trimmed.includes('&') || trimmed.includes('/') || hasKeyword;
- }
- 
- function isDateRange(value: string) {
--  return /\d{4}\s*[-â€“—]\s*(\d{4}|present|Present)/.test(value);
-+  return /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(value);
- }
- 
- function isExperienceHeader(line: string) {
-   if (!line) return false;
--  const hasSeparator = line.includes('|');
--  const hasYearRange = /\d{4}\s*[-–]\s*(\d{4}|present|Present)/.test(line);
--  return hasSeparator || hasYearRange;
-+  const trimmed = line.trim();
-+  const hasSeparator = trimmed.includes('|');
-+  const hasYearRange = /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(trimmed);
-+  const maybeRole = ROLE_PREFIX_PATTERN.test(trimmed.split('|')[0] ?? trimmed);
-+  return hasSeparator || hasYearRange || maybeRole;
- }
- 
- function buildEducationItems(content?: string | null): ResumeEducationItem[] {
-   const entries = splitEducationLines(content);
-   return entries.map((line) => ({ raw: line }));
- }
- 
- function splitEducationLines(content?: string | null) {
--  const normalized = normalizeContent(content);
-+  const normalized = expandDenseText(content);
-   if (!normalized) return [];
-   return normalized
-     .split(/\r?\n/)
-     .flatMap((line) => line.split(BULLET_GLYPH))
-     .map((segment) => segment.replace(new RegExp(BULLET_GLYPH, 'g'), '').trim())
-     .filter(Boolean);
- }
- 
- function buildCertificationItems(content?: string | null): ResumeCertificationItem[] {
-   const lines = splitLines(content);
-   return lines.map((line) => ({
-     title: line,
-   }));
- }
- 
- function buildOtherItems(content?: string | null): ResumeOtherItem[] {
-   const lines = splitLines(content);
-   if (!lines.length) return [];
-   return [{ lines }];
- }
- 
- function splitParagraphs(content?: string | null) {
-   return (normalizeContent(content) ?? '')
-     .split(/\n{2,}/)
-     .map((segment) => segment.trim())
-diff --git a/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts b/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
-index 6beb619210b5d1134a73492ee5152e4db84adb07..571b667b40001f208ba5469d5f99c980f62a6362 100644
---- a/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
-+++ b/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
-@@ -110,52 +110,52 @@ function createExperienceRoleParagraph(role: string, dateRange?: string) {
-     new TextRun({ text: role, bold: true, size: headerTitleSize, font: 'Calibri' }),
-   ];
-   if (dateRange) {
-     children.push(new TextRun({ text: '\t', size: headerTitleSize }));
-     children.push(
-       new TextRun({
-         text: dateRange,
-         size: 22,
-         italics: true,
-         font: 'Calibri',
-       }),
+     const exportResult = await service.exportResume(
+       'user-1',
+       baseRequest,
+       'docx',
      );
-   }
-   return new Paragraph({
-     spacing: { after: experienceRoleLineSpacingAfter, line: defaultLineSpacing },
-     tabStops: [
-       {
-         type: TabStopType.RIGHT,
-         position: 9100,
-       },
-     ],
-     children,
-   });
- }
- 
--function createCompanyParagraph(company?: string, location?: string) {
--  const content = [company, location].filter(Boolean).join(' | ');
-+function createCompanyParagraph(company?: string) {
-+  const content = [company].filter(Boolean).join(' | ');
-   if (!content) {
-     return null;
-   }
-   return new Paragraph({
-     spacing: { after: 50, line: defaultLineSpacing },
-     children: [
-       new TextRun({
-         text: content,
-         italics: true,
-         size: 22,
-         font: 'Calibri',
-       }),
-     ],
-   });
- }
- 
- function createLocationParagraph(location: string) {
-   return new Paragraph({
-     spacing: { after: 50, line: defaultLineSpacing },
-     children: [
-       new TextRun({
-         text: location,
-         italics: true,
-         size: 22,
-         font: 'Calibri',
-@@ -227,54 +227,51 @@ function renderSummarySection(items: ResumeSectionItem[]) {
- 
- function renderSkillsSection(items: ResumeSectionItem[]) {
-   const children: Paragraph[] = [];
-   items.filter(isSkillsItem).forEach((item) => {
-     item.groups?.forEach((group) => {
-       const paragraph = createSkillGroupParagraph(group);
-       if (paragraph) {
-         children.push(paragraph);
-       }
+     expect(exportResult.contentType).toBe(
+       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+     );
+     await assertValidDocxZip(exportResult.buffer, {
+       expectParagraphs: true,
+       expectBullets: true,
+       expectStyles: true,
+       expectExperienceHeader: true,
+       expectSectionHeaders: true,
+       expectExperienceSpacing: true,
      });
-     item.lines?.forEach((line) => {
-       const flow = createSkillFlowParagraph(line);
-       if (flow) {
-         children.push(flow);
-       }
-     });
+     const zip = await JSZip.loadAsync(exportResult.buffer);
+     const documentXml = await zip.file('word/document.xml')!.async('text');
+     expect(documentXml.indexOf('John Candidate')).toBeLessThan(
+       documentXml.indexOf('SKILLS'),
+     );
+     expect(documentXml).toContain('SKILLS');
+     expect(documentXml).toContain('EXPERIENCE');
+-    expect(exportResult.filename).toBe('resume.docx');
++    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
+     expect(exportResult.auditId).toBe('audit-1');
+     expect(exportResult.baselineVersionHash).toBe('hash-1');
    });
-   return children;
- }
  
- function renderExperienceSection(items: ResumeSectionItem[]) {
-   const experiences = items.filter(isExperienceItem);
-   const children: Paragraph[] = [];
-   experiences.forEach((experience) => {
-     children.push(createExperienceRoleParagraph(experience.role, experience.dateRange));
--    const companyParagraph = createCompanyParagraph(
--      experience.company,
--      experience.location,
--    );
-+    const companyParagraph = createCompanyParagraph(experience.company);
-     if (companyParagraph) {
-       children.push(companyParagraph);
-     }
-     if (experience.location) {
-       children.push(createLocationParagraph(experience.location));
-     }
-     if (experience.description) {
-       children.push(createDescriptionParagraph(experience.description));
-     }
-     experience.bullets.forEach((bullet) => {
-       children.push(createExperienceBullet(bullet));
-     });
-     children.push(createParagraphSpacer());
+   it('renders structured sections exactly once', async () => {
+     const { service } = buildService(95, []);
+ 
+     const exportResult = await service.exportResume(
+       'user-1',
+       baseRequest,
+       'docx',
+     );
+ 
+     const zip = await JSZip.loadAsync(exportResult.buffer);
+     const documentXml = await zip.file('word/document.xml')!.async('text');
+ 
+     const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
+     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
+     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
+ 
+     expect(skillMatches).toHaveLength(1);
+     expect(experienceMatches).toHaveLength(1);
+     expect(headerMatches).toHaveLength(1);
+     expect(documentXml).toContain('<w:numId');
    });
-   return children;
- }
  
- function renderEducationSection(items: ResumeSectionItem[]) {
-   const educationItems = items.filter(isEducationItem);
-   const educationLines = educationItems
-     .map((entry) => formatEducationLine(entry))
-     .filter((line): line is string => typeof line === 'string' && line.trim().length > 0);
-   return educationLines.map((line) => createEducationParagraph(line));
- }
+   it('exports PDF content with valid header', async () => {
+     const { service } = buildService(95, []);
  
+     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
+     expect(exportResult.contentType).toBe('application/pdf');
+-    expect(exportResult.filename).toBe('resume.pdf');
++    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
+     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
+   });
+ 
+   it('blocks generation when baseline hash is missing', async () => {
+     const complianceOverride: Partial<MockedComplianceService> = {
+       validateAndAudit: jest.fn().mockResolvedValue({
+         complianceFlags: [
+           {
+             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
+             severity: ComplianceFlagSeverity.BLOCK,
+             message: 'Baseline version hash is required.',
+           },
+         ],
+         blocked: true,
+         audit: {
+           id: 'audit-1',
+           baselineVersionId: 'baseline-version-1',
+           baselineVersionHash: null,
+           outputHash: '',
+           action: ComplianceAction.RESUME_GENERATION,
+           actorId: 'user-1',
+           jobId: 'job-1',
+           createdAt: new Date().toISOString(),
+         },
 diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index 58f3b94b9956710f9d789a01cea1a2646718d75f..4a235ff8acf443eb2bd55ec2b1b53290e1ddb7b2 100644
+index 4a235ff8acf443eb2bd55ec2b1b53290e1ddb7b2..ca06586b61c07c23f52363ef78d1336b2f2439d1 100644
 --- a/apps/api/src/resume/resume.service.ts
 +++ b/apps/api/src/resume/resume.service.ts
-@@ -357,48 +357,52 @@ export class ResumeService {
-     const job = generation.jobId
-       ? await this.jobsRepository.findOne({
-           where: { id: generation.jobId, userId },
-         })
-       : null;
+@@ -97,50 +97,62 @@ export class ResumeService {
+     const escaped = sanitized
+       .replace(/\\/g, '\\\\')
+       .replace(/\(/g, '\\(')
+       .replace(/\)/g, '\\)');
+     const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+     const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
+     const pdfParts = [
+       '%PDF-1.4',
+       '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+       '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+       '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
+       `4 0 obj ${contentStream} endobj`,
+       '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+       'xref',
+       '0 6',
+       '0000000000 65535 f ',
+       'trailer << /Size 6 /Root 1 0 R >>',
+       'startxref',
+       '0',
+       '%%EOF',
+     ];
  
+     return Buffer.from(pdfParts.join('\n'));
+   }
+ 
++  private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {
++    const safeCompany = (company ?? 'resume')
++      .trim()
++      .replace(/[^a-zA-Z0-9]+/g, '-')
++      .replace(/^-+|-+$/g, '') || 'resume';
++    const now = new Date();
++    const mm = String(now.getMonth() + 1).padStart(2, '0');
++    const dd = String(now.getDate()).padStart(2, '0');
++    const yyyy = String(now.getFullYear());
++    return `${safeCompany}-${mm}-${dd}-${yyyy}.${format}`;
++  }
++
+   private applyPoliciesToSections(
+     sections: BaselineSection[],
+     policies: BaselineBlockPolicy[],
+   ) {
+     if (!policies.length) {
+       return [...sections].sort((a, b) => a.order - b.order);
+     }
+ 
+     const policyMap = new Map<string, BaselineBlockPolicy>(
+       policies.map((policy) => [policy.baselineSectionId, policy]),
+     );
+ 
+     return [...sections]
+       .map((section) => {
+         const policy = policyMap.get(section.id);
+         return {
+           ...section,
+           includePolicy: policy?.includePolicy ?? section.includePolicy,
+           order: policy?.order ?? section.order,
+           sectionType: section.sectionType ?? section.type,
+         } as BaselineSection;
+       })
+       .sort((a, b) => a.order - b.order);
+   }
+ 
+@@ -312,76 +324,76 @@ export class ResumeService {
+       const baselineForHeader = await this.baselineRepository.findOne({
+         where: { id: generation.baselineId, userId },
+         relations: ['parsedRecords'],
+         order: { parsedRecords: { createdAt: 'DESC' } },
+       });
+       if (!baselineForHeader) {
+         throw new NotFoundException('Baseline not found');
+       }
+       const identity = resolveBaselineIdentity(baselineForHeader);
+       const model = mapResumeSectionsToDocxModel(
+         generation.sections as ResumeExportSection[],
+         identity,
+       );
+       const template = getDocxTemplate<ResumeDocxModel>(
+         'resume',
+         DEFAULT_RESUME_TEMPLATE_KEY,
+       );
+       const renderContext: DocxRenderContextBase = {
+         templateKey: DEFAULT_RESUME_TEMPLATE_KEY,
+         font: 'Calibri',
+         margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+       };
+       buffer = (await template.render(model, renderContext)).buffer;
+     }
+ 
++    const job = generation.jobId
++      ? await this.jobsRepository.findOne({
++          where: { id: generation.jobId, userId },
++        })
++      : null;
++
+     const contentType =
+       format === 'pdf'
+         ? 'application/pdf'
+         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+-    const filename = `resume.${format}`;
++    const filename = this.buildExportFilename(format, job?.company);
+ 
+     const baselineVersion = await this.baselineVersionRepository.findOne({
+       where: {
+         id: generation.baselineVersionId,
+         baselineId: generation.baselineId,
+       },
+     });
+ 
+     if (!baselineVersion) {
+       throw new NotFoundException('Baseline version not found');
+     }
+     if (!baselineVersion.hash) {
+       throw new BadRequestException('Baseline version hash missing');
+     }
+ 
+-    const job = generation.jobId
+-      ? await this.jobsRepository.findOne({
+-          where: { id: generation.jobId, userId },
+-        })
+-      : null;
+-
      const { complianceFlags, blocked, audit } =
        await this.complianceService.validateAndAudit({
          action: ComplianceAction.RESUME_EXPORT,
@@ -1361,32 +991,137 @@ index 58f3b94b9956710f9d789a01cea1a2646718d75f..4a235ff8acf443eb2bd55ec2b1b53290
          generatedSections: generation.sections,
        });
  
--    if (blocked) {
-+    const blockingFlags = complianceFlags.filter(
-+      (flag) => flag.severity === 'block',
-+    );
-+
-+    if (blocked && blockingFlags.length > 0) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'COMPLIANCE_VIOLATION',
-           message: 'Compliance validation failed.',
-           details: {
--            compliance_flags: complianceFlags,
-+            compliance_flags: blockingFlags,
-             audit_id: audit.id,
-             baseline_version_hash: audit.baselineVersionHash,
-           },
-         },
-       });
-     }
+     const blockingFlags = complianceFlags.filter(
+       (flag) => flag.severity === 'block',
+     );
  
-     return {
-       buffer,
-       contentType,
-       filename,
-       auditId: audit.id,
-       baselineVersionHash: audit.baselineVersionHash,
-     };
+     if (blocked && blockingFlags.length > 0) {
+       throw new UnprocessableEntityException({
+diff --git a/apps/web/app/(app)/studio/page.tsx b/apps/web/app/(app)/studio/page.tsx
+index 8d24b51d3882e22dca4fe7f1ad23fe34a70f6863..220ff1d2700d6ce51cd3e4a64c33b84e94df21ed 100644
+--- a/apps/web/app/(app)/studio/page.tsx
++++ b/apps/web/app/(app)/studio/page.tsx
+@@ -225,50 +225,66 @@ function stripDuplicateLeadingHeader(title?: string, content?: string): string |
+   const normalizedTitle = normalizeHeader(title);
+   if (!normalizedTitle) return content;
+   const lines = content.split(/\r?\n/);
+   if (!lines.length) return content;
+   const firstLine = lines[0].trim();
+   if (!firstLine) return content;
+   if (normalizeHeader(firstLine) !== normalizedTitle) {
+     return content;
    }
+   const remainder = lines.slice(1).join("\n").trim();
+   return remainder || undefined;
  }
+ 
+ function downloadBlob(blob: Blob, fileName: string) {
+   if (typeof window === "undefined") return;
+   const url = window.URL.createObjectURL(blob);
+   const link = document.createElement("a");
+   link.href = url;
+   link.download = fileName;
+   document.body.appendChild(link);
+   link.click();
+   link.remove();
+   window.URL.revokeObjectURL(url);
+ }
+ 
++function getFilenameFromContentDisposition(headerValue: string | null): string | null {
++  if (!headerValue) return null;
++  const starMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
++  if (starMatch?.[1]) {
++    try {
++      return decodeURIComponent(starMatch[1]).trim();
++    } catch {
++      return starMatch[1].trim();
++    }
++  }
++
++  const plainMatch = headerValue.match(/filename="?([^";]+)"?/i);
++  const parsed = plainMatch?.[1]?.trim();
++  return parsed || null;
++}
++
+ function mapVerdict(value?: string | null): "Apply" | "Consider" | "Skip" | null {
+   if (!value) return null;
+   const normalized = value.trim().toLowerCase();
+   if (!normalized) return null;
+   if (normalized.includes("apply")) return "Apply";
+   if (normalized.includes("consider")) return "Consider";
+   if (
+     normalized.includes("skip") ||
+     normalized.includes("pass") ||
+     normalized.includes("decline")
+   ) {
+     return "Skip";
+   }
+   return null;
+ }
+ 
+ function splitSectionLines(content: string): string[] {
+   return content
+     .split(/\r?\n/)
+     .map((line) => line.trim())
+     .filter((line) => line.length > 0);
+ }
+ 
+ function isBulletLine(line: string): boolean {
+   const trimmed = line.trim();
+@@ -778,52 +794,55 @@ export default function StudioPage() {
+     setResumeWarningFlags([]);
+     setResumeAuditId(undefined);
+     const payload = {
+       jobId: selectedJobId,
+       baselineId: selectedBaselineId,
+       baselineVersionId: selectedBaselineVersionId,
+       oneTap: true,
+     };
+     try {
+       const response = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify(payload),
+       });
+ 
+       if (!response.ok) {
+         const responsePayload = await readResponsePayload(response);
+         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
+         if (tierGate) {
+           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
+           return;
+         }
+         throw new Error(formatErrorMessage(responsePayload, "Resume export failed."));
+       }
+ 
++      const serverFilename = getFilenameFromContentDisposition(
++        response.headers.get("content-disposition"),
++      );
+       const blob = await response.blob();
+-      downloadBlob(blob, `resume.${format}`);
++      downloadBlob(blob, serverFilename ?? `resume.${format}`);
+     } catch (error) {
+       const message = error instanceof Error ? error.message : "Resume export failed.";
+       setResumeState((current) => ({ ...current, error: message }));
+     } finally {
+       setResumeExportFormat(null);
+     }
+   };
+ 
+   const handleCoverDraft = async () => {
+     if (!readyForDocuments) {
+       setCoverState((current) => ({
+         ...current,
+         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
+       }));
+       return;
+     }
+     setCoverGenerating(true);
+     setCoverState(createDocumentState());
+     setCoverWarningFlags([]);
+     setCoverAuditId(undefined);
+     const payload = buildCoverLetterPayload(false);
+     try {
+       const response = await fetch("/api/cover-letters", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },

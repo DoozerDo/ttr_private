@@ -74,7 +74,13 @@ export class ComplianceService {
   ) {}
 
   public normalizeText(input: string): string {
-    return (input ?? '').replace(/\s+/g, ' ').trim();
+    const normalized = (input ?? '').replace(/\r\n?/g, '\n');
+    return normalized
+      .split('\n')
+      .map((line) => line.replace(/[\t ]+/g, ' ').trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   // Preserve section shape so downstream callers can still reference `title`, etc.

@@ -247,6 +247,22 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.URL.revokeObjectURL(url);
 }
 
+function getFilenameFromContentDisposition(headerValue: string | null): string | null {
+  if (!headerValue) return null;
+  const starMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (starMatch?.[1]) {
+    try {
+      return decodeURIComponent(starMatch[1]).trim();
+    } catch {
+      return starMatch[1].trim();
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="?([^";]+)"?/i);
+  const parsed = plainMatch?.[1]?.trim();
+  return parsed || null;
+}
+
 function mapVerdict(value?: string | null): "Apply" | "Consider" | "Skip" | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
@@ -800,8 +816,11 @@ export default function StudioPage() {
         throw new Error(formatErrorMessage(responsePayload, "Resume export failed."));
       }
 
+      const serverFilename = getFilenameFromContentDisposition(
+        response.headers.get("content-disposition"),
+      );
       const blob = await response.blob();
-      downloadBlob(blob, `resume.${format}`);
+      downloadBlob(blob, serverFilename ?? `resume.${format}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Resume export failed.";
       setResumeState((current) => ({ ...current, error: message }));
