@@ -379,13 +379,17 @@ export class ResumeService {
         generatedSections: generation.sections,
       });
 
-    if (blocked) {
+    const blockingFlags = complianceFlags.filter(
+      (flag) => flag.severity === 'block',
+    );
+
+    if (blocked && blockingFlags.length > 0) {
       throw new UnprocessableEntityException({
         error: {
           code: 'COMPLIANCE_VIOLATION',
           message: 'Compliance validation failed.',
           details: {
-            compliance_flags: complianceFlags,
+            compliance_flags: blockingFlags,
             audit_id: audit.id,
             baseline_version_hash: audit.baselineVersionHash,
           },

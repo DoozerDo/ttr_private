@@ -107,8 +107,16 @@ export class BaselineParserService {
       const heading = isHeadingLine(line);
 
       if (heading) {
-        if (currentHeading || buffer.length > 0) {
-          flushSection(heading, sections.length);
+        if (currentHeading) {
+          flushSection(null, sections.length);
+          buffer = [];
+        } else if (buffer.length > 0) {
+          sections.push({
+            sectionType: BaselineSectionType.OTHER,
+            title: null,
+            content: buffer.join('\n').trim(),
+            order: sections.length,
+          });
           buffer = [];
         }
         currentHeading = heading;

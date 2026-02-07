@@ -153,9 +153,12 @@ export class BaselineService {
       return 'Uploaded file content';
     }
 
-    // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
-    // so we do not send invalid UTF-8 to Postgres.
-    return content.replace(/[\u0000-\u001F\u007F]/g, '');
+    // Strip out null bytes and non-printable control chars while preserving
+    // structural whitespace (newline/tab/carriage return) needed for parsing.
+    return content
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
   }
 
   private buildSections(
@@ -623,10 +626,10 @@ return {
         (section) => section.sectionType === BaselineSectionType.RAW,
       ) ?? baseline.sections[0];
 
-    const rawText = rawSection?.content ?? '';
     const sourceFormat = this.inferSourceFormat(baseline.mimeType);
-    const ingestion = await this.baselineIngestionService.ingestFromText(
-      rawText,
+    const ingestion = await this.reingestFromSourceFileOrFallback(
+      baseline,
+      rawSection?.content ?? '',
       sourceFormat,
     );
     const rebuiltSections = this.buildSections(
@@ -698,6 +701,29 @@ return {
 
       return manager.save(baseline);
     });
+  }
+
+  private async reingestFromSourceFileOrFallback(
+    baseline: Baseline,
+    fallbackRawText: string,
+    sourceFormat: BaselineSourceFormat,
+  ): Promise<BaselineIngestionResult> {
+    try {
+      if (baseline.storagePath?.trim()) {
+        return await this.baselineIngestionService.ingest({
+          path: baseline.storagePath,
+          originalname: baseline.originalFilename,
+          mimetype: baseline.mimeType,
+        } as Express.Multer.File);
+      }
+    } catch {
+      // Fall through to previously persisted raw text.
+    }
+
+    return this.baselineIngestionService.ingestFromText(
+      fallbackRawText,
+      sourceFormat,
+    );
   }
 
   async listBaselineVersionsForUser(baselineId: string, userId: string) {

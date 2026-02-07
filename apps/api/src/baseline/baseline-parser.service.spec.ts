@@ -61,4 +61,28 @@ Line two`;
     expect(sections[0].sectionType).toBe(BaselineSectionType.OTHER);
     expect(sections[1].sectionType).toBe(BaselineSectionType.OTHER);
   });
+
+  it('does not classify pre-heading profile text as Technical Skills', () => {
+    const rawText = `Doug Canny IT Systems Engineer | DevOps | Automation
+IT professional with nearly 20 years of experience.
+
+Technical Skills
+PowerShell
+Terraform
+
+Professional Experience
+Company A | Senior Engineer | 2019 - 2025`;
+
+    const sections = service.parseBaseline(rawText);
+
+    expect(sections[0]).toMatchObject({
+      sectionType: BaselineSectionType.OTHER,
+    });
+    expect(sections[0].content).toContain('20 years of experience');
+
+    expect(sections[1]).toMatchObject({
+      sectionType: BaselineSectionType.SKILLS,
+      title: 'Technical Skills',
+    });
+  });
 });

@@ -261,3 +261,106 @@ const ingestionResult = {
     expect(result.hash).toBeDefined();
   });
 });
+
+describe('BaselineService - reparse ingestion source', () => {
+  let service: BaselineService;
+  let baselineRepository: any;
+  let ingestionService: any;
+
+  beforeEach(async () => {
+    baselineRepository = {
+      findOne: jest.fn(),
+      manager: {
+        transaction: jest.fn(async (cb: any) =>
+          cb({
+            create: jest.fn((_: any, payload: any) => payload),
+            save: jest.fn(async (value: any) => value),
+            delete: jest.fn(),
+          }),
+        ),
+      },
+    };
+
+    ingestionService = {
+      ingest: jest.fn(),
+      ingestFromText: jest.fn(),
+    };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        BaselineService,
+        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
+        { provide: getRepositoryToken(BaselineSection), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
+        { provide: BaselineIngestionService, useValue: ingestionService },
+      ],
+    }).compile();
+
+    service = module.get(BaselineService);
+  });
+
+  it('preserves newlines in sanitizeSectionContent', () => {
+    const sanitized = (service as any).sanitizeSectionContent('line 1\r\nline 2\n\tline 3\u0000');
+    expect(sanitized).toContain('line 1\nline 2\n\tline 3');
+    expect(sanitized).not.toContain('\u0000');
+  });
+
+  it('re-ingests from storagePath file before falling back to raw section text', async () => {
+    const canonical = { ...canonicalBaseline };
+    ingestionService.ingest.mockResolvedValue({
+      rawText: 'from file',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'docx',
+    });
+
+    const baselineRecord = {
+      ...baseline,
+      sections: [
+        {
+          ...sections[0],
+          sectionType: BaselineSectionType.RAW,
+          content: 'raw fallback text',
+        },
+      ],
+    } as Baseline;
+
+    const result = await (service as any).reingestFromSourceFileOrFallback(
+      baselineRecord,
+      'raw fallback text',
+      'pdf',
+    );
+
+    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
+    expect(ingestionService.ingestFromText).not.toHaveBeenCalled();
+    expect(result.rawText).toBe('from file');
+  });
+
+  it('falls back to ingestFromText when source file ingest throws', async () => {
+    const canonical = { ...canonicalBaseline };
+    ingestionService.ingest.mockRejectedValue(new Error('missing file'));
+    ingestionService.ingestFromText.mockResolvedValue({
+      rawText: 'fallback',
+      parsedSections: [],
+      canonical,
+      sourceFormat: 'pdf',
+    });
+
+    const baselineRecord = {
+      ...baseline,
+      storagePath: '/missing/path',
+    } as Baseline;
+
+    const result = await (service as any).reingestFromSourceFileOrFallback(
+      baselineRecord,
+      'raw fallback text',
+      'pdf',
+    );
+
+    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
+    expect(ingestionService.ingestFromText).toHaveBeenCalledWith('raw fallback text', 'pdf');
+    expect(result.rawText).toBe('fallback');
+  });
+});

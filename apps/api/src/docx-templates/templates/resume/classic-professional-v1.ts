@@ -132,8 +132,8 @@ function createExperienceRoleParagraph(role: string, dateRange?: string) {
   });
 }
 
-function createCompanyParagraph(company?: string, location?: string) {
-  const content = [company, location].filter(Boolean).join(' | ');
+function createCompanyParagraph(company?: string) {
+  const content = [company].filter(Boolean).join(' | ');
   if (!content) {
     return null;
   }
@@ -249,10 +249,7 @@ function renderExperienceSection(items: ResumeSectionItem[]) {
   const children: Paragraph[] = [];
   experiences.forEach((experience) => {
     children.push(createExperienceRoleParagraph(experience.role, experience.dateRange));
-    const companyParagraph = createCompanyParagraph(
-      experience.company,
-      experience.location,
-    );
+    const companyParagraph = createCompanyParagraph(experience.company);
     if (companyParagraph) {
       children.push(companyParagraph);
     }

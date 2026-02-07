@@ -82,7 +82,7 @@ const SECTION_ORDER: ResumeSectionKey[] = [
   'other',
 ];
 
-const BULLET_PATTERN = /^[\u2022✶*-]\s+(.*)$/;
+const BULLET_PATTERN = /^[\u2022✶*-]\s*(.*)$/;
 const bulletPrefixPattern = new RegExp('^\\s*' + BULLET_GLYPH + '\\s*');
 const cleanBullets = (bullets?: string[]) =>
   (bullets ?? [])
@@ -92,6 +92,8 @@ const SKILL_LINE_LIMIT = 120;
 const EDUCATION_LINE_LIMIT = 140;
 const SKILL_VERB_PATTERN = /\b(with|including|designed|developed|managed|led|built|created|implemented|owned)\b/i;
 const ADDITIONAL_INFO_TITLE = 'Additional Information';
+const DENSE_TEXT_NEWLINE = / {2,}/g;
+const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
 
 function addQuarantinedLine(quarantined: string[], line: string) {
   const trimmed = line.trim();
@@ -222,13 +224,16 @@ function buildHeader(
   const fallbackLines = extractHeaderLines(sections);
   const header: ResumeDocxHeader = {};
   header.name =
-    identity?.fullName?.trim() ||
-    (fallbackLines.length ? fallbackLines[0] : undefined);
+    sanitizeHeaderName(identity?.fullName) ||
+    extractFallbackName(fallbackLines[0]);
 
   header.title =
-    identity?.currentTitle?.trim() ||
-    identity?.currentCompany?.trim() ||
-    fallbackLines.slice(1).find((line) => !looksLikeContact(line));
+    sanitizeHeaderTitle(identity?.currentTitle) ||
+    sanitizeHeaderTitle(identity?.currentCompany) ||
+    fallbackLines
+      .slice(1)
+      .map((line) => sanitizeHeaderTitle(line))
+      .find((line) => Boolean(line));
 
   const contactLines = new Set<string>();
   if (identity?.location?.trim()) {
@@ -244,6 +249,48 @@ function buildHeader(
     ? Array.from(contactLines)
     : undefined;
   return header;
+}
+
+
+function sanitizeHeaderName(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+
+  const firstSegment = trimmed.split('|')[0]?.trim() ?? trimmed;
+  if (looksLikeSentence(firstSegment)) {
+    return undefined;
+  }
+  if (firstSegment.length > 60) {
+    return undefined;
+  }
+  return firstSegment;
+}
+
+function sanitizeHeaderTitle(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes('|')) return undefined;
+  if (looksLikeContact(trimmed)) return undefined;
+  if (looksLikeSentence(trimmed)) return undefined;
+  if (trimmed.length > 80) return undefined;
+  return trimmed;
+}
+
+function extractFallbackName(firstLine?: string) {
+  if (!firstLine) return undefined;
+  const normalized = firstLine.trim();
+  if (!normalized) return undefined;
+  const firstSegment = normalized.split('|')[0]?.trim() ?? normalized;
+  if (looksLikeSentence(firstSegment)) return undefined;
+  if (firstSegment.length > 60) return undefined;
+  return firstSegment;
+}
+
+function looksLikeSentence(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/[.!?]/.test(trimmed)) return true;
+  return trimmed.split(/\s+/).length > 8;
 }
 
 function looksLikeContact(line: string) {
@@ -330,7 +377,7 @@ function splitIntoSentences(text: string) {
 }
 
 function buildSkillsItems(content?: string | null, quarantined: string[] = []): ResumeSkillsItem[] {
-  const lines = splitLines(content);
+  const lines = splitLines(expandDenseText(content));
   const groups: ResumeSkillsGroup[] = [];
   lines.forEach((line) => {
     const normalized = line.replace(/^(Skills|Technical Skills)/i, '').trim();
@@ -367,12 +414,9 @@ function buildSkillsItems(content?: string | null, quarantined: string[] = []): 
 }
 
 function buildExperienceItems(content?: string | null): ExperienceItem[] {
-  const normalized = normalizeContent(content);
+  const normalized = expandDenseText(content);
   if (!normalized) return [];
-  const blocks = normalized
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = splitExperienceBlocks(normalized);
 
   const entries: ExperienceItem[] = [];
   blocks.forEach((block) => {
@@ -423,6 +467,14 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
     roleLine = headerData.role;
     company = headerData.company;
     dateRange = headerData.dateRange;
+
+    if (lines.length && !company && !dateRange && looksLikeCompanyDateLine(lines[0]!)) {
+      const combinedHeader = `${roleLine} | ${lines.shift()!}`;
+      headerData = parseExperienceHeaderSegments(combinedHeader);
+      roleLine = headerData.role;
+      company = headerData.company;
+      dateRange = headerData.dateRange;
+    }
     if (headerData.remainder) {
       handleHeaderRemainder(headerData.remainder);
     }
@@ -483,6 +535,8 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
     entries.push({
       role: roleLine,
       company,
+      location: headerData.location,
+      dateRange,
       description: sanitizedDescription,
       bullets: sanitizedBullets,
     });
@@ -490,6 +544,62 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
 
   return entries;
 }
+
+
+function splitExperienceBlocks(content: string): string[] {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const blocks: string[] = [];
+  let current: string[] = [];
+
+  const flush = () => {
+    if (!current.length) return;
+    blocks.push(current.join('\n').trim());
+    current = [];
+  };
+
+  lines.forEach((line, index) => {
+    const next = lines[index + 1];
+    const startsNewRole =
+      current.length > 0 &&
+      isLikelyRoleLine(line) &&
+      Boolean(next) &&
+      looksLikeCompanyDateLine(next!);
+
+    if (startsNewRole) {
+      flush();
+    }
+
+    current.push(line);
+  });
+
+  flush();
+  return blocks;
+}
+
+function isLikelyRoleLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
+  if (trimmed.includes('|')) return false;
+  if (trimmed.includes(':')) return false;
+  if (isDateRange(trimmed)) return false;
+  if (trimmed.split(/\s+/).length > 10) return false;
+  return ROLE_PREFIX_PATTERN.test(trimmed);
+}
+
+function looksLikeCompanyDateLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  const hasMonth = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(trimmed);
+  return isDateRange(trimmed) || (trimmed.includes(',') && (hasMonth || /\b\d{4}\b/.test(trimmed)));
+}
+
 
 function sanitizeExperienceHeaderLine(line: string) {
   const inline = splitInlineBullets(line);
@@ -502,6 +612,7 @@ function sanitizeExperienceHeaderLine(line: string) {
 
 function parseExperienceHeaderSegments(line: string) {
   const segments = line
+    .replace(/,\s+/g, ' | ')
     .split('|')
     .map((part) => part.trim())
     .filter(Boolean);
@@ -512,8 +623,11 @@ function parseExperienceHeaderSegments(line: string) {
     dateRange = remaining.pop();
   }
   let company: string | undefined;
+  let location: string | undefined;
   if (remaining.length) {
-    company = remaining.shift();
+    const parsed = splitCompanyAndLocation(remaining.shift()!);
+    company = parsed.company;
+    location = parsed.location;
   }
   const remainderParts = [...remaining];
   if (dateRange) {
@@ -529,9 +643,47 @@ function parseExperienceHeaderSegments(line: string) {
   return {
     role,
     company,
+    location,
     dateRange,
     remainder,
   };
+}
+
+function splitCompanyAndLocation(segment: string) {
+  const trimmed = segment.trim();
+  if (!trimmed) {
+    return { company: undefined, location: undefined };
+  }
+
+  const divider = /\s[–—-]\s|\s·\s/;
+  const parts = trimmed
+    .split(divider)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      company: parts[0],
+      location: parts.slice(1).join(' | '),
+    };
+  }
+
+  return {
+    company: trimmed,
+    location: undefined,
+  };
+}
+
+
+function expandDenseText(content?: string | null) {
+  const normalized = normalizeContent(content);
+  if (!normalized) return normalized;
+
+  return normalized
+    .replace(/•\s*/g, '\n• ')
+    .replace(/([a-z0-9%])\s+([A-Z][A-Za-z][^\n]{3,45}(?:Experience|Education|Development))/g, '$1\n$2')
+    .replace(DENSE_TEXT_NEWLINE, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function isFunctionalLabel(line: string) {
@@ -546,14 +698,16 @@ function isFunctionalLabel(line: string) {
 }
 
 function isDateRange(value: string) {
-  return /\d{4}\s*[-â€“—]\s*(\d{4}|present|Present)/.test(value);
+  return /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(value);
 }
 
 function isExperienceHeader(line: string) {
   if (!line) return false;
-  const hasSeparator = line.includes('|');
-  const hasYearRange = /\d{4}\s*[-–]\s*(\d{4}|present|Present)/.test(line);
-  return hasSeparator || hasYearRange;
+  const trimmed = line.trim();
+  const hasSeparator = trimmed.includes('|');
+  const hasYearRange = /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(trimmed);
+  const maybeRole = ROLE_PREFIX_PATTERN.test(trimmed.split('|')[0] ?? trimmed);
+  return hasSeparator || hasYearRange || maybeRole;
 }
 
 function buildEducationItems(content?: string | null): ResumeEducationItem[] {
@@ -562,7 +716,7 @@ function buildEducationItems(content?: string | null): ResumeEducationItem[] {
 }
 
 function splitEducationLines(content?: string | null) {
-  const normalized = normalizeContent(content);
+  const normalized = expandDenseText(content);
   if (!normalized) return [];
   return normalized
     .split(/\r?\n/)

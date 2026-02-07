@@ -581,4 +581,43 @@ describe('ComplianceService', () => {
       expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
     });
   });
+
+  describe('resume export policy behavior', () => {
+    it('downgrades invention/style detections to warnings for resume export', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_EXPORT,
+        actorId: 'user-export-policy',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-export-policy',
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Built services using PostgreSQL and AWS.',
+          },
+        ],
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Built services using ImaginaryDB and reduced cycle time by ten percent — globally.',
+          },
+        ],
+      });
+
+      const metricFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.INVENTED_METRIC,
+      );
+      const techFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      );
+      const punctuationFlag = result.complianceFlags.find(
+        (flag) => flag.code === ComplianceFlagCode.STYLIZED_PUNCTUATION,
+      );
+
+      expect(metricFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
+      expect(punctuationFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
+      expect(result.blocked).toBe(false);
+    });
+  });
 });

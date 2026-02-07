@@ -1,188 +1,1392 @@
-diff --git a/apps/api/eslint.config.mjs b/apps/api/eslint.config.mjs
-index 4e9f8271c9879f43729f921e83506d3c57590c94..df3fdbdc094e5a79bb6c14cc743558f048fefc99 100644
---- a/apps/api/eslint.config.mjs
-+++ b/apps/api/eslint.config.mjs
-@@ -1,35 +1,32 @@
- // @ts-check
- import eslint from '@eslint/js';
--import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
- import globals from 'globals';
- import tseslint from 'typescript-eslint';
+diff --git a/apps/api/src/baseline/baseline-parser.service.spec.ts b/apps/api/src/baseline/baseline-parser.service.spec.ts
+index cc63f3392963150a415ba0316636f38021b05097..27370a6eb9ae87a181d3528807d077b4539d8c2a 100644
+--- a/apps/api/src/baseline/baseline-parser.service.spec.ts
++++ b/apps/api/src/baseline/baseline-parser.service.spec.ts
+@@ -39,26 +39,50 @@ Great University`;
+     const rawText = 'Just a simple resume without headings.';
  
- export default tseslint.config(
-   {
-     ignores: ['eslint.config.mjs'],
-   },
-   eslint.configs.recommended,
--  ...tseslint.configs.recommendedTypeChecked,
--  eslintPluginPrettierRecommended,
-+  ...tseslint.configs.recommended,
-   {
-     languageOptions: {
-       globals: {
-         ...globals.node,
-         ...globals.jest,
-       },
-       sourceType: 'commonjs',
-       parserOptions: {
-         projectService: true,
-         tsconfigRootDir: import.meta.dirname,
-       },
-     },
-   },
-   {
-     rules: {
--      '@typescript-eslint/no-explicit-any': 'off',
--      '@typescript-eslint/no-floating-promises': 'warn',
--      '@typescript-eslint/no-unsafe-argument': 'warn',
--      "prettier/prettier": ["error", { endOfLine: "auto" }],
-+      '@typescript-eslint/no-explicit-any': 'warn',
-+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-+      'no-unused-vars': 'off',
-     },
-   },
- );
-diff --git a/apps/api/package.json b/apps/api/package.json
-index 6a2f02c5f4d2db0ce7c75edec402a5cb2f43b902..6fffa907f36d18e802bf283a802eedb6a573194d 100644
---- a/apps/api/package.json
-+++ b/apps/api/package.json
-@@ -1,40 +1,40 @@
- {
-   "name": "api",
-   "version": "0.0.1",
-   "description": "",
-   "author": "",
-   "private": true,
-   "license": "UNLICENSED",
-   "scripts": {
-     "build": "nest build",
-     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-     "start": "nest start",
-     "start:dev": "nest start --watch",
-     "start:debug": "nest start --debug --watch",
-     "start:prod": "node dist/main",
--    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-+    "lint": "eslint \"src/**/*.ts\"",
-     "test": "jest",
-     "test:calibration": "jest --config jest.calibration.config.js --runInBand",
-     "test:watch": "jest --watch",
-     "test:cov": "jest --coverage",
-     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-     "test:e2e": "jest --config ./test/jest-e2e.json",
-     "migration:generate": "typeorm migration:generate -d dist/data-source.js",
-     "migration:run": "typeorm migration:run -d dist/data-source.js",
-     "migration:revert": "typeorm migration:revert -d dist/data-source.js"
-   },
-   "dependencies": {
-     "@nestjs/common": "^11.0.1",
-     "@nestjs/config": "^4.0.2",
-     "@nestjs/core": "^11.0.1",
-     "@nestjs/jwt": "^11.0.0",
-     "@nestjs/passport": "^11.0.0",
-     "@nestjs/platform-express": "^11.0.1",
-     "@nestjs/typeorm": "^11.0.0",
-     "@types/bcryptjs": "^2.4.6",
-     "@types/cookie-parser": "^1.4.10",
-     "bcryptjs": "^3.0.3",
-     "class-transformer": "^0.5.1",
-     "class-validator": "^0.14.3",
-     "cookie-parser": "^1.4.7",
-     "mammoth": "^1.6.0",
-diff --git a/apps/web/eslint.config.mjs b/apps/web/eslint.config.mjs
-index 05e726d1b4201bc8c7716d2b058279676582e8c0..1c45a68edc4320b47e4fa4c4375ed1b21d4c59de 100644
---- a/apps/web/eslint.config.mjs
-+++ b/apps/web/eslint.config.mjs
-@@ -1,18 +1,23 @@
- import { defineConfig, globalIgnores } from "eslint/config";
- import nextVitals from "eslint-config-next/core-web-vitals";
--import nextTs from "eslint-config-next/typescript";
+     const sections = service.parseBaseline(rawText);
  
- const eslintConfig = defineConfig([
-   ...nextVitals,
--  ...nextTs,
-   // Override default ignores of eslint-config-next.
-   globalIgnores([
-     // Default ignores of eslint-config-next:
-     ".next/**",
-     "out/**",
-     "build/**",
-     "next-env.d.ts",
-   ]),
-+  {
-+    rules: {
-+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
-+      "no-unused-vars": "off",
-+      "react-hooks/exhaustive-deps": "warn",
-+    },
-+  },
- ]);
+     expect(sections).toHaveLength(1);
+     expect(sections[0]).toMatchObject({
+       sectionType: BaselineSectionType.OTHER,
+       order: 0,
+     });
+     expect(sections[0].content).toContain('simple resume');
+   });
  
- export default eslintConfig;
-diff --git a/apps/web/package.json b/apps/web/package.json
-index 359d0d4505316fb6b4c2a9ec8ec4de1aa314c487..d42907cb790ccdbf0d62168d20221979266ac31b 100644
---- a/apps/web/package.json
-+++ b/apps/web/package.json
-@@ -1,34 +1,34 @@
- {
-   "name": "web",
-   "version": "0.1.0",
-   "private": true,
-   "scripts": {
-     "dev": "next dev",
-     "build": "next build",
-     "start": "next start",
--    "lint": "eslint",
-+    "lint": "next lint",
-     "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js",
-     "test:smoke": "vitest run",
-     "verify:ui": "node ../../scripts/verify-searchsets-expandedfit.js"
-   },
-   "dependencies": {
-     "framer-motion": "^12.26.2",
-     "next": "16.0.5",
-     "react": "19.2.0",
-     "react-dom": "19.2.0"
-   },
-   "devDependencies": {
-     "@tailwindcss/postcss": "^4",
-     "@testing-library/dom": "^10.4.1",
-     "@testing-library/jest-dom": "^6.9.1",
-     "@testing-library/react": "^16.3.1",
-     "@types/node": "^20",
-     "@types/react": "^19",
-     "@types/react-dom": "^19",
-     "eslint": "^9",
-     "eslint-config-next": "16.0.5",
-     "jsdom": "^27.4.0",
-     "tailwindcss": "^4",
-     "typescript": "5.9.3",
-     "vitest": "^1.6.1"
+   it('maps unknown headings to OTHER', () => {
+     const rawText = `Overview
+ Line one
+ 
+ Random Header
+ Line two`;
+ 
+     const sections = service.parseBaseline(rawText);
+ 
+     expect(sections).toHaveLength(2);
+     expect(sections[0].sectionType).toBe(BaselineSectionType.OTHER);
+     expect(sections[1].sectionType).toBe(BaselineSectionType.OTHER);
+   });
++
++  it('does not classify pre-heading profile text as Technical Skills', () => {
++    const rawText = `Doug Canny IT Systems Engineer | DevOps | Automation
++IT professional with nearly 20 years of experience.
++
++Technical Skills
++PowerShell
++Terraform
++
++Professional Experience
++Company A | Senior Engineer | 2019 - 2025`;
++
++    const sections = service.parseBaseline(rawText);
++
++    expect(sections[0]).toMatchObject({
++      sectionType: BaselineSectionType.OTHER,
++    });
++    expect(sections[0].content).toContain('20 years of experience');
++
++    expect(sections[1]).toMatchObject({
++      sectionType: BaselineSectionType.SKILLS,
++      title: 'Technical Skills',
++    });
++  });
+ });
+diff --git a/apps/api/src/baseline/baseline-parser.service.ts b/apps/api/src/baseline/baseline-parser.service.ts
+index f0722ab42f4050883b31bc501f943f0655b87fa8..3f448b2bf0ee56208ecb988630dadc6612757516 100644
+--- a/apps/api/src/baseline/baseline-parser.service.ts
++++ b/apps/api/src/baseline/baseline-parser.service.ts
+@@ -85,52 +85,60 @@ export class BaselineParserService {
+       const trimmed = line.trim();
+       if (!trimmed) {
+         return null;
+       }
+ 
+       if (trimmed.length > 80) {
+         return null;
+       }
+ 
+       for (const matcher of headingMatches) {
+         if (matcher.pattern.test(trimmed)) {
+           return {
+             sectionType: matcher.type,
+             title: this.normalizeHeading(trimmed),
+           };
+         }
+       }
+ 
+       return null;
+     };
+ 
+     lines.forEach((line) => {
+       const heading = isHeadingLine(line);
+ 
+       if (heading) {
+-        if (currentHeading || buffer.length > 0) {
+-          flushSection(heading, sections.length);
++        if (currentHeading) {
++          flushSection(null, sections.length);
++          buffer = [];
++        } else if (buffer.length > 0) {
++          sections.push({
++            sectionType: BaselineSectionType.OTHER,
++            title: null,
++            content: buffer.join('\n').trim(),
++            order: sections.length,
++          });
+           buffer = [];
+         }
+         currentHeading = heading;
+       } else {
+         buffer.push(line);
+       }
+     });
+ 
+     if (buffer.length > 0 || currentHeading) {
+       flushSection(null, sections.length);
+     }
+ 
+     if (sections.length === 0) {
+       return [
+         {
+           sectionType: BaselineSectionType.OTHER,
+           title: null,
+           content: normalizedText.trim(),
+           order: 0,
+         },
+       ];
+     }
+ 
+     return sections.map((section, index) => ({
+       ...section,
+diff --git a/apps/api/src/baseline/baseline.service.spec.ts b/apps/api/src/baseline/baseline.service.spec.ts
+index 22ef44236d1cb7f9d90ded7983c65dff231453df..4a873e98441b792fdee130f18df6988a7a2194e6 100644
+--- a/apps/api/src/baseline/baseline.service.spec.ts
++++ b/apps/api/src/baseline/baseline.service.spec.ts
+@@ -239,25 +239,128 @@ const ingestionResult = {
+           { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
+           { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
+         ],
+       }),
+     ).rejects.toThrow(ConflictException);
+   });
+ 
+   it('returns updated policy metadata and new version id', async () => {
+     const result = await service.updateBlockPolicies('user-1', 'b-1', {
+       baseline_version_id: 'v-1',
+       baseline_version_hash: 'hash-1',
+       blocks: [
+         { id: 's-1', include_tag: BaselineIncludePolicy.ALWAYS },
+         { id: 's-2', include_tag: BaselineIncludePolicy.NEVER },
+       ],
+     });
+ 
+     expect(result.new_version_id).toBeDefined();
+     expect(result.updated_blocks).toHaveLength(2);
+     expect(result.updated_blocks.find((block) => block.id === 's-2')?.include_tag).toBe(
+       BaselineIncludePolicy.NEVER,
+     );
+     expect(result.hash).toBeDefined();
+   });
+ });
++
++describe('BaselineService - reparse ingestion source', () => {
++  let service: BaselineService;
++  let baselineRepository: any;
++  let ingestionService: any;
++
++  beforeEach(async () => {
++    baselineRepository = {
++      findOne: jest.fn(),
++      manager: {
++        transaction: jest.fn(async (cb: any) =>
++          cb({
++            create: jest.fn((_: any, payload: any) => payload),
++            save: jest.fn(async (value: any) => value),
++            delete: jest.fn(),
++          }),
++        ),
++      },
++    };
++
++    ingestionService = {
++      ingest: jest.fn(),
++      ingestFromText: jest.fn(),
++    };
++
++    const module = await Test.createTestingModule({
++      providers: [
++        BaselineService,
++        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
++        { provide: getRepositoryToken(BaselineSection), useValue: { find: jest.fn() } },
++        { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
++        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
++        { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
++        { provide: BaselineIngestionService, useValue: ingestionService },
++      ],
++    }).compile();
++
++    service = module.get(BaselineService);
++  });
++
++  it('preserves newlines in sanitizeSectionContent', () => {
++    const sanitized = (service as any).sanitizeSectionContent('line 1\r\nline 2\n\tline 3\u0000');
++    expect(sanitized).toContain('line 1\nline 2\n\tline 3');
++    expect(sanitized).not.toContain('\u0000');
++  });
++
++  it('re-ingests from storagePath file before falling back to raw section text', async () => {
++    const canonical = { ...canonicalBaseline };
++    ingestionService.ingest.mockResolvedValue({
++      rawText: 'from file',
++      parsedSections: [],
++      canonical,
++      sourceFormat: 'docx',
++    });
++
++    const baselineRecord = {
++      ...baseline,
++      sections: [
++        {
++          ...sections[0],
++          sectionType: BaselineSectionType.RAW,
++          content: 'raw fallback text',
++        },
++      ],
++    } as Baseline;
++
++    const result = await (service as any).reingestFromSourceFileOrFallback(
++      baselineRecord,
++      'raw fallback text',
++      'pdf',
++    );
++
++    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
++    expect(ingestionService.ingestFromText).not.toHaveBeenCalled();
++    expect(result.rawText).toBe('from file');
++  });
++
++  it('falls back to ingestFromText when source file ingest throws', async () => {
++    const canonical = { ...canonicalBaseline };
++    ingestionService.ingest.mockRejectedValue(new Error('missing file'));
++    ingestionService.ingestFromText.mockResolvedValue({
++      rawText: 'fallback',
++      parsedSections: [],
++      canonical,
++      sourceFormat: 'pdf',
++    });
++
++    const baselineRecord = {
++      ...baseline,
++      storagePath: '/missing/path',
++    } as Baseline;
++
++    const result = await (service as any).reingestFromSourceFileOrFallback(
++      baselineRecord,
++      'raw fallback text',
++      'pdf',
++    );
++
++    expect(ingestionService.ingest).toHaveBeenCalledTimes(1);
++    expect(ingestionService.ingestFromText).toHaveBeenCalledWith('raw fallback text', 'pdf');
++    expect(result.rawText).toBe('fallback');
++  });
++});
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index d52f97d3979a2a6e09698fd49649111c4f09828f..b79ff86f38a5da5b5c88863c703bb48a9bd220ba 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -131,53 +131,56 @@ export class BaselineService {
+     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
+     @InjectRepository(BaselineParsed)
+     private readonly baselineParsedRepository: Repository<BaselineParsed>,
+     private readonly baselineIngestionService: BaselineIngestionService,
+   ) {}
+ 
+   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
+     const count = await manager.count(Baseline, { where: { userId } });
+ 
+     if (count >= BASELINE_LIMIT) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'limit_reached',
+           entity: 'baseline',
+           limit: BASELINE_LIMIT,
+         },
+       });
+     }
    }
-diff --git a/package.json b/package.json
-index 76887edc9172d6acfb6fede3586ee1eaaf6d1f69..c01aff7eb53d725904ccb3b624faabc79e78c493 100644
---- a/package.json
-+++ b/package.json
-@@ -1,22 +1,23 @@
- {
-   "name": "targetthisrole",
-   "private": true,
-   "workspaces": [
-     "apps/*"
-   ],
-   "scripts": {
-     "build:web": "npm -w apps/web run build",
-     "build:api": "npm -w apps/api run build",
-     "build:both": "npm run build:api && npm run build:web",
-     "lint:web": "npm -w apps/web run lint",
-     "lint:api": "npm -w apps/api run lint",
-+    "lint": "npm run lint:api && npm run lint:web",
-     "test:api": "npm -w apps/api run test",
-     "check:beta-scope": "node scripts/check-beta-scope.js",
-     "verify:ci": "npm run check:beta-scope && npm run lint:api && npm run lint:web && npm run test:api && npm run build:both",
-     "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
-     "postinstall": "patch-package"
+ 
+   private sanitizeSectionContent(content?: string | null) {
+     if (!content) {
+       return 'Uploaded file content';
+     }
+ 
+-    // Strip out null bytes that can surface from binary uploads (e.g., PDFs)
+-    // so we do not send invalid UTF-8 to Postgres.
+-    return content.replace(/[\u0000-\u001F\u007F]/g, '');
++    // Strip out null bytes and non-printable control chars while preserving
++    // structural whitespace (newline/tab/carriage return) needed for parsing.
++    return content
++      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
++      .replace(/\r\n/g, '\n')
++      .replace(/\r/g, '\n');
+   }
+ 
+   private buildSections(
+     rawText: string,
+     parsedSections: ParsedSection[],
+   ): Partial<BaselineSection>[] {
+     const sanitizedRaw = this.sanitizeSectionContent(rawText);
+ 
+     const structuredSections = parsedSections.map((section, index) => ({
+       sectionType: section.sectionType,
+       title: section.title,
+       content: this.sanitizeSectionContent(section.content),
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       // ensure RAW stays first; fall back to index if section.order is undefined
+       order: (section.order ?? index) + 1,
+     }));
+ 
+     return [
+       {
+         sectionType: BaselineSectionType.RAW,
+         title: 'Raw',
+         content: sanitizedRaw,
+         includePolicy: BaselineIncludePolicy.NEVER,
+         order: 0,
+       },
+@@ -601,54 +604,54 @@ return {
+   }
+ 
+   private inferSourceFormat(mimeType?: string | null): BaselineSourceFormat {
+     const normalized = (mimeType ?? '').toLowerCase();
+     if (normalized.includes('pdf')) {
+       return 'pdf';
+     }
+     return 'docx';
+   }
+ 
+   async reparseBaselineForUser(baselineId: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       relations: ['sections'],
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     const rawSection =
+       baseline.sections.find(
+         (section) => section.sectionType === BaselineSectionType.RAW,
+       ) ?? baseline.sections[0];
+ 
+-    const rawText = rawSection?.content ?? '';
+     const sourceFormat = this.inferSourceFormat(baseline.mimeType);
+-    const ingestion = await this.baselineIngestionService.ingestFromText(
+-      rawText,
++    const ingestion = await this.reingestFromSourceFileOrFallback(
++      baseline,
++      rawSection?.content ?? '',
+       sourceFormat,
+     );
+     const rebuiltSections = this.buildSections(
+       ingestion.rawText,
+       ingestion.parsedSections,
+     );
+ 
+     return this.baselineRepository.manager.transaction(async (manager) => {
+       await manager.delete(BaselineSection, { baselineId: baseline.id });
+ 
+       const rebuiltEntities = rebuiltSections.map((section, index) =>
+         manager.create(BaselineSection, {
+           ...section,
+           baselineId: baseline.id,
+           order: section.order ?? index,
+         }),
+       );
+ 
+       await manager.save(rebuiltEntities);
+ 
+       baseline.sections = rebuiltEntities;
+ 
+       const latestVersion = await this.getLatestVersionForBaseline(baseline.id);
+       const nextVersionNumber =
+         (latestVersion?.versionNumber ?? baseline.version ?? 0) + 1;
+@@ -678,50 +681,73 @@ return {
+         allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+       });
+ 
+       const savedVersion = await manager.save(versionRecord);
+ 
+       const policyEntities = policyState.map((policy) =>
+         manager.create(BaselineBlockPolicy, {
+           baselineVersionId: savedVersion.id,
+           baselineSectionId: policy.baselineSectionId,
+           includePolicy: policy.includePolicy,
+           order: policy.order,
+         }),
+       );
+ 
+       await manager.save(policyEntities);
+ 
+       baseline.version = nextVersionNumber;
+       baseline.versions = [savedVersion];
+ 
+       await this.persistParsedBaseline(manager, baseline, ingestion);
+ 
+       return manager.save(baseline);
+     });
+   }
+ 
++  private async reingestFromSourceFileOrFallback(
++    baseline: Baseline,
++    fallbackRawText: string,
++    sourceFormat: BaselineSourceFormat,
++  ): Promise<BaselineIngestionResult> {
++    try {
++      if (baseline.storagePath?.trim()) {
++        return await this.baselineIngestionService.ingest({
++          path: baseline.storagePath,
++          originalname: baseline.originalFilename,
++          mimetype: baseline.mimeType,
++        } as Express.Multer.File);
++      }
++    } catch {
++      // Fall through to previously persisted raw text.
++    }
++
++    return this.baselineIngestionService.ingestFromText(
++      fallbackRawText,
++      sourceFormat,
++    );
++  }
++
+   async listBaselineVersionsForUser(baselineId: string, userId: string) {
+     const baseline = await this.baselineRepository.findOne({
+       where: { id: baselineId, userId },
+       select: { id: true },
+     });
+ 
+     if (!baseline) {
+       throw new NotFoundException('Baseline not found');
+     }
+ 
+     // VERIFY: Confirm that descending order is the expected default for version history.
+     return this.baselineVersionRepository.find({
+       where: { baselineId },
+       order: { versionNumber: 'DESC', createdAt: 'DESC' },
+     });
+   }
+ 
+   async listBlocksForBaselineVersion(
+     baselineId: string,
+     baselineVersionId: string,
+     userId: string,
+   ): Promise<BaselineBlocksResponse> {
+     if (!baselineVersionId?.trim()) {
+       throw new BadRequestException('baseline_version_id is required');
+     }
+diff --git a/apps/api/src/compliance/compliance.policy.ts b/apps/api/src/compliance/compliance.policy.ts
+index 103d2a32e2ae3d83ef0449b16029da1af567c0cd..e2f55a132590a8007793e210f99a0a952e611d29 100644
+--- a/apps/api/src/compliance/compliance.policy.ts
++++ b/apps/api/src/compliance/compliance.policy.ts
+@@ -37,31 +37,53 @@ const BASE_COMPLIANCE_POLICY: Record<
    },
-   "devDependencies": {
-     "patch-package": "^8.0.1"
+   [ComplianceFlagCode.FICTIONAL_TECHNOLOGY]: {
+     severity: ComplianceFlagSeverity.WARN,
+     blockConfidenceThreshold: 0.85,
+   },
+ };
+ 
+ const COMPLIANCE_ACTIONS = Object.values(
+   ComplianceAction,
+ ) as ComplianceAction[];
+ 
+ export const COMPLIANCE_POLICY_MAP: Record<
+   ComplianceAction,
+   Record<ComplianceFlagCode, CompliancePolicyEntry>
+ > = COMPLIANCE_ACTIONS.reduce(
+   (acc, action) => {
+     acc[action] = { ...BASE_COMPLIANCE_POLICY };
+     return acc;
+   },
+   {} as Record<
+     ComplianceAction,
+     Record<ComplianceFlagCode, CompliancePolicyEntry>
+   >,
+ );
+ 
++// Export should be resilient for user-downloaded artifacts. We still emit
++// compliance flags for visibility, but avoid hard-blocking on heuristic
++// invention/style detections at export time.
++COMPLIANCE_POLICY_MAP[ComplianceAction.RESUME_EXPORT] = {
++  ...COMPLIANCE_POLICY_MAP[ComplianceAction.RESUME_EXPORT],
++  [ComplianceFlagCode.INVENTED_COMPANY]: {
++    severity: ComplianceFlagSeverity.WARN,
++  },
++  [ComplianceFlagCode.INVENTED_ROLE]: {
++    severity: ComplianceFlagSeverity.WARN,
++  },
++  [ComplianceFlagCode.INVENTED_METRIC]: {
++    severity: ComplianceFlagSeverity.WARN,
++  },
++  [ComplianceFlagCode.STYLIZED_PUNCTUATION]: {
++    severity: ComplianceFlagSeverity.WARN,
++  },
++  [ComplianceFlagCode.FICTIONAL_TECHNOLOGY]: {
++    severity: ComplianceFlagSeverity.WARN,
++  },
++};
++
+ export function resolveCompliancePolicy(
+   action: ComplianceAction,
+   code: ComplianceFlagCode,
+ ): CompliancePolicyEntry | undefined {
+   return COMPLIANCE_POLICY_MAP[action]?.[code];
+ }
+diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
+index 8e84a7da6ee0af3b6cc1d2a7ea9b7493dba00c60..7f0d75245989de6c6e7cb134278d805b21481cca 100644
+--- a/apps/api/src/compliance/compliance.service.spec.ts
++++ b/apps/api/src/compliance/compliance.service.spec.ts
+@@ -559,26 +559,65 @@ describe('ComplianceService', () => {
+       const result = await service.validateAndAudit({
+         action: ComplianceAction.RESUME_GENERATION,
+         actorId: 'user-tech-baseline',
+         baselineVersion: baselineVersionWithHash,
+         outputHash: 'out-tech-2',
+         baselineSections: [
+           {
+             title: 'Experience',
+             content: 'Led ImaginaryDB automation for multiple releases.',
+           },
+         ],
+         generatedSections: [
+           {
+             title: 'Experience',
+             content: 'Scaled ImaginaryDB automation globally.',
+           },
+         ],
+       });
+ 
+       const flags = result.complianceFlags.map((flag) => flag.code);
+ 
+       expect(result.blocked).toBe(false);
+       expect(flags).not.toContain(ComplianceFlagCode.FICTIONAL_TECHNOLOGY);
+     });
+   });
++
++  describe('resume export policy behavior', () => {
++    it('downgrades invention/style detections to warnings for resume export', async () => {
++      const result = await service.validateAndAudit({
++        action: ComplianceAction.RESUME_EXPORT,
++        actorId: 'user-export-policy',
++        baselineVersion: baselineVersionWithHash,
++        outputHash: 'out-export-policy',
++        baselineSections: [
++          {
++            title: 'Experience',
++            content: 'Built services using PostgreSQL and AWS.',
++          },
++        ],
++        generatedSections: [
++          {
++            title: 'Experience',
++            content:
++              'Built services using ImaginaryDB and reduced cycle time by ten percent — globally.',
++          },
++        ],
++      });
++
++      const metricFlag = result.complianceFlags.find(
++        (flag) => flag.code === ComplianceFlagCode.INVENTED_METRIC,
++      );
++      const techFlag = result.complianceFlags.find(
++        (flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
++      );
++      const punctuationFlag = result.complianceFlags.find(
++        (flag) => flag.code === ComplianceFlagCode.STYLIZED_PUNCTUATION,
++      );
++
++      expect(metricFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
++      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
++      expect(punctuationFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
++      expect(result.blocked).toBe(false);
++    });
++  });
+ });
+diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab928f41ed4a8398fbbbf395e9274133877251dc
+--- /dev/null
++++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
+@@ -0,0 +1,46 @@
++import { BaselineSectionType } from '../../baseline/baseline-section.entity';
++import { mapResumeSectionsToDocxModel } from './resume-sections-to-model';
++
++describe('mapResumeSectionsToDocxModel experience splitting', () => {
++  it('splits multiple jobs in one EXPERIENCE section into separate entries', () => {
++    const model = mapResumeSectionsToDocxModel([
++      {
++        type: BaselineSectionType.EXPERIENCE,
++        title: 'Professional Experience',
++        content: `Senior I/O Engineer (Sr. DevOps Engineer)
++Genoa Healthcare, August 2019 – March 2025
++• Built CI/CD pipelines.
++
++Senior Lead IT Engineer
++CenturyLink Cloud, July 2015 - August 2019
++• Led enterprise cloud support.
++
++Windows Systems Administrator
++FriendFinder, April 2013 - July 2015
++• Maintained production systems.`,
++      },
++    ]);
++
++    const expSection = model.sections.find((section) => section.key === 'experience');
++    expect(expSection).toBeDefined();
++    expect(expSection?.items).toHaveLength(3);
++  });
++
++  it('uses second line company/date to enrich a role-only header', () => {
++    const model = mapResumeSectionsToDocxModel([
++      {
++        type: BaselineSectionType.EXPERIENCE,
++        title: 'Professional Experience',
++        content: `Senior I/O Engineer (Sr. DevOps Engineer)
++Genoa Healthcare, August 2019 – March 2025
++• Built CI/CD pipelines.`,
++      },
++    ]);
++
++    const expSection = model.sections.find((section) => section.key === 'experience');
++    const first = expSection?.items[0] as { company?: string; dateRange?: string } | undefined;
++
++    expect(first?.company).toBe('Genoa Healthcare');
++    expect(first?.dateRange).toContain('2019');
++  });
++});
+diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
+index 5f334ccda758235e60f1c9635bf6f92fef757ce7..5ee34a725ac3c9d48008954b35be0cb662243cd0 100644
+--- a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
++++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
+@@ -60,60 +60,62 @@ const SECTION_TYPE_KEY_MAP: Record<BaselineSectionType, ResumeSectionKey> = {
+   [BaselineSectionType.EXPERIENCE]: 'experience',
+   [BaselineSectionType.EDUCATION]: 'education',
+   [BaselineSectionType.PROJECT]: 'other',
+   [BaselineSectionType.RAW]: 'other',
+   [BaselineSectionType.OTHER]: 'other',
+ };
+ 
+ const SECTION_TITLE_FALLBACK: Record<ResumeSectionKey, string> = {
+   summary: 'Summary',
+   skills: 'Technical Skills',
+   experience: 'Professional Experience',
+   education: 'Education',
+   certifications: 'Certifications',
+   other: 'Other',
+ };
+ 
+ const SECTION_ORDER: ResumeSectionKey[] = [
+   'summary',
+   'skills',
+   'experience',
+   'education',
+   'certifications',
+   'other',
+ ];
+ 
+-const BULLET_PATTERN = /^[\u2022✶*-]\s+(.*)$/;
++const BULLET_PATTERN = /^[\u2022✶*-]\s*(.*)$/;
+ const bulletPrefixPattern = new RegExp('^\\s*' + BULLET_GLYPH + '\\s*');
+ const cleanBullets = (bullets?: string[]) =>
+   (bullets ?? [])
+     .map((b) => (b ?? '').replace(bulletPrefixPattern, '').trim())
+     .filter((b) => b.length > 0);
+ const SKILL_LINE_LIMIT = 120;
+ const EDUCATION_LINE_LIMIT = 140;
+ const SKILL_VERB_PATTERN = /\b(with|including|designed|developed|managed|led|built|created|implemented|owned)\b/i;
+ const ADDITIONAL_INFO_TITLE = 'Additional Information';
++const DENSE_TEXT_NEWLINE = / {2,}/g;
++const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
+ 
+ function addQuarantinedLine(quarantined: string[], line: string) {
+   const trimmed = line.trim();
+   if (!trimmed) return;
+   if (quarantined[quarantined.length - 1] === trimmed) return;
+   quarantined.push(trimmed);
+ }
+ 
+ export function mapResumeSectionsToDocxModel(
+   sections: ResumeExportSection[],
+   identity?: BaselineIdentity,
+ ): ResumeDocxModel {
+   const header = buildHeader(sections, identity);
+   const headerLines = buildHeaderLineSet(header);
+   const quarantined: string[] = [];
+   const buckets = buildSectionBuckets(sections, headerLines, quarantined);
+   const orderedSections = SECTION_ORDER.map((key) => buckets.get(key)).filter(
+     (section): section is ResumeDocxSection => Boolean(section),
+   );
+ 
+   return {
+     header,
+     sections: orderedSections,
+   };
+ }
+@@ -200,74 +202,119 @@ function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
+     return undefined;
+   }
+   return filtered.join('\n');
+ }
+ 
+ function shouldSkipSection(section: ResumeExportSection) {
+   const content = normalizeContent(section.content);
+   if (!content) return true;
+   return containsContactInfo(content);
+ }
+ 
+ function containsContactInfo(content: string) {
+   const emailPattern =
+     /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+   const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
+   return emailPattern.test(content) || phonePattern.test(content);
+ }
+ 
+ function buildHeader(
+   sections: ResumeExportSection[],
+   identity?: BaselineIdentity,
+ ): ResumeDocxHeader {
+   const fallbackLines = extractHeaderLines(sections);
+   const header: ResumeDocxHeader = {};
+   header.name =
+-    identity?.fullName?.trim() ||
+-    (fallbackLines.length ? fallbackLines[0] : undefined);
++    sanitizeHeaderName(identity?.fullName) ||
++    extractFallbackName(fallbackLines[0]);
+ 
+   header.title =
+-    identity?.currentTitle?.trim() ||
+-    identity?.currentCompany?.trim() ||
+-    fallbackLines.slice(1).find((line) => !looksLikeContact(line));
++    sanitizeHeaderTitle(identity?.currentTitle) ||
++    sanitizeHeaderTitle(identity?.currentCompany) ||
++    fallbackLines
++      .slice(1)
++      .map((line) => sanitizeHeaderTitle(line))
++      .find((line) => Boolean(line));
+ 
+   const contactLines = new Set<string>();
+   if (identity?.location?.trim()) {
+     contactLines.add(identity.location.trim());
+   }
+   fallbackLines.slice(1).forEach((line) => {
+     if (looksLikeContact(line)) {
+       contactLines.add(line);
+     }
+   });
+ 
+   header.contactLines = contactLines.size
+     ? Array.from(contactLines)
+     : undefined;
+   return header;
+ }
+ 
++
++function sanitizeHeaderName(value?: string | null) {
++  const trimmed = value?.trim();
++  if (!trimmed) return undefined;
++
++  const firstSegment = trimmed.split('|')[0]?.trim() ?? trimmed;
++  if (looksLikeSentence(firstSegment)) {
++    return undefined;
++  }
++  if (firstSegment.length > 60) {
++    return undefined;
++  }
++  return firstSegment;
++}
++
++function sanitizeHeaderTitle(value?: string | null) {
++  const trimmed = value?.trim();
++  if (!trimmed) return undefined;
++  if (trimmed.includes('|')) return undefined;
++  if (looksLikeContact(trimmed)) return undefined;
++  if (looksLikeSentence(trimmed)) return undefined;
++  if (trimmed.length > 80) return undefined;
++  return trimmed;
++}
++
++function extractFallbackName(firstLine?: string) {
++  if (!firstLine) return undefined;
++  const normalized = firstLine.trim();
++  if (!normalized) return undefined;
++  const firstSegment = normalized.split('|')[0]?.trim() ?? normalized;
++  if (looksLikeSentence(firstSegment)) return undefined;
++  if (firstSegment.length > 60) return undefined;
++  return firstSegment;
++}
++
++function looksLikeSentence(line: string) {
++  const trimmed = line.trim();
++  if (!trimmed) return false;
++  if (/[.!?]/.test(trimmed)) return true;
++  return trimmed.split(/\s+/).length > 8;
++}
++
+ function looksLikeContact(line: string) {
+   const cleaned = line.trim();
+   if (!cleaned) return false;
+   if (/@/.test(cleaned)) return true;
+   if (/\d{2,}/.test(cleaned)) return true;
+   if (cleaned.includes('-') && cleaned.includes(' ')) return true;
+   return false;
+ }
+ 
+ function extractHeaderLines(sections: ResumeExportSection[]) {
+   for (const section of sections) {
+     const lines = splitLines(section.content);
+     if (lines.length) {
+       return lines.slice(0, 4);
+     }
+   }
+   return [];
+ }
+ 
+ function resolveSectionKey(type?: BaselineSectionType | string | null) {
+   if (!type) {
+     return 'other';
+   }
+   return SECTION_TYPE_KEY_MAP[type as BaselineSectionType] ?? 'other';
+ }
+@@ -308,143 +355,148 @@ function buildSummaryItems(
+   for (const sentence of sentences) {
+     const trimmed = sentence.trim();
+     if (!trimmed) continue;
+     if (kept.length >= 3 || totalLength + trimmed.length > 400) {
+       break;
+     }
+     kept.push(trimmed);
+     totalLength += trimmed.length;
+   }
+   const overflow = sentences.slice(kept.length);
+   overflow.forEach((sentence) => addQuarantinedLine(quarantined, sentence));
+   if (!kept.length) return [];
+   return [
+     {
+       paragraphs: [kept.join(' ')],
+     },
+   ];
+ }
+ 
+ function splitIntoSentences(text: string) {
+   const matches = text.match(/[^.!?]+[.!?]*/g) ?? [];
+   return matches.map((segment) => segment.trim()).filter(Boolean);
+ }
+ 
+ function buildSkillsItems(content?: string | null, quarantined: string[] = []): ResumeSkillsItem[] {
+-  const lines = splitLines(content);
++  const lines = splitLines(expandDenseText(content));
+   const groups: ResumeSkillsGroup[] = [];
+   lines.forEach((line) => {
+     const normalized = line.replace(/^(Skills|Technical Skills)/i, '').trim();
+     if (!normalized) {
+       addQuarantinedLine(quarantined, line);
+       return;
+     }
+     if (/^(Summary|Experience|Professional Experience)/i.test(normalized)) {
+       addQuarantinedLine(quarantined, normalized);
+       return;
+     }
+     if (
+       normalized.length > SKILL_LINE_LIMIT ||
+       normalized.includes('.') ||
+       SKILL_VERB_PATTERN.test(normalized)
+     ) {
+       addQuarantinedLine(quarantined, normalized);
+       return;
+     }
+     const segments = normalized
+       .split(/[,\u2022;]/)
+       .map((segment) => segment.trim())
+       .filter(Boolean);
+     if (segments.length) {
+       groups.push({
+         values: segments,
+       });
+     } else {
+       addQuarantinedLine(quarantined, normalized);
+     }
+   });
+   if (!groups.length) return [];
+   return [{ groups }];
+ }
+ 
+ function buildExperienceItems(content?: string | null): ExperienceItem[] {
+-  const normalized = normalizeContent(content);
++  const normalized = expandDenseText(content);
+   if (!normalized) return [];
+-  const blocks = normalized
+-    .split(/\n{2,}/)
+-    .map((block) => block.trim())
+-    .filter(Boolean);
++  const blocks = splitExperienceBlocks(normalized);
+ 
+   const entries: ExperienceItem[] = [];
+   blocks.forEach((block) => {
+     const lines = splitLines(block);
+     if (!lines.length) return;
+     let roleLine = lines.shift()!;
+     let company: string | undefined;
+     let dateRange: string | undefined;
+     const bullets: string[] = [];
+     let description: string | undefined;
+ 
+     const applyLabelParagraph = (labelLine: string) => {
+       const trimmedLabel = labelLine.trim().replace(/:+$/, '');
+       if (!description) {
+         description = labelLine.trim();
+         return;
+       }
+       bullets.unshift(`${trimmedLabel}:`);
+     };
+ 
+     const handleHeaderRemainder = (remainder: string) => {
+       const trimmed = remainder.trim();
+       if (!trimmed) return;
+       if (!description && !bullets.length) {
+         description = trimmed;
+         return;
+       }
+       if (trimmed.includes('.') && !isFunctionalLabel(trimmed)) {
+         bullets.unshift(trimmed);
+         return;
+       }
+       applyLabelParagraph(trimmed);
+     };
+ 
+     const initialHeader = sanitizeExperienceHeaderLine(roleLine);
+     let headerData = parseExperienceHeaderSegments(initialHeader.cleanedLine);
+     let headerInlineBullets = initialHeader.inlineBullets;
+ 
+     if (!isExperienceHeader(initialHeader.cleanedLine) && lines.length) {
+       const peekHeader = sanitizeExperienceHeaderLine(lines[0]!);
+       if (isExperienceHeader(peekHeader.cleanedLine)) {
+         lines.shift();
+         headerData = parseExperienceHeaderSegments(peekHeader.cleanedLine);
+         headerInlineBullets = peekHeader.inlineBullets;
+       }
+     }
+ 
+     roleLine = headerData.role;
+     company = headerData.company;
+     dateRange = headerData.dateRange;
++
++    if (lines.length && !company && !dateRange && looksLikeCompanyDateLine(lines[0]!)) {
++      const combinedHeader = `${roleLine} | ${lines.shift()!}`;
++      headerData = parseExperienceHeaderSegments(combinedHeader);
++      roleLine = headerData.role;
++      company = headerData.company;
++      dateRange = headerData.dateRange;
++    }
+     if (headerData.remainder) {
+       handleHeaderRemainder(headerData.remainder);
+     }
+     if (headerInlineBullets.length) {
+       bullets.push(...headerInlineBullets);
+     }
+ 
+     while (lines.length) {
+       const line = lines.shift()!;
+       const trimmed = line.trim();
+       if (!trimmed) continue;
+ 
+       const bulletMatch = trimmed.match(BULLET_PATTERN);
+       if (bulletMatch) {
+         bullets.push(bulletMatch[1]);
+         continue;
+       }
+ 
+       if (trimmed.includes(BULLET_GLYPH)) {
+         const inline = splitInlineBullets(trimmed);
+         if (inline.description) {
+           if (isFunctionalLabel(inline.description)) {
+             applyLabelParagraph(inline.description);
+           } else if (!description && !bullets.length) {
+             description = inline.description;
+@@ -461,130 +513,232 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
+       if (isFunctionalLabel(trimmed)) {
+         applyLabelParagraph(trimmed);
+         continue;
+       }
+ 
+       if (!description && !bullets.length) {
+         description = trimmed;
+         continue;
+       }
+ 
+       if (!bullets.length) {
+         description = `${description} ${trimmed}`;
+         continue;
+       }
+ 
+       bullets.push(trimmed);
+     }
+ 
+     const sanitizedDescription =
+       description?.replace(new RegExp(BULLET_GLYPH, 'g'), '').trim() || undefined;
+     const sanitizedBullets = cleanBullets(bullets);
+ 
+     entries.push({
+       role: roleLine,
+       company,
++      location: headerData.location,
++      dateRange,
+       description: sanitizedDescription,
+       bullets: sanitizedBullets,
+     });
+   });
+ 
+   return entries;
+ }
+ 
++
++function splitExperienceBlocks(content: string): string[] {
++  const lines = content
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter(Boolean);
++
++  if (!lines.length) return [];
++
++  const blocks: string[] = [];
++  let current: string[] = [];
++
++  const flush = () => {
++    if (!current.length) return;
++    blocks.push(current.join('\n').trim());
++    current = [];
++  };
++
++  lines.forEach((line, index) => {
++    const next = lines[index + 1];
++    const startsNewRole =
++      current.length > 0 &&
++      isLikelyRoleLine(line) &&
++      Boolean(next) &&
++      looksLikeCompanyDateLine(next!);
++
++    if (startsNewRole) {
++      flush();
++    }
++
++    current.push(line);
++  });
++
++  flush();
++  return blocks;
++}
++
++function isLikelyRoleLine(line: string) {
++  const trimmed = line.trim();
++  if (!trimmed) return false;
++  if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
++  if (trimmed.includes('|')) return false;
++  if (trimmed.includes(':')) return false;
++  if (isDateRange(trimmed)) return false;
++  if (trimmed.split(/\s+/).length > 10) return false;
++  return ROLE_PREFIX_PATTERN.test(trimmed);
++}
++
++function looksLikeCompanyDateLine(line: string) {
++  const trimmed = line.trim();
++  if (!trimmed) return false;
++  const hasMonth = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(trimmed);
++  return isDateRange(trimmed) || (trimmed.includes(',') && (hasMonth || /\b\d{4}\b/.test(trimmed)));
++}
++
++
+ function sanitizeExperienceHeaderLine(line: string) {
+   const inline = splitInlineBullets(line);
+   const cleanedLine = inline.description?.trim() || line.trim();
+   return {
+     cleanedLine,
+     inlineBullets: inline.bullets,
+   };
+ }
+ 
+ function parseExperienceHeaderSegments(line: string) {
+   const segments = line
++    .replace(/,\s+/g, ' | ')
+     .split('|')
+     .map((part) => part.trim())
+     .filter(Boolean);
+   const role = segments.shift() || line.trim();
+   let remaining = [...segments];
+   let dateRange: string | undefined;
+   if (remaining.length && isDateRange(remaining[remaining.length - 1])) {
+     dateRange = remaining.pop();
+   }
+   let company: string | undefined;
++  let location: string | undefined;
+   if (remaining.length) {
+-    company = remaining.shift();
++    const parsed = splitCompanyAndLocation(remaining.shift()!);
++    company = parsed.company;
++    location = parsed.location;
+   }
+   const remainderParts = [...remaining];
+   if (dateRange) {
+     const idx = line.lastIndexOf(dateRange);
+     if (idx >= 0) {
+       const trailing = line.slice(idx + dateRange.length).trim();
+       if (trailing) {
+         remainderParts.push(trailing);
+       }
+     }
+   }
+   const remainder = remainderParts.filter(Boolean).join(' | ') || undefined;
+   return {
+     role,
+     company,
++    location,
+     dateRange,
+     remainder,
+   };
+ }
+ 
++function splitCompanyAndLocation(segment: string) {
++  const trimmed = segment.trim();
++  if (!trimmed) {
++    return { company: undefined, location: undefined };
++  }
++
++  const divider = /\s[–—-]\s|\s·\s/;
++  const parts = trimmed
++    .split(divider)
++    .map((part) => part.trim())
++    .filter(Boolean);
++  if (parts.length >= 2) {
++    return {
++      company: parts[0],
++      location: parts.slice(1).join(' | '),
++    };
++  }
++
++  return {
++    company: trimmed,
++    location: undefined,
++  };
++}
++
++
++function expandDenseText(content?: string | null) {
++  const normalized = normalizeContent(content);
++  if (!normalized) return normalized;
++
++  return normalized
++    .replace(/•\s*/g, '\n• ')
++    .replace(/([a-z0-9%])\s+([A-Z][A-Za-z][^\n]{3,45}(?:Experience|Education|Development))/g, '$1\n$2')
++    .replace(DENSE_TEXT_NEWLINE, '\n')
++    .replace(/\n{3,}/g, '\n\n')
++    .trim();
++}
++
+ function isFunctionalLabel(line: string) {
+   const trimmed = line.trim();
+   if (!trimmed) return false;
+   if (trimmed.length > 60) return false;
+   if (/[.?!]/.test(trimmed)) return false;
+   const keywords = ['CI/CD', 'Key Achievements', 'Automation', 'Infrastructure', 'Cloud', 'IaC'];
+   const lower = trimmed.toLowerCase();
+   const hasKeyword = keywords.some((keyword) => lower.includes(keyword.toLowerCase()));
+   return trimmed.includes('&') || trimmed.includes('/') || hasKeyword;
+ }
+ 
+ function isDateRange(value: string) {
+-  return /\d{4}\s*[-â€“—]\s*(\d{4}|present|Present)/.test(value);
++  return /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(value);
+ }
+ 
+ function isExperienceHeader(line: string) {
+   if (!line) return false;
+-  const hasSeparator = line.includes('|');
+-  const hasYearRange = /\d{4}\s*[-–]\s*(\d{4}|present|Present)/.test(line);
+-  return hasSeparator || hasYearRange;
++  const trimmed = line.trim();
++  const hasSeparator = trimmed.includes('|');
++  const hasYearRange = /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(trimmed);
++  const maybeRole = ROLE_PREFIX_PATTERN.test(trimmed.split('|')[0] ?? trimmed);
++  return hasSeparator || hasYearRange || maybeRole;
+ }
+ 
+ function buildEducationItems(content?: string | null): ResumeEducationItem[] {
+   const entries = splitEducationLines(content);
+   return entries.map((line) => ({ raw: line }));
+ }
+ 
+ function splitEducationLines(content?: string | null) {
+-  const normalized = normalizeContent(content);
++  const normalized = expandDenseText(content);
+   if (!normalized) return [];
+   return normalized
+     .split(/\r?\n/)
+     .flatMap((line) => line.split(BULLET_GLYPH))
+     .map((segment) => segment.replace(new RegExp(BULLET_GLYPH, 'g'), '').trim())
+     .filter(Boolean);
+ }
+ 
+ function buildCertificationItems(content?: string | null): ResumeCertificationItem[] {
+   const lines = splitLines(content);
+   return lines.map((line) => ({
+     title: line,
+   }));
+ }
+ 
+ function buildOtherItems(content?: string | null): ResumeOtherItem[] {
+   const lines = splitLines(content);
+   if (!lines.length) return [];
+   return [{ lines }];
+ }
+ 
+ function splitParagraphs(content?: string | null) {
+   return (normalizeContent(content) ?? '')
+     .split(/\n{2,}/)
+     .map((segment) => segment.trim())
+diff --git a/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts b/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
+index 6beb619210b5d1134a73492ee5152e4db84adb07..571b667b40001f208ba5469d5f99c980f62a6362 100644
+--- a/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
++++ b/apps/api/src/docx-templates/templates/resume/classic-professional-v1.ts
+@@ -110,52 +110,52 @@ function createExperienceRoleParagraph(role: string, dateRange?: string) {
+     new TextRun({ text: role, bold: true, size: headerTitleSize, font: 'Calibri' }),
+   ];
+   if (dateRange) {
+     children.push(new TextRun({ text: '\t', size: headerTitleSize }));
+     children.push(
+       new TextRun({
+         text: dateRange,
+         size: 22,
+         italics: true,
+         font: 'Calibri',
+       }),
+     );
+   }
+   return new Paragraph({
+     spacing: { after: experienceRoleLineSpacingAfter, line: defaultLineSpacing },
+     tabStops: [
+       {
+         type: TabStopType.RIGHT,
+         position: 9100,
+       },
+     ],
+     children,
+   });
+ }
+ 
+-function createCompanyParagraph(company?: string, location?: string) {
+-  const content = [company, location].filter(Boolean).join(' | ');
++function createCompanyParagraph(company?: string) {
++  const content = [company].filter(Boolean).join(' | ');
+   if (!content) {
+     return null;
+   }
+   return new Paragraph({
+     spacing: { after: 50, line: defaultLineSpacing },
+     children: [
+       new TextRun({
+         text: content,
+         italics: true,
+         size: 22,
+         font: 'Calibri',
+       }),
+     ],
+   });
+ }
+ 
+ function createLocationParagraph(location: string) {
+   return new Paragraph({
+     spacing: { after: 50, line: defaultLineSpacing },
+     children: [
+       new TextRun({
+         text: location,
+         italics: true,
+         size: 22,
+         font: 'Calibri',
+@@ -227,54 +227,51 @@ function renderSummarySection(items: ResumeSectionItem[]) {
+ 
+ function renderSkillsSection(items: ResumeSectionItem[]) {
+   const children: Paragraph[] = [];
+   items.filter(isSkillsItem).forEach((item) => {
+     item.groups?.forEach((group) => {
+       const paragraph = createSkillGroupParagraph(group);
+       if (paragraph) {
+         children.push(paragraph);
+       }
+     });
+     item.lines?.forEach((line) => {
+       const flow = createSkillFlowParagraph(line);
+       if (flow) {
+         children.push(flow);
+       }
+     });
+   });
+   return children;
+ }
+ 
+ function renderExperienceSection(items: ResumeSectionItem[]) {
+   const experiences = items.filter(isExperienceItem);
+   const children: Paragraph[] = [];
+   experiences.forEach((experience) => {
+     children.push(createExperienceRoleParagraph(experience.role, experience.dateRange));
+-    const companyParagraph = createCompanyParagraph(
+-      experience.company,
+-      experience.location,
+-    );
++    const companyParagraph = createCompanyParagraph(experience.company);
+     if (companyParagraph) {
+       children.push(companyParagraph);
+     }
+     if (experience.location) {
+       children.push(createLocationParagraph(experience.location));
+     }
+     if (experience.description) {
+       children.push(createDescriptionParagraph(experience.description));
+     }
+     experience.bullets.forEach((bullet) => {
+       children.push(createExperienceBullet(bullet));
+     });
+     children.push(createParagraphSpacer());
+   });
+   return children;
+ }
+ 
+ function renderEducationSection(items: ResumeSectionItem[]) {
+   const educationItems = items.filter(isEducationItem);
+   const educationLines = educationItems
+     .map((entry) => formatEducationLine(entry))
+     .filter((line): line is string => typeof line === 'string' && line.trim().length > 0);
+   return educationLines.map((line) => createEducationParagraph(line));
+ }
+ 
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index 58f3b94b9956710f9d789a01cea1a2646718d75f..4a235ff8acf443eb2bd55ec2b1b53290e1ddb7b2 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -357,48 +357,52 @@ export class ResumeService {
+     const job = generation.jobId
+       ? await this.jobsRepository.findOne({
+           where: { id: generation.jobId, userId },
+         })
+       : null;
+ 
+     const { complianceFlags, blocked, audit } =
+       await this.complianceService.validateAndAudit({
+         action: ComplianceAction.RESUME_EXPORT,
+         actorId: userId,
+         baselineVersion,
+         job,
+         outputHash: createHash('sha256')
+           .update(
+             `${format}:${
+               format === 'pdf'
+                 ? pdfText ?? ''
+                 : JSON.stringify(sectionFragments)
+             }`,
+           )
+           .digest('hex'),
+         baselineSections: generation.sections,
+         generatedSections: generation.sections,
+       });
+ 
+-    if (blocked) {
++    const blockingFlags = complianceFlags.filter(
++      (flag) => flag.severity === 'block',
++    );
++
++    if (blocked && blockingFlags.length > 0) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'COMPLIANCE_VIOLATION',
+           message: 'Compliance validation failed.',
+           details: {
+-            compliance_flags: complianceFlags,
++            compliance_flags: blockingFlags,
+             audit_id: audit.id,
+             baseline_version_hash: audit.baselineVersionHash,
+           },
+         },
+       });
+     }
+ 
+     return {
+       buffer,
+       contentType,
+       filename,
+       auditId: audit.id,
+       baselineVersionHash: audit.baselineVersionHash,
+     };
    }
  }
