@@ -55,6 +55,25 @@ async function expectValidDocxZip(buffer: Buffer) {
   expect(zip.file('[Content_Types].xml')).toBeDefined();
 }
 
+async function extractDocxParagraphTexts(buffer: Buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const documentXml = await zip.file('word/document.xml')!.async('text');
+  const paragraphs = documentXml
+    .split('<w:p')
+    .slice(1)
+    .map((chunk) => {
+      const matches = [];
+      const regex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+      let match;
+      while ((match = regex.exec(chunk)) !== null) {
+        matches.push(match[1]);
+      }
+      return matches.join('').trim();
+    })
+    .filter(Boolean);
+  return paragraphs;
+}
+
 describe('CoverLettersService', () => {
   const coverLetterRepository = buildRepository<any>();
   const baselineRepository = buildRepository<any>({
@@ -251,6 +270,32 @@ describe('CoverLettersService', () => {
         actorId: 'user-1',
       }),
     );
+  });
+
+  it('renders greeting and multiple body paragraphs', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+    );
+
+    const result = await service.exportCoverLetter(
+      'user-1',
+      {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+      },
+      'docx',
+    );
+
+    const paragraphs = await extractDocxParagraphTexts(result.buffer);
+    const greetingIndex = paragraphs.findIndex(
+      (paragraph) => paragraph === 'Dear Hiring Team,',
+    );
+    expect(greetingIndex).toBeGreaterThanOrEqual(0);
+    const closingIndex = paragraphs.length - 1;
+    const bodyParagraphs = paragraphs.slice(greetingIndex + 1, closingIndex);
+    expect(bodyParagraphs.length).toBeGreaterThanOrEqual(2);
   });
 
   it('exports PDF cover letter content with valid header', async () => {

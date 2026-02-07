@@ -61,8 +61,21 @@ Technical Strategy, Automation, Analytics, Coaching, Leadership, Stakeholder Man
   updatedAt: new Date(),
 };
 
-const extraSection: BaselineSection = {
+const skillsSection: BaselineSection = {
   id: 'section-3',
+  baselineId: 'baseline-1',
+  sectionType: BaselineSectionType.SKILLS,
+  title: 'Skills',
+  content: `Skills
+Technical Strategy, Automation, Analytics, Coaching, Leadership, Stakeholder Management`,
+  includePolicy: BaselineIncludePolicy.ALWAYS,
+  order: 2,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+const extraSection: BaselineSection = {
+  id: 'section-4',
   baselineId: 'baseline-1',
   sectionType: BaselineSectionType.EXPERIENCE,
   title: 'Experience',
@@ -75,7 +88,7 @@ Project Lead | Gamma Inc | 2014 - 2016
 - Guided product launches with cross-functional teams.
 - Standardized reporting across regions.`,
   includePolicy: BaselineIncludePolicy.ALWAYS,
-  order: 2,
+  order: 3,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -91,7 +104,8 @@ const mockBaseline: Baseline = {
   hash: null,
   status: BaselineStatus.ACTIVE,
   archivedAt: null,
-  sections: [baselineSection, summarySection, extraSection],
+  sections: [baselineSection, summarySection, skillsSection, extraSection],
+  parsedRecords: [],
   versions: [],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -266,14 +280,15 @@ async function assertValidDocxZip(
     }
     if (options?.expectSectionHeaders) {
       expect(documentXml).toContain('<w:pBdr');
-      expect(documentXml).toContain('w:before="160"');
+      expect(documentXml).toContain('<w:bottom');
     }
     if (options?.expectExperienceHeader) {
       expect(documentXml).toContain('Senior Program Manager');
-      expect(documentXml).toContain('Beta Co | 2017 - 2019');
+      expect(documentXml).toContain('Beta Co');
+      expect(documentXml).toContain('Gamma Inc');
     }
     if (options?.expectExperienceSpacing) {
-      expect(documentXml).toContain('w:after="200"');
+      expect(documentXml).toContain('w:after="120"');
     }
     if (options?.expectBullets) {
       expect(documentXml).toContain('<w:numId');
@@ -321,7 +336,7 @@ describe('ResumeService', () => {
 
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(true);
-    expect(result.sections).toHaveLength(3);
+    expect(result.sections).toHaveLength(4);
   });
 
   it('returns draft quality when fit score is below threshold', async () => {
@@ -363,9 +378,38 @@ describe('ResumeService', () => {
       expectSectionHeaders: true,
       expectExperienceSpacing: true,
     });
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+    expect(documentXml.indexOf('John Candidate')).toBeLessThan(
+      documentXml.indexOf('SKILLS'),
+    );
+    expect(documentXml).toContain('SKILLS');
+    expect(documentXml).toContain('EXPERIENCE');
     expect(exportResult.filename).toBe('resume.docx');
     expect(exportResult.auditId).toBe('audit-1');
     expect(exportResult.baselineVersionHash).toBe('hash-1');
+  });
+
+  it('renders structured sections exactly once', async () => {
+    const { service } = buildService(95, []);
+
+    const exportResult = await service.exportResume(
+      'user-1',
+      baseRequest,
+      'docx',
+    );
+
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+
+    const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
+    const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
+    const headerMatches = documentXml.match(/John Candidate/g) ?? [];
+
+    expect(skillMatches).toHaveLength(1);
+    expect(experienceMatches).toHaveLength(1);
+    expect(headerMatches).toHaveLength(1);
+    expect(documentXml).toContain('<w:numId');
   });
 
   it('exports PDF content with valid header', async () => {

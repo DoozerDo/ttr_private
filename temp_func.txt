@@ -1,0 +1,98 @@
+
+
+export interface StructuredResumeInput {
+  header: {
+    name?: string;
+    title?: string;
+    contactLines?: string[];
+  };
+  summary?: string[];
+  skills?: string[];
+  experience?: ExperienceItem[];
+  education?: string[];
+  certifications?: string[];
+  otherLines?: string[];
+}
+
+export function mapStructuredResumeToDocxModel(input: StructuredResumeInput): ResumeDocxModel {
+  const header: ResumeDocxHeader = {
+    name: input.header.name?.trim() || undefined,
+    title: input.header.title?.trim() || undefined,
+    contactLines:
+      input.header.contactLines
+        ?.map((line) => line.trim())
+        .filter(Boolean) || undefined,
+  };
+
+  const sections: ResumeDocxSection[] = []; 
+
+  const addSection = (
+    key: ResumeSectionKey,
+    title: string,
+    items: ResumeSectionItem[],
+  ) => {
+    if (!items.length) {
+      return;
+    }
+    sections.push({ key, title, items });
+  };
+
+  const summaryParagraphs = (input.summary ?? [])
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  if (summaryParagraphs.length) {
+    addSection('summary', SECTION_TITLE_FALLBACK.summary, [
+      { paragraphs: summaryParagraphs },
+    ]);
+  }
+
+  const skillValues = (input.skills ?? [])
+    .map((skill) => skill.trim())
+    .filter(Boolean);
+  if (skillValues.length) {
+    addSection('skills', SECTION_TITLE_FALLBACK.skills, [
+      { groups: [{ values: skillValues }] },
+    ]);
+  }
+
+  const experienceItems = (input.experience ?? [])
+    .map((item) => ({
+      role: item.role.trim(),
+      company: item.company?.trim(),
+      location: item.location?.trim(),
+      dateRange: item.dateRange?.trim(),
+      description: item.description?.trim() || undefined,
+      bullets: (item.bullets ?? [])
+        .map((bullet) => bullet.trim())
+        .filter(Boolean),
+    }))
+    .filter((item) => item.role);
+  if (experienceItems.length) {
+    addSection('experience', SECTION_TITLE_FALLBACK.experience, experienceItems);
+  }
+
+  const educationItems = (input.education ?? [])
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => ({ raw: line }));
+  if (educationItems.length) {
+    addSection('education', SECTION_TITLE_FALLBACK.education, educationItems);
+  }
+
+  const certificationItems = (input.certifications ?? [])
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((title) => ({ title }));
+  if (certificationItems.length) {
+    addSection('certifications', SECTION_TITLE_FALLBACK.certifications, certificationItems);
+  }
+
+  const otherLines = (input.otherLines ?? [])
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (otherLines.length) {
+    addSection('other', ADDITIONAL_INFO_TITLE, [{ lines: otherLines }]);
+  }
+
+  return { header, sections };
+}

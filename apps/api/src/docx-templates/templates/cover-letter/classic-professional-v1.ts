@@ -23,6 +23,13 @@ function createDateParagraph(line: string) {
   });
 }
 
+function createAddresseeParagraph(line: string) {
+  return new Paragraph({
+    spacing: { after: 80, line: 276 },
+    children: [new TextRun({ text: line, size: 22, font: 'Calibri' })],
+  });
+}
+
 function createGreetingParagraph(text: string) {
   return new Paragraph({
     spacing: { after: 120, line: 276 },
@@ -52,6 +59,9 @@ const template: DocxTemplateDefinition<CoverLetterDocxModel> = {
     if (model.dateLine) {
       sections.push(createDateParagraph(model.dateLine));
     }
+    model.addresseeLines?.forEach((line) => {
+      sections.push(createAddresseeParagraph(line));
+    });
     sections.push(createGreetingParagraph(model.greeting));
     model.paragraphs.forEach((paragraph) => {
       sections.push(createBodyParagraph(paragraph));

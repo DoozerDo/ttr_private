@@ -21,24 +21,77 @@ export interface ResumeDocxHeader {
   contactLines?: string[];
 }
 
-export interface ExperienceEntry {
+export type ResumeSectionKey =
+  | 'summary'
+  | 'skills'
+  | 'experience'
+  | 'education'
+  | 'certifications'
+  | 'other';
+
+export interface ResumeDocxSection {
+  key: ResumeSectionKey;
+  title: string;
+  items: ResumeSectionItem[];
+}
+
+export interface ResumeSummaryItem {
+  paragraphs: string[];
+}
+
+export interface ResumeSkillsGroup {
+  label?: string;
+  values: string[];
+}
+
+export interface ResumeSkillsItem {
+  groups?: ResumeSkillsGroup[];
+  lines?: string[];
+}
+
+export interface ResumeEducationItem {
+  institution?: string;
+  degree?: string;
+  dateRange?: string;
+  details?: string[];
+  raw?: string;
+}
+
+export interface ResumeCertificationItem {
+  title: string;
+  organization?: string;
+  dateRange?: string;
+}
+
+export interface ResumeOtherItem {
+  lines: string[];
+}
+
+export interface ExperienceItem {
   role: string;
   company?: string;
+  location?: string;
   dateRange?: string;
+  description?: string;
   bullets: string[];
 }
 
+export type ResumeSectionItem =
+  | ResumeSummaryItem
+  | ResumeSkillsItem
+  | ExperienceItem
+  | ResumeEducationItem
+  | ResumeCertificationItem
+  | ResumeOtherItem;
+
 export interface ResumeDocxModel {
   header: ResumeDocxHeader;
-  summary?: string[];
-  skills?: string[][];
-  experiences?: ExperienceEntry[];
-  education?: string[];
-  certifications?: string[];
+  sections: ResumeDocxSection[];
 }
 
 export interface CoverLetterDocxModel {
   dateLine?: string;
+  addresseeLines?: string[];
   greeting: string;
   paragraphs: string[];
   closingLines?: string[];

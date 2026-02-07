@@ -45,13 +45,17 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
           this.composeClosing(job, tone, input.closingTemplate.text),
         ];
 
-    let content = paragraphs
+    const greeting = 'Dear Hiring Team,';
+    const trimmedParagraphs = paragraphs
       .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
+    const closingParagraph = trimmedParagraphs.pop() ?? '';
+    const bodyParagraphs = [...trimmedParagraphs];
+
+    let content = [greeting, ...bodyParagraphs, closingParagraph]
       .filter(Boolean)
       .join('\n\n')
       .trim();
-
-    content = this.ensureGreeting(content);
 
     let wordCount = this.countWords(content);
 
@@ -63,25 +67,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       wordCount = this.countWords(content);
     }
 
+    const finalParagraphs = this.splitParagraphs(content);
+    let finalGreeting = greeting;
+    if (finalParagraphs.length && /^dear\\b/i.test(finalParagraphs[0])) {
+      finalGreeting = finalParagraphs.shift()!;
+    }
+    const finalClosing =
+      finalParagraphs.length > 0 ? finalParagraphs.pop() : undefined;
+
     return {
       content,
       wordCount,
+      greeting: finalGreeting,
+      paragraphs: finalParagraphs,
+      closingParagraphs: finalClosing ? [finalClosing] : [],
     };
-  }
-
-  private ensureGreeting(body: string) {
-    const greeting = 'Dear Hiring Team,';
-    const normalized = body.trimStart();
-
-    if (normalized.startsWith(greeting)) {
-      return normalized;
-    }
-
-    const stripped = normalized
-      .replace(/^dear\s+hiring\s+team,?\s*/i, '')
-      .trimStart();
-
-    return `${greeting} ${stripped}`.trim();
   }
 
   private resolveTargetWords(maxWords?: number | null) {
@@ -328,5 +328,12 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
   private countWords(text: string) {
     return text.split(/\s+/).filter(Boolean).length;
+  }
+
+  private splitParagraphs(text: string) {
+    return text
+      .split(/\n{2,}/)
+      .map((segment) => segment.trim())
+      .filter(Boolean);
   }
 }

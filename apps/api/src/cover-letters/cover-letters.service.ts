@@ -36,6 +36,7 @@ import { CoverLetter } from './cover-letter.entity';
 import { GenerateCoverLetterDto } from './dto/generate-cover-letter.dto';
 import {
   AllowedBaselineBlock,
+  CoverLetterGenerationResult,
   CoverLetterGenerator,
 } from './generators/cover-letter-generator.interface';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
@@ -44,11 +45,12 @@ import {
   DEFAULT_COVER_LETTER_TEMPLATE_KEY,
   getDocxTemplate,
 } from '../docx-templates/docx-template.registry';
-import { mapCoverLetterTextToModel } from '../docx-templates/mappers/cover-letter-text-to-model';
+import { mapCoverLetterResultToModel } from '../docx-templates/mappers/cover-letter-result-to-model';
 import {
   CoverLetterDocxModel,
   DocxRenderContextBase,
 } from '../docx-templates/docx-template.types';
+import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -65,6 +67,7 @@ type CoverLetterDraft = {
   jobContextAllowlist: JobApplicationContext;
   closingTemplateKey: string;
   generationInputsHash: string;
+  generation: CoverLetterGenerationResult;
   complianceResult: {
     normalizedContent: string;
     complianceFlags: ComplianceFlag[];
@@ -148,7 +151,12 @@ export class CoverLettersService {
     if (format === 'pdf') {
       buffer = this.buildPdfBuffer(text);
     } else {
-      const model = mapCoverLetterTextToModel(text);
+      const identity = resolveBaselineIdentity(draft.baseline);
+      const model = mapCoverLetterResultToModel(
+        draft.generation,
+        identity,
+        draft.jobContext,
+      );
       const template = getDocxTemplate<CoverLetterDocxModel>(
         'cover_letter',
         DEFAULT_COVER_LETTER_TEMPLATE_KEY,
@@ -226,7 +234,7 @@ export class CoverLettersService {
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: input.baselineId, userId },
-      relations: ['sections'],
+      relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' } },
     });
 
@@ -370,6 +378,7 @@ export class CoverLettersService {
       jobContextAllowlist,
       closingTemplateKey,
       generationInputsHash,
+      generation,
       complianceResult,
     };
   }

@@ -21,7 +21,10 @@ import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import '../docx-templates/templates';
-import { mapResumeTextToModel } from '../docx-templates/mappers/resume-text-to-model';
+import {
+  mapResumeSectionsToDocxModel,
+  ResumeExportSection,
+} from '../docx-templates/mappers/resume-sections-to-model';
 import {
   DocxRenderContextBase,
   ResumeDocxModel,
@@ -30,6 +33,7 @@ import {
   DEFAULT_RESUME_TEMPLATE_KEY,
   getDocxTemplate,
 } from '../docx-templates/docx-template.registry';
+import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -294,19 +298,34 @@ export class ResumeService {
     const generation = await this.generateResume(userId, request, {
       enforceOneTap: false,
     });
-    const text = this.buildResumeText(
-      generation.sections.map((section) => ({
-        title: section.title,
-        content: section.content,
-      })),
-    );
+    const sectionFragments = generation.sections.map((section) => ({
+      title: section.title,
+      content: section.content,
+    }));
 
     let buffer: Buffer;
+    let pdfText: string | undefined;
     if (format === 'pdf') {
-      buffer = this.buildPdfBuffer(text);
+      pdfText = this.buildResumeText(sectionFragments);
+      buffer = this.buildPdfBuffer(pdfText);
     } else {
-      const model = mapResumeTextToModel(text, generation.sections);
-      const template = getDocxTemplate<ResumeDocxModel>('resume', DEFAULT_RESUME_TEMPLATE_KEY);
+      const baselineForHeader = await this.baselineRepository.findOne({
+        where: { id: generation.baselineId, userId },
+        relations: ['parsedRecords'],
+        order: { parsedRecords: { createdAt: 'DESC' } },
+      });
+      if (!baselineForHeader) {
+        throw new NotFoundException('Baseline not found');
+      }
+      const identity = resolveBaselineIdentity(baselineForHeader);
+      const model = mapResumeSectionsToDocxModel(
+        generation.sections as ResumeExportSection[],
+        identity,
+      );
+      const template = getDocxTemplate<ResumeDocxModel>(
+        'resume',
+        DEFAULT_RESUME_TEMPLATE_KEY,
+      );
       const renderContext: DocxRenderContextBase = {
         templateKey: DEFAULT_RESUME_TEMPLATE_KEY,
         font: 'Calibri',
@@ -348,7 +367,13 @@ export class ResumeService {
         baselineVersion,
         job,
         outputHash: createHash('sha256')
-          .update(`${format}:${text}`)
+          .update(
+            `${format}:${
+              format === 'pdf'
+                ? pdfText ?? ''
+                : JSON.stringify(sectionFragments)
+            }`,
+          )
           .digest('hex'),
         baselineSections: generation.sections,
         generatedSections: generation.sections,

@@ -39,6 +39,9 @@ export type CoverLetterGenerationInput = {
 export type CoverLetterGenerationResult = {
   content: string;
   wordCount: number;
+  greeting: string;
+  paragraphs: string[];
+  closingParagraphs: string[];
 };
 
 export interface CoverLetterGenerator {
