@@ -73,6 +73,7 @@ docker exec -it docker-db-1 psql -U postgres -d targetthisrole
 
 Cmds: 
 \dt
+\d tablename
 
 SELECT COUNT(*) AS users FROM users;
 SELECT COUNT(*) AS baselines FROM baselines;
@@ -108,7 +109,7 @@ UPDATE users SET "accountType" = 'paid' WHERE id = '56753a5f-11c1-4af5-acc5-774c
 UPDATE users SET "subscriptionTier" = 'PRO' WHERE id = '56753a5f-11c1-4af5-acc5-774c083f4538';
 
 
-INSERT INTO "admin_users" ("userId", "role") VALUES ('b29d566c-b75e-4d03-9827-a480f8b8fc73', 'admin');
+INSERT INTO "admin_users" ("userId", "role") VALUES ('bf5bad96-738f-47a4-aea5-b1649968909b', 'admin');
 INSERT INTO "admin_users" ("userId") VALUES ('doug@ttr.com');
 
 DELETE FROM admin_users WHERE id = '722e6d64-e0c3-4c18-9da3-d3ca7fef790f';
