@@ -1,322 +1,256 @@
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
-index 5be38b444b50a2f6fcc197dd7f00959014511ec9..257a59fb90c81e13e0bd054e310c100c720615fc 100644
---- a/apps/api/src/resume/resume.service.spec.ts
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -398,50 +398,103 @@ describe('ResumeService', () => {
-       baseRequest,
-       'docx',
-     );
+diff --git a/apps/web/app/(app)/baseline/_components/JobsHub.tsx b/apps/web/app/(app)/baseline/_components/JobsHub.tsx
+index 6b2384d6223393791b6641689036a5217778c3f7..ec9822cdeec459798355a1e9e6b6bcaa0baa191d 100644
+--- a/apps/web/app/(app)/baseline/_components/JobsHub.tsx
++++ b/apps/web/app/(app)/baseline/_components/JobsHub.tsx
+@@ -1,36 +1,37 @@
+ "use client";
  
-     const zip = await JSZip.loadAsync(exportResult.buffer);
-     const documentXml = await zip.file('word/document.xml')!.async('text');
+ import Link from "next/link";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { usePathname, useRouter, useSearchParams } from "next/navigation";
  
-     const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
-     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
-     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
+ import { Alert } from "@/components/Alert";
+ import { EmptyState } from "@/components/EmptyState";
+ import { FormButton, SecondaryActionLink } from "@/components/FormButton";
+ import type { JobDto } from "@/lib/jobs";
+ import { archiveJob, listJobs } from "@/lib/jobsClient";
++import { formatDateTime } from "@/lib/format-date";
+ import { getJobDetailsHref } from "@/src/navigation/routes";
+ import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
+ import { OverflowMenu } from "./OverflowMenu";
+ import { SetupModuleCard } from "./SetupModuleCard";
+ import { setJobTitle } from "./selectionStore";
  
-     expect(skillMatches).toHaveLength(1);
-     expect(experienceMatches).toHaveLength(1);
-     expect(headerMatches).toHaveLength(1);
-     expect(documentXml).toContain('<w:numId');
-   });
+ function isArchived(job: JobDto): boolean {
+   const record = job as unknown as Record<string, unknown>;
+   const archivedFlag = record["isArchived"];
+   if (typeof archivedFlag === "boolean") return archivedFlag;
  
-   it('exports PDF content with valid header', async () => {
-     const { service } = buildService(95, []);
+   const status = record["status"];
+   if (typeof status === "string" && status.toUpperCase() === "ARCHIVED") return true;
  
-     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
-     expect(exportResult.contentType).toBe('application/pdf');
-     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
-     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
-     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
-+    const pdfText = exportResult.buffer.toString('utf8');
-+    expect(pdfText).toContain('T*');
-+    expect(pdfText).not.toContain('startxref\n0');
-+  });
-+
-+  it('normalizes bullet-like and mojibake characters in PDF content', async () => {
-+    const baselineWithMojibake: Baseline = {
-+      ...mockBaseline,
-+      sections: [
-+        {
-+          ...summarySection,
-+          content: `Summary\nâ€¢ First bullet\n• Second bullet\n&&¢ Third bullet`,
-+        },
-+      ],
-+    };
-+
-+    const baselineRepository = buildRepository<Baseline>({
-+      findOne: jest.fn().mockResolvedValue(baselineWithMojibake),
-+    });
-+    const baselineVersionRepository = buildRepository<BaselineVersion>({
-+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
-+    });
-+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
-+      find: jest.fn().mockResolvedValue([]),
-+    });
-+    const jobsRepository = buildRepository<Job>({
-+      findOne: jest.fn().mockResolvedValue(mockJob),
-+    });
-+    const fitAssessmentRepository = buildRepository<FitAssessment>({
-+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
-+    });
-+
-+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
-+    const service = new ResumeService(
-+      baselineRepository,
-+      baselineVersionRepository,
-+      baselineBlockPolicyRepository,
-+      jobsRepository,
-+      fitAssessmentRepository,
-+      complianceService,
-+    );
-+
-+    const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
-+    const latin1Text = exportResult.buffer.toString('latin1');
-+    expect(latin1Text).toContain('First bullet');
-+    expect(latin1Text).toContain('Second bullet');
-+    expect(latin1Text).toContain('Third bullet');
-+    expect(latin1Text).toContain('- First bullet');
-+    expect(latin1Text).toContain('- Second bullet');
-+    expect(latin1Text).toContain('- Third bullet');
-+    expect(latin1Text).not.toContain('â€¢');
-+    expect(latin1Text).not.toContain('&&¢');
-+    expect(latin1Text).not.toContain('\n& ');
-   });
+   const archivedAt = record["archivedAt"];
+   if (typeof archivedAt === "string" && archivedAt.trim().length > 0) return true;
  
-   it('blocks generation when baseline hash is missing', async () => {
-     const complianceOverride: Partial<MockedComplianceService> = {
-       validateAndAudit: jest.fn().mockResolvedValue({
-         complianceFlags: [
-           {
-             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
-             severity: ComplianceFlagSeverity.BLOCK,
-             message: 'Baseline version hash is required.',
-           },
-         ],
-         blocked: true,
-         audit: {
-           id: 'audit-1',
-           baselineVersionId: 'baseline-version-1',
-           baselineVersionHash: null,
-           outputHash: '',
-           action: ComplianceAction.RESUME_GENERATION,
-           actorId: 'user-1',
-           jobId: 'job-1',
-           createdAt: new Date().toISOString(),
-         },
-       } as ValidateAndAuditResult),
-     };
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index ca06586b61c07c23f52363ef78d1336b2f2439d1..b165aeba9d3dd15be62d2681fb95c1db3588cf62 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -71,74 +71,185 @@ export class ResumeService {
+   return false;
+ }
  
-   private ensureOneTapAllowed(assessment?: FitAssessment | null) {
-     if (!assessment || assessment.overallScore < AUTO_GENERATE_THRESHOLD) {
-       throw new UnprocessableEntityException({
-         error: {
-           code: 'fit_score_too_low',
-           message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
-           details: { last_score: assessment?.overallScore ?? null },
-         },
-       });
-     }
-   }
+ interface JobsHubProps {
+   selectedJobId?: string | null;
+   onJobMissing?: () => void;
+ }
  
-   private buildResumeText(
-     sections: Array<{ title: string | null; content: string }>,
-   ) {
-     return sections
-       .map((section) => {
-         const title = section.title ? `${section.title}\n` : '';
-         return `${title}${section.content}`.trim();
-       })
-       .join('\n\n');
-   }
+@@ -153,93 +154,90 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
  
-   private buildPdfBuffer(content: string) {
--    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
--    const escaped = sanitized
--      .replace(/\\/g, '\\\\')
--      .replace(/\(/g, '\\(')
--      .replace(/\)/g, '\\)');
--    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
--    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
--    const pdfParts = [
--      '%PDF-1.4',
--      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
--      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
--      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
--      `4 0 obj ${contentStream} endobj`,
--      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
--      'xref',
--      '0 6',
--      '0000000000 65535 f ',
--      'trailer << /Size 6 /Root 1 0 R >>',
--      'startxref',
--      '0',
--      '%%EOF',
--    ];
+         {isLoading ? (
+           <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-200">
+             Loading jobs
+           </div>
+         ) : visibleJobs.length === 0 ? (
+           <EmptyState
+             title="No jobs yet"
+             body="Add a job to start building your target workspace."
+             cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
+           />
+         ) : (
+           <div className="space-y-3">
+             {visibleJobs.map((job) => {
+               const archived = isArchived(job);
+               const isSelected = job.id === selectedJobId;
+               const cardClasses = [
+                 "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
+                 isSelected ? "ring-2 ring-amber-400/40" : "",
+               ]
+                 .filter(Boolean)
+                 .join(" ");
+ 
+               return (
+                 <div key={job.id} className={cardClasses}>
+-                  <div className="flex flex-col gap-3">
+-                    <div className="flex items-start justify-between gap-3">
+-                      <div className="min-w-0 space-y-1">
+-                        <div className="flex flex-wrap items-center gap-2">
+-                          <Link
+-                            href={getJobDetailsHref(job.id)}
+-                            className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
+-                          >
+-                            <span className="block truncate">
+-                              {job.title || "Untitled job"}
+-                            </span>
+-                          </Link>
+-                          {archived ? (
+-                            <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
+-                              Archived
+-                            </span>
+-                          ) : null}
+-                        </div>
+-                        {job.company ? (
+-                          <p className="text-xs text-slate-400">{job.company}</p>
+-                        ) : null}
+-                      </div>
 -
--    return Buffer.from(pdfParts.join('\n'));
-+    const normalizePdfText = (value: string) => {
-+      const normalizedChars = value
-+        // Normalize common Unicode punctuation to WinAnsi-safe text.
-+        .replace(/[\u2018\u2019]/g, "'")
-+        .replace(/[\u201C\u201D]/g, '"')
-+        .replace(/[\u2013\u2014]/g, '-')
-+        .replace(/\u2026/g, '...')
-+        .replace(/\u00a0/g, ' ')
-+        // Keep visible bullet glyph in plain text while normalizing variants.
-+        .replace(/[\u25CF\u25E6\u2043\u2219]/g, '•')
-+        // Repair common mojibake sequences when UTF-8 punctuation was decoded as Latin-1.
-+        .replace(/â€¢/g, '•')
-+        .replace(/â€“|â€”/g, '-')
-+        .replace(/â€˜|â€™/g, "'")
-+        .replace(/â€œ|â€/g, '"')
-+        .replace(/â€¦/g, '...');
+-                      <div className="flex flex-wrap items-center gap-2">
+-                        <SecondaryActionLink href={getJobDetailsHref(job.id)}>
+-                          View details
+-                        </SecondaryActionLink>
+-                        <FormButton
+-                          variant="secondary"
+-                          onClick={() => setJobSelection(job.id)}
+-                          disabled={isSelected}
+-                        >
+-                          {isSelected ? "Selected" : "Select"}
+-                        </FormButton>
+-                        {!archived ? (
+-                          <OverflowMenu
+-                            onArchive={() => handleArchiveJob(job.id)}
+-                            loading={archivingJobId === job.id}
+-                            ariaLabel="Job overflow actions"
+-                          />
+-                        ) : null}
+-                      </div>
++                  <div className="min-w-0">
++                    <div className="flex min-w-0 items-center gap-2">
++                      <Link
++                        href={getJobDetailsHref(job.id)}
++                        className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
++                      >
++                        <span className="block truncate">{job.title || "Untitled job"}</span>
++                      </Link>
++                      {archived ? (
++                        <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
++                          Archived
++                        </span>
++                      ) : null}
+                     </div>
 +
-+      return normalizedChars
-+        .split('\n')
-+        .map((line) => {
-+          // Some inputs still encode bullets as leading "&"; normalize only at line start.
-+          if (/^\s*&&+¢\s+/.test(line)) {
-+            return line.replace(/^\s*&&+¢\s+/, '- ');
-+          }
-+          if (/^\s*&\s+/.test(line)) {
-+            return line.replace(/^\s*&\s+/, '- ');
-+          }
-+          if (/^\s*•\s+/.test(line)) {
-+            return line.replace(/^\s*•\s+/, '- ');
-+          }
-+          return line;
-+        })
-+        .join('\n');
-+    };
++                    {job.company ? <p className="mt-1 text-xs text-slate-400">{job.company}</p> : null}
 +
-+    const sanitizeForPdf = (value: string) =>
-+      value
-+        .replace(/\\/g, '\\\\')
-+        .replace(/\(/g, '\\(')
-+        .replace(/\)/g, '\\)');
++                    <div className="mt-3 flex flex-wrap items-center gap-2">
++                      <SecondaryActionLink href={getJobDetailsHref(job.id)}>
++                        View details
++                      </SecondaryActionLink>
++                      <FormButton
++                        variant="secondary"
++                        onClick={() => setJobSelection(job.id)}
++                        disabled={isSelected}
++                      >
++                        {isSelected ? "Selected" : "Select"}
++                      </FormButton>
++                      {!archived ? (
++                        <OverflowMenu
++                          onArchive={() => handleArchiveJob(job.id)}
++                          loading={archivingJobId === job.id}
++                          ariaLabel="Job overflow actions"
++                        />
++                      ) : null}
++                    </div>
 +
-+    const wrapLine = (line: string, maxChars: number) => {
-+      if (!line.trim()) return [''];
-+      const words = line.trim().split(/\s+/);
-+      const wrapped: string[] = [];
-+      let current = '';
-+
-+      for (const word of words) {
-+        if (!current.length) {
-+          current = word;
-+          continue;
-+        }
-+        if (`${current} ${word}`.length <= maxChars) {
-+          current = `${current} ${word}`;
-+          continue;
-+        }
-+        wrapped.push(current);
-+        current = word;
-+      }
-+
-+      if (current.length) wrapped.push(current);
-+      return wrapped;
-+    };
-+
-+    const normalized = normalizePdfText(
-+      content.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
-+    );
-+    const wrappedLines = normalized
-+      .split('\n')
-+      .flatMap((line) => wrapLine(line, 95));
-+    const lines = wrappedLines.length ? wrappedLines : [''];
-+
-+    const lineHeight = 14;
-+    const maxLinesPerPage = 48;
-+    const pageChunks: string[][] = [];
-+    for (let i = 0; i < lines.length; i += maxLinesPerPage) {
-+      pageChunks.push(lines.slice(i, i + maxLinesPerPage));
-+    }
-+
-+    const objectBodies: string[] = [];
-+    const pageObjectNumbers: number[] = [];
-+    objectBodies.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
-+    objectBodies.push(''); // 2 (filled after page refs are known)
-+
-+    for (const pageLines of pageChunks) {
-+      const pageObjectNumber = objectBodies.length + 1;
-+      const contentObjectNumber = pageObjectNumber + 1;
-+      const textCommands = [
-+        'BT',
-+        '/F1 11 Tf',
-+        `${lineHeight} TL`,
-+        '72 750 Td',
-+        ...pageLines.flatMap((line, index) => {
-+          const escaped = sanitizeForPdf(line);
-+          if (index === 0) return [`(${escaped}) Tj`];
-+          return ['T*', `(${escaped}) Tj`];
-+        }),
-+        'ET',
-+      ].join('\n');
-+
-+      const contentStream =
-+        `<< /Length ${Buffer.byteLength(textCommands, 'latin1')} >>\n` +
-+        `stream\n${textCommands}\nendstream`;
-+
-+      pageObjectNumbers.push(pageObjectNumber);
-+      objectBodies.push(
-+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjectNumber} 0 R /Resources << /Font << /F1 ${pageChunks.length * 2 + 3} 0 R >> >> >>`,
-+      );
-+      objectBodies.push(contentStream);
-+    }
-+
-+    const kids = pageObjectNumbers.map((number) => `${number} 0 R`).join(' ');
-+    objectBodies[1] = `<< /Type /Pages /Kids [${kids}] /Count ${pageObjectNumbers.length} >>`;
-+
-+    objectBodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-+
-+    let pdf = '%PDF-1.4\n';
-+    const offsets: number[] = [0];
-+
-+    objectBodies.forEach((body, index) => {
-+      offsets.push(Buffer.byteLength(pdf, 'latin1'));
-+      pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
-+    });
-+
-+    const xrefOffset = Buffer.byteLength(pdf, 'latin1');
-+    pdf += `xref\n0 ${objectBodies.length + 1}\n`;
-+    pdf += '0000000000 65535 f \n';
-+    for (let i = 1; i <= objectBodies.length; i += 1) {
-+      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-+    }
-+    pdf +=
-+      `trailer\n<< /Size ${objectBodies.length + 1} /Root 1 0 R >>\n` +
-+      `startxref\n${xrefOffset}\n%%EOF`;
-+
-+    return Buffer.from(pdf, 'latin1');
-   }
++                    <p className="mt-3 text-xs text-slate-400">
++                      Updated {formatDateTime(job.updatedAt)}
++                    </p>
+                   </div>
+                 </div>
+               );
+             })}
+           </div>
+         )}
+       </SetupModuleCard>
  
-   private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {
-     const safeCompany = (company ?? 'resume')
-       .trim()
-       .replace(/[^a-zA-Z0-9]+/g, '-')
-       .replace(/^-+|-+$/g, '') || 'resume';
-     const now = new Date();
-     const mm = String(now.getMonth() + 1).padStart(2, '0');
-     const dd = String(now.getDate()).padStart(2, '0');
-     const yyyy = String(now.getFullYear());
-     return `${safeCompany}-${mm}-${dd}-${yyyy}.${format}`;
-   }
+       {isIngestOpen ? (
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+           <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-950 p-4">
+             <div className="mb-3 flex items-center justify-between gap-3">
+               <div className="text-sm font-semibold text-slate-100">Add job</div>
+               <FormButton variant="secondary" onClick={() => setIsIngestOpen(false)}>
+                 Close
+               </FormButton>
+             </div>
  
-   private applyPoliciesToSections(
-     sections: BaselineSection[],
-     policies: BaselineBlockPolicy[],
-   ) {
-     if (!policies.length) {
-       return [...sections].sort((a, b) => a.order - b.order);
-     }
+             <JobIngestionForm
+               onCancel={() => setIsIngestOpen(false)}
+               onResolved={async (resolvedJobId) => {
+                 setIsIngestOpen(false);
+                 await load();
+                 setJobSelection(resolvedJobId);
+               }}
+diff --git a/apps/web/app/(app)/baseline/baseline-dashboard.tsx b/apps/web/app/(app)/baseline/baseline-dashboard.tsx
+index b7b33b46190eb53c0ca0a276533cf3fd0cf54e7e..b592d6dfb7d897ac001c18c1481769a2f94a14bc 100644
+--- a/apps/web/app/(app)/baseline/baseline-dashboard.tsx
++++ b/apps/web/app/(app)/baseline/baseline-dashboard.tsx
+@@ -300,70 +300,70 @@ export function BaselineDashboard({
+       {initialFetchError ? (
+         <Alert intent="error" title="Unable to load resumes">
+           <p className="text-sm text-current">{initialFetchError}</p>
+         </Alert>
+       ) : null}
  
-     const policyMap = new Map<string, BaselineBlockPolicy>(
-       policies.map((policy) => [policy.baselineSectionId, policy]),
-     );
+       {sortedBaselines.length === 0 ? (
+         initialFetchError ? null : (
+           <p className="m-0 text-[13px] text-slate-400">
+             No resumes uploaded yet.
+           </p>
+         )
+       ) : (
+         <div className="space-y-3">
+           {sortedBaselines.map((baseline) => {
+             const isSelected = baseline.id === selectedBaselineId;
+             const cardClasses = [
+               "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
+               isSelected ? "ring-2 ring-amber-400/40" : "",
+             ]
+               .filter(Boolean)
+               .join(" ");
+ 
+             return (
+               <div key={baseline.id} className={cardClasses}>
+-                <div className="flex items-center justify-between gap-4 min-w-0">
+-                  <div className="flex flex-1 min-w-0 items-center gap-2">
++                <div className="min-w-0">
++                  <div className="flex min-w-0 items-center gap-2">
+                     <p className="truncate text-sm font-semibold text-slate-100">
+                       {baseline.originalFilename}
+                     </p>
+                     {baseline.status === "ARCHIVED" ? (
+                       <span className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                         Archived
+                       </span>
+                     ) : null}
+                   </div>
+ 
+-                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
++                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                     <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
+                       View details
+                     </SecondaryActionLink>
+                     <FormButton
+                       variant="secondary"
+                       onClick={() => setBaselineSelection(baseline.id)}
+                       disabled={isSelected}
+                       className="shrink-0"
+                     >
+                       {isSelected ? "Selected" : "Select"}
+                     </FormButton>
+                     {baseline.status !== "ARCHIVED" ? (
+                       <OverflowMenu
+                         onArchive={() => handleArchiveBaseline(baseline.id)}
+                         loading={archivingBaselineId === baseline.id}
+                         ariaLabel="Resume overflow actions"
+                       />
+                     ) : null}
+                   </div>
+                 </div>
+-                <p className="text-xs text-slate-400 mt-2">
+-                  Uploaded {formatDateTime(baseline.createdAt)}
++
++                <p className="mt-3 text-xs text-slate-400">
++                  Updated {formatDateTime(baseline.updatedAt)}
+                 </p>
+               </div>
+             );
+           })}
+         </div>
+       )}
+     </SetupModuleCard>
+   );
+ }
+-

@@ -322,8 +322,8 @@ export function BaselineDashboard({
 
             return (
               <div key={baseline.id} className={cardClasses}>
-                <div className="flex items-center justify-between gap-4 min-w-0">
-                  <div className="flex flex-1 min-w-0 items-center gap-2">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-semibold text-slate-100">
                       {baseline.originalFilename}
                     </p>
@@ -334,7 +334,7 @@ export function BaselineDashboard({
                     ) : null}
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
                       View details
                     </SecondaryActionLink>
@@ -355,8 +355,9 @@ export function BaselineDashboard({
                     ) : null}
                   </div>
                 </div>
-                <p className="text-xs text-slate-400 mt-2">
-                  Uploaded {formatDateTime(baseline.createdAt)}
+
+                <p className="mt-3 text-xs text-slate-400">
+                  Updated {formatDateTime(baseline.updatedAt)}
                 </p>
               </div>
             );
@@ -366,4 +367,3 @@ export function BaselineDashboard({
     </SetupModuleCard>
   );
 }
-

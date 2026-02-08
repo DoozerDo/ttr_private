@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import type { JobDto } from "@/lib/jobs";
 import { archiveJob, listJobs } from "@/lib/jobsClient";
+import { formatDateTime } from "@/lib/format-date";
 import { getJobDetailsHref } from "@/src/navigation/routes";
 import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
 import { OverflowMenu } from "./OverflowMenu";
@@ -175,49 +176,46 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
 
               return (
                 <div key={job.id} className={cardClasses}>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={getJobDetailsHref(job.id)}
-                            className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
-                          >
-                            <span className="block truncate">
-                              {job.title || "Untitled job"}
-                            </span>
-                          </Link>
-                          {archived ? (
-                            <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
-                              Archived
-                            </span>
-                          ) : null}
-                        </div>
-                        {job.company ? (
-                          <p className="text-xs text-slate-400">{job.company}</p>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <SecondaryActionLink href={getJobDetailsHref(job.id)}>
-                          View details
-                        </SecondaryActionLink>
-                        <FormButton
-                          variant="secondary"
-                          onClick={() => setJobSelection(job.id)}
-                          disabled={isSelected}
-                        >
-                          {isSelected ? "Selected" : "Select"}
-                        </FormButton>
-                        {!archived ? (
-                          <OverflowMenu
-                            onArchive={() => handleArchiveJob(job.id)}
-                            loading={archivingJobId === job.id}
-                            ariaLabel="Job overflow actions"
-                          />
-                        ) : null}
-                      </div>
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Link
+                        href={getJobDetailsHref(job.id)}
+                        className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
+                      >
+                        <span className="block truncate">{job.title || "Untitled job"}</span>
+                      </Link>
+                      {archived ? (
+                        <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
+                          Archived
+                        </span>
+                      ) : null}
                     </div>
+
+                    {job.company ? <p className="mt-1 text-xs text-slate-400">{job.company}</p> : null}
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <SecondaryActionLink href={getJobDetailsHref(job.id)}>
+                        View details
+                      </SecondaryActionLink>
+                      <FormButton
+                        variant="secondary"
+                        onClick={() => setJobSelection(job.id)}
+                        disabled={isSelected}
+                      >
+                        {isSelected ? "Selected" : "Select"}
+                      </FormButton>
+                      {!archived ? (
+                        <OverflowMenu
+                          onArchive={() => handleArchiveJob(job.id)}
+                          loading={archivingJobId === job.id}
+                          ariaLabel="Job overflow actions"
+                        />
+                      ) : null}
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-400">
+                      Updated {formatDateTime(job.updatedAt)}
+                    </p>
                   </div>
                 </div>
               );
