@@ -19,7 +19,7 @@ export const CALIBRATION_PROFILE_OPTIONS: Array<CalibrationProfileOption> = [
   {
     value: 'balanced',
     label: 'Balanced',
-    description: 'Even weighting across all dimensions for a steady baseline.',
+    description: 'Keeps every experience area even so the score reflects the recorded baseline.',
     weights: {
       experienceAlignment: 1,
       leadershipLevel: 1,
@@ -31,7 +31,7 @@ export const CALIBRATION_PROFILE_OPTIONS: Array<CalibrationProfileOption> = [
   {
     value: 'conservative',
     label: 'Conservative',
-    description: 'Boosts experience and leadership signals for a higher bar.',
+    description: 'Leans into experience and leadership signals so the score stays cautious.',
     weights: {
       experienceAlignment: 1.2,
       leadershipLevel: 1.2,
@@ -43,7 +43,7 @@ export const CALIBRATION_PROFILE_OPTIONS: Array<CalibrationProfileOption> = [
   {
     value: 'aggressive',
     label: 'Aggressive',
-    description: 'Rewards strategic and platform signals to broaden reach.',
+    description: 'Boosts the platform and strategy signals to see how a bolder lens shifts the score.',
     weights: {
       experienceAlignment: 0.9,
       leadershipLevel: 0.9,
