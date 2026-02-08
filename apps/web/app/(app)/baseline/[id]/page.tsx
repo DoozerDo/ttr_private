@@ -151,7 +151,7 @@ const friendlyTitles: Record<string, string> = {
   PROJECT: "Projects / Programs",
   SKILLS: "Skills",
   EDUCATION: "Education",
-  OTHER: "Other",
+  OTHER: "Summary",
   RAW: "Raw",
 };
 

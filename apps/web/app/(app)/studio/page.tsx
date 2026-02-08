@@ -340,6 +340,27 @@ function extractResumeSections(payload: unknown): ResumeSection[] | undefined {
   return normalized.length ? normalized : undefined;
 }
 
+const resumeSectionHeadingByType: Record<string, string> = {
+  RAW: "Raw",
+  SUMMARY: "Summary",
+  EXPERIENCE: "Professional Experience",
+  PROJECT: "Projects",
+  SKILLS: "Technical Skills",
+  EDUCATION: "Education",
+  OTHER: "Summary",
+};
+
+function resolveResumeSectionHeading(section: ResumeSection) {
+  const normalizedTitle = section.title?.trim();
+  if (normalizedTitle && !/^other$/i.test(normalizedTitle)) {
+    return normalizedTitle;
+  }
+
+  const typeKey = section.type?.toUpperCase();
+  if (!typeKey) return normalizedTitle;
+  return resumeSectionHeadingByType[typeKey] ?? typeKey;
+}
+
 function buildResumePreview(payload: unknown): ReactNode | null {
   const sections = extractResumeSections(payload);
   if (!sections || !sections.length) return null;
@@ -356,7 +377,7 @@ function buildResumePreview(payload: unknown): ReactNode | null {
       {normalizedSections.map((section, index) => {
         const content = renderSectionContent(section.content);
         if (!content && !section.title) return null;
-        const heading = section.title ?? section.type;
+        const heading = resolveResumeSectionHeading(section);
         const key = section.id ?? heading ?? `resume-section-${index}`;
         return (
           <article key={key} className="space-y-2">
@@ -406,6 +427,7 @@ export default function StudioPage() {
   }, [baselineTouched]);
 
   const versionTouchedRef = useRef(versionTouched);
+  const pendingVersionSelectionRef = useRef<string | null>(null);
   useEffect(() => {
     versionTouchedRef.current = versionTouched;
   }, [versionTouched]);
@@ -450,9 +472,13 @@ export default function StudioPage() {
 
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
+      if (newVersionId) {
+        pendingVersionSelectionRef.current = newVersionId;
+      }
       if (newVersionId && newVersionId !== selectedBaselineVersionId) {
         setSelectedBaselineVersionId(newVersionId);
       }
+      setVersionTouched(true);
       setVersionRefreshSignal((prev) => prev + 1);
     },
     [selectedBaselineVersionId],
@@ -618,6 +644,7 @@ export default function StudioPage() {
     if (!selectedBaselineId) {
       setVersions([]);
       setSelectedBaselineVersionId("");
+      pendingVersionSelectionRef.current = null;
       setVersionsError(null);
       return;
     }
@@ -642,6 +669,11 @@ export default function StudioPage() {
         setVersions(parsed);
         setVersionsError(null);
         setSelectedBaselineVersionId((current) => {
+          const pending = pendingVersionSelectionRef.current;
+          if (pending && parsed.some((version) => version.id === pending)) {
+            pendingVersionSelectionRef.current = null;
+            return pending;
+          }
           if (current && parsed.some((version) => version.id === current)) {
             return current;
           }
@@ -667,7 +699,6 @@ export default function StudioPage() {
         }
       }
     };
-    setVersionTouched(false);
     void loadVersions();
     return () => {
       canceled = true;
@@ -979,6 +1010,8 @@ export default function StudioPage() {
                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
                 value={selectedBaselineId}
                 onChange={(event) => {
+                  pendingVersionSelectionRef.current = null;
+                  setVersionTouched(false);
                   setSelectedBaselineId(event.target.value);
                   setBaselineTouched(true);
                 }}
@@ -1000,6 +1033,7 @@ export default function StudioPage() {
                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
                 value={selectedBaselineVersionId}
                 onChange={(event) => {
+                  pendingVersionSelectionRef.current = null;
                   setSelectedBaselineVersionId(event.target.value);
                   setVersionTouched(true);
                 }}

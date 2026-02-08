@@ -161,6 +161,35 @@ export class BaselineService {
       .replace(/\r/g, '\n');
   }
 
+  private getSectionTitle(
+    sectionType?: BaselineSectionType | null,
+    title?: string | null,
+  ): string | null {
+    const trimmedTitle = title?.trim();
+
+    if (trimmedTitle && !/^other$/i.test(trimmedTitle)) {
+      return trimmedTitle;
+    }
+
+    switch (sectionType) {
+      case BaselineSectionType.RAW:
+        return 'Raw';
+      case BaselineSectionType.SUMMARY:
+      case BaselineSectionType.OTHER:
+        return 'Summary';
+      case BaselineSectionType.EXPERIENCE:
+        return 'Professional Experience';
+      case BaselineSectionType.SKILLS:
+        return 'Technical Skills';
+      case BaselineSectionType.EDUCATION:
+        return 'Education';
+      case BaselineSectionType.PROJECT:
+        return 'Projects';
+      default:
+        return trimmedTitle ?? null;
+    }
+  }
+
   private buildSections(
     rawText: string,
     parsedSections: ParsedSection[],
@@ -169,7 +198,7 @@ export class BaselineService {
 
     const structuredSections = parsedSections.map((section, index) => ({
       sectionType: section.sectionType,
-      title: section.title,
+      title: this.getSectionTitle(section.sectionType, section.title),
       content: this.sanitizeSectionContent(section.content),
       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
       // ensure RAW stays first; fall back to index if section.order is undefined
@@ -382,14 +411,14 @@ export class BaselineService {
       archivedAt: null,
       sections: parseResult?.sections?.map((section, index) => ({
         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
-        title: section.title ?? null,
+        title: this.getSectionTitle(section.sectionType, section.title),
         content: this.sanitizeSectionContent(section.content),
         includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
         order: section.order ?? index,
       })) ?? [
         {
           sectionType: BaselineSectionType.OTHER,
-          title: null,
+          title: this.getSectionTitle(BaselineSectionType.OTHER, null),
           content: this.sanitizeSectionContent(),
           includePolicy: BaselineIncludePolicy.OPTIONAL,
           order: 0,
@@ -807,7 +836,7 @@ return {
       blocks: versionSections.map((section) => ({
         id: section.id,
         section_type: section.sectionType ?? BaselineSectionType.OTHER,
-        title: section.title ?? null,
+        title: this.getSectionTitle(section.sectionType, section.title),
         content: section.content,
         include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
         order_index: section.order,
@@ -890,7 +919,7 @@ return {
     }
 
     const existingPolicies = await this.baselineBlockPolicyRepository.find({
-      where: { baselineVersionId: latestVersion.id },
+      where: { baselineVersionId: requestedVersion.id },
       order: { order: 'ASC' },
     });
 
@@ -904,19 +933,15 @@ return {
         : this.normalizePoliciesFromSections(sections as PolicySectionInput[]);
 
     const currentVersionHash =
-      latestVersion.fileHash ??
+      requestedVersion.fileHash ??
       this.buildVersionHash(
         baseline.hash,
         currentPolicyState,
-        latestVersion.verifiedAdditions ?? [],
+        requestedVersion.verifiedAdditions ?? [],
       );
 
-    if (requestedVersion.id !== latestVersion.id) {
-      this.raiseConflict(latestVersion, currentVersionHash);
-    }
-
     if (baselineVersionHash !== (currentVersionHash ?? '')) {
-      this.raiseConflict(latestVersion, currentVersionHash);
+      this.raiseConflict(requestedVersion, currentVersionHash);
     }
 
     const policyMap = new Map<string, BaselineBlockPolicy>(
@@ -945,7 +970,7 @@ return {
     const newVersionHash = this.buildVersionHash(
       baseline.hash,
       nextPolicies,
-      latestVersion.verifiedAdditions ?? [],
+      requestedVersion.verifiedAdditions ?? [],
     );
     const nextVersionNumber =
       (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
@@ -956,9 +981,9 @@ return {
         versionNumber: nextVersionNumber,
         fileHash: newVersionHash,
         storagePath: baseline.storagePath,
-        verifiedAdditions: latestVersion.verifiedAdditions ?? [],
-        additionDiff: latestVersion.additionDiff ?? null,
-        promotedFromInterviewId: latestVersion.promotedFromInterviewId ?? null,
+        verifiedAdditions: requestedVersion.verifiedAdditions ?? [],
+        additionDiff: requestedVersion.additionDiff ?? null,
+        promotedFromInterviewId: requestedVersion.promotedFromInterviewId ?? null,
       });
 
       const savedVersion = await manager.save(newVersion);
@@ -983,6 +1008,7 @@ return {
         section.includePolicy = applied?.includePolicy ?? section.includePolicy;
         section.order =
           applied?.order ?? section.order ?? section.orderIndex ?? 0;
+        section.title = this.getSectionTitle(section.sectionType, section.title);
 
         return section;
       });
@@ -992,10 +1018,13 @@ return {
 
       return {
         baseline_version_id: baselineVersionId,
-        updated_blocks: nextPolicies.map((policy) => ({
-          id: policy.baselineSectionId,
-          include_tag: policy.includePolicy,
-          order_index: policy.order,
+        updated_blocks: updatedSections.map((section) => ({
+          id: section.id,
+          section_type: section.sectionType ?? BaselineSectionType.OTHER,
+          title: this.getSectionTitle(section.sectionType, section.title),
+          content: section.content,
+          include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+          order_index: section.order ?? 0,
         })),
         new_version_id: savedVersion.id,
         hash: savedVersion.fileHash,

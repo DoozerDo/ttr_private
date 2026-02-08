@@ -1,1127 +1,990 @@
-diff --git a/apps/api/src/compliance/compliance.service.spec.ts b/apps/api/src/compliance/compliance.service.spec.ts
-index 7f0d75245989de6c6e7cb134278d805b21481cca..d45e0a0bb87b2b4781eeb1c543017a3503d633c3 100644
---- a/apps/api/src/compliance/compliance.service.spec.ts
-+++ b/apps/api/src/compliance/compliance.service.spec.ts
-@@ -7,50 +7,62 @@ import {
- import { BaselineSectionType } from '../baseline/baseline-section.entity';
+diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
+index b79ff86f38a5da5b5c88863c703bb48a9bd220ba..695140a01a7a6d02ee7648a461d7eaa0d005cce1 100644
+--- a/apps/api/src/baseline/baseline.service.ts
++++ b/apps/api/src/baseline/baseline.service.ts
+@@ -139,59 +139,88 @@ export class BaselineService {
  
- const buildAuditRepo = () => {
-   const create = jest.fn((payload) => payload);
-   const save = jest.fn(async (payload) => ({
-     id: 'audit-1',
-     createdAt: new Date(),
-     ...payload,
-   }));
- 
-   return { create, save };
- };
- 
- describe('ComplianceService', () => {
-   const repoMock = buildAuditRepo();
-   const service = new ComplianceService(
-     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-     // @ts-ignore: manual repository injection
-     repoMock,
-   );
- 
-   beforeEach(() => {
-     jest.clearAllMocks();
-   });
- 
-+  it('preserves line breaks when normalizing section content', () => {
-+    const sections = service.normalizeSectionsForOutput([
-+      {
-+        title: 'Experience',
-+        content: 'Senior I/O Engineer\nGenoa Healthcare, August 2019 – March 2025\n• Built CI/CD pipelines.',
-+      },
-+    ]);
-+
-+    expect(sections[0]?.content).toContain('Senior I/O Engineer\nGenoa Healthcare');
-+    expect(sections[0]?.content).toContain('\n• Built CI/CD pipelines.');
-+  });
-+
-   it('flags stylized dash punctuation without mutating content', () => {
-     const flags = service.enforceResumeWritingRules({
-       rawContent: 'Delivered impact — and scale.',
-     });
- 
-     expect(flags).toEqual([
-       expect.objectContaining({
-         code: ComplianceFlagCode.STYLIZED_PUNCTUATION,
-         severity: ComplianceFlagSeverity.BLOCK,
-       }),
-     ]);
-   });
- 
-   it('persists audit metadata with baseline version details', async () => {
-     const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
-     const job = { id: 'job-1' };
- 
-     const result = await service.validateAndAudit({
-       action: ComplianceAction.RESUME_GENERATION,
-       actorId: 'user-1',
-       baselineVersion,
-       job,
-       outputHash: 'out-123',
-     });
- 
-diff --git a/apps/api/src/compliance/compliance.service.ts b/apps/api/src/compliance/compliance.service.ts
-index c240bf8b25f759d7d15cc51c1c150239d60c9bf2..ab031d1a9121d82ca22936ee4bc26c55c62734a1 100644
---- a/apps/api/src/compliance/compliance.service.ts
-+++ b/apps/api/src/compliance/compliance.service.ts
-@@ -52,51 +52,57 @@ export type ValidateAndAuditRequest = {
- export type ValidateAndAuditResult = {
-   blocked: boolean;
-   complianceFlags: ComplianceFlag[];
-   audit: {
-     id: string;
-     baselineVersionId: string | null;
-     outputHash: string;
-     action: ComplianceAction;
-     actorId: string;
-     baselineVersionHash: string | null;
-     jobId: string | null;
-     createdAt: string;
-   };
- };
- 
- @Injectable()
- export class ComplianceService {
-   private readonly scopeInflationDetector = new ScopeInflationDetector();
- 
-   constructor(
-     @InjectRepository(ComplianceAudit)
-     private readonly auditsRepository: Repository<ComplianceAudit>,
-   ) {}
- 
-   public normalizeText(input: string): string {
--    return (input ?? '').replace(/\s+/g, ' ').trim();
-+    const normalized = (input ?? '').replace(/\r\n?/g, '\n');
-+    return normalized
-+      .split('\n')
-+      .map((line) => line.replace(/[\t ]+/g, ' ').trim())
-+      .join('\n')
-+      .replace(/\n{3,}/g, '\n\n')
-+      .trim();
+     if (count >= BASELINE_LIMIT) {
+       throw new UnprocessableEntityException({
+         error: {
+           code: 'limit_reached',
+           entity: 'baseline',
+           limit: BASELINE_LIMIT,
+         },
+       });
+     }
    }
  
-   // Preserve section shape so downstream callers can still reference `title`, etc.
-   public normalizeSectionsForOutput<
-     T extends {
-       content?: string | null;
-       title?: string | null;
-       [key: string]: any;
-     },
-   >(sections: T[]): T[] {
-     if (!Array.isArray(sections)) return [];
+   private sanitizeSectionContent(content?: string | null) {
+     if (!content) {
+       return 'Uploaded file content';
+     }
  
-     return sections.map((s) => ({
-       ...s,
-       title: s?.title ?? null,
-       content: this.normalizeText(String(s?.content ?? '')),
+     // Strip out null bytes and non-printable control chars while preserving
+     // structural whitespace (newline/tab/carriage return) needed for parsing.
+     return content
+       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+       .replace(/\r\n/g, '\n')
+       .replace(/\r/g, '\n');
+   }
+ 
++  private getSectionTitle(
++    sectionType?: BaselineSectionType | null,
++    title?: string | null,
++  ): string | null {
++    const trimmedTitle = title?.trim();
++
++    if (trimmedTitle && !/^other$/i.test(trimmedTitle)) {
++      return trimmedTitle;
++    }
++
++    switch (sectionType) {
++      case BaselineSectionType.RAW:
++        return 'Raw';
++      case BaselineSectionType.SUMMARY:
++      case BaselineSectionType.OTHER:
++        return 'Summary';
++      case BaselineSectionType.EXPERIENCE:
++        return 'Professional Experience';
++      case BaselineSectionType.SKILLS:
++        return 'Technical Skills';
++      case BaselineSectionType.EDUCATION:
++        return 'Education';
++      case BaselineSectionType.PROJECT:
++        return 'Projects';
++      default:
++        return trimmedTitle ?? null;
++    }
++  }
++
+   private buildSections(
+     rawText: string,
+     parsedSections: ParsedSection[],
+   ): Partial<BaselineSection>[] {
+     const sanitizedRaw = this.sanitizeSectionContent(rawText);
+ 
+     const structuredSections = parsedSections.map((section, index) => ({
+       sectionType: section.sectionType,
+-      title: section.title,
++      title: this.getSectionTitle(section.sectionType, section.title),
+       content: this.sanitizeSectionContent(section.content),
+       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+       // ensure RAW stays first; fall back to index if section.order is undefined
+       order: (section.order ?? index) + 1,
      }));
+ 
+     return [
+       {
+         sectionType: BaselineSectionType.RAW,
+         title: 'Raw',
+         content: sanitizedRaw,
+         includePolicy: BaselineIncludePolicy.NEVER,
+         order: 0,
+       },
+       ...structuredSections,
+     ];
    }
  
-   public enforceResumeWritingRules(payload: {
-     normalizedContent?: string;
-     rawContent?: string;
-     [key: string]: unknown;
-   }): ComplianceFlag[] {
-     const content = this.normalizeText(
-diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
-index ab928f41ed4a8398fbbbf395e9274133877251dc..5049a4846ff721d297b1d0bcbd142035f3708716 100644
---- a/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
-+++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.spec.ts
-@@ -21,26 +21,131 @@ FriendFinder, April 2013 - July 2015
+   private async computeFileHash(filePath: string): Promise<string> {
+     try {
+       const fileBuffer = await readFile(filePath);
+       return createHash('sha256').update(fileBuffer).digest('hex');
+     } catch {
+       throw new BadRequestException('Unable to compute file hash');
+     }
+@@ -360,58 +389,58 @@ export class BaselineService {
+         userId,
+         hash,
+         status: BaselineStatus.ACTIVE,
        },
-     ]);
+       order: { createdAt: 'DESC' },
+     });
+   }
  
-     const expSection = model.sections.find((section) => section.key === 'experience');
-     expect(expSection).toBeDefined();
-     expect(expSection?.items).toHaveLength(3);
-   });
+   private async createBaselineRecord(
+     manager: EntityManager,
+     userId: string,
+     file: FileMetadata,
+     fileHash: string,
+     parseResult?: BaselineFileParseResult,
+   ): Promise<BaselineCreationResult> {
+     const baseline = manager.create(Baseline, {
+       userId,
+       originalFilename: file.originalname,
+       mimeType: file.mimetype,
+       storagePath: file.path,
+       hash: fileHash,
+       status: BaselineStatus.ACTIVE,
+       archivedAt: null,
+       sections: parseResult?.sections?.map((section, index) => ({
+         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
+-        title: section.title ?? null,
++        title: this.getSectionTitle(section.sectionType, section.title),
+         content: this.sanitizeSectionContent(section.content),
+         includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+         order: section.order ?? index,
+       })) ?? [
+         {
+           sectionType: BaselineSectionType.OTHER,
+-          title: null,
++          title: this.getSectionTitle(BaselineSectionType.OTHER, null),
+           content: this.sanitizeSectionContent(),
+           includePolicy: BaselineIncludePolicy.OPTIONAL,
+           order: 0,
+         },
+       ],
+     });
  
-   it('uses second line company/date to enrich a role-only header', () => {
-     const model = mapResumeSectionsToDocxModel([
-       {
-         type: BaselineSectionType.EXPERIENCE,
-         title: 'Professional Experience',
-         content: `Senior I/O Engineer (Sr. DevOps Engineer)
- Genoa Healthcare, August 2019 – March 2025
- • Built CI/CD pipelines.`,
-       },
-     ]);
+     const savedBaseline = await manager.save(baseline);
  
-     const expSection = model.sections.find((section) => section.key === 'experience');
-     const first = expSection?.items[0] as { company?: string; dateRange?: string } | undefined;
+     const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
  
-     expect(first?.company).toBe('Genoa Healthcare');
-     expect(first?.dateRange).toContain('2019');
-   });
-+
-+  it('splits entries when each header already includes company and date on one line', () => {
-+    const model = mapResumeSectionsToDocxModel([
-+      {
-+        type: BaselineSectionType.EXPERIENCE,
-+        title: 'Professional Experience',
-+        content: `Senior I/O Engineer (Sr. DevOps Engineer) | Genoa Healthcare | August 2019 – March 2025
-+• Built CI/CD pipelines.
-+
-+Senior Lead IT Engineer | CenturyLink Cloud | July 2015 - August 2019
-+• Led enterprise cloud support.
-+
-+Windows Systems Administrator | FriendFinder | April 2013 - July 2015
-+• Maintained production systems.`,
-+      },
-+    ]);
-+
-+    const expSection = model.sections.find((section) => section.key === 'experience');
-+    expect(expSection).toBeDefined();
-+    expect(expSection?.items).toHaveLength(3);
-+  });
-+
-+  it('retains other section content even when one line includes contact info', () => {
-+    const model = mapResumeSectionsToDocxModel([
-+      {
-+        type: BaselineSectionType.OTHER,
-+        title: 'Other',
-+        content: `Doug Canny
-+IT Systems Engineer | DevOps | Automation
-+doug@example.com
-+IT professional with nearly 20 years of experience transitioning to cloud infrastructure.`,
-+      },
-+    ]);
-+
-+    const otherSection = model.sections.find((section) => section.key === 'other');
-+    expect(otherSection).toBeDefined();
-+    const firstItem = otherSection?.items[0] as { lines?: string[] } | undefined;
-+    expect(firstItem?.lines?.join('\n')).toContain('nearly 20 years of experience');
-+  });
-+
-+  it('keeps full summary text without truncating after a few sentences', () => {
-+    const longSummary = [
-+      'IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.',
-+      'Proven expertise in CI/CD pipelines, infrastructure as code, and PowerShell scripting.',
-+      'Adept at designing scalable automation solutions to enhance system performance and developer productivity.',
-+      'Strong background in cloud computing, system administration, and deployment automation across enterprise environments.',
-+    ].join(' ');
-+
-+    const model = mapResumeSectionsToDocxModel([
-+      {
-+        type: BaselineSectionType.SUMMARY,
-+        title: 'Summary',
-+        content: longSummary,
-+      },
-+    ]);
-+
-+    const summarySection = model.sections.find((section) => section.key === 'summary');
-+    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
-+
-+    expect(summarySection).toBeDefined();
-+    expect(summary?.paragraphs?.join(' ')).toContain('Strong background in cloud computing');
-+  });
-+
-+  it('does not classify narrative lines with numbers as header contact lines', () => {
-+    const model = mapResumeSectionsToDocxModel([
-+      {
-+        type: BaselineSectionType.OTHER,
-+        title: 'Other',
-+        content: `Doug Canny
-+IT Systems Engineer | DevOps | Automation
-+IT professional with nearly 20 years of experience.
-+Proven expertise in CI/CD pipelines.`,
-+      },
-+    ]);
-+
-+    expect(model.header.contactLines).toBeUndefined();
-+    const otherSection = model.sections.find((section) => section.key === 'other');
-+    const text = (otherSection?.items[0] as { lines?: string[] } | undefined)?.lines?.join(' ') ?? '';
-+    expect(text).toContain('nearly 20 years of experience');
-+  });
-+
-+  it('maps intro-like OTHER content into summary when no summary exists', () => {
-+    const model = mapResumeSectionsToDocxModel([
-+      {
-+        type: BaselineSectionType.OTHER,
-+        title: 'Other',
-+        content: `Doug Canny
-+IT Systems Engineer | DevOps | Automation
-+IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.`,
-+      },
-+      {
-+        type: BaselineSectionType.SKILLS,
-+        title: 'Skills',
-+        content: 'PowerShell, Terraform, AWS',
-+      },
-+    ]);
-+
-+    const summarySection = model.sections.find((section) => section.key === 'summary');
-+    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
-+    expect(summarySection).toBeDefined();
-+    expect(summary?.paragraphs?.join(' ')).toContain('nearly 20 years of experience');
-+
-+    const otherSection = model.sections.find((section) => section.key === 'other');
-+    expect(otherSection).toBeUndefined();
-+  });
- });
-diff --git a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
-index 5ee34a725ac3c9d48008954b35be0cb662243cd0..56199aa9c54bfd108a37d1b0984a6867c65d8a14 100644
---- a/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
-+++ b/apps/api/src/docx-templates/mappers/resume-sections-to-model.ts
-@@ -48,51 +48,51 @@ function splitInlineBullets(input: string): { description?: string; bullets: str
-       bullets: [],
+     const policyState = this.normalizePoliciesFromSections(
+       (savedBaseline.sections ?? []) as PolicySectionInput[],
+     );
+     const versionHash = this.buildVersionHash(fileHash, policyState);
+     const allowlistSnapshot = buildBaselineAllowlistSnapshot(
+       savedBaseline.sections ?? [],
+     );
+ 
+     const versionRecord = manager.create(BaselineVersion, {
+       baselineId: savedBaseline.id,
+       versionNumber: nextVersionNumber,
+       fileHash: versionHash,
+       storagePath: savedBaseline.storagePath,
+       verifiedAdditions: [],
+@@ -785,51 +814,51 @@ return {
+ 
+     const versionSections = [...sections, ...additionSections];
+ 
+     const policyState = this.normalizePoliciesFromSections(
+       versionSections as PolicySectionInput[],
+     );
+     const versionHash =
+       baselineVersion.fileHash ??
+       this.buildVersionHash(
+         baseline.hash,
+         policyState,
+         baselineVersion.verifiedAdditions ?? [],
+       );
+ 
+     if (!baselineVersion.fileHash && versionHash) {
+       baselineVersion.fileHash = versionHash;
+       await this.baselineVersionRepository.save(baselineVersion);
+     }
+ 
+     return {
+       baseline_version_id: baselineVersion.id,
+       baseline_version_hash: versionHash ?? null,
+       blocks: versionSections.map((section) => ({
+         id: section.id,
+         section_type: section.sectionType ?? BaselineSectionType.OTHER,
+-        title: section.title ?? null,
++        title: this.getSectionTitle(section.sectionType, section.title),
+         content: section.content,
+         include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
+         order_index: section.order,
+       })),
      };
    }
  
-   const description = parts[0] || undefined;
-   const bullets = parts.slice(1);
-   return { description, bullets };
- }
- 
- const SECTION_TYPE_KEY_MAP: Record<BaselineSectionType, ResumeSectionKey> = {
-   [BaselineSectionType.SUMMARY]: 'summary',
-   [BaselineSectionType.SKILLS]: 'skills',
-   [BaselineSectionType.EXPERIENCE]: 'experience',
-   [BaselineSectionType.EDUCATION]: 'education',
-   [BaselineSectionType.PROJECT]: 'other',
-   [BaselineSectionType.RAW]: 'other',
-   [BaselineSectionType.OTHER]: 'other',
- };
- 
- const SECTION_TITLE_FALLBACK: Record<ResumeSectionKey, string> = {
-   summary: 'Summary',
-   skills: 'Technical Skills',
-   experience: 'Professional Experience',
-   education: 'Education',
-   certifications: 'Certifications',
--  other: 'Other',
-+  other: 'Intro',
- };
- 
- const SECTION_ORDER: ResumeSectionKey[] = [
-   'summary',
-   'skills',
-   'experience',
-   'education',
-   'certifications',
-   'other',
- ];
- 
- const BULLET_PATTERN = /^[\u2022✶*-]\s*(.*)$/;
- const bulletPrefixPattern = new RegExp('^\\s*' + BULLET_GLYPH + '\\s*');
- const cleanBullets = (bullets?: string[]) =>
-   (bullets ?? [])
-     .map((b) => (b ?? '').replace(bulletPrefixPattern, '').trim())
-     .filter((b) => b.length > 0);
- const SKILL_LINE_LIMIT = 120;
- const EDUCATION_LINE_LIMIT = 140;
- const SKILL_VERB_PATTERN = /\b(with|including|designed|developed|managed|led|built|created|implemented|owned)\b/i;
- const ADDITIONAL_INFO_TITLE = 'Additional Information';
- const DENSE_TEXT_NEWLINE = / {2,}/g;
- const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
- 
- function addQuarantinedLine(quarantined: string[], line: string) {
-@@ -104,139 +104,196 @@ function addQuarantinedLine(quarantined: string[], line: string) {
- 
- export function mapResumeSectionsToDocxModel(
-   sections: ResumeExportSection[],
-   identity?: BaselineIdentity,
- ): ResumeDocxModel {
-   const header = buildHeader(sections, identity);
-   const headerLines = buildHeaderLineSet(header);
-   const quarantined: string[] = [];
-   const buckets = buildSectionBuckets(sections, headerLines, quarantined);
-   const orderedSections = SECTION_ORDER.map((key) => buckets.get(key)).filter(
-     (section): section is ResumeDocxSection => Boolean(section),
-   );
- 
-   return {
-     header,
-     sections: orderedSections,
-   };
- }
- 
- function buildSectionBuckets(
-   sections: ResumeExportSection[],
-   headerLines: Set<string>,
-   quarantined: string[],
- ): Map<ResumeSectionKey, ResumeDocxSection> {
-   const buckets = new Map<ResumeSectionKey, ResumeDocxSection>();
-+  const hasExplicitSummary = sections.some((section) => {
-+    const key = resolveSectionKey(section.type);
-+    return key === 'summary' && Boolean(normalizeContent(section.content));
-+  });
-+  let synthesizedSummaryFromOther = false;
- 
-   for (const section of sections) {
-     if (shouldSkipSection(section)) {
-       continue;
-     }
- 
--    const key = resolveSectionKey(section.type);
-+    let key = resolveSectionKey(section.type);
-     const contentWithoutHeader = removeHeaderLines(section.content, headerLines);
-     if (!contentWithoutHeader) {
-       continue;
-     }
-+
-+    if (
-+      key === 'other' &&
-+      !hasExplicitSummary &&
-+      !synthesizedSummaryFromOther &&
-+      isLikelyIntroSection(contentWithoutHeader)
-+    ) {
-+      key = 'summary';
-+      synthesizedSummaryFromOther = true;
-+    }
-+
-     const items = buildSectionItems(key, contentWithoutHeader, quarantined);
-     if (!items.length) {
-       continue;
-     }
- 
-     const bucket = buckets.get(key);
-     if (!bucket) {
-       buckets.set(key, {
-         key,
-         title: SECTION_TITLE_FALLBACK[key],
-         items: [...items],
-       });
-       continue;
-     }
- 
-     bucket.items.push(...items);
-   }
- 
-   if (quarantined.length) {
-     const infoItem: ResumeOtherItem = { lines: [...quarantined] };
-     const otherBucket = buckets.get('other');
-     if (!otherBucket) {
-       buckets.set('other', {
-         key: 'other',
-         title: ADDITIONAL_INFO_TITLE,
-         items: [infoItem],
-       });
-     } else {
-       otherBucket.title = ADDITIONAL_INFO_TITLE;
-       otherBucket.items.push(infoItem);
-     }
-   }
-   return buckets;
- }
- 
-+function isLikelyIntroSection(content: string) {
-+  const lines = splitLines(content);
-+  if (!lines.length) return false;
-+  if (lines.length > 10) return false;
-+
-+  const bulletLikeCount = lines.filter(
-+    (line) => line.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(line),
-+  ).length;
-+  if (bulletLikeCount > 1) return false;
-+
-+  const longNarrativeLineCount = lines.filter((line) => line.length > 80).length;
-+  return longNarrativeLineCount > 0;
-+}
-+
- function buildHeaderLineSet(header: ResumeDocxHeader) {
-   const lines = new Set<string>();
-   const addLine = (value?: string) => {
-     const trimmed = value?.trim();
-     if (trimmed) {
-       lines.add(trimmed);
-     }
-   };
-   addLine(header.name);
-   addLine(header.title);
-   header.contactLines?.forEach(addLine);
-   return lines;
- }
- 
- function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
-   if (!content) return content;
-   if (!headerLines?.size) return content;
-   const filtered = content
-     .split(/\r?\n/)
-     .filter((line) => {
-       const trimmed = line.trim();
-       if (!trimmed) {
-         return true;
-       }
-       return !headerLines.has(trimmed);
-     });
-   if (!filtered.length) {
-     return undefined;
-   }
-   return filtered.join('\n');
- }
- 
- function shouldSkipSection(section: ResumeExportSection) {
-   const content = normalizeContent(section.content);
-   if (!content) return true;
--  return containsContactInfo(content);
-+  return isLikelyContactOnlySection(content);
-+}
-+
-+function isLikelyContactOnlySection(content: string) {
-+  const lines = content
-+    .split(/\r?\n/)
-+    .map((line) => line.trim())
-+    .filter(Boolean);
-+
-+  if (!lines.length) return true;
-+  if (lines.length > 5) return false;
-+
-+  const contactLineCount = lines.filter((line) => isContactLine(line)).length;
-+  if (!contactLineCount) return false;
-+
-+  const substantialNonContactCount = lines.filter(
-+    (line) => !isContactLine(line) && line.length > 20,
-+  ).length;
-+
-+  return substantialNonContactCount === 0;
- }
- 
--function containsContactInfo(content: string) {
--  const emailPattern =
--    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-+function isContactLine(line: string) {
-+  const trimmed = line.trim();
-+  if (!trimmed) return false;
-+
-+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-   const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
--  return emailPattern.test(content) || phonePattern.test(content);
-+  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
-+
-+  return (
-+    emailPattern.test(trimmed) ||
-+    phonePattern.test(trimmed) ||
-+    profilePattern.test(trimmed)
-+  );
- }
- 
- function buildHeader(
-   sections: ResumeExportSection[],
-   identity?: BaselineIdentity,
- ): ResumeDocxHeader {
-   const fallbackLines = extractHeaderLines(sections);
-   const header: ResumeDocxHeader = {};
-   header.name =
-     sanitizeHeaderName(identity?.fullName) ||
-     extractFallbackName(fallbackLines[0]);
- 
-   header.title =
-     sanitizeHeaderTitle(identity?.currentTitle) ||
-     sanitizeHeaderTitle(identity?.currentCompany) ||
-     fallbackLines
-       .slice(1)
-       .map((line) => sanitizeHeaderTitle(line))
-       .find((line) => Boolean(line));
- 
-   const contactLines = new Set<string>();
-   if (identity?.location?.trim()) {
-     contactLines.add(identity.location.trim());
-   }
-   fallbackLines.slice(1).forEach((line) => {
-@@ -274,130 +331,117 @@ function sanitizeHeaderTitle(value?: string | null) {
-   if (looksLikeSentence(trimmed)) return undefined;
-   if (trimmed.length > 80) return undefined;
-   return trimmed;
- }
- 
- function extractFallbackName(firstLine?: string) {
-   if (!firstLine) return undefined;
-   const normalized = firstLine.trim();
-   if (!normalized) return undefined;
-   const firstSegment = normalized.split('|')[0]?.trim() ?? normalized;
-   if (looksLikeSentence(firstSegment)) return undefined;
-   if (firstSegment.length > 60) return undefined;
-   return firstSegment;
- }
- 
- function looksLikeSentence(line: string) {
-   const trimmed = line.trim();
-   if (!trimmed) return false;
-   if (/[.!?]/.test(trimmed)) return true;
-   return trimmed.split(/\s+/).length > 8;
- }
- 
- function looksLikeContact(line: string) {
-   const cleaned = line.trim();
-   if (!cleaned) return false;
--  if (/@/.test(cleaned)) return true;
--  if (/\d{2,}/.test(cleaned)) return true;
--  if (cleaned.includes('-') && cleaned.includes(' ')) return true;
--  return false;
-+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-+  const phonePattern = /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/;
-+  const profilePattern = /\b(?:linkedin|github|portfolio|website)\b|https?:\/\//i;
-+  return (
-+    emailPattern.test(cleaned) ||
-+    phonePattern.test(cleaned) ||
-+    profilePattern.test(cleaned)
-+  );
- }
- 
- function extractHeaderLines(sections: ResumeExportSection[]) {
-   for (const section of sections) {
-     const lines = splitLines(section.content);
-     if (lines.length) {
-       return lines.slice(0, 4);
-     }
-   }
-   return [];
- }
- 
- function resolveSectionKey(type?: BaselineSectionType | string | null) {
-   if (!type) {
-     return 'other';
-   }
-   return SECTION_TYPE_KEY_MAP[type as BaselineSectionType] ?? 'other';
- }
- 
- function buildSectionItems(
-   key: ResumeSectionKey,
-   content: string | null | undefined,
-   quarantined: string[],
- ): ResumeSectionItem[] {
-   switch (key) {
-     case 'summary':
--      return buildSummaryItems(content, quarantined);
-+      return buildSummaryItems(content);
-     case 'skills':
-       return buildSkillsItems(content, quarantined);
-     case 'experience':
-       return buildExperienceItems(content);
-     case 'education':
-       return buildEducationItems(content);
-     case 'certifications':
-       return buildCertificationItems(content);
-     case 'other':
-     default:
-       return buildOtherItems(content);
-   }
- }
- 
- function buildSummaryItems(
-   content?: string | null,
--  quarantined: string[] = [],
- ): ResumeSummaryItem[] {
-   const paragraphs = splitParagraphs(content);
--  const sentences: string[] = [];
--  paragraphs.forEach((paragraph) => {
--    sentences.push(...splitIntoSentences(paragraph));
--  });
--  const kept: string[] = [];
--  let totalLength = 0;
--  for (const sentence of sentences) {
--    const trimmed = sentence.trim();
--    if (!trimmed) continue;
--    if (kept.length >= 3 || totalLength + trimmed.length > 400) {
--      break;
--    }
--    kept.push(trimmed);
--    totalLength += trimmed.length;
--  }
--  const overflow = sentences.slice(kept.length);
--  overflow.forEach((sentence) => addQuarantinedLine(quarantined, sentence));
-+  if (!paragraphs.length) return [];
-+
-+  const kept = paragraphs
-+    .map((paragraph) => paragraph.trim())
-+    .filter((paragraph) => paragraph.length > 0);
-+
-   if (!kept.length) return [];
-   return [
-     {
--      paragraphs: [kept.join(' ')],
-+      paragraphs: kept,
+   async updateBlockPolicies(
+     userId: string,
+     baselineId: string,
+     payload: {
+       baseline_version_id?: string;
+       baseline_version_hash?: string;
+       blocks?: BaselineBlockUpdate[];
      },
-   ];
- }
- 
--function splitIntoSentences(text: string) {
--  const matches = text.match(/[^.!?]+[.!?]*/g) ?? [];
--  return matches.map((segment) => segment.trim()).filter(Boolean);
--}
--
- function buildSkillsItems(content?: string | null, quarantined: string[] = []): ResumeSkillsItem[] {
-   const lines = splitLines(expandDenseText(content));
-   const groups: ResumeSkillsGroup[] = [];
-   lines.forEach((line) => {
-     const normalized = line.replace(/^(Skills|Technical Skills)/i, '').trim();
-     if (!normalized) {
-       addQuarantinedLine(quarantined, line);
-       return;
-     }
-     if (/^(Summary|Experience|Professional Experience)/i.test(normalized)) {
-       addQuarantinedLine(quarantined, normalized);
-       return;
-     }
-     if (
-       normalized.length > SKILL_LINE_LIMIT ||
-       normalized.includes('.') ||
-       SKILL_VERB_PATTERN.test(normalized)
-     ) {
-       addQuarantinedLine(quarantined, normalized);
-       return;
-     }
-     const segments = normalized
-       .split(/[,\u2022;]/)
-       .map((segment) => segment.trim())
-       .filter(Boolean);
-@@ -543,67 +587,82 @@ function buildExperienceItems(content?: string | null): ExperienceItem[] {
-   });
- 
-   return entries;
- }
- 
- 
- function splitExperienceBlocks(content: string): string[] {
-   const lines = content
-     .split(/\r?\n/)
-     .map((line) => line.trim())
-     .filter(Boolean);
- 
-   if (!lines.length) return [];
- 
-   const blocks: string[] = [];
-   let current: string[] = [];
- 
-   const flush = () => {
-     if (!current.length) return;
-     blocks.push(current.join('\n').trim());
-     current = [];
-   };
- 
-   lines.forEach((line, index) => {
-     const next = lines[index + 1];
--    const startsNewRole =
-+    const startsNewRoleFromTwoLineHeader =
-       current.length > 0 &&
-       isLikelyRoleLine(line) &&
-       Boolean(next) &&
-       looksLikeCompanyDateLine(next!);
- 
--    if (startsNewRole) {
-+    const startsNewRoleFromSingleLineHeader =
-+      current.length > 0 && isStandaloneExperienceHeader(line);
-+
-+    if (startsNewRoleFromTwoLineHeader || startsNewRoleFromSingleLineHeader) {
-       flush();
-     }
- 
-     current.push(line);
-   });
- 
-   flush();
-   return blocks;
- }
- 
-+function isStandaloneExperienceHeader(line: string) {
-+  const trimmed = line.trim();
-+  if (!trimmed) return false;
-+  if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
-+  if (!isExperienceHeader(trimmed)) return false;
-+
-+  const parsed = parseExperienceHeaderSegments(trimmed);
-+  if (!parsed.role?.trim()) return false;
-+
-+  return Boolean(parsed.company || parsed.dateRange);
-+}
-+
- function isLikelyRoleLine(line: string) {
-   const trimmed = line.trim();
-   if (!trimmed) return false;
-   if (trimmed.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(trimmed)) return false;
-   if (trimmed.includes('|')) return false;
-   if (trimmed.includes(':')) return false;
-   if (isDateRange(trimmed)) return false;
-   if (trimmed.split(/\s+/).length > 10) return false;
-   return ROLE_PREFIX_PATTERN.test(trimmed);
- }
- 
- function looksLikeCompanyDateLine(line: string) {
-   const trimmed = line.trim();
-   if (!trimmed) return false;
-   const hasMonth = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(trimmed);
-   return isDateRange(trimmed) || (trimmed.includes(',') && (hasMonth || /\b\d{4}\b/.test(trimmed)));
- }
- 
- 
- function sanitizeExperienceHeaderLine(line: string) {
-   const inline = splitInlineBullets(line);
-   const cleanedLine = inline.description?.trim() || line.trim();
-   return {
-     cleanedLine,
-     inlineBullets: inline.bullets,
-diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
-index 472d6325316730fb6c60aeb55de62f2e25be11bb..5be38b444b50a2f6fcc197dd7f00959014511ec9 100644
---- a/apps/api/src/resume/resume.service.spec.ts
-+++ b/apps/api/src/resume/resume.service.spec.ts
-@@ -363,83 +363,83 @@ describe('ResumeService', () => {
-     const { service } = buildService(95, []);
- 
-     const exportResult = await service.exportResume(
-       'user-1',
-       baseRequest,
-       'docx',
-     );
-     expect(exportResult.contentType).toBe(
-       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-     );
-     await assertValidDocxZip(exportResult.buffer, {
-       expectParagraphs: true,
-       expectBullets: true,
-       expectStyles: true,
-       expectExperienceHeader: true,
-       expectSectionHeaders: true,
-       expectExperienceSpacing: true,
-     });
-     const zip = await JSZip.loadAsync(exportResult.buffer);
-     const documentXml = await zip.file('word/document.xml')!.async('text');
-     expect(documentXml.indexOf('John Candidate')).toBeLessThan(
-       documentXml.indexOf('SKILLS'),
-     );
-     expect(documentXml).toContain('SKILLS');
-     expect(documentXml).toContain('EXPERIENCE');
--    expect(exportResult.filename).toBe('resume.docx');
-+    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
-     expect(exportResult.auditId).toBe('audit-1');
-     expect(exportResult.baselineVersionHash).toBe('hash-1');
-   });
- 
-   it('renders structured sections exactly once', async () => {
-     const { service } = buildService(95, []);
- 
-     const exportResult = await service.exportResume(
-       'user-1',
-       baseRequest,
-       'docx',
-     );
- 
-     const zip = await JSZip.loadAsync(exportResult.buffer);
-     const documentXml = await zip.file('word/document.xml')!.async('text');
- 
-     const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
-     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
-     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
- 
-     expect(skillMatches).toHaveLength(1);
-     expect(experienceMatches).toHaveLength(1);
-     expect(headerMatches).toHaveLength(1);
-     expect(documentXml).toContain('<w:numId');
-   });
- 
-   it('exports PDF content with valid header', async () => {
-     const { service } = buildService(95, []);
- 
-     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
-     expect(exportResult.contentType).toBe('application/pdf');
--    expect(exportResult.filename).toBe('resume.pdf');
-+    expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
-     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
-     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
-   });
- 
-   it('blocks generation when baseline hash is missing', async () => {
-     const complianceOverride: Partial<MockedComplianceService> = {
-       validateAndAudit: jest.fn().mockResolvedValue({
-         complianceFlags: [
-           {
-             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
-             severity: ComplianceFlagSeverity.BLOCK,
-             message: 'Baseline version hash is required.',
-           },
-         ],
-         blocked: true,
-         audit: {
-           id: 'audit-1',
-           baselineVersionId: 'baseline-version-1',
-           baselineVersionHash: null,
-           outputHash: '',
-           action: ComplianceAction.RESUME_GENERATION,
-           actorId: 'user-1',
-           jobId: 'job-1',
-           createdAt: new Date().toISOString(),
-         },
-diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
-index 4a235ff8acf443eb2bd55ec2b1b53290e1ddb7b2..ca06586b61c07c23f52363ef78d1336b2f2439d1 100644
---- a/apps/api/src/resume/resume.service.ts
-+++ b/apps/api/src/resume/resume.service.ts
-@@ -97,50 +97,62 @@ export class ResumeService {
-     const escaped = sanitized
-       .replace(/\\/g, '\\\\')
-       .replace(/\(/g, '\\(')
-       .replace(/\)/g, '\\)');
-     const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
-     const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
-     const pdfParts = [
-       '%PDF-1.4',
-       '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-       '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-       '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
-       `4 0 obj ${contentStream} endobj`,
-       '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-       'xref',
-       '0 6',
-       '0000000000 65535 f ',
-       'trailer << /Size 6 /Root 1 0 R >>',
-       'startxref',
-       '0',
-       '%%EOF',
-     ];
- 
-     return Buffer.from(pdfParts.join('\n'));
-   }
- 
-+  private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {
-+    const safeCompany = (company ?? 'resume')
-+      .trim()
-+      .replace(/[^a-zA-Z0-9]+/g, '-')
-+      .replace(/^-+|-+$/g, '') || 'resume';
-+    const now = new Date();
-+    const mm = String(now.getMonth() + 1).padStart(2, '0');
-+    const dd = String(now.getDate()).padStart(2, '0');
-+    const yyyy = String(now.getFullYear());
-+    return `${safeCompany}-${mm}-${dd}-${yyyy}.${format}`;
-+  }
-+
-   private applyPoliciesToSections(
-     sections: BaselineSection[],
-     policies: BaselineBlockPolicy[],
    ) {
-     if (!policies.length) {
-       return [...sections].sort((a, b) => a.order - b.order);
+     const baselineVersionId = payload?.baseline_version_id?.trim();
+     const baselineVersionHash = payload?.baseline_version_hash?.trim();
+     const blocks = payload?.blocks ?? [];
+ 
+     if (!baselineVersionId) {
+       throw new BadRequestException('baseline_version_id is required');
+     }
+ 
+     if (!baselineVersionHash) {
+@@ -868,138 +897,138 @@ return {
+       }
+     }
+ 
+     const sections = baseline.sections?.length
+       ? baseline.sections
+       : await this.baselineSectionRepository.find({
+           where: { baselineId: baseline.id },
+           order: { order: 'ASC' },
+         });
+ 
+     const sectionMap = new Map(
+       sections.map((section) => [section.id, section]),
+     );
+ 
+     const updateMap = new Map<string, BaselineBlockUpdate>(
+       blocks.map((block) => [block.id, block]),
+     );
+ 
+     for (const blockId of updateMap.keys()) {
+       if (!sectionMap.has(blockId)) {
+         throw new NotFoundException('Baseline block not found');
+       }
+     }
+ 
+     const existingPolicies = await this.baselineBlockPolicyRepository.find({
+-      where: { baselineVersionId: latestVersion.id },
++      where: { baselineVersionId: requestedVersion.id },
+       order: { order: 'ASC' },
+     });
+ 
+     const currentPolicyState: PolicyState[] =
+       existingPolicies.length > 0
+         ? existingPolicies.map((policy) => ({
+             baselineSectionId: policy.baselineSectionId,
+             includePolicy: policy.includePolicy,
+             order: policy.order,
+           }))
+         : this.normalizePoliciesFromSections(sections as PolicySectionInput[]);
+ 
+     const currentVersionHash =
+-      latestVersion.fileHash ??
++      requestedVersion.fileHash ??
+       this.buildVersionHash(
+         baseline.hash,
+         currentPolicyState,
+-        latestVersion.verifiedAdditions ?? [],
++        requestedVersion.verifiedAdditions ?? [],
+       );
+ 
+-    if (requestedVersion.id !== latestVersion.id) {
+-      this.raiseConflict(latestVersion, currentVersionHash);
+-    }
+-
+     if (baselineVersionHash !== (currentVersionHash ?? '')) {
+-      this.raiseConflict(latestVersion, currentVersionHash);
++      this.raiseConflict(requestedVersion, currentVersionHash);
      }
  
      const policyMap = new Map<string, BaselineBlockPolicy>(
-       policies.map((policy) => [policy.baselineSectionId, policy]),
+       existingPolicies.map((policy) => [policy.baselineSectionId, policy]),
      );
  
-     return [...sections]
-       .map((section) => {
-         const policy = policyMap.get(section.id);
-         return {
-           ...section,
-           includePolicy: policy?.includePolicy ?? section.includePolicy,
-           order: policy?.order ?? section.order,
-           sectionType: section.sectionType ?? section.type,
-         } as BaselineSection;
-       })
-       .sort((a, b) => a.order - b.order);
-   }
+     const nextPolicies: PolicyState[] = sections.map((section, index) => {
+       const incoming = updateMap.get(section.id);
+       const currentPolicy = policyMap.get(section.id);
  
-@@ -312,76 +324,76 @@ export class ResumeService {
-       const baselineForHeader = await this.baselineRepository.findOne({
-         where: { id: generation.baselineId, userId },
-         relations: ['parsedRecords'],
-         order: { parsedRecords: { createdAt: 'DESC' } },
-       });
-       if (!baselineForHeader) {
-         throw new NotFoundException('Baseline not found');
-       }
-       const identity = resolveBaselineIdentity(baselineForHeader);
-       const model = mapResumeSectionsToDocxModel(
-         generation.sections as ResumeExportSection[],
-         identity,
-       );
-       const template = getDocxTemplate<ResumeDocxModel>(
-         'resume',
-         DEFAULT_RESUME_TEMPLATE_KEY,
-       );
-       const renderContext: DocxRenderContextBase = {
-         templateKey: DEFAULT_RESUME_TEMPLATE_KEY,
-         font: 'Calibri',
-         margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+       return {
+         baselineSectionId: section.id,
+         includePolicy:
+           incoming?.include_tag ??
+           currentPolicy?.includePolicy ??
+           section.includePolicy ??
+           BaselineIncludePolicy.OPTIONAL,
+         order:
+           incoming?.order_index ??
+           currentPolicy?.order ??
+           section.order ??
+           index,
        };
-       buffer = (await template.render(model, renderContext)).buffer;
-     }
- 
-+    const job = generation.jobId
-+      ? await this.jobsRepository.findOne({
-+          where: { id: generation.jobId, userId },
-+        })
-+      : null;
-+
-     const contentType =
-       format === 'pdf'
-         ? 'application/pdf'
-         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
--    const filename = `resume.${format}`;
-+    const filename = this.buildExportFilename(format, job?.company);
- 
-     const baselineVersion = await this.baselineVersionRepository.findOne({
-       where: {
-         id: generation.baselineVersionId,
-         baselineId: generation.baselineId,
-       },
      });
  
-     if (!baselineVersion) {
-       throw new NotFoundException('Baseline version not found');
-     }
-     if (!baselineVersion.hash) {
-       throw new BadRequestException('Baseline version hash missing');
-     }
+     const newVersionHash = this.buildVersionHash(
+       baseline.hash,
+       nextPolicies,
+-      latestVersion.verifiedAdditions ?? [],
++      requestedVersion.verifiedAdditions ?? [],
+     );
+     const nextVersionNumber =
+       (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
  
--    const job = generation.jobId
--      ? await this.jobsRepository.findOne({
--          where: { id: generation.jobId, userId },
--        })
--      : null;
--
-     const { complianceFlags, blocked, audit } =
-       await this.complianceService.validateAndAudit({
-         action: ComplianceAction.RESUME_EXPORT,
-         actorId: userId,
-         baselineVersion,
-         job,
-         outputHash: createHash('sha256')
-           .update(
-             `${format}:${
-               format === 'pdf'
-                 ? pdfText ?? ''
-                 : JSON.stringify(sectionFragments)
-             }`,
-           )
-           .digest('hex'),
-         baselineSections: generation.sections,
-         generatedSections: generation.sections,
+     return this.baselineRepository.manager.transaction(async (manager) => {
+       const newVersion = manager.create(BaselineVersion, {
+         baselineId: baseline.id,
+         versionNumber: nextVersionNumber,
+         fileHash: newVersionHash,
+         storagePath: baseline.storagePath,
+-        verifiedAdditions: latestVersion.verifiedAdditions ?? [],
+-        additionDiff: latestVersion.additionDiff ?? null,
+-        promotedFromInterviewId: latestVersion.promotedFromInterviewId ?? null,
++        verifiedAdditions: requestedVersion.verifiedAdditions ?? [],
++        additionDiff: requestedVersion.additionDiff ?? null,
++        promotedFromInterviewId: requestedVersion.promotedFromInterviewId ?? null,
        });
  
-     const blockingFlags = complianceFlags.filter(
-       (flag) => flag.severity === 'block',
-     );
+       const savedVersion = await manager.save(newVersion);
  
-     if (blocked && blockingFlags.length > 0) {
-       throw new UnprocessableEntityException({
+       const policyEntities = nextPolicies.map((policy) =>
+         manager.create(BaselineBlockPolicy, {
+           baselineVersionId: savedVersion.id,
+           baselineSectionId: policy.baselineSectionId,
+           includePolicy: policy.includePolicy,
+           order: policy.order,
+         }),
+       );
+ 
+       await manager.save(policyEntities);
+ 
+       baseline.version = nextVersionNumber;
+       const updatedSections = sections.map((section) => {
+         const applied = nextPolicies.find(
+           (policy) => policy.baselineSectionId === section.id,
+         );
+ 
+         section.includePolicy = applied?.includePolicy ?? section.includePolicy;
+         section.order =
+           applied?.order ?? section.order ?? section.orderIndex ?? 0;
++        section.title = this.getSectionTitle(section.sectionType, section.title);
+ 
+         return section;
+       });
+ 
+       await manager.save(BaselineSection, updatedSections);
+       await manager.save(baseline);
+ 
+       return {
+         baseline_version_id: baselineVersionId,
+-        updated_blocks: nextPolicies.map((policy) => ({
+-          id: policy.baselineSectionId,
+-          include_tag: policy.includePolicy,
+-          order_index: policy.order,
++        updated_blocks: updatedSections.map((section) => ({
++          id: section.id,
++          section_type: section.sectionType ?? BaselineSectionType.OTHER,
++          title: this.getSectionTitle(section.sectionType, section.title),
++          content: section.content,
++          include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
++          order_index: section.order ?? 0,
+         })),
+         new_version_id: savedVersion.id,
+         hash: savedVersion.fileHash,
+       };
+     });
+   }
+ }
+diff --git a/apps/api/src/compliance/baseline-allowlist.ts b/apps/api/src/compliance/baseline-allowlist.ts
+index 85e4ff6f1870bab18c75890771d1eb190196670d..96aa6bf45ff21e9a11ef4ac2f19459485a7dd6ad 100644
+--- a/apps/api/src/compliance/baseline-allowlist.ts
++++ b/apps/api/src/compliance/baseline-allowlist.ts
+@@ -1,50 +1,53 @@
+ import { ComplianceTextSection } from './compliance.types';
+ import {
+   collectCandidates,
+   collectMetricCandidatesFromSections,
+   collectTechnologyTokensFromSections,
+   extractBaselineCompanyTokens,
+   extractCompanyCandidatesFromText,
+   extractRoleCandidatesFromText,
+   normalizeCompanyTokenForComparison,
+   normalizeTokenForComparison,
+   shouldUseForRoleDetection,
+ } from './detectors';
+ import {
+   BaselineAllowlistSnapshot,
+   EMPTY_BASELINE_ALLOWLIST,
+ } from './baseline-allowlist.types';
+ 
+ export function buildBaselineAllowlistSnapshot(
+   sections: ComplianceTextSection[] | null | undefined,
+ ): BaselineAllowlistSnapshot {
+   if (!sections?.length) {
+     return { ...EMPTY_BASELINE_ALLOWLIST };
+   }
+ 
+-  const normalizedSections = sections ?? [];
++  const normalizedSections = (sections ?? []).filter((section) => {
++    const type = section.sectionType?.toUpperCase?.();
++    return type !== 'RAW';
++  });
+ 
+   const companyTokens = new Set<string>();
+ 
+   for (const token of extractBaselineCompanyTokens(normalizedSections)) {
+     const normalized = normalizeCompanyTokenForComparison(token);
+     if (normalized) {
+       companyTokens.add(normalized);
+     }
+   }
+ 
+   const candidateCompanies = collectCandidates(
+     normalizedSections,
+     extractCompanyCandidatesFromText,
+     normalizeCompanyTokenForComparison,
+   );
+   for (const normalized of candidateCompanies.keys()) {
+     if (normalized) {
+       companyTokens.add(normalized);
+     }
+   }
+ 
+   const roleSections = normalizedSections.filter((section) =>
+     shouldUseForRoleDetection(section.sectionType),
+   );
+   const roleCandidates = collectCandidates(
+diff --git a/apps/web/app/(app)/baseline/[id]/page.tsx b/apps/web/app/(app)/baseline/[id]/page.tsx
+index b8c59900d28906b7fb2122d18cf24f49fc2080d4..e0954bb9a1f3058cb5dc8a7673780c5ff37b4649 100644
+--- a/apps/web/app/(app)/baseline/[id]/page.tsx
++++ b/apps/web/app/(app)/baseline/[id]/page.tsx
+@@ -129,51 +129,51 @@ async function fetchBaselineVersions(
+     if (response.status === 401 || response.status === 403) {
+       redirect("/auth/login");
+     }
+ 
+     if (!response.ok) {
+       return null;
+     }
+ 
+     return (await response.json()) as BaselineVersionDto[];
+   } catch (error) {
+     if (isNextRedirectError(error)) {
+       throw error;
+     }
+ 
+     console.error("Failed to fetch baseline versions", error);
+     return null;
+   }
+ }
+ 
+ const friendlyTitles: Record<string, string> = {
+   SUMMARY: "Summary",
+   EXPERIENCE: "Experience",
+   PROJECT: "Projects / Programs",
+   SKILLS: "Skills",
+   EDUCATION: "Education",
+-  OTHER: "Other",
++  OTHER: "Summary",
+   RAW: "Raw",
+ };
+ 
+ type GroupedSections = Record<string, BaselineSectionDto[]>;
+ 
+ const displayOrder = [
+   "SUMMARY",
+   "EXPERIENCE",
+   "PROJECT",
+   "SKILLS",
+   "EDUCATION",
+   "OTHER",
+   "RAW",
+ ];
+ 
+ function organizeSections(sections: BaselineSectionDto[]): GroupedSections {
+   const sorted = [...sections].sort((a, b) => a.order - b.order);
+   const grouped: Record<string, BaselineSectionDto[]> = {};
+ 
+   sorted.forEach((section) => {
+     const key = section.sectionType ?? "OTHER";
+     if (!grouped[key]) {
+       grouped[key] = [];
+     }
+     grouped[key].push(section);
 diff --git a/apps/web/app/(app)/studio/page.tsx b/apps/web/app/(app)/studio/page.tsx
-index 8d24b51d3882e22dca4fe7f1ad23fe34a70f6863..220ff1d2700d6ce51cd3e4a64c33b84e94df21ed 100644
+index 220ff1d2700d6ce51cd3e4a64c33b84e94df21ed..ecf4850dff46ebdcd63e1e0f353e7b6b07758104 100644
 --- a/apps/web/app/(app)/studio/page.tsx
 +++ b/apps/web/app/(app)/studio/page.tsx
-@@ -225,50 +225,66 @@ function stripDuplicateLeadingHeader(title?: string, content?: string): string |
-   const normalizedTitle = normalizeHeader(title);
-   if (!normalizedTitle) return content;
-   const lines = content.split(/\r?\n/);
-   if (!lines.length) return content;
-   const firstLine = lines[0].trim();
-   if (!firstLine) return content;
-   if (normalizeHeader(firstLine) !== normalizedTitle) {
-     return content;
+@@ -318,163 +318,189 @@ function renderSectionContent(content?: string): ReactNode | null {
+         <p key={`${line}-${index}`}>{line}</p>
+       ))}
+     </div>
+   );
+ }
+ 
+ function extractResumeSections(payload: unknown): ResumeSection[] | undefined {
+   if (!payload || typeof payload !== "object") return undefined;
+   const record = payload as Record<string, unknown>;
+   const rawSections = record.sections;
+   if (!Array.isArray(rawSections)) return undefined;
+   const normalized: ResumeSection[] = [];
+   for (const section of rawSections) {
+     if (!section || typeof section !== "object") continue;
+     const entry = section as Record<string, unknown>;
+     const title = typeof entry.title === "string" ? entry.title : undefined;
+     const type = typeof entry.type === "string" ? entry.type : undefined;
+     const id = typeof entry.id === "string" ? entry.id : undefined;
+     const content = typeof entry.content === "string" ? entry.content : undefined;
+     if (!title && !content && !type) continue;
+     normalized.push({ id, type, title, content });
    }
-   const remainder = lines.slice(1).join("\n").trim();
-   return remainder || undefined;
+   return normalized.length ? normalized : undefined;
  }
  
- function downloadBlob(blob: Blob, fileName: string) {
-   if (typeof window === "undefined") return;
-   const url = window.URL.createObjectURL(blob);
-   const link = document.createElement("a");
-   link.href = url;
-   link.download = fileName;
-   document.body.appendChild(link);
-   link.click();
-   link.remove();
-   window.URL.revokeObjectURL(url);
- }
- 
-+function getFilenameFromContentDisposition(headerValue: string | null): string | null {
-+  if (!headerValue) return null;
-+  const starMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
-+  if (starMatch?.[1]) {
-+    try {
-+      return decodeURIComponent(starMatch[1]).trim();
-+    } catch {
-+      return starMatch[1].trim();
-+    }
++const resumeSectionHeadingByType: Record<string, string> = {
++  RAW: "Raw",
++  SUMMARY: "Summary",
++  EXPERIENCE: "Professional Experience",
++  PROJECT: "Projects",
++  SKILLS: "Technical Skills",
++  EDUCATION: "Education",
++  OTHER: "Summary",
++};
++
++function resolveResumeSectionHeading(section: ResumeSection) {
++  const normalizedTitle = section.title?.trim();
++  if (normalizedTitle && !/^other$/i.test(normalizedTitle)) {
++    return normalizedTitle;
 +  }
 +
-+  const plainMatch = headerValue.match(/filename="?([^";]+)"?/i);
-+  const parsed = plainMatch?.[1]?.trim();
-+  return parsed || null;
++  const typeKey = section.type?.toUpperCase();
++  if (!typeKey) return normalizedTitle;
++  return resumeSectionHeadingByType[typeKey] ?? typeKey;
 +}
 +
- function mapVerdict(value?: string | null): "Apply" | "Consider" | "Skip" | null {
-   if (!value) return null;
-   const normalized = value.trim().toLowerCase();
-   if (!normalized) return null;
-   if (normalized.includes("apply")) return "Apply";
-   if (normalized.includes("consider")) return "Consider";
-   if (
-     normalized.includes("skip") ||
-     normalized.includes("pass") ||
-     normalized.includes("decline")
-   ) {
-     return "Skip";
-   }
-   return null;
+ function buildResumePreview(payload: unknown): ReactNode | null {
+   const sections = extractResumeSections(payload);
+   if (!sections || !sections.length) return null;
+   const normalizedSections = sections
+     .map((section) => ({
+       ...section,
+       content: stripDuplicateLeadingHeader(section.title, section.content),
+     }))
+     .filter((section) => normalizeHeader(section.title) !== "raw")
+     .filter((section) => section.title || section.content);
+   if (!normalizedSections.length) return null;
+   return (
+     <div className="space-y-6">
+       {normalizedSections.map((section, index) => {
+         const content = renderSectionContent(section.content);
+         if (!content && !section.title) return null;
+-        const heading = section.title ?? section.type;
++        const heading = resolveResumeSectionHeading(section);
+         const key = section.id ?? heading ?? `resume-section-${index}`;
+         return (
+           <article key={key} className="space-y-2">
+             {heading ? (
+               <h3 className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">
+                 {heading}
+               </h3>
+             ) : null}
+             {content}
+           </article>
+         );
+       })}
+     </div>
+   );
  }
  
- function splitSectionLines(content: string): string[] {
-   return content
-     .split(/\r?\n/)
-     .map((line) => line.trim())
-     .filter((line) => line.length > 0);
- }
+ export default function StudioPage() {
+   const searchParams = useSearchParams();
+   const searchParamValue = searchParams.toString();
+   const requestedJobId = useMemo(
+     () => searchParams.get("jobId")?.trim() ?? "",
+     [searchParamValue],
+   );
+   const requestedBaselineVersionId = useMemo(
+     () => searchParams.get("baselineVersionId")?.trim() ?? "",
+     [searchParamValue],
+   );
  
- function isBulletLine(line: string): boolean {
-   const trimmed = line.trim();
-@@ -778,52 +794,55 @@ export default function StudioPage() {
-     setResumeWarningFlags([]);
-     setResumeAuditId(undefined);
-     const payload = {
-       jobId: selectedJobId,
-       baselineId: selectedBaselineId,
-       baselineVersionId: selectedBaselineVersionId,
-       oneTap: true,
-     };
-     try {
-       const response = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify(payload),
-       });
+   const [jobs, setJobs] = useState<Job[]>([]);
+   const [jobsLoading, setJobsLoading] = useState(false);
+   const [jobsError, setJobsError] = useState<string | null>(null);
  
-       if (!response.ok) {
-         const responsePayload = await readResponsePayload(response);
-         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
-         if (tierGate) {
-           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
-           return;
-         }
-         throw new Error(formatErrorMessage(responsePayload, "Resume export failed."));
+   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
+   const [baselinesLoading, setBaselinesLoading] = useState(false);
+   const [baselinesError, setBaselinesError] = useState<string | null>(null);
+ 
+   const [selectedJobId, setSelectedJobId] = useState("");
+   const [selectedBaselineId, setSelectedBaselineId] = useState("");
+   const [selectedBaselineVersionId, setSelectedBaselineVersionId] = useState("");
+   const [baselineTouched, setBaselineTouched] = useState(false);
+   const [versionTouched, setVersionTouched] = useState(false);
+   const [versionRefreshSignal, setVersionRefreshSignal] = useState(0);
+ 
+   const baselineTouchedRef = useRef(baselineTouched);
+   useEffect(() => {
+     baselineTouchedRef.current = baselineTouched;
+   }, [baselineTouched]);
+ 
+   const versionTouchedRef = useRef(versionTouched);
++  const pendingVersionSelectionRef = useRef<string | null>(null);
+   useEffect(() => {
+     versionTouchedRef.current = versionTouched;
+   }, [versionTouched]);
+ 
+   const [versions, setVersions] = useState<BaselineVersionDto[]>([]);
+   const [versionsLoading, setVersionsLoading] = useState(false);
+   const [versionsError, setVersionsError] = useState<string | null>(null);
+ 
+   const [analysis, setAnalysis] = useState<LatestAnalysis | null>(null);
+   const [analysisLoading, setAnalysisLoading] = useState(false);
+   const [analysisError, setAnalysisError] = useState<string | null>(null);
+ 
+   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
+   const [resumeGenerating, setResumeGenerating] = useState(false);
+   const [resumeExportFormat, setResumeExportFormat] =
+     useState<"docx" | "pdf" | null>(null);
+   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
+   const [resumeAuditId, setResumeAuditId] = useState<string | undefined>();
+ 
+   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
+   const [coverGenerating, setCoverGenerating] = useState(false);
+   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
+   const [coverWarningFlags, setCoverWarningFlags] = useState<ComplianceFlag[]>([]);
+   const [coverAuditId, setCoverAuditId] = useState<string | undefined>();
+ 
+   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
+ 
+   const { isPro } = useEntitlements();
+ 
+   const selectedJob = useMemo(
+     () => jobs.find((job) => job.id === selectedJobId),
+     [jobs, selectedJobId],
+   );
+ 
+   const selectedVersion = useMemo(
+     () => versions.find((version) => version.id === selectedBaselineVersionId),
+     [versions, selectedBaselineVersionId],
+   );
+   const selectedVersionLabel = selectedVersion?.versionNumber
+     ? `Version ${selectedVersion.versionNumber}`
+     : "";
+ 
+   const handleBlockPolicyVersionAdvance = useCallback(
+     (newVersionId: string, newHash: string | null) => {
++      if (newVersionId) {
++        pendingVersionSelectionRef.current = newVersionId;
++      }
+       if (newVersionId && newVersionId !== selectedBaselineVersionId) {
+         setSelectedBaselineVersionId(newVersionId);
        }
++      setVersionTouched(true);
+       setVersionRefreshSignal((prev) => prev + 1);
+     },
+     [selectedBaselineVersionId],
+   );
  
-+      const serverFilename = getFilenameFromContentDisposition(
-+        response.headers.get("content-disposition"),
-+      );
-       const blob = await response.blob();
--      downloadBlob(blob, `resume.${format}`);
-+      downloadBlob(blob, serverFilename ?? `resume.${format}`);
-     } catch (error) {
-       const message = error instanceof Error ? error.message : "Resume export failed.";
-       setResumeState((current) => ({ ...current, error: message }));
-     } finally {
-       setResumeExportFormat(null);
-     }
-   };
+   const refreshBlockPolicyList = useCallback(() => {
+     setVersionRefreshSignal((prev) => prev + 1);
+   }, []);
  
-   const handleCoverDraft = async () => {
-     if (!readyForDocuments) {
-       setCoverState((current) => ({
-         ...current,
-         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
-       }));
+   const coverLetterJobContext = useMemo(() => {
+     const jobWithExtras = selectedJob as Job & {
+       companyName?: string | null;
+       jobTitle?: string | null;
+     };
+     const companies = collectNormalizedContextValues([
+       selectedJob?.company,
+       jobWithExtras?.companyName,
+       analysis?.company,
+       analysis?.companyName,
+     ]);
+     const roleTitles = collectNormalizedContextValues([
+       selectedJob?.title,
+       jobWithExtras?.jobTitle,
+       analysis?.jobTitle,
+       analysis?.title,
+@@ -596,100 +622,105 @@ export default function StudioPage() {
+             return current;
+           }
+           return fetched[0]?.id ?? "";
+         });
+       } catch (error) {
+         if (canceled) return;
+         const message =
+           error instanceof Error ? error.message : "Baselines could not be loaded.";
+         setBaselinesError(message);
+       } finally {
+         if (!canceled) {
+           setBaselinesLoading(false);
+         }
+       }
+     };
+     void loadBaselines();
+     return () => {
+       canceled = true;
+     };
+   }, []);
+ 
+   useEffect(() => {
+     if (!selectedBaselineId) {
+       setVersions([]);
+       setSelectedBaselineVersionId("");
++      pendingVersionSelectionRef.current = null;
+       setVersionsError(null);
        return;
      }
-     setCoverGenerating(true);
-     setCoverState(createDocumentState());
-     setCoverWarningFlags([]);
-     setCoverAuditId(undefined);
-     const payload = buildCoverLetterPayload(false);
-     try {
-       const response = await fetch("/api/cover-letters", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
+     let canceled = false;
+     setVersionsLoading(true);
+     setVersionsError(null);
+     const loadVersions = async () => {
+       try {
+         const response = await fetch(
+           `/api/baselines/${encodeURIComponent(selectedBaselineId)}/versions`,
+         );
+         const payload = await readResponsePayload(response);
+         if (canceled) return;
+         if (!response.ok || !Array.isArray(payload)) {
+           const message = formatErrorMessage(payload, "Baseline versions could not be loaded.");
+           setVersionsError(message);
+           setVersions([]);
+           setSelectedBaselineVersionId("");
+           return;
+         }
+         const parsed = payload as BaselineVersionDto[];
+         setVersions(parsed);
+         setVersionsError(null);
+         setSelectedBaselineVersionId((current) => {
++          const pending = pendingVersionSelectionRef.current;
++          if (pending && parsed.some((version) => version.id === pending)) {
++            pendingVersionSelectionRef.current = null;
++            return pending;
++          }
+           if (current && parsed.some((version) => version.id === current)) {
+             return current;
+           }
+           if (
+             !versionTouchedRef.current &&
+             requestedBaselineVersionId &&
+             parsed.some((version) => version.id === requestedBaselineVersionId)
+           ) {
+             return requestedBaselineVersionId;
+           }
+           return parsed[0]?.id ?? "";
+         });
+       } catch (error) {
+         if (canceled) return;
+         const message =
+           error instanceof Error ? error.message : "Baseline versions could not be loaded.";
+         setVersionsError(message);
+         setVersions([]);
+         setSelectedBaselineVersionId("");
+       } finally {
+         if (!canceled) {
+           setVersionsLoading(false);
+         }
+       }
+     };
+-    setVersionTouched(false);
+     void loadVersions();
+     return () => {
+       canceled = true;
+     };
+   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
+ 
+   useEffect(() => {
+     if (!selectedJobId) {
+       setAnalysis(null);
+       setAnalysisError(null);
+       return;
+     }
+     let canceled = false;
+     setAnalysisLoading(true);
+     setAnalysisError(null);
+     const loadAnalysis = async () => {
+       try {
+         const response = await fetch(
+           `/api/analysis/latest?jobId=${encodeURIComponent(selectedJobId)}`,
+         );
+         const payload = await readResponsePayload(response);
+         if (canceled) return;
+         if (!response.ok) {
+           const message = formatErrorMessage(payload, "Fit analysis could not be loaded.");
+           setAnalysis(null);
+@@ -957,71 +988,74 @@ export default function StudioPage() {
+                 onChange={(event) => setSelectedJobId(event.target.value)}
+                 disabled={jobsLoading}
+               >
+                 {jobs.map((job) => (
+                   <option key={job.id} value={job.id}>
+                     {job.company ?? "Untitled company"} - {job.title ?? "Untitled role"}
+                     {(job.archivedAt || job.isArchived) && " (archived)"}
+                   </option>
+                 ))}
+               </select>
+             </label>
+           )}
+ 
+           {baselines.length === 0 ? (
+             <EmptyState
+               title="No baselines yet"
+               body="Upload a baseline to pair with your job before generating documents."
+             />
+           ) : (
+             <label className="flex flex-col gap-2 text-sm text-slate-400">
+               Baseline
+               <select
+                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
+                 value={selectedBaselineId}
+                 onChange={(event) => {
++                  pendingVersionSelectionRef.current = null;
++                  setVersionTouched(false);
+                   setSelectedBaselineId(event.target.value);
+                   setBaselineTouched(true);
+                 }}
+                 disabled={baselinesLoading}
+               >
+                 {baselines.map((baseline) => (
+                   <option key={baseline.id} value={baseline.id}>
+                     {baseline.originalFilename || `Baseline ${baseline.version}`}
+                   </option>
+                 ))}
+               </select>
+             </label>
+           )}
+ 
+           {selectedBaselineId ? (
+             <label className="flex flex-col gap-2 text-sm text-slate-400">
+               Baseline version
+               <select
+                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
+                 value={selectedBaselineVersionId}
+                 onChange={(event) => {
++                  pendingVersionSelectionRef.current = null;
+                   setSelectedBaselineVersionId(event.target.value);
+                   setVersionTouched(true);
+                 }}
+                 disabled={versionsLoading}
+               >
+                 {versions.map((version) => (
+                   <option key={version.id} value={version.id}>
+                     {version.versionNumber ? `Version ${version.versionNumber}` : version.id}
+                     {version.fileHash ? ` (${version.fileHash.slice(0, 8)})` : ""}
+                   </option>
+                 ))}
+               </select>
+             </label>
+           ) : null}
+ 
+           {versionsError ? (
+             <Alert intent="error" title="Versions unavailable">
+               {versionsError}
+             </Alert>
+           ) : null}
+           {selectedBaselineId && !versionsLoading && versions.length === 0 ? (
+             <Alert intent="warning" title="No baseline versions">
+               Upload a baseline version for this baseline before generating documents.
+             </Alert>
+           ) : null}
+diff --git a/apps/web/components/BaselineBlockPolicyList.tsx b/apps/web/components/BaselineBlockPolicyList.tsx
+index 271db96421cbdc23c4e64f346e985fd6cb6eee90..718484d7f4cfad6c5a918162c736eaca012c0917 100644
+--- a/apps/web/components/BaselineBlockPolicyList.tsx
++++ b/apps/web/components/BaselineBlockPolicyList.tsx
+@@ -15,64 +15,79 @@ const policyOptions: Array<{
+ }> = [
+   {
+     value: "always",
+     label: "Always",
+     description: "Force this block into every generated draft.",
+   },
+   {
+     value: "optional",
+     label: "Optional",
+     description: "Allow the writer to include this block when relevant.",
+   },
+   {
+     value: "never",
+     label: "Never",
+     description: "Exclude the block from downstream generations.",
+   },
+ ];
+ 
+ const sectionTitles: Record<string, string> = {
+   RAW: "Raw",
+   SUMMARY: "Summary",
+   EXPERIENCE: "Experience",
+   PROJECT: "Projects / Programs",
+   SKILLS: "Skills",
+   EDUCATION: "Education",
+-  OTHER: "Other",
++  OTHER: "Summary",
+ };
+ 
+ type BaselineBlockPolicyListProps = {
+   blocks: BaselineBlockDto[];
+   onPolicyChange: (blockId: string, includePolicy: BaselineIncludePolicy) => void;
+   saving?: boolean;
+ };
+ 
+-const truncatePreview = (value: string, max = 220) => {
+-  if (value.length <= max) {
+-    return value;
++const truncatePreview = (value?: string | null, max = 220) => {
++  const normalized = value ?? "";
++
++  if (normalized.length <= max) {
++    return normalized;
++  }
++  return `${normalized.slice(0, max).trimEnd()}…`;
++};
++
++const getDisplayTitle = (block: BaselineBlockDto) => {
++  const title = block.title?.trim();
++  if (title && !/^untitled block$/i.test(title) && !/^other$/i.test(title)) {
++    return title;
+   }
+-  return `${value.slice(0, max).trimEnd()}…`;
++
++  if (block.section_type === "OTHER" || block.section_type === "SUMMARY") {
++    return "Summary";
++  }
++
++  return sectionTitles[block.section_type] ?? "Untitled block";
+ };
+ 
+ export function BaselineBlockPolicyList({
+   blocks,
+   onPolicyChange,
+   saving,
+ }: BaselineBlockPolicyListProps) {
+   const sortedBlocks = useMemo(
+     () =>
+       [...blocks].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
+     [blocks],
+   );
+ 
+   return (
+     <div className="space-y-4">
+       <div className="space-y-2">
+         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Content controls</p>
+         <p className="text-xs text-slate-300">
+           Use the three-state toggle to keep a block in every draft, allow it when relevant, or
+           exclude it entirely.
+         </p>
+         <div className="grid gap-2 text-[11px] text-slate-400 sm:grid-cols-3">
+           {policyOptions.map((option) => (
+             <div key={option.value}>
+               <p className="font-semibold text-slate-200">{option.label}</p>
+@@ -102,43 +117,43 @@ export function BaselineBlockPolicyList({
+                     </span>
+                     <div className="flex gap-2">
+                       {policyOptions.map((option) => {
+                         const isActive = block.include_tag === option.value;
+                         return (
+                           <button
+                             key={option.value}
+                             type="button"
+                             onClick={() => onPolicyChange(block.id, option.value)}
+                             disabled={saving}
+                             className={`rounded-full px-3 py-1 text-xs font-semibold shadow-sm transition ${
+                               isActive
+                                 ? "bg-blue-500 text-white"
+                                 : "bg-white text-slate-900 hover:bg-slate-100"
+                             }`}
+                           >
+                             {option.label}
+                           </button>
+                         );
+                       })}
+                     </div>
+                   </div>
+ 
+                   <div className="space-y-1">
+                     <p className="text-sm font-semibold text-white">
+-                      {block.title || "Untitled block"}
++                      {getDisplayTitle(block)}
+                     </p>
+                     <p className="text-xs text-slate-300">
+                       {truncatePreview(block.content)}
+                     </p>
+                   </div>
+                 </div>
+                 <p className="mt-3 text-[11px] text-slate-500">
+                   Order: {block.order_index ?? "—"}
+                 </p>
+               </article>
+             );
+           })}
+         </div>
+       )}
+     </div>
+   );
+ }

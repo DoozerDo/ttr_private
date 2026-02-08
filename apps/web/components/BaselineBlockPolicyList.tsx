@@ -37,7 +37,7 @@ const sectionTitles: Record<string, string> = {
   PROJECT: "Projects / Programs",
   SKILLS: "Skills",
   EDUCATION: "Education",
-  OTHER: "Other",
+  OTHER: "Summary",
 };
 
 type BaselineBlockPolicyListProps = {
@@ -46,11 +46,26 @@ type BaselineBlockPolicyListProps = {
   saving?: boolean;
 };
 
-const truncatePreview = (value: string, max = 220) => {
-  if (value.length <= max) {
-    return value;
+const truncatePreview = (value?: string | null, max = 220) => {
+  const normalized = value ?? "";
+
+  if (normalized.length <= max) {
+    return normalized;
   }
-  return `${value.slice(0, max).trimEnd()}…`;
+  return `${normalized.slice(0, max).trimEnd()}…`;
+};
+
+const getDisplayTitle = (block: BaselineBlockDto) => {
+  const title = block.title?.trim();
+  if (title && !/^untitled block$/i.test(title) && !/^other$/i.test(title)) {
+    return title;
+  }
+
+  if (block.section_type === "OTHER" || block.section_type === "SUMMARY") {
+    return "Summary";
+  }
+
+  return sectionTitles[block.section_type] ?? "Untitled block";
 };
 
 export function BaselineBlockPolicyList({
@@ -124,7 +139,7 @@ export function BaselineBlockPolicyList({
 
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-white">
-                      {block.title || "Untitled block"}
+                      {getDisplayTitle(block)}
                     </p>
                     <p className="text-xs text-slate-300">
                       {truncatePreview(block.content)}

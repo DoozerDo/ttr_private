@@ -22,7 +22,10 @@ export function buildBaselineAllowlistSnapshot(
     return { ...EMPTY_BASELINE_ALLOWLIST };
   }
 
-  const normalizedSections = sections ?? [];
+  const normalizedSections = (sections ?? []).filter((section) => {
+    const type = section.sectionType?.toUpperCase?.();
+    return type !== 'RAW';
+  });
 
   const companyTokens = new Set<string>();
 
