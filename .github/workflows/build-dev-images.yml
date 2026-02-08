@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - develop
-      - do_studio_fix
 
 permissions:
   contents: read
