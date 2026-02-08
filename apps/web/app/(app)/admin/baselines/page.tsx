@@ -23,7 +23,7 @@ function lockedLabel(status: string): string {
 }
 
 async function loadBaselines(): Promise<AdminBaselineRow[]> {
-  return adminServerFetch<AdminBaselineRow[]>("/baselines?includeArchived=true", "Load baselines");
+  return adminServerFetch<AdminBaselineRow[]>("/admin/baselines?includeArchived=true", "Load baselines");
 }
 
 async function deleteBaselineAction(formData: FormData) {

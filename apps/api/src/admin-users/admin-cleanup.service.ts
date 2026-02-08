@@ -10,7 +10,7 @@ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { BaselineParsed } from '../baseline/baseline-parsed.entity';
 import { BaselineSection } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import { Baseline } from '../baseline/baseline.entity';
+import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
 import { ComplianceAudit } from '../compliance/compliance-audit.entity';
 import { CoverLetter } from '../cover-letters/cover-letter.entity';
 import { InterviewSession } from '../interviews/interview-session.entity';
@@ -31,6 +31,28 @@ type CleanupResult = {
 @Injectable()
 export class AdminCleanupService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  async listJobs(includeArchived: boolean) {
+    const manager = this.dataSource.manager;
+    const jobs = await manager.find(Job, {
+      where: includeArchived ? {} : { isArchived: false },
+      order: { createdAt: 'DESC' },
+      select: ['id', 'title', 'userId', 'createdAt', 'isArchived'],
+    });
+
+    return jobs;
+  }
+
+  async listBaselines(includeArchived: boolean) {
+    const manager = this.dataSource.manager;
+    const baselines = await manager.find(Baseline, {
+      where: includeArchived ? {} : { status: BaselineStatus.ACTIVE },
+      order: { updatedAt: 'DESC' },
+      select: ['id', 'originalFilename', 'status', 'updatedAt', 'userId'],
+    });
+
+    return baselines;
+  }
 
   async deleteUser(userId: string): Promise<CleanupResult> {
     return this.dataSource.transaction(async (manager) => {

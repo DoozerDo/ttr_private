@@ -10,7 +10,7 @@ type AdminJobRow = {
 };
 
 async function loadJobs(): Promise<AdminJobRow[]> {
-  return adminServerFetch<AdminJobRow[]>("/jobs?includeArchived=true", "Load jobs");
+  return adminServerFetch<AdminJobRow[]>("/admin/jobs?includeArchived=true", "Load jobs");
 }
 
 function formatDate(value: string): string {
