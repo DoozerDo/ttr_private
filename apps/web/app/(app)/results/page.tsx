@@ -12,6 +12,7 @@ import {
 } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
+import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
@@ -71,6 +72,8 @@ type LatestAnalysis = {
   gaps?: string[];
   complianceFlags?: string[];
   summary?: string | null;
+  evaluationNotes?: string[] | null;
+  systemConstraints?: string[] | null;
   createdAt?: string | null;
 };
 
@@ -106,6 +109,8 @@ const DIMENSION_LABELS: Record<keyof FitDimensionScores, string> = {
   industryContext: "Industry & context",
   strategicTacticalFit: "Strategic vs tactical",
 };
+
+const LOW_EXPERIENCE_THRESHOLD = 70;
 
 function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionScores {
   if (!data) return {};
@@ -150,10 +155,10 @@ const getNextSteps = ({
 
   return [
     {
-      title: "Understand this verdict",
+      title: "Understand the score summary",
       description: hasAnalysis
-        ? `Review the strengths, gaps, and dimension contributions above to see how we landed on the ${verdictInfo.label.toLowerCase()} verdict (${scoreLabel}).`
-        : "Load the latest analysis to reveal the verdict and supporting context.",
+        ? `Review the strengths, gaps, and experience area contributions above to see how the ${scoreLabel} score came together.`
+        : "Load the latest analysis to reveal the score summary and supporting context.",
     },
     {
       title: "Decide whether to apply",
@@ -322,6 +327,10 @@ export default function ResultsPage() {
   useEffect(() => {
     setHasMounted(true);
   }, []);
+  const [showAllComplianceFlags, setShowAllComplianceFlags] = useState(false);
+  const [experienceActionTarget, setExperienceActionTarget] = useState<string | null>(null);
+  const confidenceSettingsRef = useRef<HTMLDivElement | null>(null);
+  const complianceDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -390,6 +399,10 @@ export default function ResultsPage() {
         return "border-slate-500/30 bg-slate-800/40 text-slate-200";
     }
   }, [activeVerdictInfo.label]);
+  const displayActiveVerdictLabel =
+    activeVerdictInfo.label === "Verdict pending" ? "Score pending" : activeVerdictInfo.label;
+  const displayCurrentVerdictLabel =
+    currentVerdictInfo.label === "Verdict pending" ? "Score pending" : currentVerdictInfo.label;
 
   const jobDescriptor = useMemo(() => {
     if (latest?.jobTitle) {
@@ -500,15 +513,25 @@ export default function ResultsPage() {
     return "Confidence is unchanged—proceed with the next action.";
   }, [calibrationResult]);
 
+  const normalizedDimensionScores = useMemo(
+    () => normalizeDimensionScores(activeAnalysis ?? null),
+    [activeAnalysis],
+  );
+  const industryContextPerfect = useMemo(() => {
+    const value = normalizedDimensionScores.industryContext;
+    return typeof value === "number" && value >= 99.5;
+  }, [normalizedDimensionScores]);
   const dimensionEntries = useMemo(() => {
-    const scores = normalizeDimensionScores(activeAnalysis ?? null);
     const keys = Object.keys(DIMENSION_LABELS) as Array<keyof FitDimensionScores>;
     return keys.map((key) => ({
       key,
       label: DIMENSION_LABELS[key],
-      value: typeof scores[key] === "number" ? scores[key] : null,
+      value:
+        typeof normalizedDimensionScores[key] === "number"
+          ? normalizedDimensionScores[key]
+          : null,
     }));
-  }, [activeAnalysis]);
+  }, [normalizedDimensionScores]);
 
   const reasonSummary = useMemo(
     () => buildReasonSummary(latest?.strengths ?? [], latest?.gaps ?? []),
@@ -520,8 +543,65 @@ export default function ResultsPage() {
   }, [reasonSummary]);
   const highlightedGaps = useMemo(() => {
     const all = [...reasonSummary.primary, ...reasonSummary.extras];
-    return all.filter((item) => item.type === "gap").slice(0, 3);
-  }, [reasonSummary]);
+    return all
+      .filter((item) => item.type === "gap")
+      .filter((item) => {
+        if (!industryContextPerfect) return true;
+        return !item.message.toLowerCase().includes("industry");
+      })
+      .slice(0, 3);
+  }, [reasonSummary, industryContextPerfect]);
+
+  const summaryCopy = useMemo(() => {
+    if (!latest) {
+      return "Load the latest analysis to surface the strengths, gaps, and experience areas behind this score.";
+    }
+    const raw = typeof latest.summary === "string" ? latest.summary.trim() : "";
+    if (raw.length && !/key term/i.test(raw)) {
+      return raw;
+    }
+    return "Review the strengths, gaps, and experience area contributions that shaped this score.";
+  }, [latest]);
+
+  const keyTermDetails = useMemo(() => {
+    if (!latest) {
+      return { matchedKeyTerms: [], missingKeyTerms: [] };
+    }
+    const payload = latest as AnyObject;
+    const matchedRaw = payload.matchedTerms ?? payload.matched_terms;
+    const missingRaw = payload.missingTerms ?? payload.missing_terms;
+    const matchedKeyTerms = Array.isArray(matchedRaw)
+      ? matchedRaw.filter((term): term is string => typeof term === "string")
+      : [];
+    const missingKeyTerms = Array.isArray(missingRaw)
+      ? missingRaw.filter((term): term is string => typeof term === "string")
+      : [];
+    return { matchedKeyTerms, missingKeyTerms };
+  }, [latest]);
+  const keyTermDetailsAvailable =
+    keyTermDetails.matchedKeyTerms.length > 0 || keyTermDetails.missingKeyTerms.length > 0;
+  const evaluationNotes = useMemo(() => {
+    if (!latest) return [];
+    const candidates = [latest.systemConstraints, latest.evaluationNotes];
+    for (const candidate of candidates) {
+      const normalized = stringsOnly(candidate);
+      if (normalized.length) return normalized;
+    }
+    if (typeof latest.note === "string" && latest.note.trim()) {
+      return latest.note
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length);
+    }
+    return [];
+  }, [latest]);
+  const evaluationNotesAvailable = evaluationNotes.length > 0;
+  const keyTermSummary = useMemo(() => {
+    const totalTerms =
+      keyTermDetails.matchedKeyTerms.length + keyTermDetails.missingKeyTerms.length;
+    if (!totalTerms) return "Key term data is not available for this run.";
+    return `Matched ${keyTermDetails.matchedKeyTerms.length} of ${totalTerms} key terms from the job description.`;
+  }, [keyTermDetails]);
 
   const complianceFlagList = useMemo(
     () => sortComplianceFlagsBySeverity(mapComplianceFlags(latest?.complianceFlags ?? undefined)),
@@ -654,6 +734,22 @@ export default function ResultsPage() {
     }
   }
 
+  const handleScrollToConfidenceSettings = useCallback(() => {
+    if (!confidenceSettingsRef.current) return;
+    confidenceSettingsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    const focusTarget = confidenceSettingsRef.current.querySelector<HTMLElement>("select, button");
+    focusTarget?.focus();
+  }, []);
+
+  const handleReviewComplianceFlags = useCallback(() => {
+    setShowAllComplianceFlags(true);
+    complianceDetailsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  const handleExperienceAction = useCallback((area: string) => {
+    setExperienceActionTarget(area);
+  }, []);
+
   useEffect(() => {
     if (!runIdentifier) {
       setLastLoadedRunIdentifier(null);
@@ -743,7 +839,7 @@ export default function ResultsPage() {
           {!latest ? (
             <EmptyState
               title="No analysis yet"
-              body="Load the latest analysis to reveal the fit score and verdict."
+              body="Load the latest analysis to reveal the fit score summary."
               cta={
                 <FormButton
                   variant="ghost"
@@ -757,30 +853,37 @@ export default function ResultsPage() {
             />
           ) : (
             <>
-              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="space-y-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                    <div className="flex items-center justify-between">
                       <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Active fit score
+                        Score summary
                       </p>
-                      <p className="text-5xl font-semibold text-white">
-                        {activeScore !== null ? activeScore.toFixed(1) : "Not available"}
-                      </p>
+                      {qualityBadge ? (
+                        <span
+                          className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
+                        >
+                          {qualityBadge.label}
+                        </span>
+                      ) : null}
                     </div>
-                    <div className="flex flex-col items-start gap-2">
-                      <span
-                        className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
-                      >
-                        {activeVerdictInfo.label}
-                      </span>
-                      <p className="max-w-2xl text-sm text-slate-200">{activeVerdictInfo.description}</p>
-                      <p className="text-xs text-slate-400">{jobDescriptor}</p>
-                      <p className="text-xs text-slate-400">{baselineDescriptor}</p>
-                      <p className="text-xs text-slate-400">
-                        The active score is the live lens we share on this page; the saved current score remains stable until a refresh.
-                      </p>
+                    <div className="mt-4 flex justify-center">
+                      <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} label="CX Fit Score" />
                     </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 space-y-2">
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
+                    >
+                      {displayActiveVerdictLabel}
+                    </span>
+                    <p className="text-sm text-slate-200">{activeVerdictInfo.description}</p>
+                    <p className="text-xs text-slate-400">{jobDescriptor}</p>
+                    <p className="text-xs text-slate-400">{baselineDescriptor}</p>
+                    <p className="text-xs text-slate-400">
+                      The active score reflects the live lens on this page while the stored score stays until you refresh.
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-4 flex flex-col items-end">
@@ -792,203 +895,124 @@ export default function ResultsPage() {
                       {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
                     </p>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">
-                      {currentVerdictInfo.label}
+                      {displayCurrentVerdictLabel}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
                       Saved until you choose to rerun the analysis.
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-3 max-w-[260px] text-center">
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 max-w-[280px] text-left">
                     <div className="flex items-center justify-between">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Confidence check (optional)
+                        Confidence Check
                       </p>
                       <span className="text-xs text-slate-400">Optional</span>
                     </div>
-                    <p className="mt-2 text-xs text-slate-400">
-                      Re-running the score with a different profile shows how sensitive the verdict is; your saved score stays unaffected.
+                    <p className="mt-2 text-sm text-slate-300">
+                      Confidence Check reruns the score with the profile you choose below so you can see how stable this signal is. Press the button to jump to the controls and try a different lens.
                     </p>
-                    {calibrationResult ? (
-                      <>
-                        <p className="mt-3 text-3xl font-semibold text-white">
-                          {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
-                        </p>
-                        <p className="text-sm text-slate-300">
-                          {calibrationConfidenceSummary}
-                          {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
-                        </p>
-                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                          Recommendation
-                        </p>
-                        <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
-                        <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 justify-center">
-                          <input
-                            id="use-calibrated-score"
-                            type="checkbox"
-                            checked={useCalibratedScore}
-                            onChange={(event) => setUseCalibratedScore(event.target.checked)}
-                            className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
-                          />
-                          <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
-                            Apply this confidence lens for downstream actions
-                          </span>
-                        </label>
-                      </>
-                    ) : (
-                      <p className="mt-3 text-sm text-slate-400">
-                        Run a confidence check to preview how a different lens shifts the verdict.
-                      </p>
-                    )}
+                    <FormButton className="mt-4 w-full" onClick={handleScrollToConfidenceSettings}>
+                      Run Confidence Check
+                    </FormButton>
+                    <p className="mt-2 text-xs text-slate-400">
+                      The section below lets you pick a profile, rerun the analysis, and compare the resulting score with the one above.
+                    </p>
                   </div>
                 </div>
+                </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200">
+                {summaryCopy}
               </div>
 
-              <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Score explanation
-                  </p>
-                  <h2 className="text-lg font-semibold text-slate-100">Why this verdict?</h2>
-                  <p className="mt-1 text-sm text-slate-300">
-                    {latest?.summary
-                      ? latest.summary
-                      : "Load the latest analysis to surface the strengths, gaps, and dimension contributions behind this score."}
-                  </p>
-                </div>
-                <p className="mt-3 text-sm text-slate-300">
-                  Dimension scores show how each area contributed to the verdict. Treat the lower scores as the best places to provide new or clarified evidence.
-                </p>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  {dimensionEntries.map((dimension) => (
-                    <div
-                      key={dimension.key}
-                      className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
-                    >
-                      <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                        {dimension.label}
-                      </p>
-                      <p className="mt-1 text-lg font-semibold text-white">
-                        {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">Strengths</p>
-                    <div className="mt-3 space-y-3">
-                      {highlightedStrengths.length ? (
-                        highlightedStrengths.map((item, index) => (
-                          <div key={`${item.message}-${index}`} className="space-y-1">
-                            <p className="text-sm font-semibold text-white">{item.message}</p>
-                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Confidence</p>
-                            <p className="text-sm text-slate-300">Lean on this strength as you tailor your story.</p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm text-slate-400">Generate or load an analysis to see the confirming signals.</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">Gaps</p>
-                    <div className="mt-3 space-y-3">
-                      {highlightedGaps.length ? (
-                        highlightedGaps.map((item, index) => (
-                          <div key={`${item.message}-${index}`} className="space-y-1">
-                            <p className="text-sm font-semibold text-white">{item.message}</p>
-                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Action</p>
-                            <p className="text-sm text-slate-300">
-                              Clarify how your experience addresses this area or build new evidence before exporting.
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm text-slate-400">
-                          No gaps surfaced yet; run the latest analysis to highlight where to focus.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-                <div className="mt-5 space-y-3">
-                  <div>
-                    <label
-                      className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
-                      htmlFor="calibration-profile"
-                    >
-                      Confidence check profile
-                    </label>
-                    <div className="mt-2 flex flex-col gap-1">
-                      <select
-                        id="calibration-profile"
-                        value={calibrationProfile}
-                        onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
-                        className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
-                      >
-                        {CALIBRATION_PROFILE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-slate-400">
-                        {selectedCalibrationProfile?.description ?? "Adjust weights to tilt the scoring emphasis."}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
-                      {calibrating ? "Calibrating..." : "Run confidence check"}
-                    </FormButton>
-                    <p className="text-xs text-slate-400">
-                      Confidence check reruns the analysis under the selected profile without overwriting the stored score.
-                    </p>
-                  </div>
-                </div>
-
-              {calibrationError ? (
-                <Alert intent="error" title="Calibration failed">
-                  {calibrationError}
-                </Alert>
-              ) : null}
             </>
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-center justify-between">
+        {evaluationNotesAvailable ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                System constraints
+                Evaluation notes
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Evaluation notes</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Evaluation notes describe the guardrails or context the scoring model followed; they are usually informational and do not require action unless you see a compliance flag.
+              </p>
+            </div>
+            <ul className="space-y-2 text-sm text-slate-200">
+              {evaluationNotes.map((note, index) => (
+                <li
+                  key={`${note}-${index}`}
+                  className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3"
+                >
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Compliance status
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Resume truth & boundary checks</h2>
               <p className="mt-1 text-sm text-slate-300">
-                These signals reflect system-enforced boundaries that determine what we can safely describe or generate. They are not personal judgments, only guidance about output limits.
+                These indicators highlight compliance considerations before we produce materials so you can review them calmly.
               </p>
             </div>
             <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Sorted by impact</span>
           </div>
 
-          {topComplianceFlags.length ? (
-            <ul className="mt-4 space-y-3 text-sm text-slate-200">
-              {topComplianceFlags.map((flag) => (
-                <li key={flag.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                    <span>{flag.severity === "block" ? "Required boundary" : "Advisory boundary"}</span>
+          {!latest ? (
+            <p className="mt-4 text-sm text-slate-400">
+              Load the latest analysis to surface how the resume aligns with compliance signals.
+            </p>
+          ) : topComplianceFlags.length ? (
+            <>
+              <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-50">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">Compliance flags detected</p>
+                    <p className="text-xs text-amber-100">
+                      Review these warnings before generating documents or exports.
+                    </p>
                   </div>
-                  <p className="mt-2 text-sm text-slate-100">{flag.message}</p>
-                </li>
-              ))}
-            </ul>
+                  <FormButton variant="secondary" onClick={handleReviewComplianceFlags}>
+                    Review flagged claims
+                  </FormButton>
+                </div>
+              </div>
+              <ul className="mt-4 space-y-3 text-sm text-slate-200">
+                {topComplianceFlags.map((flag) => (
+                  <li key={flag.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                      <span>{flag.severity === "block" ? "Required boundary" : "Advisory boundary"}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-100">{flag.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : (
-            <p className="mt-3 text-sm text-slate-400">No constraints triggered on this run.</p>
+            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
+              <span className="text-emerald-300 text-lg" aria-hidden="true">
+                ✓
+              </span>
+              <p>No compliance issues detected for this assessment.</p>
+            </div>
           )}
 
-          {hasMoreComplianceFlags ? (
-            <details className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+          {latest && hasMoreComplianceFlags ? (
+            <details
+              ref={complianceDetailsRef}
+              open={showAllComplianceFlags}
+              onToggle={(event) => setShowAllComplianceFlags(event.currentTarget.open)}
+              className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
+            >
               <summary className="cursor-pointer text-sm font-semibold text-slate-100">
                 Show all {complianceFlagList.length} flags
               </summary>
@@ -1009,6 +1033,250 @@ export default function ResultsPage() {
           ) : null}
         </section>
 
+        {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
+
+        <section ref={confidenceSettingsRef} className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Confidence Check Settings
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Stress-test the score</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Confidence Check reruns the score with the profile you select so you can see how the result shifts while keeping the stored score untouched.
+              </p>
+            </div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Optional</span>
+          </div>
+
+          {latest ? (
+            <div className="space-y-4">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="space-y-3">
+                  <label
+                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
+                    htmlFor="calibration-profile"
+                  >
+                    Confidence profile
+                  </label>
+                  <select
+                    id="calibration-profile"
+                    value={calibrationProfile}
+                    onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
+                    className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
+                  >
+                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-xs text-slate-400 space-y-1">
+                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
+                      <p key={option.value} className="flex gap-2">
+                        <span
+                          className={`font-semibold ${option.value === calibrationProfile ? "text-slate-100" : "text-slate-400"}`}
+                        >
+                          {option.label}:
+                        </span>
+                        <span>{option.description}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                  {calibrationResult ? (
+                    <>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                        Latest result
+                      </p>
+                      <p className="mt-3 text-3xl font-semibold text-white">
+                        {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
+                      </p>
+                      <p className="text-sm text-slate-300">
+                        {calibrationConfidenceSummary}
+                        {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
+                      </p>
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                        Recommendation
+                      </p>
+                      <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
+                      <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
+                        <input
+                          id="use-calibrated-score"
+                          type="checkbox"
+                          checked={useCalibratedScore}
+                          onChange={(event) => setUseCalibratedScore(event.target.checked)}
+                          className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
+                        />
+                        <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                          Apply this confidence lens for downstream actions
+                        </span>
+                      </label>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      Run a confidence check to preview how a different lens shifts the score.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
+                  {calibrating ? "Calibrating..." : "Run Confidence Check"}
+                </FormButton>
+                <p className="text-xs text-slate-400">
+                  Confidence check reruns the analysis under the selected profile without overwriting the stored score.
+                </p>
+              </div>
+              {calibrationError ? (
+                <Alert intent="error" title="Calibration failed">
+                  {calibrationError}
+                </Alert>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              Load the latest analysis to configure the confidence check.
+            </p>
+          )}
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Experience areas</p>
+            <h2 className="text-lg font-semibold text-slate-100">Score breakdown</h2>
+            <p className="mt-1 text-sm text-slate-300">{summaryCopy}</p>
+            <p className="text-sm text-slate-300">
+              Experience areas describe how your background contributes to each category while the key terms below track whether the job language also appears; focus on the lower contributors to clarify authentic experience.
+            </p>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {dimensionEntries.map((dimension) => (
+              <div
+                key={dimension.key}
+                className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+              >
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                  {dimension.label}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-white">
+                  {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
+                </p>
+                {dimension.value !== null && dimension.value < LOW_EXPERIENCE_THRESHOLD ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleExperienceAction(dimension.label)}
+                      className="mt-2 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300 hover:text-amber-200"
+                    >
+                      Add or clarify experience
+                    </button>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Coming soon: this action will launch the Baseline Expansion Interview. In the meantime, refine the baseline in{" "}
+                      <Link href={fitReviewPath} className="text-amber-300 underline">
+                        Fit Review
+                      </Link>
+                      .
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">Strengths</p>
+              <div className="mt-3 space-y-3">
+                {highlightedStrengths.length ? (
+                  highlightedStrengths.map((item, index) => (
+                    <div key={`${item.message}-${index}`} className="space-y-1">
+                      <p className="text-sm font-semibold text-white">{item.message}</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Confidence</p>
+                      <p className="text-sm text-slate-300">Lean on this strength as you tailor your story.</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400">Generate or load an analysis to see the confirming signals.</p>
+                )}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">Gaps</p>
+              <div className="mt-3 space-y-3">
+                {highlightedGaps.length ? (
+                  highlightedGaps.map((item, index) => (
+                    <div key={`${item.message}-${index}`} className="space-y-1">
+                      <p className="text-sm font-semibold text-white">{item.message}</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Action</p>
+                      <p className="text-sm text-slate-300">
+                        Frame this area with role-specific impact examples to reinforce defensibility before exporting.
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400">
+                    No gaps surfaced yet; run the latest analysis to highlight where to focus.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Key terms</p>
+                <p className="text-sm text-slate-300">
+                  Key terms track the job-specific language that appears in your baseline content while experience areas describe how your background contributes to the role.
+                </p>
+                <p className="mt-2 text-xs text-slate-400">{keyTermSummary}</p>
+              </div>
+              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Context</span>
+            </div>
+            {keyTermDetailsAvailable ? (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Matched terms</p>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-100">
+                    {keyTermDetails.matchedKeyTerms.slice(0, 6).map((term) => (
+                      <li key={`matched-${term}`} className="flex items-center gap-2">
+                        <span className="text-emerald-300">•</span>
+                        <span>{term}</span>
+                      </li>
+                    ))}
+                    {!keyTermDetails.matchedKeyTerms.length ? (
+                      <li className="text-sm text-slate-500">Not provided.</li>
+                    ) : null}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Missing or weak terms</p>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-100">
+                    {keyTermDetails.missingKeyTerms.slice(0, 6).map((term) => (
+                      <li key={`missing-${term}`} className="flex items-center gap-2">
+                        <span className="text-amber-300">•</span>
+                        <span>{term}</span>
+                      </li>
+                    ))}
+                    {!keyTermDetails.missingKeyTerms.length ? (
+                      <li className="text-sm text-slate-500">Not documented.</li>
+                    ) : null}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-400">Key term details are not available for this run.</p>
+            )}
+            <p className="mt-3 text-xs text-slate-300">
+              Clarify or expand the baseline evidence in{" "}
+              <Link href={fitReviewPath} className="text-amber-300 underline">
+                Fit Review
+              </Link>{" "}
+              so the same experience language shows up naturally and the matched terms reflect the story you tell elsewhere.
+            </p>
+          </div>
+        </section>
+
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
             <div>
@@ -1017,7 +1285,7 @@ export default function ResultsPage() {
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Follow this path</h2>
               <p className="mt-1 text-sm text-slate-300">
-                This sequence mirrors the real-life cadence: understand the verdict, decide if and how to apply, polish your materials, apply, then prep for interviews.
+                This sequence mirrors the real-life cadence: understand the score, decide if and how to apply, polish your materials, apply, then prep for interviews.
               </p>
             </div>
             <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Ordered flow</span>
@@ -1037,8 +1305,6 @@ export default function ResultsPage() {
           </p>
         </section>
 
-        {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
-
         {error ? (
           <Alert intent="error" title="Uh oh">
             {error}
@@ -1053,7 +1319,7 @@ export default function ResultsPage() {
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Open the Studio</h2>
               <p className="mt-1 text-sm text-slate-300">
-                Generate curated drafts and exportable documents that reflect the verdict above.
+                Generate curated drafts and exportable documents that reflect the score above.
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -1150,6 +1416,26 @@ export default function ResultsPage() {
                 />
               )}
             </section>
+          </div>
+        ) : null}
+        {experienceActionTarget ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="experience-cta-title"
+              className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 text-slate-50 shadow-2xl shadow-black/80"
+            >
+              <h2 id="experience-cta-title" className="text-xl font-semibold text-slate-100">
+                Coming soon
+              </h2>
+              <p className="mt-3 text-sm text-slate-300">
+                Adding or clarifying experience for {experienceActionTarget} is coming soon. We&apos;ll open the Baseline Expansion Interview for this action in a future release.
+              </p>
+              <div className="mt-6 flex justify-end">
+                <FormButton onClick={() => setExperienceActionTarget(null)}>Got it</FormButton>
+              </div>
+            </div>
           </div>
         ) : null}
       </div>
