@@ -717,7 +717,7 @@ export default function StudioPage() {
     const loadAnalysis = async () => {
       try {
         const response = await fetch(
-          `/api/analysis/latest?jobId=${encodeURIComponent(selectedJobId)}`,
+          `/api/analysis/job/${encodeURIComponent(selectedJobId)}/latest`,
         );
         const payload = await readResponsePayload(response);
         if (canceled) return;
