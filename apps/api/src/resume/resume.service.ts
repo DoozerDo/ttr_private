@@ -93,30 +93,141 @@ export class ResumeService {
   }
 
   private buildPdfBuffer(content: string) {
-    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const escaped = sanitized
-      .replace(/\\/g, '\\\\')
-      .replace(/\(/g, '\\(')
-      .replace(/\)/g, '\\)');
-    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
-    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
-    const pdfParts = [
-      '%PDF-1.4',
-      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
-      `4 0 obj ${contentStream} endobj`,
-      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-      'xref',
-      '0 6',
-      '0000000000 65535 f ',
-      'trailer << /Size 6 /Root 1 0 R >>',
-      'startxref',
-      '0',
-      '%%EOF',
-    ];
+    const normalizePdfText = (value: string) => {
+      const normalizedChars = value
+        // Normalize common Unicode punctuation to WinAnsi-safe text.
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2013\u2014]/g, '-')
+        .replace(/\u2026/g, '...')
+        .replace(/\u00a0/g, ' ')
+        // Keep visible bullet glyph in plain text while normalizing variants.
+        .replace(/[\u25CF\u25E6\u2043\u2219]/g, '•')
+        // Repair common mojibake sequences when UTF-8 punctuation was decoded as Latin-1.
+        .replace(/â€¢/g, '•')
+        .replace(/â€“|â€”/g, '-')
+        .replace(/â€˜|â€™/g, "'")
+        .replace(/â€œ|â€/g, '"')
+        .replace(/â€¦/g, '...');
 
-    return Buffer.from(pdfParts.join('\n'));
+      return normalizedChars
+        .split('\n')
+        .map((line) => {
+          // Some inputs still encode bullets as leading "&"; normalize only at line start.
+          if (/^\s*&&+¢\s+/.test(line)) {
+            return line.replace(/^\s*&&+¢\s+/, '- ');
+          }
+          if (/^\s*&\s+/.test(line)) {
+            return line.replace(/^\s*&\s+/, '- ');
+          }
+          if (/^\s*•\s+/.test(line)) {
+            return line.replace(/^\s*•\s+/, '- ');
+          }
+          return line;
+        })
+        .join('\n');
+    };
+
+    const sanitizeForPdf = (value: string) =>
+      value
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)');
+
+    const wrapLine = (line: string, maxChars: number) => {
+      if (!line.trim()) return [''];
+      const words = line.trim().split(/\s+/);
+      const wrapped: string[] = [];
+      let current = '';
+
+      for (const word of words) {
+        if (!current.length) {
+          current = word;
+          continue;
+        }
+        if (`${current} ${word}`.length <= maxChars) {
+          current = `${current} ${word}`;
+          continue;
+        }
+        wrapped.push(current);
+        current = word;
+      }
+
+      if (current.length) wrapped.push(current);
+      return wrapped;
+    };
+
+    const normalized = normalizePdfText(
+      content.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+    );
+    const wrappedLines = normalized
+      .split('\n')
+      .flatMap((line) => wrapLine(line, 95));
+    const lines = wrappedLines.length ? wrappedLines : [''];
+
+    const lineHeight = 14;
+    const maxLinesPerPage = 48;
+    const pageChunks: string[][] = [];
+    for (let i = 0; i < lines.length; i += maxLinesPerPage) {
+      pageChunks.push(lines.slice(i, i + maxLinesPerPage));
+    }
+
+    const objectBodies: string[] = [];
+    const pageObjectNumbers: number[] = [];
+    objectBodies.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
+    objectBodies.push(''); // 2 (filled after page refs are known)
+
+    for (const pageLines of pageChunks) {
+      const pageObjectNumber = objectBodies.length + 1;
+      const contentObjectNumber = pageObjectNumber + 1;
+      const textCommands = [
+        'BT',
+        '/F1 11 Tf',
+        `${lineHeight} TL`,
+        '72 750 Td',
+        ...pageLines.flatMap((line, index) => {
+          const escaped = sanitizeForPdf(line);
+          if (index === 0) return [`(${escaped}) Tj`];
+          return ['T*', `(${escaped}) Tj`];
+        }),
+        'ET',
+      ].join('\n');
+
+      const contentStream =
+        `<< /Length ${Buffer.byteLength(textCommands, 'latin1')} >>\n` +
+        `stream\n${textCommands}\nendstream`;
+
+      pageObjectNumbers.push(pageObjectNumber);
+      objectBodies.push(
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjectNumber} 0 R /Resources << /Font << /F1 ${pageChunks.length * 2 + 3} 0 R >> >> >>`,
+      );
+      objectBodies.push(contentStream);
+    }
+
+    const kids = pageObjectNumbers.map((number) => `${number} 0 R`).join(' ');
+    objectBodies[1] = `<< /Type /Pages /Kids [${kids}] /Count ${pageObjectNumbers.length} >>`;
+
+    objectBodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [0];
+
+    objectBodies.forEach((body, index) => {
+      offsets.push(Buffer.byteLength(pdf, 'latin1'));
+      pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+    });
+
+    const xrefOffset = Buffer.byteLength(pdf, 'latin1');
+    pdf += `xref\n0 ${objectBodies.length + 1}\n`;
+    pdf += '0000000000 65535 f \n';
+    for (let i = 1; i <= objectBodies.length; i += 1) {
+      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf +=
+      `trailer\n<< /Size ${objectBodies.length + 1} /Root 1 0 R >>\n` +
+      `startxref\n${xrefOffset}\n%%EOF`;
+
+    return Buffer.from(pdf, 'latin1');
   }
 
   private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {

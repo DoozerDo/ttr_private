@@ -420,6 +420,59 @@ describe('ResumeService', () => {
     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
+    const pdfText = exportResult.buffer.toString('utf8');
+    expect(pdfText).toContain('T*');
+    expect(pdfText).not.toContain('startxref\n0');
+  });
+
+  it('normalizes bullet-like and mojibake characters in PDF content', async () => {
+    const baselineWithMojibake: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...summarySection,
+          content: `Summary\nâ€¢ First bullet\n• Second bullet\n&&¢ Third bullet`,
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(baselineWithMojibake),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+    );
+
+    const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
+    const latin1Text = exportResult.buffer.toString('latin1');
+    expect(latin1Text).toContain('First bullet');
+    expect(latin1Text).toContain('Second bullet');
+    expect(latin1Text).toContain('Third bullet');
+    expect(latin1Text).toContain('- First bullet');
+    expect(latin1Text).toContain('- Second bullet');
+    expect(latin1Text).toContain('- Third bullet');
+    expect(latin1Text).not.toContain('â€¢');
+    expect(latin1Text).not.toContain('&&¢');
+    expect(latin1Text).not.toContain('\n& ');
   });
 
   it('blocks generation when baseline hash is missing', async () => {

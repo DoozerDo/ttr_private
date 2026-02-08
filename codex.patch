@@ -1,990 +1,322 @@
-diff --git a/apps/api/src/baseline/baseline.service.ts b/apps/api/src/baseline/baseline.service.ts
-index b79ff86f38a5da5b5c88863c703bb48a9bd220ba..695140a01a7a6d02ee7648a461d7eaa0d005cce1 100644
---- a/apps/api/src/baseline/baseline.service.ts
-+++ b/apps/api/src/baseline/baseline.service.ts
-@@ -139,59 +139,88 @@ export class BaselineService {
+diff --git a/apps/api/src/resume/resume.service.spec.ts b/apps/api/src/resume/resume.service.spec.ts
+index 5be38b444b50a2f6fcc197dd7f00959014511ec9..257a59fb90c81e13e0bd054e310c100c720615fc 100644
+--- a/apps/api/src/resume/resume.service.spec.ts
++++ b/apps/api/src/resume/resume.service.spec.ts
+@@ -398,50 +398,103 @@ describe('ResumeService', () => {
+       baseRequest,
+       'docx',
+     );
  
-     if (count >= BASELINE_LIMIT) {
+     const zip = await JSZip.loadAsync(exportResult.buffer);
+     const documentXml = await zip.file('word/document.xml')!.async('text');
+ 
+     const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
+     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
+     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
+ 
+     expect(skillMatches).toHaveLength(1);
+     expect(experienceMatches).toHaveLength(1);
+     expect(headerMatches).toHaveLength(1);
+     expect(documentXml).toContain('<w:numId');
+   });
+ 
+   it('exports PDF content with valid header', async () => {
+     const { service } = buildService(95, []);
+ 
+     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
+     expect(exportResult.contentType).toBe('application/pdf');
+     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.pdf$/);
+     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
+     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
++    const pdfText = exportResult.buffer.toString('utf8');
++    expect(pdfText).toContain('T*');
++    expect(pdfText).not.toContain('startxref\n0');
++  });
++
++  it('normalizes bullet-like and mojibake characters in PDF content', async () => {
++    const baselineWithMojibake: Baseline = {
++      ...mockBaseline,
++      sections: [
++        {
++          ...summarySection,
++          content: `Summary\nâ€¢ First bullet\n• Second bullet\n&&¢ Third bullet`,
++        },
++      ],
++    };
++
++    const baselineRepository = buildRepository<Baseline>({
++      findOne: jest.fn().mockResolvedValue(baselineWithMojibake),
++    });
++    const baselineVersionRepository = buildRepository<BaselineVersion>({
++      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
++    });
++    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
++      find: jest.fn().mockResolvedValue([]),
++    });
++    const jobsRepository = buildRepository<Job>({
++      findOne: jest.fn().mockResolvedValue(mockJob),
++    });
++    const fitAssessmentRepository = buildRepository<FitAssessment>({
++      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
++    });
++
++    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
++    const service = new ResumeService(
++      baselineRepository,
++      baselineVersionRepository,
++      baselineBlockPolicyRepository,
++      jobsRepository,
++      fitAssessmentRepository,
++      complianceService,
++    );
++
++    const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
++    const latin1Text = exportResult.buffer.toString('latin1');
++    expect(latin1Text).toContain('First bullet');
++    expect(latin1Text).toContain('Second bullet');
++    expect(latin1Text).toContain('Third bullet');
++    expect(latin1Text).toContain('- First bullet');
++    expect(latin1Text).toContain('- Second bullet');
++    expect(latin1Text).toContain('- Third bullet');
++    expect(latin1Text).not.toContain('â€¢');
++    expect(latin1Text).not.toContain('&&¢');
++    expect(latin1Text).not.toContain('\n& ');
+   });
+ 
+   it('blocks generation when baseline hash is missing', async () => {
+     const complianceOverride: Partial<MockedComplianceService> = {
+       validateAndAudit: jest.fn().mockResolvedValue({
+         complianceFlags: [
+           {
+             code: ComplianceFlagCode.MISSING_BASELINE_HASH,
+             severity: ComplianceFlagSeverity.BLOCK,
+             message: 'Baseline version hash is required.',
+           },
+         ],
+         blocked: true,
+         audit: {
+           id: 'audit-1',
+           baselineVersionId: 'baseline-version-1',
+           baselineVersionHash: null,
+           outputHash: '',
+           action: ComplianceAction.RESUME_GENERATION,
+           actorId: 'user-1',
+           jobId: 'job-1',
+           createdAt: new Date().toISOString(),
+         },
+       } as ValidateAndAuditResult),
+     };
+diff --git a/apps/api/src/resume/resume.service.ts b/apps/api/src/resume/resume.service.ts
+index ca06586b61c07c23f52363ef78d1336b2f2439d1..b165aeba9d3dd15be62d2681fb95c1db3588cf62 100644
+--- a/apps/api/src/resume/resume.service.ts
++++ b/apps/api/src/resume/resume.service.ts
+@@ -71,74 +71,185 @@ export class ResumeService {
+ 
+   private ensureOneTapAllowed(assessment?: FitAssessment | null) {
+     if (!assessment || assessment.overallScore < AUTO_GENERATE_THRESHOLD) {
        throw new UnprocessableEntityException({
          error: {
-           code: 'limit_reached',
-           entity: 'baseline',
-           limit: BASELINE_LIMIT,
+           code: 'fit_score_too_low',
+           message: `One tap resume generation requires fit score >= ${AUTO_GENERATE_THRESHOLD}.`,
+           details: { last_score: assessment?.overallScore ?? null },
          },
        });
      }
    }
  
-   private sanitizeSectionContent(content?: string | null) {
-     if (!content) {
-       return 'Uploaded file content';
-     }
- 
-     // Strip out null bytes and non-printable control chars while preserving
-     // structural whitespace (newline/tab/carriage return) needed for parsing.
-     return content
-       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-       .replace(/\r\n/g, '\n')
-       .replace(/\r/g, '\n');
-   }
- 
-+  private getSectionTitle(
-+    sectionType?: BaselineSectionType | null,
-+    title?: string | null,
-+  ): string | null {
-+    const trimmedTitle = title?.trim();
-+
-+    if (trimmedTitle && !/^other$/i.test(trimmedTitle)) {
-+      return trimmedTitle;
-+    }
-+
-+    switch (sectionType) {
-+      case BaselineSectionType.RAW:
-+        return 'Raw';
-+      case BaselineSectionType.SUMMARY:
-+      case BaselineSectionType.OTHER:
-+        return 'Summary';
-+      case BaselineSectionType.EXPERIENCE:
-+        return 'Professional Experience';
-+      case BaselineSectionType.SKILLS:
-+        return 'Technical Skills';
-+      case BaselineSectionType.EDUCATION:
-+        return 'Education';
-+      case BaselineSectionType.PROJECT:
-+        return 'Projects';
-+      default:
-+        return trimmedTitle ?? null;
-+    }
-+  }
-+
-   private buildSections(
-     rawText: string,
-     parsedSections: ParsedSection[],
-   ): Partial<BaselineSection>[] {
-     const sanitizedRaw = this.sanitizeSectionContent(rawText);
- 
-     const structuredSections = parsedSections.map((section, index) => ({
-       sectionType: section.sectionType,
--      title: section.title,
-+      title: this.getSectionTitle(section.sectionType, section.title),
-       content: this.sanitizeSectionContent(section.content),
-       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-       // ensure RAW stays first; fall back to index if section.order is undefined
-       order: (section.order ?? index) + 1,
-     }));
- 
-     return [
-       {
-         sectionType: BaselineSectionType.RAW,
-         title: 'Raw',
-         content: sanitizedRaw,
-         includePolicy: BaselineIncludePolicy.NEVER,
-         order: 0,
-       },
-       ...structuredSections,
-     ];
-   }
- 
-   private async computeFileHash(filePath: string): Promise<string> {
-     try {
-       const fileBuffer = await readFile(filePath);
-       return createHash('sha256').update(fileBuffer).digest('hex');
-     } catch {
-       throw new BadRequestException('Unable to compute file hash');
-     }
-@@ -360,58 +389,58 @@ export class BaselineService {
-         userId,
-         hash,
-         status: BaselineStatus.ACTIVE,
-       },
-       order: { createdAt: 'DESC' },
-     });
-   }
- 
-   private async createBaselineRecord(
-     manager: EntityManager,
-     userId: string,
-     file: FileMetadata,
-     fileHash: string,
-     parseResult?: BaselineFileParseResult,
-   ): Promise<BaselineCreationResult> {
-     const baseline = manager.create(Baseline, {
-       userId,
-       originalFilename: file.originalname,
-       mimeType: file.mimetype,
-       storagePath: file.path,
-       hash: fileHash,
-       status: BaselineStatus.ACTIVE,
-       archivedAt: null,
-       sections: parseResult?.sections?.map((section, index) => ({
-         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
--        title: section.title ?? null,
-+        title: this.getSectionTitle(section.sectionType, section.title),
-         content: this.sanitizeSectionContent(section.content),
-         includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-         order: section.order ?? index,
-       })) ?? [
-         {
-           sectionType: BaselineSectionType.OTHER,
--          title: null,
-+          title: this.getSectionTitle(BaselineSectionType.OTHER, null),
-           content: this.sanitizeSectionContent(),
-           includePolicy: BaselineIncludePolicy.OPTIONAL,
-           order: 0,
-         },
-       ],
-     });
- 
-     const savedBaseline = await manager.save(baseline);
- 
-     const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
- 
-     const policyState = this.normalizePoliciesFromSections(
-       (savedBaseline.sections ?? []) as PolicySectionInput[],
-     );
-     const versionHash = this.buildVersionHash(fileHash, policyState);
-     const allowlistSnapshot = buildBaselineAllowlistSnapshot(
-       savedBaseline.sections ?? [],
-     );
- 
-     const versionRecord = manager.create(BaselineVersion, {
-       baselineId: savedBaseline.id,
-       versionNumber: nextVersionNumber,
-       fileHash: versionHash,
-       storagePath: savedBaseline.storagePath,
-       verifiedAdditions: [],
-@@ -785,51 +814,51 @@ return {
- 
-     const versionSections = [...sections, ...additionSections];
- 
-     const policyState = this.normalizePoliciesFromSections(
-       versionSections as PolicySectionInput[],
-     );
-     const versionHash =
-       baselineVersion.fileHash ??
-       this.buildVersionHash(
-         baseline.hash,
-         policyState,
-         baselineVersion.verifiedAdditions ?? [],
-       );
- 
-     if (!baselineVersion.fileHash && versionHash) {
-       baselineVersion.fileHash = versionHash;
-       await this.baselineVersionRepository.save(baselineVersion);
-     }
- 
-     return {
-       baseline_version_id: baselineVersion.id,
-       baseline_version_hash: versionHash ?? null,
-       blocks: versionSections.map((section) => ({
-         id: section.id,
-         section_type: section.sectionType ?? BaselineSectionType.OTHER,
--        title: section.title ?? null,
-+        title: this.getSectionTitle(section.sectionType, section.title),
-         content: section.content,
-         include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-         order_index: section.order,
-       })),
-     };
-   }
- 
-   async updateBlockPolicies(
-     userId: string,
-     baselineId: string,
-     payload: {
-       baseline_version_id?: string;
-       baseline_version_hash?: string;
-       blocks?: BaselineBlockUpdate[];
-     },
+   private buildResumeText(
+     sections: Array<{ title: string | null; content: string }>,
    ) {
-     const baselineVersionId = payload?.baseline_version_id?.trim();
-     const baselineVersionHash = payload?.baseline_version_hash?.trim();
-     const blocks = payload?.blocks ?? [];
+     return sections
+       .map((section) => {
+         const title = section.title ? `${section.title}\n` : '';
+         return `${title}${section.content}`.trim();
+       })
+       .join('\n\n');
+   }
  
-     if (!baselineVersionId) {
-       throw new BadRequestException('baseline_version_id is required');
-     }
- 
-     if (!baselineVersionHash) {
-@@ -868,138 +897,138 @@ return {
-       }
-     }
- 
-     const sections = baseline.sections?.length
-       ? baseline.sections
-       : await this.baselineSectionRepository.find({
-           where: { baselineId: baseline.id },
-           order: { order: 'ASC' },
-         });
- 
-     const sectionMap = new Map(
-       sections.map((section) => [section.id, section]),
-     );
- 
-     const updateMap = new Map<string, BaselineBlockUpdate>(
-       blocks.map((block) => [block.id, block]),
-     );
- 
-     for (const blockId of updateMap.keys()) {
-       if (!sectionMap.has(blockId)) {
-         throw new NotFoundException('Baseline block not found');
-       }
-     }
- 
-     const existingPolicies = await this.baselineBlockPolicyRepository.find({
--      where: { baselineVersionId: latestVersion.id },
-+      where: { baselineVersionId: requestedVersion.id },
-       order: { order: 'ASC' },
-     });
- 
-     const currentPolicyState: PolicyState[] =
-       existingPolicies.length > 0
-         ? existingPolicies.map((policy) => ({
-             baselineSectionId: policy.baselineSectionId,
-             includePolicy: policy.includePolicy,
-             order: policy.order,
-           }))
-         : this.normalizePoliciesFromSections(sections as PolicySectionInput[]);
- 
-     const currentVersionHash =
--      latestVersion.fileHash ??
-+      requestedVersion.fileHash ??
-       this.buildVersionHash(
-         baseline.hash,
-         currentPolicyState,
--        latestVersion.verifiedAdditions ?? [],
-+        requestedVersion.verifiedAdditions ?? [],
-       );
- 
--    if (requestedVersion.id !== latestVersion.id) {
--      this.raiseConflict(latestVersion, currentVersionHash);
--    }
+   private buildPdfBuffer(content: string) {
+-    const sanitized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+-    const escaped = sanitized
+-      .replace(/\\/g, '\\\\')
+-      .replace(/\(/g, '\\(')
+-      .replace(/\)/g, '\\)');
+-    const textObject = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+-    const contentStream = `<< /Length ${textObject.length} >>\nstream\n${textObject}\nendstream`;
+-    const pdfParts = [
+-      '%PDF-1.4',
+-      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+-      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+-      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj',
+-      `4 0 obj ${contentStream} endobj`,
+-      '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+-      'xref',
+-      '0 6',
+-      '0000000000 65535 f ',
+-      'trailer << /Size 6 /Root 1 0 R >>',
+-      'startxref',
+-      '0',
+-      '%%EOF',
+-    ];
 -
-     if (baselineVersionHash !== (currentVersionHash ?? '')) {
--      this.raiseConflict(latestVersion, currentVersionHash);
-+      this.raiseConflict(requestedVersion, currentVersionHash);
+-    return Buffer.from(pdfParts.join('\n'));
++    const normalizePdfText = (value: string) => {
++      const normalizedChars = value
++        // Normalize common Unicode punctuation to WinAnsi-safe text.
++        .replace(/[\u2018\u2019]/g, "'")
++        .replace(/[\u201C\u201D]/g, '"')
++        .replace(/[\u2013\u2014]/g, '-')
++        .replace(/\u2026/g, '...')
++        .replace(/\u00a0/g, ' ')
++        // Keep visible bullet glyph in plain text while normalizing variants.
++        .replace(/[\u25CF\u25E6\u2043\u2219]/g, '•')
++        // Repair common mojibake sequences when UTF-8 punctuation was decoded as Latin-1.
++        .replace(/â€¢/g, '•')
++        .replace(/â€“|â€”/g, '-')
++        .replace(/â€˜|â€™/g, "'")
++        .replace(/â€œ|â€/g, '"')
++        .replace(/â€¦/g, '...');
++
++      return normalizedChars
++        .split('\n')
++        .map((line) => {
++          // Some inputs still encode bullets as leading "&"; normalize only at line start.
++          if (/^\s*&&+¢\s+/.test(line)) {
++            return line.replace(/^\s*&&+¢\s+/, '- ');
++          }
++          if (/^\s*&\s+/.test(line)) {
++            return line.replace(/^\s*&\s+/, '- ');
++          }
++          if (/^\s*•\s+/.test(line)) {
++            return line.replace(/^\s*•\s+/, '- ');
++          }
++          return line;
++        })
++        .join('\n');
++    };
++
++    const sanitizeForPdf = (value: string) =>
++      value
++        .replace(/\\/g, '\\\\')
++        .replace(/\(/g, '\\(')
++        .replace(/\)/g, '\\)');
++
++    const wrapLine = (line: string, maxChars: number) => {
++      if (!line.trim()) return [''];
++      const words = line.trim().split(/\s+/);
++      const wrapped: string[] = [];
++      let current = '';
++
++      for (const word of words) {
++        if (!current.length) {
++          current = word;
++          continue;
++        }
++        if (`${current} ${word}`.length <= maxChars) {
++          current = `${current} ${word}`;
++          continue;
++        }
++        wrapped.push(current);
++        current = word;
++      }
++
++      if (current.length) wrapped.push(current);
++      return wrapped;
++    };
++
++    const normalized = normalizePdfText(
++      content.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
++    );
++    const wrappedLines = normalized
++      .split('\n')
++      .flatMap((line) => wrapLine(line, 95));
++    const lines = wrappedLines.length ? wrappedLines : [''];
++
++    const lineHeight = 14;
++    const maxLinesPerPage = 48;
++    const pageChunks: string[][] = [];
++    for (let i = 0; i < lines.length; i += maxLinesPerPage) {
++      pageChunks.push(lines.slice(i, i + maxLinesPerPage));
++    }
++
++    const objectBodies: string[] = [];
++    const pageObjectNumbers: number[] = [];
++    objectBodies.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
++    objectBodies.push(''); // 2 (filled after page refs are known)
++
++    for (const pageLines of pageChunks) {
++      const pageObjectNumber = objectBodies.length + 1;
++      const contentObjectNumber = pageObjectNumber + 1;
++      const textCommands = [
++        'BT',
++        '/F1 11 Tf',
++        `${lineHeight} TL`,
++        '72 750 Td',
++        ...pageLines.flatMap((line, index) => {
++          const escaped = sanitizeForPdf(line);
++          if (index === 0) return [`(${escaped}) Tj`];
++          return ['T*', `(${escaped}) Tj`];
++        }),
++        'ET',
++      ].join('\n');
++
++      const contentStream =
++        `<< /Length ${Buffer.byteLength(textCommands, 'latin1')} >>\n` +
++        `stream\n${textCommands}\nendstream`;
++
++      pageObjectNumbers.push(pageObjectNumber);
++      objectBodies.push(
++        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjectNumber} 0 R /Resources << /Font << /F1 ${pageChunks.length * 2 + 3} 0 R >> >> >>`,
++      );
++      objectBodies.push(contentStream);
++    }
++
++    const kids = pageObjectNumbers.map((number) => `${number} 0 R`).join(' ');
++    objectBodies[1] = `<< /Type /Pages /Kids [${kids}] /Count ${pageObjectNumbers.length} >>`;
++
++    objectBodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
++
++    let pdf = '%PDF-1.4\n';
++    const offsets: number[] = [0];
++
++    objectBodies.forEach((body, index) => {
++      offsets.push(Buffer.byteLength(pdf, 'latin1'));
++      pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
++    });
++
++    const xrefOffset = Buffer.byteLength(pdf, 'latin1');
++    pdf += `xref\n0 ${objectBodies.length + 1}\n`;
++    pdf += '0000000000 65535 f \n';
++    for (let i = 1; i <= objectBodies.length; i += 1) {
++      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
++    }
++    pdf +=
++      `trailer\n<< /Size ${objectBodies.length + 1} /Root 1 0 R >>\n` +
++      `startxref\n${xrefOffset}\n%%EOF`;
++
++    return Buffer.from(pdf, 'latin1');
+   }
+ 
+   private buildExportFilename(format: 'docx' | 'pdf', company?: string | null) {
+     const safeCompany = (company ?? 'resume')
+       .trim()
+       .replace(/[^a-zA-Z0-9]+/g, '-')
+       .replace(/^-+|-+$/g, '') || 'resume';
+     const now = new Date();
+     const mm = String(now.getMonth() + 1).padStart(2, '0');
+     const dd = String(now.getDate()).padStart(2, '0');
+     const yyyy = String(now.getFullYear());
+     return `${safeCompany}-${mm}-${dd}-${yyyy}.${format}`;
+   }
+ 
+   private applyPoliciesToSections(
+     sections: BaselineSection[],
+     policies: BaselineBlockPolicy[],
+   ) {
+     if (!policies.length) {
+       return [...sections].sort((a, b) => a.order - b.order);
      }
  
      const policyMap = new Map<string, BaselineBlockPolicy>(
-       existingPolicies.map((policy) => [policy.baselineSectionId, policy]),
+       policies.map((policy) => [policy.baselineSectionId, policy]),
      );
- 
-     const nextPolicies: PolicyState[] = sections.map((section, index) => {
-       const incoming = updateMap.get(section.id);
-       const currentPolicy = policyMap.get(section.id);
- 
-       return {
-         baselineSectionId: section.id,
-         includePolicy:
-           incoming?.include_tag ??
-           currentPolicy?.includePolicy ??
-           section.includePolicy ??
-           BaselineIncludePolicy.OPTIONAL,
-         order:
-           incoming?.order_index ??
-           currentPolicy?.order ??
-           section.order ??
-           index,
-       };
-     });
- 
-     const newVersionHash = this.buildVersionHash(
-       baseline.hash,
-       nextPolicies,
--      latestVersion.verifiedAdditions ?? [],
-+      requestedVersion.verifiedAdditions ?? [],
-     );
-     const nextVersionNumber =
-       (latestVersion.versionNumber ?? baseline.version ?? 0) + 1;
- 
-     return this.baselineRepository.manager.transaction(async (manager) => {
-       const newVersion = manager.create(BaselineVersion, {
-         baselineId: baseline.id,
-         versionNumber: nextVersionNumber,
-         fileHash: newVersionHash,
-         storagePath: baseline.storagePath,
--        verifiedAdditions: latestVersion.verifiedAdditions ?? [],
--        additionDiff: latestVersion.additionDiff ?? null,
--        promotedFromInterviewId: latestVersion.promotedFromInterviewId ?? null,
-+        verifiedAdditions: requestedVersion.verifiedAdditions ?? [],
-+        additionDiff: requestedVersion.additionDiff ?? null,
-+        promotedFromInterviewId: requestedVersion.promotedFromInterviewId ?? null,
-       });
- 
-       const savedVersion = await manager.save(newVersion);
- 
-       const policyEntities = nextPolicies.map((policy) =>
-         manager.create(BaselineBlockPolicy, {
-           baselineVersionId: savedVersion.id,
-           baselineSectionId: policy.baselineSectionId,
-           includePolicy: policy.includePolicy,
-           order: policy.order,
-         }),
-       );
- 
-       await manager.save(policyEntities);
- 
-       baseline.version = nextVersionNumber;
-       const updatedSections = sections.map((section) => {
-         const applied = nextPolicies.find(
-           (policy) => policy.baselineSectionId === section.id,
-         );
- 
-         section.includePolicy = applied?.includePolicy ?? section.includePolicy;
-         section.order =
-           applied?.order ?? section.order ?? section.orderIndex ?? 0;
-+        section.title = this.getSectionTitle(section.sectionType, section.title);
- 
-         return section;
-       });
- 
-       await manager.save(BaselineSection, updatedSections);
-       await manager.save(baseline);
- 
-       return {
-         baseline_version_id: baselineVersionId,
--        updated_blocks: nextPolicies.map((policy) => ({
--          id: policy.baselineSectionId,
--          include_tag: policy.includePolicy,
--          order_index: policy.order,
-+        updated_blocks: updatedSections.map((section) => ({
-+          id: section.id,
-+          section_type: section.sectionType ?? BaselineSectionType.OTHER,
-+          title: this.getSectionTitle(section.sectionType, section.title),
-+          content: section.content,
-+          include_tag: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-+          order_index: section.order ?? 0,
-         })),
-         new_version_id: savedVersion.id,
-         hash: savedVersion.fileHash,
-       };
-     });
-   }
- }
-diff --git a/apps/api/src/compliance/baseline-allowlist.ts b/apps/api/src/compliance/baseline-allowlist.ts
-index 85e4ff6f1870bab18c75890771d1eb190196670d..96aa6bf45ff21e9a11ef4ac2f19459485a7dd6ad 100644
---- a/apps/api/src/compliance/baseline-allowlist.ts
-+++ b/apps/api/src/compliance/baseline-allowlist.ts
-@@ -1,50 +1,53 @@
- import { ComplianceTextSection } from './compliance.types';
- import {
-   collectCandidates,
-   collectMetricCandidatesFromSections,
-   collectTechnologyTokensFromSections,
-   extractBaselineCompanyTokens,
-   extractCompanyCandidatesFromText,
-   extractRoleCandidatesFromText,
-   normalizeCompanyTokenForComparison,
-   normalizeTokenForComparison,
-   shouldUseForRoleDetection,
- } from './detectors';
- import {
-   BaselineAllowlistSnapshot,
-   EMPTY_BASELINE_ALLOWLIST,
- } from './baseline-allowlist.types';
- 
- export function buildBaselineAllowlistSnapshot(
-   sections: ComplianceTextSection[] | null | undefined,
- ): BaselineAllowlistSnapshot {
-   if (!sections?.length) {
-     return { ...EMPTY_BASELINE_ALLOWLIST };
-   }
- 
--  const normalizedSections = sections ?? [];
-+  const normalizedSections = (sections ?? []).filter((section) => {
-+    const type = section.sectionType?.toUpperCase?.();
-+    return type !== 'RAW';
-+  });
- 
-   const companyTokens = new Set<string>();
- 
-   for (const token of extractBaselineCompanyTokens(normalizedSections)) {
-     const normalized = normalizeCompanyTokenForComparison(token);
-     if (normalized) {
-       companyTokens.add(normalized);
-     }
-   }
- 
-   const candidateCompanies = collectCandidates(
-     normalizedSections,
-     extractCompanyCandidatesFromText,
-     normalizeCompanyTokenForComparison,
-   );
-   for (const normalized of candidateCompanies.keys()) {
-     if (normalized) {
-       companyTokens.add(normalized);
-     }
-   }
- 
-   const roleSections = normalizedSections.filter((section) =>
-     shouldUseForRoleDetection(section.sectionType),
-   );
-   const roleCandidates = collectCandidates(
-diff --git a/apps/web/app/(app)/baseline/[id]/page.tsx b/apps/web/app/(app)/baseline/[id]/page.tsx
-index b8c59900d28906b7fb2122d18cf24f49fc2080d4..e0954bb9a1f3058cb5dc8a7673780c5ff37b4649 100644
---- a/apps/web/app/(app)/baseline/[id]/page.tsx
-+++ b/apps/web/app/(app)/baseline/[id]/page.tsx
-@@ -129,51 +129,51 @@ async function fetchBaselineVersions(
-     if (response.status === 401 || response.status === 403) {
-       redirect("/auth/login");
-     }
- 
-     if (!response.ok) {
-       return null;
-     }
- 
-     return (await response.json()) as BaselineVersionDto[];
-   } catch (error) {
-     if (isNextRedirectError(error)) {
-       throw error;
-     }
- 
-     console.error("Failed to fetch baseline versions", error);
-     return null;
-   }
- }
- 
- const friendlyTitles: Record<string, string> = {
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
--  OTHER: "Other",
-+  OTHER: "Summary",
-   RAW: "Raw",
- };
- 
- type GroupedSections = Record<string, BaselineSectionDto[]>;
- 
- const displayOrder = [
-   "SUMMARY",
-   "EXPERIENCE",
-   "PROJECT",
-   "SKILLS",
-   "EDUCATION",
-   "OTHER",
-   "RAW",
- ];
- 
- function organizeSections(sections: BaselineSectionDto[]): GroupedSections {
-   const sorted = [...sections].sort((a, b) => a.order - b.order);
-   const grouped: Record<string, BaselineSectionDto[]> = {};
- 
-   sorted.forEach((section) => {
-     const key = section.sectionType ?? "OTHER";
-     if (!grouped[key]) {
-       grouped[key] = [];
-     }
-     grouped[key].push(section);
-diff --git a/apps/web/app/(app)/studio/page.tsx b/apps/web/app/(app)/studio/page.tsx
-index 220ff1d2700d6ce51cd3e4a64c33b84e94df21ed..ecf4850dff46ebdcd63e1e0f353e7b6b07758104 100644
---- a/apps/web/app/(app)/studio/page.tsx
-+++ b/apps/web/app/(app)/studio/page.tsx
-@@ -318,163 +318,189 @@ function renderSectionContent(content?: string): ReactNode | null {
-         <p key={`${line}-${index}`}>{line}</p>
-       ))}
-     </div>
-   );
- }
- 
- function extractResumeSections(payload: unknown): ResumeSection[] | undefined {
-   if (!payload || typeof payload !== "object") return undefined;
-   const record = payload as Record<string, unknown>;
-   const rawSections = record.sections;
-   if (!Array.isArray(rawSections)) return undefined;
-   const normalized: ResumeSection[] = [];
-   for (const section of rawSections) {
-     if (!section || typeof section !== "object") continue;
-     const entry = section as Record<string, unknown>;
-     const title = typeof entry.title === "string" ? entry.title : undefined;
-     const type = typeof entry.type === "string" ? entry.type : undefined;
-     const id = typeof entry.id === "string" ? entry.id : undefined;
-     const content = typeof entry.content === "string" ? entry.content : undefined;
-     if (!title && !content && !type) continue;
-     normalized.push({ id, type, title, content });
-   }
-   return normalized.length ? normalized : undefined;
- }
- 
-+const resumeSectionHeadingByType: Record<string, string> = {
-+  RAW: "Raw",
-+  SUMMARY: "Summary",
-+  EXPERIENCE: "Professional Experience",
-+  PROJECT: "Projects",
-+  SKILLS: "Technical Skills",
-+  EDUCATION: "Education",
-+  OTHER: "Summary",
-+};
-+
-+function resolveResumeSectionHeading(section: ResumeSection) {
-+  const normalizedTitle = section.title?.trim();
-+  if (normalizedTitle && !/^other$/i.test(normalizedTitle)) {
-+    return normalizedTitle;
-+  }
-+
-+  const typeKey = section.type?.toUpperCase();
-+  if (!typeKey) return normalizedTitle;
-+  return resumeSectionHeadingByType[typeKey] ?? typeKey;
-+}
-+
- function buildResumePreview(payload: unknown): ReactNode | null {
-   const sections = extractResumeSections(payload);
-   if (!sections || !sections.length) return null;
-   const normalizedSections = sections
-     .map((section) => ({
-       ...section,
-       content: stripDuplicateLeadingHeader(section.title, section.content),
-     }))
-     .filter((section) => normalizeHeader(section.title) !== "raw")
-     .filter((section) => section.title || section.content);
-   if (!normalizedSections.length) return null;
-   return (
-     <div className="space-y-6">
-       {normalizedSections.map((section, index) => {
-         const content = renderSectionContent(section.content);
-         if (!content && !section.title) return null;
--        const heading = section.title ?? section.type;
-+        const heading = resolveResumeSectionHeading(section);
-         const key = section.id ?? heading ?? `resume-section-${index}`;
-         return (
-           <article key={key} className="space-y-2">
-             {heading ? (
-               <h3 className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">
-                 {heading}
-               </h3>
-             ) : null}
-             {content}
-           </article>
-         );
-       })}
-     </div>
-   );
- }
- 
- export default function StudioPage() {
-   const searchParams = useSearchParams();
-   const searchParamValue = searchParams.toString();
-   const requestedJobId = useMemo(
-     () => searchParams.get("jobId")?.trim() ?? "",
-     [searchParamValue],
-   );
-   const requestedBaselineVersionId = useMemo(
-     () => searchParams.get("baselineVersionId")?.trim() ?? "",
-     [searchParamValue],
-   );
- 
-   const [jobs, setJobs] = useState<Job[]>([]);
-   const [jobsLoading, setJobsLoading] = useState(false);
-   const [jobsError, setJobsError] = useState<string | null>(null);
- 
-   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
-   const [baselinesLoading, setBaselinesLoading] = useState(false);
-   const [baselinesError, setBaselinesError] = useState<string | null>(null);
- 
-   const [selectedJobId, setSelectedJobId] = useState("");
-   const [selectedBaselineId, setSelectedBaselineId] = useState("");
-   const [selectedBaselineVersionId, setSelectedBaselineVersionId] = useState("");
-   const [baselineTouched, setBaselineTouched] = useState(false);
-   const [versionTouched, setVersionTouched] = useState(false);
-   const [versionRefreshSignal, setVersionRefreshSignal] = useState(0);
- 
-   const baselineTouchedRef = useRef(baselineTouched);
-   useEffect(() => {
-     baselineTouchedRef.current = baselineTouched;
-   }, [baselineTouched]);
- 
-   const versionTouchedRef = useRef(versionTouched);
-+  const pendingVersionSelectionRef = useRef<string | null>(null);
-   useEffect(() => {
-     versionTouchedRef.current = versionTouched;
-   }, [versionTouched]);
- 
-   const [versions, setVersions] = useState<BaselineVersionDto[]>([]);
-   const [versionsLoading, setVersionsLoading] = useState(false);
-   const [versionsError, setVersionsError] = useState<string | null>(null);
- 
-   const [analysis, setAnalysis] = useState<LatestAnalysis | null>(null);
-   const [analysisLoading, setAnalysisLoading] = useState(false);
-   const [analysisError, setAnalysisError] = useState<string | null>(null);
- 
-   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
-   const [resumeGenerating, setResumeGenerating] = useState(false);
-   const [resumeExportFormat, setResumeExportFormat] =
-     useState<"docx" | "pdf" | null>(null);
-   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
-   const [resumeAuditId, setResumeAuditId] = useState<string | undefined>();
- 
-   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
-   const [coverGenerating, setCoverGenerating] = useState(false);
-   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
-   const [coverWarningFlags, setCoverWarningFlags] = useState<ComplianceFlag[]>([]);
-   const [coverAuditId, setCoverAuditId] = useState<string | undefined>();
- 
-   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
- 
-   const { isPro } = useEntitlements();
- 
-   const selectedJob = useMemo(
-     () => jobs.find((job) => job.id === selectedJobId),
-     [jobs, selectedJobId],
-   );
- 
-   const selectedVersion = useMemo(
-     () => versions.find((version) => version.id === selectedBaselineVersionId),
-     [versions, selectedBaselineVersionId],
-   );
-   const selectedVersionLabel = selectedVersion?.versionNumber
-     ? `Version ${selectedVersion.versionNumber}`
-     : "";
- 
-   const handleBlockPolicyVersionAdvance = useCallback(
-     (newVersionId: string, newHash: string | null) => {
-+      if (newVersionId) {
-+        pendingVersionSelectionRef.current = newVersionId;
-+      }
-       if (newVersionId && newVersionId !== selectedBaselineVersionId) {
-         setSelectedBaselineVersionId(newVersionId);
-       }
-+      setVersionTouched(true);
-       setVersionRefreshSignal((prev) => prev + 1);
-     },
-     [selectedBaselineVersionId],
-   );
- 
-   const refreshBlockPolicyList = useCallback(() => {
-     setVersionRefreshSignal((prev) => prev + 1);
-   }, []);
- 
-   const coverLetterJobContext = useMemo(() => {
-     const jobWithExtras = selectedJob as Job & {
-       companyName?: string | null;
-       jobTitle?: string | null;
-     };
-     const companies = collectNormalizedContextValues([
-       selectedJob?.company,
-       jobWithExtras?.companyName,
-       analysis?.company,
-       analysis?.companyName,
-     ]);
-     const roleTitles = collectNormalizedContextValues([
-       selectedJob?.title,
-       jobWithExtras?.jobTitle,
-       analysis?.jobTitle,
-       analysis?.title,
-@@ -596,100 +622,105 @@ export default function StudioPage() {
-             return current;
-           }
-           return fetched[0]?.id ?? "";
-         });
-       } catch (error) {
-         if (canceled) return;
-         const message =
-           error instanceof Error ? error.message : "Baselines could not be loaded.";
-         setBaselinesError(message);
-       } finally {
-         if (!canceled) {
-           setBaselinesLoading(false);
-         }
-       }
-     };
-     void loadBaselines();
-     return () => {
-       canceled = true;
-     };
-   }, []);
- 
-   useEffect(() => {
-     if (!selectedBaselineId) {
-       setVersions([]);
-       setSelectedBaselineVersionId("");
-+      pendingVersionSelectionRef.current = null;
-       setVersionsError(null);
-       return;
-     }
-     let canceled = false;
-     setVersionsLoading(true);
-     setVersionsError(null);
-     const loadVersions = async () => {
-       try {
-         const response = await fetch(
-           `/api/baselines/${encodeURIComponent(selectedBaselineId)}/versions`,
-         );
-         const payload = await readResponsePayload(response);
-         if (canceled) return;
-         if (!response.ok || !Array.isArray(payload)) {
-           const message = formatErrorMessage(payload, "Baseline versions could not be loaded.");
-           setVersionsError(message);
-           setVersions([]);
-           setSelectedBaselineVersionId("");
-           return;
-         }
-         const parsed = payload as BaselineVersionDto[];
-         setVersions(parsed);
-         setVersionsError(null);
-         setSelectedBaselineVersionId((current) => {
-+          const pending = pendingVersionSelectionRef.current;
-+          if (pending && parsed.some((version) => version.id === pending)) {
-+            pendingVersionSelectionRef.current = null;
-+            return pending;
-+          }
-           if (current && parsed.some((version) => version.id === current)) {
-             return current;
-           }
-           if (
-             !versionTouchedRef.current &&
-             requestedBaselineVersionId &&
-             parsed.some((version) => version.id === requestedBaselineVersionId)
-           ) {
-             return requestedBaselineVersionId;
-           }
-           return parsed[0]?.id ?? "";
-         });
-       } catch (error) {
-         if (canceled) return;
-         const message =
-           error instanceof Error ? error.message : "Baseline versions could not be loaded.";
-         setVersionsError(message);
-         setVersions([]);
-         setSelectedBaselineVersionId("");
-       } finally {
-         if (!canceled) {
-           setVersionsLoading(false);
-         }
-       }
-     };
--    setVersionTouched(false);
-     void loadVersions();
-     return () => {
-       canceled = true;
-     };
-   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
- 
-   useEffect(() => {
-     if (!selectedJobId) {
-       setAnalysis(null);
-       setAnalysisError(null);
-       return;
-     }
-     let canceled = false;
-     setAnalysisLoading(true);
-     setAnalysisError(null);
-     const loadAnalysis = async () => {
-       try {
-         const response = await fetch(
-           `/api/analysis/latest?jobId=${encodeURIComponent(selectedJobId)}`,
-         );
-         const payload = await readResponsePayload(response);
-         if (canceled) return;
-         if (!response.ok) {
-           const message = formatErrorMessage(payload, "Fit analysis could not be loaded.");
-           setAnalysis(null);
-@@ -957,71 +988,74 @@ export default function StudioPage() {
-                 onChange={(event) => setSelectedJobId(event.target.value)}
-                 disabled={jobsLoading}
-               >
-                 {jobs.map((job) => (
-                   <option key={job.id} value={job.id}>
-                     {job.company ?? "Untitled company"} - {job.title ?? "Untitled role"}
-                     {(job.archivedAt || job.isArchived) && " (archived)"}
-                   </option>
-                 ))}
-               </select>
-             </label>
-           )}
- 
-           {baselines.length === 0 ? (
-             <EmptyState
-               title="No baselines yet"
-               body="Upload a baseline to pair with your job before generating documents."
-             />
-           ) : (
-             <label className="flex flex-col gap-2 text-sm text-slate-400">
-               Baseline
-               <select
-                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-                 value={selectedBaselineId}
-                 onChange={(event) => {
-+                  pendingVersionSelectionRef.current = null;
-+                  setVersionTouched(false);
-                   setSelectedBaselineId(event.target.value);
-                   setBaselineTouched(true);
-                 }}
-                 disabled={baselinesLoading}
-               >
-                 {baselines.map((baseline) => (
-                   <option key={baseline.id} value={baseline.id}>
-                     {baseline.originalFilename || `Baseline ${baseline.version}`}
-                   </option>
-                 ))}
-               </select>
-             </label>
-           )}
- 
-           {selectedBaselineId ? (
-             <label className="flex flex-col gap-2 text-sm text-slate-400">
-               Baseline version
-               <select
-                 className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-                 value={selectedBaselineVersionId}
-                 onChange={(event) => {
-+                  pendingVersionSelectionRef.current = null;
-                   setSelectedBaselineVersionId(event.target.value);
-                   setVersionTouched(true);
-                 }}
-                 disabled={versionsLoading}
-               >
-                 {versions.map((version) => (
-                   <option key={version.id} value={version.id}>
-                     {version.versionNumber ? `Version ${version.versionNumber}` : version.id}
-                     {version.fileHash ? ` (${version.fileHash.slice(0, 8)})` : ""}
-                   </option>
-                 ))}
-               </select>
-             </label>
-           ) : null}
- 
-           {versionsError ? (
-             <Alert intent="error" title="Versions unavailable">
-               {versionsError}
-             </Alert>
-           ) : null}
-           {selectedBaselineId && !versionsLoading && versions.length === 0 ? (
-             <Alert intent="warning" title="No baseline versions">
-               Upload a baseline version for this baseline before generating documents.
-             </Alert>
-           ) : null}
-diff --git a/apps/web/components/BaselineBlockPolicyList.tsx b/apps/web/components/BaselineBlockPolicyList.tsx
-index 271db96421cbdc23c4e64f346e985fd6cb6eee90..718484d7f4cfad6c5a918162c736eaca012c0917 100644
---- a/apps/web/components/BaselineBlockPolicyList.tsx
-+++ b/apps/web/components/BaselineBlockPolicyList.tsx
-@@ -15,64 +15,79 @@ const policyOptions: Array<{
- }> = [
-   {
-     value: "always",
-     label: "Always",
-     description: "Force this block into every generated draft.",
-   },
-   {
-     value: "optional",
-     label: "Optional",
-     description: "Allow the writer to include this block when relevant.",
-   },
-   {
-     value: "never",
-     label: "Never",
-     description: "Exclude the block from downstream generations.",
-   },
- ];
- 
- const sectionTitles: Record<string, string> = {
-   RAW: "Raw",
-   SUMMARY: "Summary",
-   EXPERIENCE: "Experience",
-   PROJECT: "Projects / Programs",
-   SKILLS: "Skills",
-   EDUCATION: "Education",
--  OTHER: "Other",
-+  OTHER: "Summary",
- };
- 
- type BaselineBlockPolicyListProps = {
-   blocks: BaselineBlockDto[];
-   onPolicyChange: (blockId: string, includePolicy: BaselineIncludePolicy) => void;
-   saving?: boolean;
- };
- 
--const truncatePreview = (value: string, max = 220) => {
--  if (value.length <= max) {
--    return value;
-+const truncatePreview = (value?: string | null, max = 220) => {
-+  const normalized = value ?? "";
-+
-+  if (normalized.length <= max) {
-+    return normalized;
-+  }
-+  return `${normalized.slice(0, max).trimEnd()}…`;
-+};
-+
-+const getDisplayTitle = (block: BaselineBlockDto) => {
-+  const title = block.title?.trim();
-+  if (title && !/^untitled block$/i.test(title) && !/^other$/i.test(title)) {
-+    return title;
-   }
--  return `${value.slice(0, max).trimEnd()}…`;
-+
-+  if (block.section_type === "OTHER" || block.section_type === "SUMMARY") {
-+    return "Summary";
-+  }
-+
-+  return sectionTitles[block.section_type] ?? "Untitled block";
- };
- 
- export function BaselineBlockPolicyList({
-   blocks,
-   onPolicyChange,
-   saving,
- }: BaselineBlockPolicyListProps) {
-   const sortedBlocks = useMemo(
-     () =>
-       [...blocks].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
-     [blocks],
-   );
- 
-   return (
-     <div className="space-y-4">
-       <div className="space-y-2">
-         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Content controls</p>
-         <p className="text-xs text-slate-300">
-           Use the three-state toggle to keep a block in every draft, allow it when relevant, or
-           exclude it entirely.
-         </p>
-         <div className="grid gap-2 text-[11px] text-slate-400 sm:grid-cols-3">
-           {policyOptions.map((option) => (
-             <div key={option.value}>
-               <p className="font-semibold text-slate-200">{option.label}</p>
-@@ -102,43 +117,43 @@ export function BaselineBlockPolicyList({
-                     </span>
-                     <div className="flex gap-2">
-                       {policyOptions.map((option) => {
-                         const isActive = block.include_tag === option.value;
-                         return (
-                           <button
-                             key={option.value}
-                             type="button"
-                             onClick={() => onPolicyChange(block.id, option.value)}
-                             disabled={saving}
-                             className={`rounded-full px-3 py-1 text-xs font-semibold shadow-sm transition ${
-                               isActive
-                                 ? "bg-blue-500 text-white"
-                                 : "bg-white text-slate-900 hover:bg-slate-100"
-                             }`}
-                           >
-                             {option.label}
-                           </button>
-                         );
-                       })}
-                     </div>
-                   </div>
- 
-                   <div className="space-y-1">
-                     <p className="text-sm font-semibold text-white">
--                      {block.title || "Untitled block"}
-+                      {getDisplayTitle(block)}
-                     </p>
-                     <p className="text-xs text-slate-300">
-                       {truncatePreview(block.content)}
-                     </p>
-                   </div>
-                 </div>
-                 <p className="mt-3 text-[11px] text-slate-500">
-                   Order: {block.order_index ?? "—"}
-                 </p>
-               </article>
-             );
-           })}
-         </div>
-       )}
-     </div>
-   );
- }
