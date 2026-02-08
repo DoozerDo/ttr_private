@@ -33,25 +33,45 @@ export class AdminCleanupService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   async listJobs(includeArchived: boolean) {
-    const manager = this.dataSource.manager;
-    const jobs = await manager.find(Job, {
-      where: includeArchived ? {} : { isArchived: false },
-      order: { createdAt: 'DESC' },
-      select: ['id', 'title', 'userId', 'createdAt', 'isArchived'],
-    });
+    const query = this.dataSource
+      .createQueryBuilder(Job, 'job')
+      .leftJoin(User, 'user', 'CAST(user.id AS text) = job.userId')
+      .select([
+        'job.id AS id',
+        'job.title AS title',
+        'job.userId AS "userId"',
+        'job.createdAt AS "createdAt"',
+        'job.isArchived AS "isArchived"',
+        'user.email AS "userEmail"',
+      ])
+      .orderBy('job.createdAt', 'DESC');
 
-    return jobs;
+    if (!includeArchived) {
+      query.where('job.isArchived = :isArchived', { isArchived: false });
+    }
+
+    return query.getRawMany();
   }
 
   async listBaselines(includeArchived: boolean) {
-    const manager = this.dataSource.manager;
-    const baselines = await manager.find(Baseline, {
-      where: includeArchived ? {} : { status: BaselineStatus.ACTIVE },
-      order: { updatedAt: 'DESC' },
-      select: ['id', 'originalFilename', 'status', 'updatedAt', 'userId'],
-    });
+    const query = this.dataSource
+      .createQueryBuilder(Baseline, 'baseline')
+      .leftJoin(User, 'user', 'CAST(user.id AS text) = baseline.userId')
+      .select([
+        'baseline.id AS id',
+        'baseline.originalFilename AS "originalFilename"',
+        'baseline.status AS status',
+        'baseline.updatedAt AS "updatedAt"',
+        'baseline.userId AS "userId"',
+        'user.email AS "userEmail"',
+      ])
+      .orderBy('baseline.updatedAt', 'DESC');
 
-    return baselines;
+    if (!includeArchived) {
+      query.where('baseline.status = :status', { status: BaselineStatus.ACTIVE });
+    }
+
+    return query.getRawMany();
   }
 
   async deleteUser(userId: string): Promise<CleanupResult> {

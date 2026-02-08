@@ -14,7 +14,7 @@ const NAV_LINKS = [
 export default function AdminLayout({ children }: AdminLayoutProps) {
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
-      <nav className="w-56 border-r border-slate-800 bg-slate-900/70 px-4 py-6">
+      <nav className="w-48 border-r border-slate-800 bg-slate-900/70 px-4 py-6">
         <p className="mb-4 text-xs uppercase tracking-[0.3em] text-slate-400">
           Admin
         </p>

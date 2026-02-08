@@ -6,6 +6,7 @@ type AdminJobRow = {
   id: string;
   title: string | null;
   userId: string;
+  userEmail: string | null;
   createdAt: string;
 };
 
@@ -64,6 +65,7 @@ export default async function AdminJobsPage() {
                 <th className="px-4 py-3">Job ID</th>
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Created by</th>
+                <th className="px-4 py-3">User email</th>
                 <th className="px-4 py-3">Created at</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -83,6 +85,9 @@ export default async function AdminJobsPage() {
                     {job.title ?? "Untitled"}
                   </td>
                   <td className="px-4 py-3 text-slate-200">{job.userId}</td>
+                  <td className="px-4 py-3 text-slate-200">
+                    {job.userEmail ?? "Unknown"}
+                  </td>
                   <td className="px-4 py-3 text-slate-200">
                     {formatDate(job.createdAt)}
                   </td>

@@ -7,6 +7,8 @@ type AdminBaselineRow = {
   id: string;
   originalFilename: string | null;
   status: "ACTIVE" | "ARCHIVED" | string;
+  userId: string;
+  userEmail: string | null;
   updatedAt: string;
 };
 
@@ -67,6 +69,7 @@ export default async function AdminBaselinesPage() {
                 <tr>
                   <th className="px-4 py-3">Name / ID</th>
                   <th className="px-4 py-3">Locked status</th>
+                  <th className="px-4 py-3">User email</th>
                   <th className="px-4 py-3">Updated at</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
@@ -85,6 +88,9 @@ export default async function AdminBaselinesPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-200">
                       {lockedLabel(baseline.status)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-200">
+                      {baseline.userEmail ?? "Unknown"}
                     </td>
                     <td className="px-4 py-3 text-slate-200">
                       {formatDate(baseline.updatedAt)}

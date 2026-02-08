@@ -1,49 +1,11 @@
-diff --git a/apps/api/src/admin-users/admin-baselines.controller.ts b/apps/api/src/admin-users/admin-baselines.controller.ts
-index fd79aa6dad88c95604353980634afcabeed40f17..8172b2a9d36e237487da4151602418bf58818783 100644
---- a/apps/api/src/admin-users/admin-baselines.controller.ts
-+++ b/apps/api/src/admin-users/admin-baselines.controller.ts
-@@ -1,16 +1,21 @@
--import { Controller, Delete, Param, UseGuards } from '@nestjs/common';
-+import { Controller, Delete, Get, Param, Query, UseGuards } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- 
- import { AdminBypassGuard } from './admin-bypass.guard';
- import { AdminCleanupService } from './admin-cleanup.service';
- 
- @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
- @Controller('admin/baselines')
- export class AdminBaselinesController {
-   constructor(private readonly adminCleanupService: AdminCleanupService) {}
- 
-+  @Get()
-+  listBaselines(@Query('includeArchived') includeArchived?: string) {
-+    return this.adminCleanupService.listBaselines(includeArchived === 'true');
-+  }
-+
-   @Delete(':id')
-   deleteBaseline(@Param('id') baselineId: string) {
-     return this.adminCleanupService.deleteBaseline(baselineId);
-   }
- }
 diff --git a/apps/api/src/admin-users/admin-cleanup.service.ts b/apps/api/src/admin-users/admin-cleanup.service.ts
-index ca8d291fbeab11757918c3f5a3feee6b2628897c..340055bef806b818a223880df5ace9bd4a7f8ed9 100644
+index 340055bef806b818a223880df5ace9bd4a7f8ed9..8fbfd958751037005e94efbad9a8ae72136bfb44 100644
 --- a/apps/api/src/admin-users/admin-cleanup.service.ts
 +++ b/apps/api/src/admin-users/admin-cleanup.service.ts
-@@ -1,59 +1,81 @@
- import { Injectable, NotFoundException } from '@nestjs/common';
- import { InjectDataSource } from '@nestjs/typeorm';
- import { DataSource, EntityManager, In, ObjectLiteral } from 'typeorm';
- 
- import { AdminUser } from './admin-user.entity';
- import { Application } from '../applications/application.entity';
- import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
- import { FitAssessment } from '../analysis/fit-assessment.entity';
- import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
- import { BaselineParsed } from '../baseline/baseline-parsed.entity';
+@@ -11,69 +11,89 @@ import { BaselineParsed } from '../baseline/baseline-parsed.entity';
  import { BaselineSection } from '../baseline/baseline-section.entity';
  import { BaselineVersion } from '../baseline/baseline-version.entity';
--import { Baseline } from '../baseline/baseline.entity';
-+import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
+ import { Baseline, BaselineStatus } from '../baseline/baseline.entity';
  import { ComplianceAudit } from '../compliance/compliance-audit.entity';
  import { CoverLetter } from '../cover-letters/cover-letter.entity';
  import { InterviewSession } from '../interviews/interview-session.entity';
@@ -65,28 +27,62 @@ index ca8d291fbeab11757918c3f5a3feee6b2628897c..340055bef806b818a223880df5ace9bd
  export class AdminCleanupService {
    constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
  
-+  async listJobs(includeArchived: boolean) {
-+    const manager = this.dataSource.manager;
-+    const jobs = await manager.find(Job, {
-+      where: includeArchived ? {} : { isArchived: false },
-+      order: { createdAt: 'DESC' },
-+      select: ['id', 'title', 'userId', 'createdAt', 'isArchived'],
-+    });
+   async listJobs(includeArchived: boolean) {
+-    const manager = this.dataSource.manager;
+-    const jobs = await manager.find(Job, {
+-      where: includeArchived ? {} : { isArchived: false },
+-      order: { createdAt: 'DESC' },
+-      select: ['id', 'title', 'userId', 'createdAt', 'isArchived'],
+-    });
++    const query = this.dataSource
++      .createQueryBuilder(Job, 'job')
++      .leftJoin(User, 'user', 'CAST(user.id AS text) = job.userId')
++      .select([
++        'job.id AS id',
++        'job.title AS title',
++        'job.userId AS "userId"',
++        'job.createdAt AS "createdAt"',
++        'job.isArchived AS "isArchived"',
++        'user.email AS "userEmail"',
++      ])
++      .orderBy('job.createdAt', 'DESC');
 +
-+    return jobs;
-+  }
++    if (!includeArchived) {
++      query.where('job.isArchived = :isArchived', { isArchived: false });
++    }
+ 
+-    return jobs;
++    return query.getRawMany();
+   }
+ 
+   async listBaselines(includeArchived: boolean) {
+-    const manager = this.dataSource.manager;
+-    const baselines = await manager.find(Baseline, {
+-      where: includeArchived ? {} : { status: BaselineStatus.ACTIVE },
+-      order: { updatedAt: 'DESC' },
+-      select: ['id', 'originalFilename', 'status', 'updatedAt', 'userId'],
+-    });
++    const query = this.dataSource
++      .createQueryBuilder(Baseline, 'baseline')
++      .leftJoin(User, 'user', 'CAST(user.id AS text) = baseline.userId')
++      .select([
++        'baseline.id AS id',
++        'baseline.originalFilename AS "originalFilename"',
++        'baseline.status AS status',
++        'baseline.updatedAt AS "updatedAt"',
++        'baseline.userId AS "userId"',
++        'user.email AS "userEmail"',
++      ])
++      .orderBy('baseline.updatedAt', 'DESC');
 +
-+  async listBaselines(includeArchived: boolean) {
-+    const manager = this.dataSource.manager;
-+    const baselines = await manager.find(Baseline, {
-+      where: includeArchived ? {} : { status: BaselineStatus.ACTIVE },
-+      order: { updatedAt: 'DESC' },
-+      select: ['id', 'originalFilename', 'status', 'updatedAt', 'userId'],
-+    });
-+
-+    return baselines;
-+  }
-+
++    if (!includeArchived) {
++      query.where('baseline.status = :status', { status: BaselineStatus.ACTIVE });
++    }
+ 
+-    return baselines;
++    return query.getRawMany();
+   }
+ 
    async deleteUser(userId: string): Promise<CleanupResult> {
      return this.dataSource.transaction(async (manager) => {
        const user = await manager.findOne(User, { where: { id: userId } });
@@ -110,40 +106,11 @@ index ca8d291fbeab11757918c3f5a3feee6b2628897c..340055bef806b818a223880df5ace9bd
        if (baselineIds.length > 0) {
          await this.deleteByBaselineIds(manager, baselineIds, counts);
        }
- 
-       await this.deleteWhere(manager, Application, { userId }, counts, 'applications');
-diff --git a/apps/api/src/admin-users/admin-jobs.controller.ts b/apps/api/src/admin-users/admin-jobs.controller.ts
-index dad9a4ab31c5330fc07c2758012f946e243d679d..754a46b68171a919680d71e20deaa88cad6801a9 100644
---- a/apps/api/src/admin-users/admin-jobs.controller.ts
-+++ b/apps/api/src/admin-users/admin-jobs.controller.ts
-@@ -1,16 +1,21 @@
--import { Controller, Delete, Param, UseGuards } from '@nestjs/common';
-+import { Controller, Delete, Get, Param, Query, UseGuards } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- 
- import { AdminBypassGuard } from './admin-bypass.guard';
- import { AdminCleanupService } from './admin-cleanup.service';
- 
- @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
- @Controller('admin/jobs')
- export class AdminJobsController {
-   constructor(private readonly adminCleanupService: AdminCleanupService) {}
- 
-+  @Get()
-+  listJobs(@Query('includeArchived') includeArchived?: string) {
-+    return this.adminCleanupService.listJobs(includeArchived === 'true');
-+  }
-+
-   @Delete(':id')
-   deleteJob(@Param('id') jobId: string) {
-     return this.adminCleanupService.deleteJob(jobId);
-   }
- }
 diff --git a/apps/web/app/(app)/admin/baselines/page.tsx b/apps/web/app/(app)/admin/baselines/page.tsx
-index dc6321c8a48ac3dcf85eedc00246acc715cca6ba..56ebd75d3729c461f53ffed915044f833cfc2af4 100644
+index 56ebd75d3729c461f53ffed915044f833cfc2af4..b731b1bef61a68e6ccfa1104d85c858f2ac11f80 100644
 --- a/apps/web/app/(app)/admin/baselines/page.tsx
 +++ b/apps/web/app/(app)/admin/baselines/page.tsx
-@@ -1,51 +1,51 @@
+@@ -1,34 +1,36 @@
  import { revalidatePath } from "next/cache";
  import Link from "next/link";
  
@@ -153,6 +120,8 @@ index dc6321c8a48ac3dcf85eedc00246acc715cca6ba..56ebd75d3729c461f53ffed915044f83
    id: string;
    originalFilename: string | null;
    status: "ACTIVE" | "ARCHIVED" | string;
++  userId: string;
++  userEmail: string | null;
    updatedAt: string;
  };
  
@@ -169,8 +138,7 @@ index dc6321c8a48ac3dcf85eedc00246acc715cca6ba..56ebd75d3729c461f53ffed915044f83
  }
  
  async function loadBaselines(): Promise<AdminBaselineRow[]> {
--  return adminServerFetch<AdminBaselineRow[]>("/baselines?includeArchived=true", "Load baselines");
-+  return adminServerFetch<AdminBaselineRow[]>("/admin/baselines?includeArchived=true", "Load baselines");
+   return adminServerFetch<AdminBaselineRow[]>("/admin/baselines?includeArchived=true", "Load baselines");
  }
  
  async function deleteBaselineAction(formData: FormData) {
@@ -179,16 +147,7 @@ index dc6321c8a48ac3dcf85eedc00246acc715cca6ba..56ebd75d3729c461f53ffed915044f83
    const baselineId = formData.get("baselineId");
    if (typeof baselineId !== "string" || !baselineId.trim()) {
      throw new Error("Missing baselineId");
-   }
- 
-   await adminServerFetch(`/admin/baselines/${baselineId}`, "Delete baseline", {
-     method: "DELETE",
-   });
- 
-   revalidatePath("/admin/baselines");
- }
- 
- export default async function AdminBaselinesPage() {
+@@ -45,69 +47,73 @@ export default async function AdminBaselinesPage() {
    try {
      const baselines = await loadBaselines();
  
@@ -196,11 +155,77 @@ index dc6321c8a48ac3dcf85eedc00246acc715cca6ba..56ebd75d3729c461f53ffed915044f83
        <div className="space-y-6">
          <header>
            <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Baselines</p>
+           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+             Baseline catalogue
+           </h1>
+           <p className="mt-2 text-sm text-slate-300">
+             Review baseline versions, locked status, and delete baselines with linked records.
+           </p>
+         </header>
+ 
+         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-black/40">
+           <div className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">
+             Baselines
+           </div>
+           <div className="overflow-x-auto">
+             <table className="min-w-full border-collapse text-sm">
+               <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+                 <tr>
+                   <th className="px-4 py-3">Name / ID</th>
+                   <th className="px-4 py-3">Locked status</th>
++                  <th className="px-4 py-3">User email</th>
+                   <th className="px-4 py-3">Updated at</th>
+                   <th className="px-4 py-3">Actions</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {baselines.map((baseline) => (
+                   <tr key={baseline.id} className="border-t border-white/10">
+                     <td className="px-4 py-3">
+                       <Link
+                         className="text-amber-300 hover:text-amber-200"
+                         href={`/admin/baselines/${baseline.id}`}
+                       >
+                         {baseline.originalFilename ?? baseline.id}
+                       </Link>
+                       <p className="text-xs text-slate-500">{baseline.id}</p>
+                     </td>
+                     <td className="px-4 py-3 text-slate-200">
+                       {lockedLabel(baseline.status)}
+                     </td>
++                    <td className="px-4 py-3 text-slate-200">
++                      {baseline.userEmail ?? "Unknown"}
++                    </td>
+                     <td className="px-4 py-3 text-slate-200">
+                       {formatDate(baseline.updatedAt)}
+                     </td>
+                     <td className="px-4 py-3">
+                       <form action={deleteBaselineAction}>
+                         <input type="hidden" name="baselineId" value={baseline.id} />
+                         <button
+                           type="submit"
+                           className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
+                         >
+                           Delete baseline
+                         </button>
+                       </form>
+                     </td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+           </div>
+         </section>
+       </div>
+     );
+   } catch (error: unknown) {
+     const message = error instanceof Error ? error.message : "Unable to load baselines.";
+ 
 diff --git a/apps/web/app/(app)/admin/jobs/page.tsx b/apps/web/app/(app)/admin/jobs/page.tsx
-index 31b75c16b84515e9aed983c0607373b0ccabd38d..41387c32b3e7085a29f9a6b40be54a94f8b3a7a1 100644
+index 41387c32b3e7085a29f9a6b40be54a94f8b3a7a1..6eafda9dfe57b9bde4eea84a0f5a6e0afce58a6d 100644
 --- a/apps/web/app/(app)/admin/jobs/page.tsx
 +++ b/apps/web/app/(app)/admin/jobs/page.tsx
-@@ -1,38 +1,38 @@
+@@ -1,33 +1,34 @@
  import { revalidatePath } from "next/cache";
  import Link from "next/link";
  import { adminServerFetch } from "../_lib/adminServerFetch";
@@ -209,12 +234,12 @@ index 31b75c16b84515e9aed983c0607373b0ccabd38d..41387c32b3e7085a29f9a6b40be54a94
    id: string;
    title: string | null;
    userId: string;
++  userEmail: string | null;
    createdAt: string;
  };
  
  async function loadJobs(): Promise<AdminJobRow[]> {
--  return adminServerFetch<AdminJobRow[]>("/jobs?includeArchived=true", "Load jobs");
-+  return adminServerFetch<AdminJobRow[]>("/admin/jobs?includeArchived=true", "Load jobs");
+   return adminServerFetch<AdminJobRow[]>("/admin/jobs?includeArchived=true", "Load jobs");
  }
  
  function formatDate(value: string): string {
@@ -235,8 +260,118 @@ index 31b75c16b84515e9aed983c0607373b0ccabd38d..41387c32b3e7085a29f9a6b40be54a94
  
    await adminServerFetch(`/admin/jobs/${jobId}`, "Delete job", {
      method: "DELETE",
-   });
+@@ -42,67 +43,71 @@ export default async function AdminJobsPage() {
+   return (
+     <div className="space-y-6">
+       <header>
+         <p className="text-sm uppercase tracking-[0.4em] text-slate-400">
+           Jobs
+         </p>
+         <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+           Job records
+         </h1>
+         <p className="mt-2 text-sm text-slate-300">
+           Admin delete support for jobs and related records.
+         </p>
+       </header>
  
-   revalidatePath("/admin/jobs");
+       <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-black/40">
+         <div className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">
+           Jobs
+         </div>
+         <div className="overflow-x-auto">
+           <table className="min-w-full border-collapse text-sm">
+             <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+               <tr>
+                 <th className="px-4 py-3">Job ID</th>
+                 <th className="px-4 py-3">Title</th>
+                 <th className="px-4 py-3">Created by</th>
++                <th className="px-4 py-3">User email</th>
+                 <th className="px-4 py-3">Created at</th>
+                 <th className="px-4 py-3">Actions</th>
+               </tr>
+             </thead>
+             <tbody>
+               {jobs.map((job) => (
+                 <tr key={job.id} className="border-t border-white/10">
+                   <td className="px-4 py-3">
+                     <Link
+                       className="text-amber-300 hover:text-amber-200"
+                       href={`/admin/jobs/${job.id}`}
+                     >
+                       {job.id}
+                     </Link>
+                   </td>
+                   <td className="px-4 py-3 text-slate-100">
+                     {job.title ?? "Untitled"}
+                   </td>
+                   <td className="px-4 py-3 text-slate-200">{job.userId}</td>
++                  <td className="px-4 py-3 text-slate-200">
++                    {job.userEmail ?? "Unknown"}
++                  </td>
+                   <td className="px-4 py-3 text-slate-200">
+                     {formatDate(job.createdAt)}
+                   </td>
+                   <td className="px-4 py-3">
+                     <form action={deleteJobAction}>
+                       <input type="hidden" name="jobId" value={job.id} />
+                       <button
+                         type="submit"
+                         className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
+                       >
+                         Delete job
+                       </button>
+                     </form>
+                   </td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+       </section>
+     </div>
+   );
  }
+diff --git a/apps/web/app/(app)/admin/layout.tsx b/apps/web/app/(app)/admin/layout.tsx
+index be634b17de09d2081d462f06cc34351aea55cb6a..56fcf458cc6ab635b91637d9989131c1a20be42f 100644
+--- a/apps/web/app/(app)/admin/layout.tsx
++++ b/apps/web/app/(app)/admin/layout.tsx
+@@ -1,37 +1,37 @@
+ import type { ReactNode } from "react";
+ import Link from "next/link";
  
+ type AdminLayoutProps = {
+   children: ReactNode;
+ };
+ 
+ const NAV_LINKS = [
+   { href: "/admin/users", label: "Users" },
+   { href: "/admin/jobs", label: "Jobs" },
+   { href: "/admin/baselines", label: "Baselines" },
+ ];
+ 
+ export default function AdminLayout({ children }: AdminLayoutProps) {
+   return (
+     <div className="flex min-h-screen bg-slate-950 text-slate-50">
+-      <nav className="w-56 border-r border-slate-800 bg-slate-900/70 px-4 py-6">
++      <nav className="w-48 border-r border-slate-800 bg-slate-900/70 px-4 py-6">
+         <p className="mb-4 text-xs uppercase tracking-[0.3em] text-slate-400">
+           Admin
+         </p>
+         <ul className="space-y-2">
+           {NAV_LINKS.map((link) => (
+             <li key={link.href}>
+               <Link
+                 className="block rounded-md px-3 py-2 text-sm font-medium transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                 href={link.href}
+               >
+                 {link.label}
+               </Link>
+             </li>
+           ))}
+         </ul>
+       </nav>
+       <main className="flex-1 p-6">{children}</main>
+     </div>
+   );
+ }
