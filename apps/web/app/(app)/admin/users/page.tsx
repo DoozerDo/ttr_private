@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { adminServerFetch } from "../_lib/adminServerFetch";
 
 type AdminUserRow = {
@@ -23,6 +24,21 @@ function formatDate(value: string | null): string {
 
 async function loadUsers(): Promise<AdminUserRow[]> {
   return adminServerFetch<AdminUserRow[]>("/admin/users", "Load admin users");
+}
+
+async function deleteUserAction(formData: FormData) {
+  "use server";
+
+  const userId = formData.get("userId");
+  if (typeof userId !== "string" || !userId.trim()) {
+    throw new Error("Missing userId");
+  }
+
+  await adminServerFetch(`/admin/users/${userId}`, "Delete user", {
+    method: "DELETE",
+  });
+
+  revalidatePath("/admin/users");
 }
 
 export default async function AdminUsersPage() {
@@ -51,6 +67,7 @@ export default async function AdminUsersPage() {
                   <th className="px-4 py-3">Account type</th>
                   <th className="px-4 py-3">Created at</th>
                   <th className="px-4 py-3">Updated at</th>
+                  <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -60,6 +77,17 @@ export default async function AdminUsersPage() {
                     <td className="px-4 py-3 text-slate-200">{user.accountType ?? "free"}</td>
                     <td className="px-4 py-3 text-slate-200">{formatDate(user.createdAt)}</td>
                     <td className="px-4 py-3 text-slate-200">{formatDate(user.updatedAt)}</td>
+                    <td className="px-4 py-3">
+                      <form action={deleteUserAction}>
+                        <input type="hidden" name="userId" value={user.id} />
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
+                        >
+                          Delete user
+                        </button>
+                      </form>
+                    </td>
                   </tr>
                 ))}
               </tbody>

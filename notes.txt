@@ -72,12 +72,7 @@ Connect:
 docker exec -it docker-db-1 psql -U postgres -d targetthisrole
 
 Cmds: 
-See all tables: 
 \dt
-
-See table columns: 
-\d tablename
-
 
 SELECT COUNT(*) AS users FROM users;
 SELECT COUNT(*) AS baselines FROM baselines;

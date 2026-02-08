@@ -1,256 +1,698 @@
-diff --git a/apps/web/app/(app)/baseline/_components/JobsHub.tsx b/apps/web/app/(app)/baseline/_components/JobsHub.tsx
-index 6b2384d6223393791b6641689036a5217778c3f7..ec9822cdeec459798355a1e9e6b6bcaa0baa191d 100644
---- a/apps/web/app/(app)/baseline/_components/JobsHub.tsx
-+++ b/apps/web/app/(app)/baseline/_components/JobsHub.tsx
-@@ -1,36 +1,37 @@
- "use client";
+diff --git a/apps/api/src/admin-users/admin-baselines.controller.ts b/apps/api/src/admin-users/admin-baselines.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd79aa6dad88c95604353980634afcabeed40f17
+--- /dev/null
++++ b/apps/api/src/admin-users/admin-baselines.controller.ts
+@@ -0,0 +1,16 @@
++import { Controller, Delete, Param, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++
++import { AdminBypassGuard } from './admin-bypass.guard';
++import { AdminCleanupService } from './admin-cleanup.service';
++
++@UseGuards(AuthGuard('jwt'), AdminBypassGuard)
++@Controller('admin/baselines')
++export class AdminBaselinesController {
++  constructor(private readonly adminCleanupService: AdminCleanupService) {}
++
++  @Delete(':id')
++  deleteBaseline(@Param('id') baselineId: string) {
++    return this.adminCleanupService.deleteBaseline(baselineId);
++  }
++}
+diff --git a/apps/api/src/admin-users/admin-cleanup.service.ts b/apps/api/src/admin-users/admin-cleanup.service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca8d291fbeab11757918c3f5a3feee6b2628897c
+--- /dev/null
++++ b/apps/api/src/admin-users/admin-cleanup.service.ts
+@@ -0,0 +1,190 @@
++import { Injectable, NotFoundException } from '@nestjs/common';
++import { InjectDataSource } from '@nestjs/typeorm';
++import { DataSource, EntityManager, In, ObjectLiteral } from 'typeorm';
++
++import { AdminUser } from './admin-user.entity';
++import { Application } from '../applications/application.entity';
++import { ExpandedFitAssessment } from '../analysis/expanded-fit-assessment.entity';
++import { FitAssessment } from '../analysis/fit-assessment.entity';
++import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
++import { BaselineParsed } from '../baseline/baseline-parsed.entity';
++import { BaselineSection } from '../baseline/baseline-section.entity';
++import { BaselineVersion } from '../baseline/baseline-version.entity';
++import { Baseline } from '../baseline/baseline.entity';
++import { ComplianceAudit } from '../compliance/compliance-audit.entity';
++import { CoverLetter } from '../cover-letters/cover-letter.entity';
++import { InterviewSession } from '../interviews/interview-session.entity';
++import { Interview } from '../interviews/interview.entity';
++import { JobTrackerEntry } from '../job-tracker/job-tracker-entry.entity';
++import { Job } from '../jobs/job.entity';
++import { RealityCheck } from '../reality-check/reality-check.entity';
++import { StarStory } from '../star-stories/star-story.entity';
++import { User } from '../users/user.entity';
++
++type CleanupResult = {
++  deleted: true;
++  id: string;
++  category: 'user' | 'job' | 'baseline';
++  counts: Record<string, number>;
++};
++
++@Injectable()
++export class AdminCleanupService {
++  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
++
++  async deleteUser(userId: string): Promise<CleanupResult> {
++    return this.dataSource.transaction(async (manager) => {
++      const user = await manager.findOne(User, { where: { id: userId } });
++      if (!user) {
++        throw new NotFoundException('User not found');
++      }
++
++      const jobIds = (
++        await manager.find(Job, { where: { userId }, select: ['id'] })
++      ).map((record) => record.id);
++      const baselineIds = (
++        await manager.find(Baseline, { where: { userId }, select: ['id'] })
++      ).map((record) => record.id);
++
++      const counts: Record<string, number> = {};
++
++      if (jobIds.length > 0) {
++        await this.deleteByJobIds(manager, jobIds, counts);
++      }
++
++      if (baselineIds.length > 0) {
++        await this.deleteByBaselineIds(manager, baselineIds, counts);
++      }
++
++      await this.deleteWhere(manager, Application, { userId }, counts, 'applications');
++      await this.deleteWhere(manager, CoverLetter, { userId }, counts, 'cover_letters_user');
++      await this.deleteWhere(manager, InterviewSession, { userId }, counts, 'interview_sessions_user');
++      await this.deleteWhere(manager, Interview, { userId }, counts, 'interviews_user');
++      await this.deleteWhere(manager, FitAssessment, { userId }, counts, 'fit_assessments_user');
++      await this.deleteWhere(manager, ExpandedFitAssessment, { userId }, counts, 'expanded_fit_assessments_user');
++      await this.deleteWhere(manager, StarStory, { userId }, counts, 'star_stories');
++      await this.deleteWhere(manager, JobTrackerEntry, { userId }, counts, 'job_tracker_entries');
++      await this.deleteWhere(manager, ComplianceAudit, { actorId: userId }, counts, 'compliance_audits_actor');
++      await this.deleteWhere(manager, AdminUser, { userId }, counts, 'admin_users');
++      await this.deleteWhere(manager, Baseline, { userId }, counts, 'baselines_user');
++      await this.deleteWhere(manager, Job, { userId }, counts, 'jobs_user');
++      await this.deleteWhere(manager, User, { id: userId }, counts, 'users');
++
++      return { deleted: true, id: userId, category: 'user', counts };
++    });
++  }
++
++  async deleteJob(jobId: string): Promise<CleanupResult> {
++    return this.dataSource.transaction(async (manager) => {
++      const job = await manager.findOne(Job, { where: { id: jobId } });
++      if (!job) {
++        throw new NotFoundException('Job not found');
++      }
++
++      const counts: Record<string, number> = {};
++      await this.deleteByJobIds(manager, [jobId], counts);
++      await this.deleteWhere(manager, Job, { id: jobId }, counts, 'jobs');
++
++      return { deleted: true, id: jobId, category: 'job', counts };
++    });
++  }
++
++  async deleteBaseline(baselineId: string): Promise<CleanupResult> {
++    return this.dataSource.transaction(async (manager) => {
++      const baseline = await manager.findOne(Baseline, { where: { id: baselineId } });
++      if (!baseline) {
++        throw new NotFoundException('Baseline not found');
++      }
++
++      const counts: Record<string, number> = {};
++      await this.deleteByBaselineIds(manager, [baselineId], counts);
++      await this.deleteWhere(manager, Baseline, { id: baselineId }, counts, 'baselines');
++
++      return { deleted: true, id: baselineId, category: 'baseline', counts };
++    });
++  }
++
++  private async deleteByJobIds(
++    manager: EntityManager,
++    jobIds: string[],
++    counts: Record<string, number>,
++  ) {
++    const where = { jobId: In(jobIds) };
++    await this.deleteWhere(manager, Application, where, counts, 'applications_job');
++    await this.deleteWhere(manager, CoverLetter, where, counts, 'cover_letters_job');
++    await this.deleteWhere(manager, InterviewSession, where, counts, 'interview_sessions_job');
++    await this.deleteWhere(manager, Interview, where, counts, 'interviews_job');
++    await this.deleteWhere(manager, FitAssessment, where, counts, 'fit_assessments_job');
++    await this.deleteWhere(manager, ExpandedFitAssessment, where, counts, 'expanded_fit_assessments_job');
++    await this.deleteWhere(manager, RealityCheck, where, counts, 'reality_checks_job');
++    await this.deleteWhere(manager, ComplianceAudit, where, counts, 'compliance_audits_job');
++  }
++
++  private async deleteByBaselineIds(
++    manager: EntityManager,
++    baselineIds: string[],
++    counts: Record<string, number>,
++  ) {
++    const baselineVersions = await manager.find(BaselineVersion, {
++      where: { baselineId: In(baselineIds) },
++      select: ['id'],
++    });
++    const baselineVersionIds = baselineVersions.map((record) => record.id);
++
++    const where = { baselineId: In(baselineIds) };
++    await this.deleteWhere(manager, CoverLetter, where, counts, 'cover_letters_baseline');
++    await this.deleteWhere(manager, InterviewSession, where, counts, 'interview_sessions_baseline');
++    await this.deleteWhere(manager, Interview, where, counts, 'interviews_baseline');
++    await this.deleteWhere(manager, FitAssessment, where, counts, 'fit_assessments_baseline');
++    await this.deleteWhere(manager, ExpandedFitAssessment, where, counts, 'expanded_fit_assessments_baseline');
++    await this.deleteWhere(manager, RealityCheck, where, counts, 'reality_checks_baseline');
++    await this.deleteWhere(manager, BaselineParsed, where, counts, 'baseline_parsed');
++
++    const baselineSections = await manager.find(BaselineSection, {
++      where: { baselineId: In(baselineIds) },
++      select: ['id'],
++    });
++    const baselineSectionIds = baselineSections.map((record) => record.id);
++
++    if (baselineSectionIds.length > 0) {
++      await this.deleteWhere(
++        manager,
++        BaselineBlockPolicy,
++        { baselineSectionId: In(baselineSectionIds) },
++        counts,
++        'baseline_block_policies_by_section',
++      );
++    }
++
++    if (baselineVersionIds.length > 0) {
++      await this.deleteWhere(
++        manager,
++        ComplianceAudit,
++        { baselineVersionId: In(baselineVersionIds) },
++        counts,
++        'compliance_audits_baseline_version',
++      );
++      await this.deleteWhere(
++        manager,
++        BaselineBlockPolicy,
++        { baselineVersionId: In(baselineVersionIds) },
++        counts,
++        'baseline_block_policies_by_version',
++      );
++    }
++
++    await this.deleteWhere(manager, BaselineSection, where, counts, 'baseline_sections');
++    await this.deleteWhere(manager, BaselineVersion, where, counts, 'baseline_versions');
++  }
++
++  private async deleteWhere<T extends ObjectLiteral>(
++    manager: EntityManager,
++    entity: new () => T,
++    where: Record<string, unknown>,
++    counts: Record<string, number>,
++    key: string,
++  ) {
++    const result = await manager.delete(entity, where);
++    counts[key] = (counts[key] ?? 0) + (result.affected ?? 0);
++  }
++}
+diff --git a/apps/api/src/admin-users/admin-jobs.controller.ts b/apps/api/src/admin-users/admin-jobs.controller.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dad9a4ab31c5330fc07c2758012f946e243d679d
+--- /dev/null
++++ b/apps/api/src/admin-users/admin-jobs.controller.ts
+@@ -0,0 +1,16 @@
++import { Controller, Delete, Param, UseGuards } from '@nestjs/common';
++import { AuthGuard } from '@nestjs/passport';
++
++import { AdminBypassGuard } from './admin-bypass.guard';
++import { AdminCleanupService } from './admin-cleanup.service';
++
++@UseGuards(AuthGuard('jwt'), AdminBypassGuard)
++@Controller('admin/jobs')
++export class AdminJobsController {
++  constructor(private readonly adminCleanupService: AdminCleanupService) {}
++
++  @Delete(':id')
++  deleteJob(@Param('id') jobId: string) {
++    return this.adminCleanupService.deleteJob(jobId);
++  }
++}
+diff --git a/apps/api/src/admin-users/admin-users.controller.ts b/apps/api/src/admin-users/admin-users.controller.ts
+index 6fcab512ea0afbab4cf7fbdd40d4fc48de0a41c1..4814c4a3e0880e3f242005c11baff2d83192b94d 100644
+--- a/apps/api/src/admin-users/admin-users.controller.ts
++++ b/apps/api/src/admin-users/admin-users.controller.ts
+@@ -1,44 +1,54 @@
+ import {
+   BadRequestException,
+   Body,
+   Controller,
++  Delete,
+   Get,
+   Param,
+   Patch,
+   UseGuards,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
  
+ import { AccountType } from '../users/account-type.enum';
+-import { AdminUsersService } from './admin-users.service';
++import { AdminCleanupService } from './admin-cleanup.service';
+ import { AdminBypassGuard } from './admin-bypass.guard';
++import { AdminUsersService } from './admin-users.service';
+ 
+ @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+ @Controller('admin/users')
+ export class AdminUsersController {
+-  constructor(private readonly adminUsersService: AdminUsersService) {}
++  constructor(
++    private readonly adminUsersService: AdminUsersService,
++    private readonly adminCleanupService: AdminCleanupService,
++  ) {}
+ 
+   @Get()
+   listUsers() {
+     return this.adminUsersService.listUsers();
+   }
+ 
+   @Patch(':id')
+   async updateAccountType(
+     @Param('id') userId: string,
+     @Body() body: { accountType?: string },
+   ) {
+     const requestedAccountType = (body.accountType ?? '').toLowerCase().trim();
+ 
+     if (
+       !Object.values(AccountType).includes(requestedAccountType as AccountType)
+     ) {
+       throw new BadRequestException('accountType must be "free" or "paid"');
+     }
+ 
+     return this.adminUsersService.updateUserAccountType(
+       userId,
+       requestedAccountType as AccountType,
+     );
+   }
++
++  @Delete(':id')
++  deleteUser(@Param('id') userId: string) {
++    return this.adminCleanupService.deleteUser(userId);
++  }
+ }
+diff --git a/apps/api/src/admin-users/admin-users.module.ts b/apps/api/src/admin-users/admin-users.module.ts
+index 4a28bd9ca86560916b8d6b5770fe35748cb2a305..818e0e36de91baa60a8ce1a3abd2642a0c4873d8 100644
+--- a/apps/api/src/admin-users/admin-users.module.ts
++++ b/apps/api/src/admin-users/admin-users.module.ts
+@@ -1,16 +1,23 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ 
+ import { AdminBypassGuard } from './admin-bypass.guard';
++import { AdminBaselinesController } from './admin-baselines.controller';
++import { AdminCleanupService } from './admin-cleanup.service';
++import { AdminJobsController } from './admin-jobs.controller';
+ import { AdminUser } from './admin-user.entity';
+ import { AdminUsersController } from './admin-users.controller';
+ import { AdminUsersService } from './admin-users.service';
+ import { User } from '../users/user.entity';
+ 
+ @Module({
+   imports: [TypeOrmModule.forFeature([User, AdminUser])],
+-  controllers: [AdminUsersController],
+-  providers: [AdminUsersService, AdminBypassGuard],
++  controllers: [
++    AdminUsersController,
++    AdminJobsController,
++    AdminBaselinesController,
++  ],
++  providers: [AdminUsersService, AdminCleanupService, AdminBypassGuard],
+   exports: [AdminUsersService],
+ })
+ export class AdminUsersModule {}
+diff --git a/apps/web/app/(app)/admin/baselines/page.tsx b/apps/web/app/(app)/admin/baselines/page.tsx
+index 0491d9efd94625d36ad34928e0c42b8e58618328..dc6321c8a48ac3dcf85eedc00246acc715cca6ba 100644
+--- a/apps/web/app/(app)/admin/baselines/page.tsx
++++ b/apps/web/app/(app)/admin/baselines/page.tsx
+@@ -1,99 +1,127 @@
++import { revalidatePath } from "next/cache";
  import Link from "next/link";
- import { useCallback, useEffect, useMemo, useRef, useState } from "react";
- import { usePathname, useRouter, useSearchParams } from "next/navigation";
  
- import { Alert } from "@/components/Alert";
- import { EmptyState } from "@/components/EmptyState";
- import { FormButton, SecondaryActionLink } from "@/components/FormButton";
- import type { JobDto } from "@/lib/jobs";
- import { archiveJob, listJobs } from "@/lib/jobsClient";
-+import { formatDateTime } from "@/lib/format-date";
- import { getJobDetailsHref } from "@/src/navigation/routes";
- import { JobIngestionForm } from "@/app/(app)/jobs/_components/JobIngestionForm";
- import { OverflowMenu } from "./OverflowMenu";
- import { SetupModuleCard } from "./SetupModuleCard";
- import { setJobTitle } from "./selectionStore";
+ import { adminServerFetch } from "../_lib/adminServerFetch";
  
- function isArchived(job: JobDto): boolean {
-   const record = job as unknown as Record<string, unknown>;
-   const archivedFlag = record["isArchived"];
-   if (typeof archivedFlag === "boolean") return archivedFlag;
+ type AdminBaselineRow = {
+   id: string;
+   originalFilename: string | null;
+   status: "ACTIVE" | "ARCHIVED" | string;
+   updatedAt: string;
+ };
  
-   const status = record["status"];
-   if (typeof status === "string" && status.toUpperCase() === "ARCHIVED") return true;
- 
-   const archivedAt = record["archivedAt"];
-   if (typeof archivedAt === "string" && archivedAt.trim().length > 0) return true;
- 
-   return false;
+ function formatDate(value: string): string {
+   const parsed = new Date(value);
+   if (Number.isNaN(parsed.getTime())) {
+     return value;
+   }
+   return parsed.toLocaleString();
  }
  
- interface JobsHubProps {
-   selectedJobId?: string | null;
-   onJobMissing?: () => void;
+ function lockedLabel(status: string): string {
+   return status === "ACTIVE" ? "Unlocked" : "Locked";
  }
  
-@@ -153,93 +154,90 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
+ async function loadBaselines(): Promise<AdminBaselineRow[]> {
+   return adminServerFetch<AdminBaselineRow[]>("/baselines?includeArchived=true", "Load baselines");
+ }
  
-         {isLoading ? (
-           <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-sm text-slate-200">
-             Loading jobs
-           </div>
-         ) : visibleJobs.length === 0 ? (
-           <EmptyState
-             title="No jobs yet"
-             body="Add a job to start building your target workspace."
-             cta={<FormButton onClick={navigateToAddJob}>Add job</FormButton>}
-           />
-         ) : (
-           <div className="space-y-3">
-             {visibleJobs.map((job) => {
-               const archived = isArchived(job);
-               const isSelected = job.id === selectedJobId;
-               const cardClasses = [
-                 "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
-                 isSelected ? "ring-2 ring-amber-400/40" : "",
-               ]
-                 .filter(Boolean)
-                 .join(" ");
- 
-               return (
-                 <div key={job.id} className={cardClasses}>
--                  <div className="flex flex-col gap-3">
--                    <div className="flex items-start justify-between gap-3">
--                      <div className="min-w-0 space-y-1">
--                        <div className="flex flex-wrap items-center gap-2">
--                          <Link
--                            href={getJobDetailsHref(job.id)}
--                            className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
--                          >
--                            <span className="block truncate">
--                              {job.title || "Untitled job"}
--                            </span>
--                          </Link>
--                          {archived ? (
--                            <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
--                              Archived
--                            </span>
--                          ) : null}
--                        </div>
--                        {job.company ? (
--                          <p className="text-xs text-slate-400">{job.company}</p>
--                        ) : null}
--                      </div>
--
--                      <div className="flex flex-wrap items-center gap-2">
--                        <SecondaryActionLink href={getJobDetailsHref(job.id)}>
--                          View details
--                        </SecondaryActionLink>
--                        <FormButton
--                          variant="secondary"
--                          onClick={() => setJobSelection(job.id)}
--                          disabled={isSelected}
--                        >
--                          {isSelected ? "Selected" : "Select"}
--                        </FormButton>
--                        {!archived ? (
--                          <OverflowMenu
--                            onArchive={() => handleArchiveJob(job.id)}
--                            loading={archivingJobId === job.id}
--                            ariaLabel="Job overflow actions"
--                          />
--                        ) : null}
--                      </div>
-+                  <div className="min-w-0">
-+                    <div className="flex min-w-0 items-center gap-2">
-+                      <Link
-+                        href={getJobDetailsHref(job.id)}
-+                        className="block min-w-0 text-sm font-semibold text-slate-100 underline decoration-white/10 underline-offset-4 hover:decoration-white/40"
-+                      >
-+                        <span className="block truncate">{job.title || "Untitled job"}</span>
-+                      </Link>
-+                      {archived ? (
-+                        <span className="text-[10px] uppercase tracking-[0.35em] text-slate-400">
-+                          Archived
-+                        </span>
-+                      ) : null}
-                     </div>
++async function deleteBaselineAction(formData: FormData) {
++  "use server";
 +
-+                    {job.company ? <p className="mt-1 text-xs text-slate-400">{job.company}</p> : null}
++  const baselineId = formData.get("baselineId");
++  if (typeof baselineId !== "string" || !baselineId.trim()) {
++    throw new Error("Missing baselineId");
++  }
 +
-+                    <div className="mt-3 flex flex-wrap items-center gap-2">
-+                      <SecondaryActionLink href={getJobDetailsHref(job.id)}>
-+                        View details
-+                      </SecondaryActionLink>
-+                      <FormButton
-+                        variant="secondary"
-+                        onClick={() => setJobSelection(job.id)}
-+                        disabled={isSelected}
-+                      >
-+                        {isSelected ? "Selected" : "Select"}
-+                      </FormButton>
-+                      {!archived ? (
-+                        <OverflowMenu
-+                          onArchive={() => handleArchiveJob(job.id)}
-+                          loading={archivingJobId === job.id}
-+                          ariaLabel="Job overflow actions"
-+                        />
-+                      ) : null}
-+                    </div>
++  await adminServerFetch(`/admin/baselines/${baselineId}`, "Delete baseline", {
++    method: "DELETE",
++  });
 +
-+                    <p className="mt-3 text-xs text-slate-400">
-+                      Updated {formatDateTime(job.updatedAt)}
-+                    </p>
-                   </div>
-                 </div>
-               );
-             })}
-           </div>
-         )}
-       </SetupModuleCard>
++  revalidatePath("/admin/baselines");
++}
++
+ export default async function AdminBaselinesPage() {
+   try {
+     const baselines = await loadBaselines();
  
-       {isIngestOpen ? (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-           <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-slate-950 p-4">
-             <div className="mb-3 flex items-center justify-between gap-3">
-               <div className="text-sm font-semibold text-slate-100">Add job</div>
-               <FormButton variant="secondary" onClick={() => setIsIngestOpen(false)}>
-                 Close
-               </FormButton>
-             </div>
- 
-             <JobIngestionForm
-               onCancel={() => setIsIngestOpen(false)}
-               onResolved={async (resolvedJobId) => {
-                 setIsIngestOpen(false);
-                 await load();
-                 setJobSelection(resolvedJobId);
-               }}
-diff --git a/apps/web/app/(app)/baseline/baseline-dashboard.tsx b/apps/web/app/(app)/baseline/baseline-dashboard.tsx
-index b7b33b46190eb53c0ca0a276533cf3fd0cf54e7e..b592d6dfb7d897ac001c18c1481769a2f94a14bc 100644
---- a/apps/web/app/(app)/baseline/baseline-dashboard.tsx
-+++ b/apps/web/app/(app)/baseline/baseline-dashboard.tsx
-@@ -300,70 +300,70 @@ export function BaselineDashboard({
-       {initialFetchError ? (
-         <Alert intent="error" title="Unable to load resumes">
-           <p className="text-sm text-current">{initialFetchError}</p>
-         </Alert>
-       ) : null}
- 
-       {sortedBaselines.length === 0 ? (
-         initialFetchError ? null : (
-           <p className="m-0 text-[13px] text-slate-400">
-             No resumes uploaded yet.
+     return (
+       <div className="space-y-6">
+         <header>
+           <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Baselines</p>
+           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+             Baseline catalogue
+           </h1>
+           <p className="mt-2 text-sm text-slate-300">
+-            Review baseline versions and their locked status.
++            Review baseline versions, locked status, and delete baselines with linked records.
            </p>
-         )
-       ) : (
-         <div className="space-y-3">
-           {sortedBaselines.map((baseline) => {
-             const isSelected = baseline.id === selectedBaselineId;
-             const cardClasses = [
-               "rounded-2xl border border-white/10 bg-slate-950/40 p-4",
-               isSelected ? "ring-2 ring-amber-400/40" : "",
-             ]
-               .filter(Boolean)
-               .join(" ");
+         </header>
  
-             return (
-               <div key={baseline.id} className={cardClasses}>
--                <div className="flex items-center justify-between gap-4 min-w-0">
--                  <div className="flex flex-1 min-w-0 items-center gap-2">
-+                <div className="min-w-0">
-+                  <div className="flex min-w-0 items-center gap-2">
-                     <p className="truncate text-sm font-semibold text-slate-100">
-                       {baseline.originalFilename}
-                     </p>
-                     {baseline.status === "ARCHIVED" ? (
-                       <span className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-slate-400">
-                         Archived
-                       </span>
-                     ) : null}
-                   </div>
+         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-black/40">
+           <div className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">
+             Baselines
+           </div>
+           <div className="overflow-x-auto">
+             <table className="min-w-full border-collapse text-sm">
+               <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+                 <tr>
+                   <th className="px-4 py-3">Name / ID</th>
+                   <th className="px-4 py-3">Locked status</th>
+                   <th className="px-4 py-3">Updated at</th>
++                  <th className="px-4 py-3">Actions</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {baselines.map((baseline) => (
+                   <tr key={baseline.id} className="border-t border-white/10">
+                     <td className="px-4 py-3">
+                       <Link
+                         className="text-amber-300 hover:text-amber-200"
+                         href={`/admin/baselines/${baseline.id}`}
+                       >
+                         {baseline.originalFilename ?? baseline.id}
+                       </Link>
+                       <p className="text-xs text-slate-500">{baseline.id}</p>
+                     </td>
+                     <td className="px-4 py-3 text-slate-200">
+                       {lockedLabel(baseline.status)}
+                     </td>
+                     <td className="px-4 py-3 text-slate-200">
+                       {formatDate(baseline.updatedAt)}
+                     </td>
++                    <td className="px-4 py-3">
++                      <form action={deleteBaselineAction}>
++                        <input type="hidden" name="baselineId" value={baseline.id} />
++                        <button
++                          type="submit"
++                          className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
++                        >
++                          Delete baseline
++                        </button>
++                      </form>
++                    </td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+           </div>
+         </section>
+       </div>
+     );
+   } catch (error: unknown) {
+     const message = error instanceof Error ? error.message : "Unable to load baselines.";
  
--                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-+                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                     <SecondaryActionLink href={getBaselineDetailsHref(baseline.id)}>
-                       View details
-                     </SecondaryActionLink>
-                     <FormButton
-                       variant="secondary"
-                       onClick={() => setBaselineSelection(baseline.id)}
-                       disabled={isSelected}
-                       className="shrink-0"
-                     >
-                       {isSelected ? "Selected" : "Select"}
-                     </FormButton>
-                     {baseline.status !== "ARCHIVED" ? (
-                       <OverflowMenu
-                         onArchive={() => handleArchiveBaseline(baseline.id)}
-                         loading={archivingBaselineId === baseline.id}
-                         ariaLabel="Resume overflow actions"
-                       />
-                     ) : null}
-                   </div>
-                 </div>
--                <p className="text-xs text-slate-400 mt-2">
--                  Uploaded {formatDateTime(baseline.createdAt)}
+     return (
+       <div className="space-y-6">
+         <header>
+           <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Baselines</p>
+           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+             Baseline catalogue
+           </h1>
+           <p className="mt-2 text-sm text-slate-300">
+             Review baseline versions and their locked status.
+           </p>
+         </header>
+ 
+         <section className="rounded-3xl border border-rose-500/40 bg-rose-500/10 px-6 py-4 text-sm font-medium text-rose-200">
+           Unable to load baselines: {message}
+diff --git a/apps/web/app/(app)/admin/jobs/page.tsx b/apps/web/app/(app)/admin/jobs/page.tsx
+index a7850ce3149a37074aabb8c1e712be544efc7d7e..31b75c16b84515e9aed983c0607373b0ccabd38d 100644
+--- a/apps/web/app/(app)/admin/jobs/page.tsx
++++ b/apps/web/app/(app)/admin/jobs/page.tsx
+@@ -1,80 +1,108 @@
++import { revalidatePath } from "next/cache";
+ import Link from "next/link";
+ import { adminServerFetch } from "../_lib/adminServerFetch";
+ 
+ type AdminJobRow = {
+   id: string;
+   title: string | null;
+   userId: string;
+   createdAt: string;
+ };
+ 
+ async function loadJobs(): Promise<AdminJobRow[]> {
+   return adminServerFetch<AdminJobRow[]>("/jobs?includeArchived=true", "Load jobs");
+ }
+ 
+ function formatDate(value: string): string {
+   const parsed = new Date(value);
+   if (Number.isNaN(parsed.getTime())) {
+     return value;
+   }
+   return parsed.toLocaleString();
+ }
+ 
++async function deleteJobAction(formData: FormData) {
++  "use server";
 +
-+                <p className="mt-3 text-xs text-slate-400">
-+                  Updated {formatDateTime(baseline.updatedAt)}
-                 </p>
-               </div>
-             );
-           })}
++  const jobId = formData.get("jobId");
++  if (typeof jobId !== "string" || !jobId.trim()) {
++    throw new Error("Missing jobId");
++  }
++
++  await adminServerFetch(`/admin/jobs/${jobId}`, "Delete job", {
++    method: "DELETE",
++  });
++
++  revalidatePath("/admin/jobs");
++}
++
+ export default async function AdminJobsPage() {
+   const jobs = await loadJobs();
+ 
+   return (
+     <div className="space-y-6">
+       <header>
+         <p className="text-sm uppercase tracking-[0.4em] text-slate-400">
+           Jobs
+         </p>
+         <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+           Job records
+         </h1>
+         <p className="mt-2 text-sm text-slate-300">
+-          A read-only list of jobs created via the platform.
++          Admin delete support for jobs and related records.
+         </p>
+       </header>
+ 
+       <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-black/40">
+         <div className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">
+           Jobs
          </div>
-       )}
-     </SetupModuleCard>
+         <div className="overflow-x-auto">
+           <table className="min-w-full border-collapse text-sm">
+             <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+               <tr>
+                 <th className="px-4 py-3">Job ID</th>
+                 <th className="px-4 py-3">Title</th>
+                 <th className="px-4 py-3">Created by</th>
+                 <th className="px-4 py-3">Created at</th>
++                <th className="px-4 py-3">Actions</th>
+               </tr>
+             </thead>
+             <tbody>
+               {jobs.map((job) => (
+                 <tr key={job.id} className="border-t border-white/10">
+                   <td className="px-4 py-3">
+                     <Link
+                       className="text-amber-300 hover:text-amber-200"
+                       href={`/admin/jobs/${job.id}`}
+                     >
+                       {job.id}
+                     </Link>
+                   </td>
+                   <td className="px-4 py-3 text-slate-100">
+                     {job.title ?? "Untitled"}
+                   </td>
+                   <td className="px-4 py-3 text-slate-200">{job.userId}</td>
+                   <td className="px-4 py-3 text-slate-200">
+                     {formatDate(job.createdAt)}
+                   </td>
++                  <td className="px-4 py-3">
++                    <form action={deleteJobAction}>
++                      <input type="hidden" name="jobId" value={job.id} />
++                      <button
++                        type="submit"
++                        className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
++                      >
++                        Delete job
++                      </button>
++                    </form>
++                  </td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+       </section>
+     </div>
    );
  }
--
+diff --git a/apps/web/app/(app)/admin/users/page.tsx b/apps/web/app/(app)/admin/users/page.tsx
+index c58fb0c7c6a3ca6341c95c3ec2d0187d0ba075d5..adca8c1deca10ffd044ba27f64fac3d2c90c9b03 100644
+--- a/apps/web/app/(app)/admin/users/page.tsx
++++ b/apps/web/app/(app)/admin/users/page.tsx
+@@ -1,87 +1,115 @@
++import { revalidatePath } from "next/cache";
+ import { adminServerFetch } from "../_lib/adminServerFetch";
+ 
+ type AdminUserRow = {
+   id: string;
+   email: string | null;
+   accountType: string | null;
+   createdAt: string;
+   updatedAt: string;
+ };
+ 
+ function formatDate(value: string | null): string {
+   if (!value) {
+     return "-";
+   }
+ 
+   const parsed = new Date(value);
+   if (Number.isNaN(parsed.getTime())) {
+     return value;
+   }
+ 
+   return parsed.toLocaleString();
+ }
+ 
+ async function loadUsers(): Promise<AdminUserRow[]> {
+   return adminServerFetch<AdminUserRow[]>("/admin/users", "Load admin users");
+ }
+ 
++async function deleteUserAction(formData: FormData) {
++  "use server";
++
++  const userId = formData.get("userId");
++  if (typeof userId !== "string" || !userId.trim()) {
++    throw new Error("Missing userId");
++  }
++
++  await adminServerFetch(`/admin/users/${userId}`, "Delete user", {
++    method: "DELETE",
++  });
++
++  revalidatePath("/admin/users");
++}
++
+ export default async function AdminUsersPage() {
+   try {
+     const users = await loadUsers();
+ 
+     return (
+       <div className="space-y-6">
+         <header>
+           <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Admins</p>
+           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+             Admin users
+           </h1>
+           <p className="mt-2 text-sm text-slate-300">
+             List of registered users and their account tiers.
+           </p>
+         </header>
+ 
+         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-lg shadow-black/40">
+           <div className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-slate-400">Users</div>
+           <div className="overflow-x-auto">
+             <table className="min-w-full border-collapse text-sm">
+               <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+                 <tr>
+                   <th className="px-4 py-3">Email</th>
+                   <th className="px-4 py-3">Account type</th>
+                   <th className="px-4 py-3">Created at</th>
+                   <th className="px-4 py-3">Updated at</th>
++                  <th className="px-4 py-3">Actions</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {users.map((user) => (
+                   <tr key={user.id} className="border-t border-white/10">
+                     <td className="px-4 py-3 text-slate-100">{user.email ?? "Unknown"}</td>
+                     <td className="px-4 py-3 text-slate-200">{user.accountType ?? "free"}</td>
+                     <td className="px-4 py-3 text-slate-200">{formatDate(user.createdAt)}</td>
+                     <td className="px-4 py-3 text-slate-200">{formatDate(user.updatedAt)}</td>
++                    <td className="px-4 py-3">
++                      <form action={deleteUserAction}>
++                        <input type="hidden" name="userId" value={user.id} />
++                        <button
++                          type="submit"
++                          className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
++                        >
++                          Delete user
++                        </button>
++                      </form>
++                    </td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+           </div>
+         </section>
+       </div>
+     );
+   } catch (error: unknown) {
+     const message = error instanceof Error ? error.message : "Unable to load users.";
+ 
+     return (
+       <div className="space-y-6">
+         <header>
+           <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Admins</p>
+           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
+             Admin users
+           </h1>
+           <p className="mt-2 text-sm text-slate-300">
+             List of registered users and their account tiers.
+           </p>
+         </header>
+ 
+         <section className="rounded-3xl border border-rose-500/40 bg-rose-500/10 px-6 py-4 text-sm font-medium text-rose-200">
+           Unable to load users: {message}

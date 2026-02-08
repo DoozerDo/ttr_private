@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -10,13 +11,17 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 
 import { AccountType } from '../users/account-type.enum';
-import { AdminUsersService } from './admin-users.service';
+import { AdminCleanupService } from './admin-cleanup.service';
 import { AdminBypassGuard } from './admin-bypass.guard';
+import { AdminUsersService } from './admin-users.service';
 
 @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
 @Controller('admin/users')
 export class AdminUsersController {
-  constructor(private readonly adminUsersService: AdminUsersService) {}
+  constructor(
+    private readonly adminUsersService: AdminUsersService,
+    private readonly adminCleanupService: AdminCleanupService,
+  ) {}
 
   @Get()
   listUsers() {
@@ -40,5 +45,10 @@ export class AdminUsersController {
       userId,
       requestedAccountType as AccountType,
     );
+  }
+
+  @Delete(':id')
+  deleteUser(@Param('id') userId: string) {
+    return this.adminCleanupService.deleteUser(userId);
   }
 }

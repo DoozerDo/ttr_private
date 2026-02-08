@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { adminServerFetch } from "../_lib/adminServerFetch";
 
@@ -20,6 +21,21 @@ function formatDate(value: string): string {
   return parsed.toLocaleString();
 }
 
+async function deleteJobAction(formData: FormData) {
+  "use server";
+
+  const jobId = formData.get("jobId");
+  if (typeof jobId !== "string" || !jobId.trim()) {
+    throw new Error("Missing jobId");
+  }
+
+  await adminServerFetch(`/admin/jobs/${jobId}`, "Delete job", {
+    method: "DELETE",
+  });
+
+  revalidatePath("/admin/jobs");
+}
+
 export default async function AdminJobsPage() {
   const jobs = await loadJobs();
 
@@ -33,7 +49,7 @@ export default async function AdminJobsPage() {
           Job records
         </h1>
         <p className="mt-2 text-sm text-slate-300">
-          A read-only list of jobs created via the platform.
+          Admin delete support for jobs and related records.
         </p>
       </header>
 
@@ -49,6 +65,7 @@ export default async function AdminJobsPage() {
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Created by</th>
                 <th className="px-4 py-3">Created at</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -68,6 +85,17 @@ export default async function AdminJobsPage() {
                   <td className="px-4 py-3 text-slate-200">{job.userId}</td>
                   <td className="px-4 py-3 text-slate-200">
                     {formatDate(job.createdAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <form action={deleteJobAction}>
+                      <input type="hidden" name="jobId" value={job.id} />
+                      <button
+                        type="submit"
+                        className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
+                      >
+                        Delete job
+                      </button>
+                    </form>
                   </td>
                 </tr>
               ))}

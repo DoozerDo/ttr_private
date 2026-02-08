@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import Link from "next/link";
 
 import { adminServerFetch } from "../_lib/adminServerFetch";
@@ -25,6 +26,21 @@ async function loadBaselines(): Promise<AdminBaselineRow[]> {
   return adminServerFetch<AdminBaselineRow[]>("/baselines?includeArchived=true", "Load baselines");
 }
 
+async function deleteBaselineAction(formData: FormData) {
+  "use server";
+
+  const baselineId = formData.get("baselineId");
+  if (typeof baselineId !== "string" || !baselineId.trim()) {
+    throw new Error("Missing baselineId");
+  }
+
+  await adminServerFetch(`/admin/baselines/${baselineId}`, "Delete baseline", {
+    method: "DELETE",
+  });
+
+  revalidatePath("/admin/baselines");
+}
+
 export default async function AdminBaselinesPage() {
   try {
     const baselines = await loadBaselines();
@@ -37,7 +53,7 @@ export default async function AdminBaselinesPage() {
             Baseline catalogue
           </h1>
           <p className="mt-2 text-sm text-slate-300">
-            Review baseline versions and their locked status.
+            Review baseline versions, locked status, and delete baselines with linked records.
           </p>
         </header>
 
@@ -52,6 +68,7 @@ export default async function AdminBaselinesPage() {
                   <th className="px-4 py-3">Name / ID</th>
                   <th className="px-4 py-3">Locked status</th>
                   <th className="px-4 py-3">Updated at</th>
+                  <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -71,6 +88,17 @@ export default async function AdminBaselinesPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-200">
                       {formatDate(baseline.updatedAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <form action={deleteBaselineAction}>
+                        <input type="hidden" name="baselineId" value={baseline.id} />
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-rose-500/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200 hover:bg-rose-600/20"
+                        >
+                          Delete baseline
+                        </button>
+                      </form>
                     </td>
                   </tr>
                 ))}
