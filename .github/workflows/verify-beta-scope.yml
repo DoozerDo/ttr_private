@@ -3,8 +3,9 @@ name: Verify Beta Scope
 on:
   pull_request:
     branches:
-      - develop
-      - main
+      - bob
+      # - develop
+      # - main
   push:
     branches:
       - develop
