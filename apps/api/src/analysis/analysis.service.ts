@@ -43,7 +43,11 @@ import {
   FitScoringService,
 } from './fit-scoring.service';
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
-import type { CxFitV2Result, FitScoreDebugBundle } from './cx-fit-scoring-v2';
+import type {
+  BaselineCoverageDetails,
+  CxFitV2Result,
+  FitScoreDebugBundle,
+} from './cx-fit-scoring-v2';
 
 import {
   DEFAULT_LEGACY_CALIBRATION_WEIGHTS,
@@ -54,7 +58,7 @@ import {
 } from './calibration-weights';
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
-import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
+import { buildJobPromptText, normalizeText } from '../scoring/fit-score/fit-score.utils';
 import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 import type { FitScoreRubricJson } from './prompts/fit-score-rubric.v1';
@@ -526,6 +530,55 @@ export class AnalysisService {
     });
   }
 
+  private buildBaselineCoverageDetails(
+    baseline: Baseline,
+    sectionPayload: Array<{ type?: string; content: string }>,
+    selectedSectionIds?: string[] | null,
+  ): BaselineCoverageDetails {
+    const originalBaselineText = (baseline.sections ?? [])
+      .map((section) => section.content ?? '')
+      .join('\n');
+    const includedBaselineText = sectionPayload
+      .map((section) => section.content ?? '')
+      .join('\n');
+    const normalizedBaselineChars = getCharCount(normalizeText(includedBaselineText));
+    const selectedSectionGateActive = Boolean(selectedSectionIds?.length);
+    const selectedSectionCount = selectedSectionGateActive
+      ? selectedSectionIds!.length
+      : 0;
+    const source = selectedSectionGateActive
+      ? 'selectedBaselineSections'
+      : 'baselineVersion.canonicalSections';
+
+    return {
+      originalBaselineChars: getCharCount(originalBaselineText),
+      includedBaselineChars: getCharCount(includedBaselineText),
+      coverageFormula: 'includedBaselineChars / originalBaselineChars',
+      source,
+      selectedSectionGateActive,
+      selectedSectionCount,
+      normalizedBaselineChars,
+    };
+  }
+
+  private applyBaselineCoverageDetails(
+    scoringV2: CxFitV2Result,
+    baseline: Baseline,
+    sectionPayload: Array<{ type?: string; content: string }>,
+    selectedSectionIds?: string[] | null,
+  ) {
+    const coverageDetails = this.buildBaselineCoverageDetails(
+      baseline,
+      sectionPayload,
+      selectedSectionIds,
+    );
+    scoringV2.debug.baselineCoverageDetails = coverageDetails;
+    if (scoringV2.debug.bundle) {
+      scoringV2.debug.bundle.inputs.normalizedBaseline.coverageDetails =
+        coverageDetails;
+    }
+  }
+
   private buildSectionPayload(sections: BaselineSection[]) {
     return sections.map((section) => ({
       type: section.sectionType ?? section.type,
@@ -572,6 +625,10 @@ export class AnalysisService {
       }
       if (entry.scope_summary?.trim()) {
         lines.push(entry.scope_summary.trim());
+      }
+      if (entry.details_text?.trim()) {
+        lines.push('');
+        lines.push(entry.details_text.trim());
       }
 
       const content = lines.join('\n').trim();
@@ -1345,37 +1402,44 @@ export class AnalysisService {
       dimensionWeights,
     );
 
-    const scoringV2 = scoreCxFitV2(
-      {
-        job: {
-          rawDescription: canonicalJobForHash.rawDescription,
-          normalizedResponsibilities: normalizedJobResponsibilities,
-          normalizedRequirements: normalizedJobRequirements,
+      const scoringV2 = scoreCxFitV2(
+        {
+          job: {
+            rawDescription: canonicalJobForHash.rawDescription,
+            normalizedResponsibilities: normalizedJobResponsibilities,
+            normalizedRequirements: normalizedJobRequirements,
+          },
+          normalizedJobResponsibilities,
+          normalizedJobRequirements,
+          baselineSections: sectionPayload,
+          metadata: {
+            jobId: job?.id ?? jobId ?? undefined,
+            baselineId: baseline.id,
+            baselineVersionId:
+              baselineVersion.versionNumber ?? baseline.version ?? null,
+          },
         },
-        normalizedJobResponsibilities,
-        normalizedJobRequirements,
-        baselineSections: sectionPayload,
-        metadata: {
-          jobId: job?.id ?? jobId ?? undefined,
-          baselineId: baseline.id,
-          baselineVersionId:
-            baselineVersion.versionNumber ?? baseline.version ?? null,
-        },
-      },
-      { debugBundle: allowDebug },
-    );
-
-    if (
-      !scoringV2 ||
-      !scoringV2.rubric ||
-      !scoringV2.rubric.dimensionPercents ||
-      typeof scoringV2.score !== 'number' ||
-      !scoringV2.debug
-    ) {
-      throw new InternalServerErrorException(
-        'CX Fit v2 scoring produced incomplete results',
+        { debugBundle: allowDebug },
       );
-    }
+
+      if (
+        !scoringV2 ||
+        !scoringV2.rubric ||
+        !scoringV2.rubric.dimensionPercents ||
+        typeof scoringV2.score !== 'number' ||
+        !scoringV2.debug
+      ) {
+        throw new InternalServerErrorException(
+          'CX Fit v2 scoring produced incomplete results',
+        );
+      }
+
+      this.applyBaselineCoverageDetails(
+        scoringV2,
+        baseline,
+        sectionPayload,
+        selectedBlockIds,
+      );
 
     const legacyDimensionScores =
       this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
@@ -1858,6 +1922,8 @@ export class AnalysisService {
           'CX Fit v2 scoring produced incomplete results',
         );
       }
+
+      this.applyBaselineCoverageDetails(scoringV2, baseline, sectionPayload);
 
       const legacyDimensionScores =
         this.mapCxFitV2ToLegacyDimensionScores(scoringV2);

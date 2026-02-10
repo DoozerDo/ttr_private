@@ -34,6 +34,23 @@ type FitScoreNormalizedSegment = {
   snippet: string;
 };
 
+export type BaselineCoverageDetails = {
+  originalBaselineChars: number;
+  includedBaselineChars: number;
+  coverageFormula: string;
+  source: string;
+  selectedSectionGateActive: boolean;
+  selectedSectionCount: number;
+  normalizedBaselineChars: number;
+};
+
+export type BaselineCoverageDetailsInput = Omit<
+  BaselineCoverageDetails,
+  'normalizedBaselineChars'
+> & {
+  coverageFormula?: string;
+};
+
 export type FitScoreDebugBundle = {
   inputs: {
     baselineId?: string;
@@ -60,6 +77,7 @@ export type FitScoreDebugBundle = {
       totalChars: number;
       sections: FitScoreNormalizedSection[];
       preview: string;
+      coverageDetails: BaselineCoverageDetails;
     };
     normalizedJob: {
       charCount: number;
@@ -145,6 +163,7 @@ export type CxFitV2DebugInfo = {
     requiredCoverage: number;
     preferredCoverage: number;
   };
+  baselineCoverageDetails?: BaselineCoverageDetails;
   bundle?: FitScoreDebugBundle;
 };
 
@@ -939,6 +958,15 @@ const buildFitScoreDebugBundle = (
         totalChars: getCharCount(normalizedBaselineText),
         sections: baselineSectionSummaries,
         preview: baselinePreview,
+        coverageDetails: {
+          originalBaselineChars: 0,
+          includedBaselineChars: 0,
+          coverageFormula: 'includedBaselineChars / originalBaselineChars',
+          source: 'unknown',
+          selectedSectionGateActive: false,
+          selectedSectionCount: 0,
+          normalizedBaselineChars: getCharCount(normalizedBaselineText),
+        },
       },
       normalizedJob: {
         charCount: getCharCount(normalizedJobText),

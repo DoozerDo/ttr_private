@@ -262,12 +262,13 @@ export class BaselineIngestionService {
       context.missingFields.push('experience.start_date');
     }
 
+    const bodyLines = lines.slice(1);
     const scopeSummary =
-      lines
-        .slice(1)
+      bodyLines
         .map((line) => line.trim())
         .filter(Boolean)
         .join(' ') || '';
+    const detailsText = bodyLines.join('\n');
 
     return {
       company_name: company,
@@ -275,6 +276,7 @@ export class BaselineIngestionService {
       start_date: start ?? null,
       end_date: end ?? null,
       scope_summary: scopeSummary,
+      details_text: detailsText,
     };
   }
 

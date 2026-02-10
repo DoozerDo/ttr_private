@@ -17,6 +17,7 @@ const ExperienceEntrySchema = z.object({
     z.null(),
   ]),
   scope_summary: z.string(),
+  details_text: z.string().default(''),
 });
 
 const PeopleLeadershipSchema = z.object({
