@@ -22,6 +22,7 @@ import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
+import type { CxFitV2Result } from './cx-fit-scoring-v2';
 
 describe('AnalysisService - fit scores contract', () => {
   let service: AnalysisService;
@@ -100,6 +101,52 @@ describe('AnalysisService - fit scores contract', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+
+const sampleScoringV2: CxFitV2Result = {
+  score: 80,
+  rubric: {
+    id: 'scoring_contract_v1',
+    weights: {
+      role_scope_and_seniority: 25,
+      support_operations_and_process_rigor: 25,
+      tooling_and_platform_experience: 20,
+      domain_and_business_context: 15,
+      change_leadership_and_customer_advocacy: 15,
+    },
+    dimensionPercents: {
+      role_scope_and_seniority: 80,
+      support_operations_and_process_rigor: 70,
+      tooling_and_platform_experience: 60,
+      domain_and_business_context: 75,
+      change_leadership_and_customer_advocacy: 65,
+    },
+    dimensionPoints: {
+      role_scope_and_seniority: 20,
+      support_operations_and_process_rigor: 18,
+      tooling_and_platform_experience: 12,
+      domain_and_business_context: 11,
+      change_leadership_and_customer_advocacy: 9,
+    },
+    subtotal: 70,
+    penalties: [],
+    finalBeforeClamp: 70,
+    rounding: 'round_half_up_final_only',
+  },
+  debug: {
+    jobScoringTextSource: 'raw',
+    baselineBand: 'L4',
+    roleBand: 'L4',
+    bandDelta: 0,
+    domainTagsBaseline: [],
+    domainTagsRole: [],
+    responsibilityOverlapPercent: 0,
+    baselineCoveragePercent: 0,
+    toolingCoverage: {
+      requiredCoverage: 0,
+      preferredCoverage: 0,
+    },
+  },
+};
 
   beforeEach(async () => {
     baselineVersionRepository = {
@@ -254,6 +301,34 @@ describe('AnalysisService - fit scores contract', () => {
       where: { baselineId: 'b-1', versionNumber: 2 },
       order: { createdAt: 'DESC' },
     });
+  });
+
+  it('includes scoring_v2 from the stored assessment payload', async () => {
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      createdAt: new Date(),
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+
+    expect(result.scoring_v2).toBe(sampleScoringV2);
   });
 
   it('rejects ambiguous JD inputs', async () => {
@@ -575,10 +650,11 @@ describe('AnalysisService - fit scores contract', () => {
         },
         strengths: ['leadership'],
         gaps: ['detail'],
-        complianceFlags: [],
-        inputsHash: expectedHash,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      inputsHash: expectedHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
       };
 
       fitAssessmentRepository.findOne.mockResolvedValue(storedAssessment);
@@ -613,6 +689,7 @@ describe('AnalysisService - fit scores contract', () => {
         strengths: [],
         gaps: [],
         complianceFlags: [],
+        scoringV2: null,
         inputsHash: 'stale-hash',
         createdAt: new Date(),
         updatedAt: new Date(),

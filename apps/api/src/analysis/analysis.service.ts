@@ -2008,19 +2008,20 @@ export class AnalysisService {
         return blockedResponse;
       }
 
-      const assessment = this.fitAssessmentRepository.create({
-        userId,
-        jobId: resolvedJobId,
-        baselineId: baseline.id,
-        baselineVersion: baselineVersion ?? baseline.version ?? null,
-        overallScore: finalScore,
-        verdict: persistenceVerdict,
-        dimensionScores: legacyDimensionScores,
-        strengths,
-        gaps,
-        complianceFlags,
-        inputsHash,
-      });
+    const assessment = this.fitAssessmentRepository.create({
+      userId,
+      jobId: resolvedJobId,
+      baselineId: baseline.id,
+      baselineVersion: baselineVersion ?? baseline.version ?? null,
+      overallScore: finalScore,
+      verdict: persistenceVerdict,
+      dimensionScores: legacyDimensionScores,
+      strengths,
+      gaps,
+      complianceFlags,
+      scoringV2: scoringV2,
+      inputsHash,
+    });
 
       const savedAssessment = await this.fitAssessmentRepository.save(assessment);
 
@@ -2343,6 +2344,7 @@ export class AnalysisService {
       complianceFlags: assessment.complianceFlags,
       summary,
       createdAt: assessment.createdAt,
+      scoring_v2: assessment.scoringV2 ?? null,
     };
   }
 

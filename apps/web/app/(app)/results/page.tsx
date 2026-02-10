@@ -456,9 +456,13 @@ export default function ResultsPage() {
     return typeof fallback === "number" ? fallback : null;
   }, [activeAnalysis]);
 
-  const scoringV2 = latest?.scoring_v2 ?? null;
+  const analysis = latest;
+  const scoringV2 = analysis?.scoring_v2 ?? null;
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
+  const analysisKeys = analysis ? Object.keys(analysis) : [];
+  const hasAnalysis = Boolean(analysis);
+  const diagnosticAssessmentId = analysis?.assessmentId ?? runIdentifier ?? "N/A";
 
   const activeVerdictInfo = useMemo(
     () => getVerdictDisplayOrDefault(activeAnalysis?.verdict ?? null),
@@ -701,10 +705,10 @@ export default function ResultsPage() {
 
   const rubricDescription = useMemo(
     () =>
-      rubricDimensionEntries.length
+      scoringV2?.rubric
         ? "The scoring_contract_v1 rubric captures how each dimension contributes to the CX Fit score."
         : summaryCopy,
-    [rubricDimensionEntries.length, summaryCopy],
+    [scoringV2?.rubric, summaryCopy],
   );
 
   const keyTermDetails = useMemo(() => {
@@ -1294,7 +1298,7 @@ export default function ResultsPage() {
             <h2 className="text-lg font-semibold text-slate-100">Rubric breakdown</h2>
             <p className="mt-1 text-sm text-slate-300">{rubricDescription}</p>
           </div>
-          {rubricDimensionEntries.length ? (
+          {scoringV2?.rubric ? (
             <>
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 {rubricDimensionEntries.map((dimension) => (
@@ -1369,22 +1373,33 @@ export default function ResultsPage() {
                     Final score
                   </p>
                   <p className="mt-2 text-3xl font-semibold text-white">
-                    {latestScore !== null ? latestScore.toFixed(1) : "Pending"}
+                    {typeof scoringV2?.score === "number" ? scoringV2.score.toFixed(1) : "Pending"}
                   </p>
                   <p className="text-xs text-slate-400">Rounded via {scoringRubric?.rounding}</p>
                 </div>
               </div>
             </>
           ) : (
-            <p className="text-sm text-slate-300">
-              Load the latest analysis to visualize how each scoring_contract_v1 dimension contributes to the CX Fit score.
-            </p>
+            <div className="mt-4 rounded-2xl border border-rose-600/40 bg-rose-950/10 p-4 text-sm text-rose-200">
+              <p className="font-semibold text-rose-100">
+                scoring_v2 missing from analysis payload
+              </p>
+              <p className="text-rose-300">
+                <strong>Assessment ID:</strong> {diagnosticAssessmentId}
+              </p>
+              <p className="text-rose-300">
+                <strong>Analysis loaded:</strong> {hasAnalysis ? "true" : "false"}
+              </p>
+              <p className="text-rose-300">
+                <strong>Top-level keys:</strong> {analysisKeys.length ? analysisKeys.join(", ") : "none"}
+              </p>
+              <p className="mt-2 text-xs text-rose-300">
+                Rubric breakdown requires scoring_v2.rubric. Refresh or rerun the analysis to load that payload.
+              </p>
+            </div>
           )}
-        </section>
-
-        {scoringV2 ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <details className="group rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+          {scoringV2?.rubric ? (
+            <details className="group rounded-2xl border border-white/10 bg-white/5 p-4">
               <summary className="cursor-pointer text-sm font-semibold text-slate-100">
                 Debug details
               </summary>
@@ -1411,12 +1426,8 @@ export default function ResultsPage() {
                 </div>
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job scoring source</p>
-                  <p className="text-sm text-white">{debugFields?.jobScoringTextSource ?? "n/a"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job text source</p>
                   <p className="text-sm text-white">
-                    {latest?.jobTextSource ?? scoringV2.jobTextSource ?? "n/a"}
+                    {debugFields?.jobScoringTextSource ?? scoringV2.jobTextSource ?? "n/a"}
                   </p>
                 </div>
                 <div>
@@ -1424,27 +1435,27 @@ export default function ResultsPage() {
                   <p className="text-sm text-white">{latest?.baselineId ?? "n/a"}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline hash</p>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline version hash</p>
                   <p className="text-sm text-white">{latest?.baselineVersionHash ?? "n/a"}</p>
                 </div>
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job ID</p>
                   <p className="text-sm text-white">{latest?.jobId ?? "n/a"}</p>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
                   <p className="text-sm text-white">
                     Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
                     {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
                   </p>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (role)</p>
                   <p className="text-sm text-white">
                     {debugFields?.domainTagsRole?.join(", ") || "None"}
                   </p>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (baseline)</p>
                   <p className="text-sm text-white">
                     {debugFields?.domainTagsBaseline?.join(", ") || "None"}
@@ -1462,14 +1473,16 @@ export default function ResultsPage() {
                 {debugCopyStatus ? <p className="text-xs text-slate-400">{debugCopyStatus}</p> : null}
               </div>
             </details>
-          </section>
-        ) : null}
+          ) : null}
+        </section>
 
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Experience areas</p>
-            <h2 className="text-lg font-semibold text-slate-100">Score breakdown</h2>
-            <p className="mt-1 text-sm text-slate-300">{summaryCopy}</p>
+
+        {!scoringV2?.rubric ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Experience areas</p>
+              <h2 className="text-lg font-semibold text-slate-100">Score breakdown</h2>
+              <p className="mt-1 text-sm text-slate-300">{summaryCopy}</p>
             <p className="text-sm text-slate-300">
               Experience areas describe how your background contributes to each category while the key terms below track whether the job language also appears; focus on the lower contributors to clarify authentic experience.
             </p>
@@ -1597,8 +1610,9 @@ export default function ResultsPage() {
               </Link>{" "}
               so the same experience language shows up naturally and the matched terms reflect the story you tell elsewhere.
             </p>
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
