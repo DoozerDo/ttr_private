@@ -43,7 +43,7 @@ import {
   FitScoringService,
 } from './fit-scoring.service';
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
-import type { CxFitV2Result } from './cx-fit-scoring-v2';
+import type { CxFitV2Result, FitScoreDebugBundle } from './cx-fit-scoring-v2';
 
 import {
   DEFAULT_LEGACY_CALIBRATION_WEIGHTS,
@@ -58,6 +58,7 @@ import { buildJobPromptText } from '../scoring/fit-score/fit-score.utils';
 import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 import type { FitScoreRubricJson } from './prompts/fit-score-rubric.v1';
+import { normalizeJobDescription } from './job-normalizer';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -98,7 +99,11 @@ export type FitScoreRequest = {
   selected_block_ids?: string[];
 };
 
-export type JobTextSource = 'raw' | 'raw+normalized' | 'normalized_fallback';
+export type JobTextSource =
+  | 'raw'
+  | 'raw+normalized'
+  | 'normalized_fallback'
+  | 'normalized';
 
 export type JobTextInput = {
   rawDescription?: string | null;
@@ -200,6 +205,11 @@ type CompatibilityRunDebugPayload = {
   jobRawTextTooShort: boolean;
   jobRawTextWarning?: string | null;
   jobTextSource: JobTextSource;
+  jobNormalization?: {
+    headingsDetected: string[];
+    bulletsDetected: number;
+    fallbackSentenceSplitUsed: boolean;
+  };
 };
 
 type FitScoreResponse = {
@@ -228,6 +238,7 @@ type FitScoreResponse = {
   dimensionScores?: FitAssessment['dimensionScores'];
   complianceFlags?: FitAssessment['complianceFlags'];
   summary?: string;
+  fit_score_debug?: FitScoreDebugBundle;
   debug?: CompatibilityRunDebugPayload;
   scoringProof?: ScoringProofSnapshot;
   baseline_version_hash?: string | null;
@@ -266,6 +277,7 @@ type RunFitAssessmentComplianceBlockedResponse = {
   scoringProof?: ScoringProofSnapshot;
   debug?: CompatibilityRunDebugPayload;
   summary?: string;
+  fit_score_debug?: FitScoreDebugBundle;
   compliance: {
     blocked: true;
     flags: ComplianceFlag[];
@@ -433,19 +445,33 @@ export class AnalysisService {
     normalizedRequirements?: string[] | null;
   }) {
     const rawDescription = (jobProps.rawDescription ?? '').trim();
+    const providedResponsibilities = (jobProps.normalizedResponsibilities ?? [])
+      .map((entry) => entry?.trim() ?? '')
+      .filter(Boolean);
+    const providedRequirements = (jobProps.normalizedRequirements ?? [])
+      .map((entry) => entry?.trim() ?? '')
+      .filter(Boolean);
+
+    const shouldParse =
+      rawDescription.length > 0 &&
+      (!providedResponsibilities.length || !providedRequirements.length);
+    const parsedSegments = shouldParse
+      ? normalizeJobDescription(rawDescription)
+      : null;
     const normalizedResponsibilities =
-      rawDescription.length > 0
-        ? []
-        : (jobProps.normalizedResponsibilities ?? []).filter(Boolean);
+      providedResponsibilities.length || !shouldParse
+        ? providedResponsibilities
+        : parsedSegments?.normalized.responsibilities ?? [];
     const normalizedRequirements =
-      rawDescription.length > 0
-        ? []
-        : (jobProps.normalizedRequirements ?? []).filter(Boolean);
+      providedRequirements.length || !shouldParse
+        ? providedRequirements
+        : parsedSegments?.normalized.requirements ?? [];
 
     return {
       rawDescription,
       normalizedResponsibilities,
       normalizedRequirements,
+      jobNormalization: parsedSegments?.debug,
     };
   }
 
@@ -752,6 +778,7 @@ export class AnalysisService {
     jobRawTextTooShort,
     jobRawTextWarning,
     jobTextSource,
+    jobNormalization,
   }: {
     baselineId: string;
     baselineVersionHash: string | null;
@@ -770,6 +797,7 @@ export class AnalysisService {
     jobRawTextTooShort: boolean;
     jobRawTextWarning?: string | null;
     jobTextSource: JobTextSource;
+    jobNormalization?: CompatibilityRunDebugPayload['jobNormalization'];
   }): CompatibilityRunDebugPayload {
     return {
       baselineId,
@@ -789,6 +817,7 @@ export class AnalysisService {
       jobRawTextTooShort,
       jobRawTextWarning,
       jobTextSource,
+      jobNormalization,
     };
   }
 
@@ -1284,15 +1313,15 @@ export class AnalysisService {
       const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
         this.buildCanonicalJobAssets(jobPayload);
 
-    const normalizedResponsibilities =
-      canonicalJobForHash.normalizedResponsibilities;
-    const normalizedRequirements = canonicalJobForHash.normalizedRequirements;
-    const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(
-      normalizedResponsibilities,
-    );
-    const normalizedRequirementsStats = this.buildNormalizedSegmentStats(
-      normalizedRequirements,
-    );
+    const jobText = jobTextForScoring.jobText;
+    const {
+      normalized: normalizedJob,
+      debug: jobNormDebug,
+    } = normalizeJobDescription(jobText);
+    const normalizedJobResponsibilities = normalizedJob.responsibilities;
+    const normalizedJobRequirements = normalizedJob.requirements;
+    const jobTextSource: JobTextSource =
+      normalizedJob.meta.source === 'normalized' ? 'normalized' : 'raw';
     const normalizedJobDescription = this.complianceService.normalizeText(
       canonicalJobForHash.rawDescription,
     );
@@ -1302,7 +1331,7 @@ export class AnalysisService {
       this.logShortTextWarningOnce(shortTextWarningKey, warningMessage);
     }
 
-    const chosenText = jobTextForScoring.jobText;
+    const chosenText = jobText;
     const chosenTextChars = getCharCount(chosenText);
 
     const baselineForHash: Baseline = {
@@ -1316,15 +1345,25 @@ export class AnalysisService {
       dimensionWeights,
     );
 
-    const scoringV2 = scoreCxFitV2({
-      job: {
-        rawDescription: canonicalJobForHash.rawDescription,
-        normalizedResponsibilities:
-          canonicalJobForHash.normalizedResponsibilities,
-        normalizedRequirements: canonicalJobForHash.normalizedRequirements,
-      },
+    const scoringV2 = scoreCxFitV2(
+      {
+        job: {
+          rawDescription: canonicalJobForHash.rawDescription,
+          normalizedResponsibilities: normalizedJobResponsibilities,
+          normalizedRequirements: normalizedJobRequirements,
+        },
+        normalizedJobResponsibilities,
+        normalizedJobRequirements,
         baselineSections: sectionPayload,
-      });
+        metadata: {
+          jobId: job?.id ?? jobId ?? undefined,
+          baselineId: baseline.id,
+          baselineVersionId:
+            baselineVersion.versionNumber ?? baseline.version ?? null,
+        },
+      },
+      { debugBundle: allowDebug },
+    );
 
     if (
       !scoringV2 ||
@@ -1413,6 +1452,12 @@ export class AnalysisService {
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
     }
 
+    const jobNormalizationPayload = {
+      headingsDetected: jobNormDebug.headingsDetected.slice(0, 10),
+      bulletsDetected: jobNormDebug.bulletsDetected,
+      fallbackSentenceSplitUsed: jobNormDebug.fallbackSentenceSplitUsed,
+    };
+
     const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
       ? this.buildCompatibilityDebugPayload({
           baselineId: baseline.id,
@@ -1421,20 +1466,23 @@ export class AnalysisService {
           baselineTotalChars: baselineTextCharsScored,
           jobId: job?.id ?? jobId ?? null,
           jobRawChars: jobTextForScoring.jobRawTextCharCount,
-          normalizedResponsibilitiesCount:
-            normalizedResponsibilitiesStats.count,
-          normalizedResponsibilitiesChars:
-            normalizedResponsibilitiesStats.chars,
-          normalizedRequirementsCount: normalizedRequirementsStats.count,
-          normalizedRequirementsChars: normalizedRequirementsStats.chars,
+          normalizedResponsibilitiesCount: jobNormDebug.responsibilitiesCount,
+          normalizedResponsibilitiesChars: jobNormDebug.responsibilitiesChars,
+          normalizedRequirementsCount: jobNormDebug.requirementsCount,
+          normalizedRequirementsChars: jobNormDebug.requirementsChars,
           dimensionScores: legacyDimensionScores,
           totalScore: finalScore,
           jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
           jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
           jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
           jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-          jobTextSource: jobTextForScoring.jobTextSource,
+          jobTextSource,
+          jobNormalization: jobNormalizationPayload,
         })
+      : undefined;
+
+    const fitScoreDebug: FitScoreDebugBundle | undefined = allowDebug
+      ? scoringV2.debug?.bundle
       : undefined;
 
     const breakdown = {
@@ -1451,13 +1499,13 @@ export class AnalysisService {
       jobTextCharsScored: chosenTextChars,
       truncationAppliedBaseline: false,
       truncationAppliedJob: false,
-      normalizedResponsibilitiesCount: normalizedResponsibilities.length,
-      normalizedRequirementsCount: normalizedRequirements.length,
+      normalizedResponsibilitiesCount: jobNormDebug.responsibilitiesCount,
+      normalizedRequirementsCount: jobNormDebug.requirementsCount,
       jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
       jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
       jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
       jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-      jobTextSource: jobTextForScoring.jobTextSource,
+      jobTextSource,
     };
 
     return {
@@ -1483,6 +1531,7 @@ export class AnalysisService {
       complianceFlags,
       summary: scoring?.summary,
       ...(debugInfo ? { debug: debugInfo } : {}),
+      ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
       scoringProof,
     };
     } finally {
@@ -1745,15 +1794,15 @@ export class AnalysisService {
           sourceUrl: job.sourceUrl ?? null,
         });
 
-      const normalizedResponsibilities =
-        canonicalJobForHash.normalizedResponsibilities;
-      const normalizedRequirements = canonicalJobForHash.normalizedRequirements;
-      const normalizedResponsibilitiesStats = this.buildNormalizedSegmentStats(
-        normalizedResponsibilities,
-      );
-      const normalizedRequirementsStats = this.buildNormalizedSegmentStats(
-        normalizedRequirements,
-      );
+      const jobText = jobTextForScoring.jobText;
+      const {
+        normalized: normalizedJob,
+        debug: jobNormDebug,
+      } = normalizeJobDescription(jobText);
+      const normalizedJobResponsibilities = normalizedJob.responsibilities;
+      const normalizedJobRequirements = normalizedJob.requirements;
+      const jobTextSource: JobTextSource =
+        normalizedJob.meta.source === 'normalized' ? 'normalized' : 'raw';
       const normalizedJobDescription = this.complianceService.normalizeText(
         canonicalJobForHash.rawDescription,
       );
@@ -1779,15 +1828,24 @@ export class AnalysisService {
 
       const allowDebug = Boolean(payload.debug);
 
-      const scoringV2 = scoreCxFitV2({
-        job: {
-          rawDescription: canonicalJobForHash.rawDescription,
-          normalizedResponsibilities:
-            canonicalJobForHash.normalizedResponsibilities,
-          normalizedRequirements: canonicalJobForHash.normalizedRequirements,
+      const scoringV2 = scoreCxFitV2(
+        {
+          job: {
+            rawDescription: canonicalJobForHash.rawDescription,
+            normalizedResponsibilities: normalizedJobResponsibilities,
+            normalizedRequirements: normalizedJobRequirements,
+          },
+          normalizedJobResponsibilities,
+          normalizedJobRequirements,
+          baselineSections: sectionPayload,
+          metadata: {
+            jobId: job?.id ?? resolvedJobId ?? null,
+            baselineId: baseline.id,
+            baselineVersionId: baseline.version ?? null,
+          },
         },
-        baselineSections: sectionPayload,
-      });
+        { debugBundle: allowDebug },
+      );
 
       if (
         !scoringV2 ||
@@ -1839,6 +1897,12 @@ export class AnalysisService {
       const baselineVersionHash = baseline.hash ?? null;
       const jobIdentifier = job?.id ?? resolvedJobId ?? null;
 
+      const jobNormalizationPayload = {
+        headingsDetected: jobNormDebug.headingsDetected.slice(0, 10),
+        bulletsDetected: jobNormDebug.bulletsDetected,
+        fallbackSentenceSplitUsed: jobNormDebug.fallbackSentenceSplitUsed,
+      };
+
       const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
         ? this.buildCompatibilityDebugPayload({
             baselineId: baseline.id,
@@ -1847,19 +1911,23 @@ export class AnalysisService {
             baselineTotalChars: baselineTextCharsScored,
             jobId: jobIdentifier,
             jobRawChars: jobTextForScoring.jobRawTextCharCount,
-            normalizedResponsibilitiesCount:
-              normalizedResponsibilitiesStats.count,
-            normalizedResponsibilitiesChars: normalizedResponsibilitiesStats.chars,
-            normalizedRequirementsCount: normalizedRequirementsStats.count,
-            normalizedRequirementsChars: normalizedRequirementsStats.chars,
+            normalizedResponsibilitiesCount: jobNormDebug.responsibilitiesCount,
+            normalizedResponsibilitiesChars: jobNormDebug.responsibilitiesChars,
+            normalizedRequirementsCount: jobNormDebug.requirementsCount,
+            normalizedRequirementsChars: jobNormDebug.requirementsChars,
             dimensionScores: legacyDimensionScores,
             totalScore: finalScore,
             jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
             jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
             jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
             jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-            jobTextSource: jobTextForScoring.jobTextSource,
+            jobTextSource,
+            jobNormalization: jobNormalizationPayload,
           })
+        : undefined;
+
+      const fitScoreDebug: FitScoreDebugBundle | undefined = allowDebug
+        ? scoringV2.debug?.bundle
         : undefined;
 
       const scoringProof: ScoringProofSnapshot = {
@@ -1868,13 +1936,13 @@ export class AnalysisService {
         jobTextCharsScored: jobTextCharsScored,
         truncationAppliedBaseline: false,
         truncationAppliedJob: false,
-        normalizedResponsibilitiesCount: normalizedResponsibilities.length,
-        normalizedRequirementsCount: normalizedRequirements.length,
+        normalizedResponsibilitiesCount: jobNormDebug.responsibilitiesCount,
+        normalizedRequirementsCount: jobNormDebug.requirementsCount,
         jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
         jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
         jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
         jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-        jobTextSource: jobTextForScoring.jobTextSource,
+        jobTextSource,
       };
 
       const generatedSectionsForCompliance = normalizedJobDescription
@@ -1918,6 +1986,7 @@ export class AnalysisService {
           gaps,
           scoring_v2: scoringV2,
           ...(debugInfo ? { debug: debugInfo } : {}),
+          ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
           scoringProof,
           summary: debugScoring?.summary,
           compliance: {

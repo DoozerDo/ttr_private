@@ -50,12 +50,63 @@ type DimensionBreakdown = {
   strategic_vs_tactical?: number;
 };
 
+type ScoringContractV1DimensionKey =
+  | "role_scope_and_seniority"
+  | "support_operations_and_process_rigor"
+  | "tooling_and_platform_experience"
+  | "domain_and_business_context"
+  | "change_leadership_and_customer_advocacy";
+
+type ScoringV2PenaltyCode = "scope_mismatch_downlevel" | "domain_mismatch_hard";
+
+type ScoringV2Penalty = {
+  code: ScoringV2PenaltyCode;
+  points: number;
+  reason: string;
+};
+
+type ScoringV2ToolingCoverage = {
+  requiredCoverage: number;
+  preferredCoverage: number;
+};
+
+type ScoringV2DebugInfo = {
+  jobScoringTextSource: "normalized" | "raw";
+  baselineBand: string;
+  roleBand: string;
+  bandDelta: number;
+  domainTagsBaseline: string[];
+  domainTagsRole: string[];
+  responsibilityOverlapPercent: number;
+  baselineCoveragePercent: number;
+  toolingCoverage: ScoringV2ToolingCoverage;
+};
+
+type ScoringV2Rubric = {
+  id: "scoring_contract_v1";
+  weights: Record<ScoringContractV1DimensionKey, number>;
+  dimensionPercents: Record<ScoringContractV1DimensionKey, number>;
+  dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
+  subtotal: number;
+  penalties: ScoringV2Penalty[];
+  finalBeforeClamp: number;
+  rounding: string;
+};
+
+type ScoringV2Result = {
+  score: number;
+  rubric: ScoringV2Rubric;
+  debug: ScoringV2DebugInfo;
+  jobTextSource?: "normalized" | "raw";
+};
+
 type LatestAnalysis = {
   baselineId: string;
   baselineVersion?: number | null;
   baselineVersionId?: string | null;
   baselineVersionHash?: string | null;
   jobId: string;
+  jobTextSource?: "normalized" | "raw" | null;
   overallScore?: number;
   note?: string;
   verdict?: string | null;
@@ -75,6 +126,7 @@ type LatestAnalysis = {
   evaluationNotes?: string[] | null;
   systemConstraints?: string[] | null;
   createdAt?: string | null;
+  scoring_v2?: ScoringV2Result | null;
 };
 
 type CalibrationMetadata = {
@@ -110,7 +162,26 @@ const DIMENSION_LABELS: Record<keyof FitDimensionScores, string> = {
   strategicTacticalFit: "Strategic vs tactical",
 };
 
+const SCORING_DIMENSION_ORDER: ScoringContractV1DimensionKey[] = [
+  "role_scope_and_seniority",
+  "support_operations_and_process_rigor",
+  "tooling_and_platform_experience",
+  "domain_and_business_context",
+  "change_leadership_and_customer_advocacy",
+];
+
+const SCORING_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
+  role_scope_and_seniority: "Role scope and seniority",
+  support_operations_and_process_rigor: "Support operations and process rigor",
+  tooling_and_platform_experience: "Tooling and platform experience",
+  domain_and_business_context: "Domain and business context",
+  change_leadership_and_customer_advocacy: "Change leadership and customer advocacy",
+};
+
 const LOW_EXPERIENCE_THRESHOLD = 70;
+
+const formatPercentValue = (value?: number | null) =>
+  typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
 
 function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionScores {
   if (!data) return {};
@@ -135,7 +206,8 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
       leadershipLevel: typeof scores.leadership_level === "number" ? scores.leadership_level : undefined,
       technicalPlatformFit:
         typeof scores.technical_platform_fit === "number" ? scores.technical_platform_fit : undefined,
-      industryContext: typeof scores.industry_context === "number" ? scores.industry_context : undefined,
+      industryContext:
+        typeof scores.industry_context === "number" ? scores.industry_context : undefined,
       strategicTacticalFit:
         typeof scores.strategic_vs_tactical === "number" ? scores.strategic_vs_tactical : undefined,
     };
@@ -322,6 +394,7 @@ export default function ResultsPage() {
   const [calibrating, setCalibrating] = useState(false);
   const [calibrationError, setCalibrationError] = useState<string | null>(null);
   const [useCalibratedScore, setUseCalibratedScore] = useState(false);
+  const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   // Prevent SSR hydration mismatches for locale and timezone dependent formatting.
   const [hasMounted, setHasMounted] = useState(false);
   useEffect(() => {
@@ -360,8 +433,12 @@ export default function ResultsPage() {
 
   const latestScore: number | null = useMemo(() => {
     if (!latest) return null;
-    const v = latest.overallScore ?? (typeof latest.score === "number" ? latest.score : latest.score ?? null);
-    return typeof v === "number" ? v : null;
+    const scoringV2Score = latest.scoring_v2?.score;
+    if (typeof scoringV2Score === "number") return scoringV2Score;
+    const fallback =
+      latest.overallScore ??
+      (typeof latest.score === "number" ? latest.score : latest.score ?? null);
+    return typeof fallback === "number" ? fallback : null;
   }, [latest]);
 
   const activeAnalysis = useMemo(() => {
@@ -371,11 +448,17 @@ export default function ResultsPage() {
 
   const activeScore = useMemo(() => {
     if (!activeAnalysis) return null;
-    const value =
+    const scoringV2Score = activeAnalysis.scoring_v2?.score;
+    if (typeof scoringV2Score === "number") return scoringV2Score;
+    const fallback =
       activeAnalysis.overallScore ??
       (typeof activeAnalysis.score === "number" ? activeAnalysis.score : activeAnalysis.score ?? null);
-    return typeof value === "number" ? value : null;
+    return typeof fallback === "number" ? fallback : null;
   }, [activeAnalysis]);
+
+  const scoringV2 = latest?.scoring_v2 ?? null;
+  const scoringRubric = scoringV2?.rubric ?? null;
+  const debugFields = scoringV2?.debug ?? null;
 
   const activeVerdictInfo = useMemo(
     () => getVerdictDisplayOrDefault(activeAnalysis?.verdict ?? null),
@@ -513,14 +596,14 @@ export default function ResultsPage() {
     return "Confidence is unchanged—proceed with the next action.";
   }, [calibrationResult]);
 
+  const domainContextPerfect = useMemo(() => {
+    const value = scoringRubric?.dimensionPercents?.domain_and_business_context;
+    return typeof value === "number" && value >= 99.5;
+  }, [scoringRubric?.dimensionPercents]);
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(activeAnalysis ?? null),
     [activeAnalysis],
   );
-  const industryContextPerfect = useMemo(() => {
-    const value = normalizedDimensionScores.industryContext;
-    return typeof value === "number" && value >= 99.5;
-  }, [normalizedDimensionScores]);
   const dimensionEntries = useMemo(() => {
     const keys = Object.keys(DIMENSION_LABELS) as Array<keyof FitDimensionScores>;
     return keys.map((key) => ({
@@ -532,6 +615,59 @@ export default function ResultsPage() {
           : null,
     }));
   }, [normalizedDimensionScores]);
+  const rubricDimensionEntries = useMemo(() => {
+    if (!scoringRubric) return [];
+    return SCORING_DIMENSION_ORDER.map((key) => ({
+      key,
+      label: SCORING_DIMENSION_LABELS[key],
+      percent:
+        typeof scoringRubric.dimensionPercents[key] === "number"
+          ? scoringRubric.dimensionPercents[key]
+          : null,
+      points:
+        typeof scoringRubric.dimensionPoints[key] === "number" ? scoringRubric.dimensionPoints[key] : null,
+      weight:
+        typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
+    }));
+  }, [scoringRubric]);
+
+  const debugJsonPayload = useMemo(() => {
+    if (!scoringV2) return null;
+    return JSON.stringify(
+      {
+        baselineId: latest?.baselineId ?? null,
+        baselineVersionHash: latest?.baselineVersionHash ?? null,
+        jobId: latest?.jobId ?? null,
+        scoring_v2: scoringV2,
+      },
+      null,
+      2,
+    );
+  }, [scoringV2, latest?.baselineId, latest?.baselineVersionHash, latest?.jobId]);
+
+  const handleCopyDebugJson = useCallback(async () => {
+    if (!debugJsonPayload) return;
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(debugJsonPayload);
+      } else if (typeof document !== "undefined") {
+        const textarea = document.createElement("textarea");
+        textarea.value = debugJsonPayload;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      } else {
+        throw new Error("Clipboard unavailable");
+      }
+      setDebugCopyStatus("Copied to clipboard");
+    } catch (error) {
+      setDebugCopyStatus("Copy failed; select the JSON below manually.");
+    }
+  }, [debugJsonPayload]);
 
   const reasonSummary = useMemo(
     () => buildReasonSummary(latest?.strengths ?? [], latest?.gaps ?? []),
@@ -546,11 +682,11 @@ export default function ResultsPage() {
     return all
       .filter((item) => item.type === "gap")
       .filter((item) => {
-        if (!industryContextPerfect) return true;
+      if (!domainContextPerfect) return true;
         return !item.message.toLowerCase().includes("industry");
       })
       .slice(0, 3);
-  }, [reasonSummary, industryContextPerfect]);
+  }, [reasonSummary, domainContextPerfect]);
 
   const summaryCopy = useMemo(() => {
     if (!latest) {
@@ -562,6 +698,14 @@ export default function ResultsPage() {
     }
     return "Review the strengths, gaps, and experience area contributions that shaped this score.";
   }, [latest]);
+
+  const rubricDescription = useMemo(
+    () =>
+      rubricDimensionEntries.length
+        ? "The scoring_contract_v1 rubric captures how each dimension contributes to the CX Fit score."
+        : summaryCopy,
+    [rubricDimensionEntries.length, summaryCopy],
+  );
 
   const keyTermDetails = useMemo(() => {
     if (!latest) {
@@ -1141,6 +1285,185 @@ export default function ResultsPage() {
             </p>
           )}
         </section>
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5 shadow">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              Scoring contract
+            </p>
+            <h2 className="text-lg font-semibold text-slate-100">Rubric breakdown</h2>
+            <p className="mt-1 text-sm text-slate-300">{rubricDescription}</p>
+          </div>
+          {rubricDimensionEntries.length ? (
+            <>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {rubricDimensionEntries.map((dimension) => (
+                  <div
+                    key={dimension.key}
+                    className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                      {dimension.label}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-white">
+                      {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Points {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
+                      {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} weight
+                    </p>
+                    {dimension.percent !== null && dimension.percent < LOW_EXPERIENCE_THRESHOLD ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleExperienceAction(dimension.label)}
+                          className="mt-2 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300 hover:text-amber-200"
+                        >
+                          Add or clarify experience
+                        </button>
+                        <p className="mt-2 text-[11px] text-slate-400">
+                          Coming soon: this action will launch the Baseline Expansion Interview. In the meantime, refine the baseline in{" "}
+                          <Link href={fitReviewPath} className="text-amber-300 underline">
+                            Fit Review
+                          </Link>
+                          .
+                        </p>
+                      </>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                    Subtotal
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {scoringRubric?.subtotal.toFixed(1)}
+                  </p>
+                  <p className="text-xs text-slate-400">Subtotal before penalties</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                    Penalties
+                  </p>
+                  {scoringRubric?.penalties.length ? (
+                    <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                      {scoringRubric.penalties.map((penalty) => (
+                        <li key={`${penalty.code}-${penalty.points}`} className="flex gap-2">
+                          <span className="font-semibold text-amber-300">
+                            {penalty.points.toFixed(1)} pts
+                          </span>
+                          <span className="text-slate-300">
+                            <span className="font-semibold text-white">{penalty.code}</span> — {penalty.reason}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-400">No penalties applied.</p>
+                  )}
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                    Final score
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {latestScore !== null ? latestScore.toFixed(1) : "Pending"}
+                  </p>
+                  <p className="text-xs text-slate-400">Rounded via {scoringRubric?.rounding}</p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-300">
+              Load the latest analysis to visualize how each scoring_contract_v1 dimension contributes to the CX Fit score.
+            </p>
+          )}
+        </section>
+
+        {scoringV2 ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <details className="group rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                Debug details
+              </summary>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline band</p>
+                  <p className="text-sm text-white">{debugFields?.baselineBand ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Role band</p>
+                  <p className="text-sm text-white">{debugFields?.roleBand ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline coverage</p>
+                  <p className="text-sm text-white">
+                    {formatPercentValue(debugFields?.baselineCoveragePercent)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Responsibility overlap</p>
+                  <p className="text-sm text-white">
+                    {formatPercentValue(debugFields?.responsibilityOverlapPercent)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job scoring source</p>
+                  <p className="text-sm text-white">{debugFields?.jobScoringTextSource ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job text source</p>
+                  <p className="text-sm text-white">
+                    {latest?.jobTextSource ?? scoringV2.jobTextSource ?? "n/a"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline ID</p>
+                  <p className="text-sm text-white">{latest?.baselineId ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline hash</p>
+                  <p className="text-sm text-white">{latest?.baselineVersionHash ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job ID</p>
+                  <p className="text-sm text-white">{latest?.jobId ?? "n/a"}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
+                  <p className="text-sm text-white">
+                    Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
+                    {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (role)</p>
+                  <p className="text-sm text-white">
+                    {debugFields?.domainTagsRole?.join(", ") || "None"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (baseline)</p>
+                  <p className="text-sm text-white">
+                    {debugFields?.domainTagsBaseline?.join(", ") || "None"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-col items-start gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyDebugJson}
+                  className="rounded-full border border-white/20 bg-slate-800 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 hover:border-white/40"
+                >
+                  Copy debug JSON
+                </button>
+                {debugCopyStatus ? <p className="text-xs text-slate-400">{debugCopyStatus}</p> : null}
+              </div>
+            </details>
+          </section>
+        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div>

@@ -39,6 +39,7 @@ export class AnalysisController {
   async runFitAssessment(
     @Body() body: RunFitAssessmentDto,
     @Req() request: Request & { user?: { id?: string } },
+    @Query('debug') debug?: string,
   ) {
     const userId = request.user?.id;
 
@@ -46,7 +47,13 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.runFitAssessment(userId, body);
+    const debugEnabled =
+      debug === '1' ||
+      debug === 'true' ||
+      Boolean(body.debug);
+    const payload = { ...body, debug: debugEnabled };
+
+    return this.analysisService.runFitAssessment(userId, payload);
   }
 
   @Post('run-expanded')

@@ -1,7 +1,97 @@
 import { clamp, normalizeText } from '../scoring/fit-score/fit-score.utils';
 import { evaluateToolCoverage } from '../scoring/fit-score/tool-extractor';
+import { getCharCount, safeSnippet, sha256 } from '../common/text-metrics';
 
 type BaselineSection = { type?: string; content: string };
+
+export type CxFitV2Metadata = {
+  baselineId?: string;
+  baselineVersionId?: number | string;
+  jobId?: string;
+};
+
+type FitScoreDebugSnippet = {
+  source: 'baseline' | 'job';
+  reference: string;
+  text: string;
+};
+
+type FitScoreDimensionEvidence = {
+  signals: string[];
+  snippets: FitScoreDebugSnippet[];
+};
+
+type FitScoreNormalizedSection = {
+  index: number;
+  type?: string;
+  charCount: number;
+  snippet: string;
+};
+
+type FitScoreNormalizedSegment = {
+  id: string;
+  charCount: number;
+  snippet: string;
+};
+
+export type FitScoreDebugBundle = {
+  inputs: {
+    baselineId?: string;
+    baselineVersionId?: number | string;
+    jobId?: string;
+    baselineHash: string;
+    jobHash: string;
+    jobTextSource: "normalized" | "raw";
+    truncation: {
+      baseline: {
+        originalChars: number;
+        finalChars: number;
+        threshold: number | null;
+        truncated: boolean;
+      };
+      job: {
+        originalChars: number;
+        finalChars: number;
+        threshold: number | null;
+        truncated: boolean;
+      };
+    };
+    normalizedBaseline: {
+      totalChars: number;
+      sections: FitScoreNormalizedSection[];
+      preview: string;
+    };
+    normalizedJob: {
+      charCount: number;
+      preview: string;
+      rawDescriptionIncluded: boolean;
+      normalizedResponsibilitiesCount: number;
+      normalizedResponsibilitiesChars: number;
+      normalizedRequirementsCount: number;
+      normalizedRequirementsChars: number;
+      responsibilities: FitScoreNormalizedSegment[];
+      requirements: FitScoreNormalizedSegment[];
+    };
+  };
+  math: {
+    contractVersion: 'scoring_contract_v1';
+    weights: ScoringContractV1Weights;
+    dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
+    dimensionPercents: Record<ScoringContractV1DimensionKey, number>;
+    penalties: ScoringContractV1Penalty[];
+    finalBeforeClamp: number;
+    roundingMethod: string;
+    finalScore: number;
+  };
+  evidence: Record<ScoringContractV1DimensionKey, FitScoreDimensionEvidence>;
+  determinism: {
+    randomSeed: number | null;
+    llmTemperature: number;
+    llmModel: string | null;
+    llmMaxTokens: number | null;
+    notes: string;
+  };
+};
 
 export type CxFitV2Input = {
   job: {
@@ -10,6 +100,9 @@ export type CxFitV2Input = {
     normalizedRequirements: string[];
   };
   baselineSections: BaselineSection[];
+  metadata?: CxFitV2Metadata;
+  normalizedJobResponsibilities?: string[];
+  normalizedJobRequirements?: string[];
 };
 
 type DomainTag =
@@ -39,6 +132,22 @@ export type ScoringContractV1Penalty = {
   reason: string;
 };
 
+export type CxFitV2DebugInfo = {
+  jobScoringTextSource: 'normalized' | 'raw';
+  baselineBand: string;
+  roleBand: string;
+  bandDelta: number;
+  domainTagsBaseline: DomainTag[];
+  domainTagsRole: DomainTag[];
+  responsibilityOverlapPercent: number;
+  baselineCoveragePercent: number;
+  toolingCoverage: {
+    requiredCoverage: number;
+    preferredCoverage: number;
+  };
+  bundle?: FitScoreDebugBundle;
+};
+
 export type CxFitV2Result = {
   // canonical
   score: number;
@@ -56,19 +165,7 @@ export type CxFitV2Result = {
   };
 
   // extra debug info (safe to log / show)
-  debug: {
-    baselineBand: string;
-    roleBand: string;
-    bandDelta: number;
-    domainTagsBaseline: DomainTag[];
-    domainTagsRole: DomainTag[];
-    responsibilityOverlapPercent: number;
-    baselineCoveragePercent: number;
-    toolingCoverage: {
-      requiredCoverage: number;
-      preferredCoverage: number;
-    };
-  };
+  debug: CxFitV2DebugInfo;
 };
 
 const WEIGHTS: ScoringContractV1Weights = {
@@ -324,21 +421,55 @@ const toWeightedPoints = (percent: number, weight: number) => {
   return raw;
 };
 
-export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
+export const scoreCxFitV2 = (
+  input: CxFitV2Input,
+  options?: { debugBundle?: boolean },
+): CxFitV2Result => {
   const baselineText = input.baselineSections
     .map((section) => section.content ?? '')
     .join('\n');
 
-  const jobSegments = [
-    ...input.job.normalizedResponsibilities,
-    ...input.job.normalizedRequirements,
-  ]
-    .filter(Boolean)
+  const normalizedJobResponsibilities = (
+    input.normalizedJobResponsibilities ??
+    input.job.normalizedResponsibilities ??
+    []
+  ).filter(Boolean);
+  const normalizedJobRequirements = (
+    input.normalizedJobRequirements ??
+    input.job.normalizedRequirements ??
+    []
+  ).filter(Boolean);
+
+  const jobSegments = [...normalizedJobResponsibilities, ...normalizedJobRequirements]
     .join(' ');
 
   const jobText = [jobSegments, input.job.rawDescription].filter(Boolean).join('\n');
 
-  const normalizedJobText = normalizeText(jobText);
+  const hasRawDescription = Boolean((input.job.rawDescription ?? '').trim());
+
+  const responsibilitiesText = normalizedJobResponsibilities
+    .slice(0, 40)
+    .map((line) => `- ${line}`)
+    .join('\n');
+
+  const requirementsText = normalizedJobRequirements
+    .slice(0, 40)
+    .map((line) => `- ${line}`)
+    .join('\n');
+
+  const normalizedJobSummary = [
+    responsibilitiesText ? `Responsibilities:\n${responsibilitiesText}` : '',
+    requirementsText ? `Requirements:\n${requirementsText}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const jobTextForScoring =
+    normalizedJobSummary.length > 0 ? normalizedJobSummary : jobText;
+
+  const jobScoringTextSource = normalizedJobSummary.length > 0 ? 'normalized' : 'raw';
+
+  const normalizedJobText = normalizeText(jobTextForScoring);
   const normalizedBaselineText = normalizeText(baselineText);
 
   // vector overlap stats
@@ -373,7 +504,7 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
   const advocacyMatchesBaseline = countPatternMatches(normalizedBaselineText, CUSTOMER_ADVOCACY_PATTERNS);
 
   // tooling
-  const toolingCoverage = evaluateToolCoverage(jobText, baselineText);
+  const toolingCoverage = evaluateToolCoverage(jobTextForScoring, baselineText);
   const rawToolingPercent = clamp(
     Math.round(
       toolingCoverage.requiredCoverage * 70 + toolingCoverage.preferredCoverage * 30,
@@ -516,6 +647,46 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
   // contract rounding: round half up, final only
   const roundedFinal = roundHalfUp(finalBeforeClamp);
   const finalScore = clamp(roundedFinal);
+  const debugBundle =
+    options?.debugBundle
+      ? buildFitScoreDebugBundle({
+          baselineText,
+          normalizedBaselineText,
+          baselineSections: input.baselineSections,
+          jobText,
+          normalizedJobText,
+          normalizedResponsibilities: normalizedJobResponsibilities,
+          normalizedRequirements: normalizedJobRequirements,
+          metadata: input.metadata,
+          sharedVectors,
+          jobVectors,
+          baselineVectors,
+          responsibilityOverlapPercent,
+          baselineCoveragePercent,
+          bandDelta,
+          baselineBand,
+          roleBand,
+          toolingCoverage,
+          toolingPercent,
+          hasMissingHardTools,
+          strategyMatchesJob,
+          strategyMatchesBaseline,
+          executionMatchesJob,
+          executionMatchesBaseline,
+          advocacyMatchesJob,
+          advocacyMatchesBaseline,
+          domainPercent,
+          domainTagsBaseline,
+          domainTagsRole,
+          hasRawDescription,
+          dimensionPoints,
+          dimensionPercents,
+          penalties,
+          finalBeforeClamp,
+          finalScore,
+          rounding: 'round_half_up_final_only',
+        })
+      : undefined;
 
   return {
     score: finalScore,
@@ -530,6 +701,7 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
       rounding: 'round_half_up_final_only',
     },
     debug: {
+      jobScoringTextSource,
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
@@ -541,6 +713,286 @@ export const scoreCxFitV2 = (input: CxFitV2Input): CxFitV2Result => {
         requiredCoverage: toolingCoverage.requiredCoverage,
         preferredCoverage: toolingCoverage.preferredCoverage,
       },
+      bundle: debugBundle,
     },
   };
+};
+
+type BuildFitScoreDebugBundleParams = {
+  baselineText: string;
+  normalizedBaselineText: string;
+  baselineSections: BaselineSection[];
+  jobText: string;
+  normalizedJobText: string;
+  normalizedResponsibilities: string[];
+  normalizedRequirements: string[];
+  metadata?: CxFitV2Metadata;
+  sharedVectors: string[];
+  jobVectors: string[];
+  baselineVectors: string[];
+  responsibilityOverlapPercent: number;
+  baselineCoveragePercent: number;
+  dimensionPercents: Record<ScoringContractV1DimensionKey, number>;
+  bandDelta: number;
+  baselineBand: number;
+  roleBand: number;
+  toolingCoverage: {
+    requiredCoverage: number;
+    preferredCoverage: number;
+  };
+  toolingPercent: number;
+  hasMissingHardTools: boolean;
+  strategyMatchesJob: number;
+  strategyMatchesBaseline: number;
+  executionMatchesJob: number;
+  executionMatchesBaseline: number;
+  advocacyMatchesJob: number;
+  advocacyMatchesBaseline: number;
+  domainPercent: number;
+  domainTagsRole: DomainTag[];
+  domainTagsBaseline: DomainTag[];
+  dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
+  penalties: ScoringContractV1Penalty[];
+  finalBeforeClamp: number;
+  finalScore: number;
+  rounding: string;
+  hasRawDescription: boolean;
+};
+
+const buildFitScoreDebugBundle = (
+  params: BuildFitScoreDebugBundleParams,
+): FitScoreDebugBundle => {
+  const {
+    baselineText,
+    normalizedBaselineText,
+    baselineSections,
+    jobText,
+    normalizedJobText,
+    normalizedResponsibilities,
+    normalizedRequirements,
+    metadata,
+    sharedVectors,
+    jobVectors,
+    baselineVectors,
+    responsibilityOverlapPercent,
+    baselineCoveragePercent,
+    dimensionPercents,
+    bandDelta,
+    baselineBand,
+    roleBand,
+    toolingCoverage,
+    toolingPercent,
+    hasMissingHardTools,
+    strategyMatchesJob,
+    strategyMatchesBaseline,
+    executionMatchesJob,
+    executionMatchesBaseline,
+    advocacyMatchesJob,
+    advocacyMatchesBaseline,
+    domainPercent,
+    domainTagsBaseline,
+    domainTagsRole,
+    dimensionPoints,
+    penalties,
+    finalBeforeClamp,
+    finalScore,
+    rounding,
+    hasRawDescription,
+  } = params;
+
+  const baselineId = metadata?.baselineId;
+  const baselineVersionId = metadata?.baselineVersionId;
+  const jobId = metadata?.jobId;
+  const baselineHash = sha256(baselineText);
+  const jobHash = sha256(jobText);
+
+  const baselineSectionSummaries = baselineSections.map((section, index) => ({
+    index,
+    type: section.type,
+    charCount: getCharCount(section.content ?? ''),
+    snippet: safeSnippet(section.content ?? '', 120) || '<empty section>',
+  }));
+
+  const responsibilitySegments = normalizedResponsibilities.map((text, index) => ({
+    id: `responsibility-${index + 1}`,
+    charCount: getCharCount(text),
+    snippet: safeSnippet(text, 120) || '<empty responsibility>',
+  }));
+
+  const requirementSegments = normalizedRequirements.map((text, index) => ({
+    id: `requirement-${index + 1}`,
+    charCount: getCharCount(text),
+    snippet: safeSnippet(text, 120) || '<empty requirement>',
+  }));
+
+  const normalizedResponsibilitiesCount = normalizedResponsibilities.length;
+  const normalizedRequirementsCount = normalizedRequirements.length;
+  const normalizedResponsibilitiesChars = responsibilitySegments.reduce(
+    (sum, segment) => sum + segment.charCount,
+    0,
+  );
+  const normalizedRequirementsChars = requirementSegments.reduce(
+    (sum, segment) => sum + segment.charCount,
+    0,
+  );
+  const jobTextSource =
+    normalizedResponsibilitiesCount + normalizedRequirementsCount > 0 ? 'normalized' : 'raw';
+
+  const baselinePreview = safeSnippet(normalizedBaselineText, 140) || '<empty normalized baseline>';
+  const jobPreview = safeSnippet(normalizedJobText, 140) || '<empty normalized job text>';
+  const jobRawPreview = safeSnippet(jobText, 140) || '<empty job text>';
+  const baselineRawPreview = safeSnippet(baselineText, 140) || '<empty baseline text>';
+
+  const evidence: Record<ScoringContractV1DimensionKey, FitScoreDimensionEvidence> = {
+    role_scope_and_seniority: buildEvidence(
+      [
+        `shared_vectors=${sharedVectors.length ? sharedVectors.join(',') : 'none'}`,
+        `job_vectors=${jobVectors.length ? jobVectors.join(',') : 'none'}`,
+        `baseline_vectors=${baselineVectors.length ? baselineVectors.join(',') : 'none'}`,
+        `responsibility_overlap=${responsibilityOverlapPercent.toFixed(1)}%`,
+        `baseline_coverage=${baselineCoveragePercent.toFixed(1)}%`,
+        `band_delta=${bandDelta}`,
+        `baseline_band=L${baselineBand}`,
+        `role_band=L${roleBand}`,
+      ],
+      [
+        { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
+        { source: 'baseline', reference: 'normalized baseline summary', text: normalizedBaselineText },
+        { source: 'job', reference: 'job text preview', text: jobText },
+        { source: 'baseline', reference: 'baseline text preview', text: baselineText },
+      ],
+    ),
+    support_operations_and_process_rigor: buildEvidence(
+      [
+        `execution_matches_job=${executionMatchesJob}`,
+        `execution_matches_baseline=${executionMatchesBaseline}`,
+        `ops_rigor_percent=${dimensionPercents.support_operations_and_process_rigor.toFixed(
+          1,
+        )}%`,
+      ],
+      [
+        { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
+        { source: 'baseline', reference: 'normalized baseline summary', text: normalizedBaselineText },
+      ],
+    ),
+    tooling_and_platform_experience: buildEvidence(
+      [
+        `tooling_percent=${toolingPercent.toFixed(1)}%`,
+        `required_coverage=${(toolingCoverage.requiredCoverage * 100).toFixed(1)}%`,
+        `preferred_coverage=${(toolingCoverage.preferredCoverage * 100).toFixed(1)}%`,
+        `missing_hard_tools=${hasMissingHardTools}`,
+      ],
+      [
+        { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
+        { source: 'job', reference: 'job text preview', text: jobText },
+      ],
+    ),
+    domain_and_business_context: buildEvidence(
+      [
+        `domain_percent=${domainPercent.toFixed(1)}%`,
+        `domain_tags_role=${formatDomainTags(domainTagsRole)}`,
+        `domain_tags_baseline=${formatDomainTags(domainTagsBaseline)}`,
+      ],
+      [
+        { source: 'baseline', reference: 'normalized baseline summary', text: normalizedBaselineText },
+        { source: 'baseline', reference: 'baseline text preview', text: baselineText },
+      ],
+    ),
+    change_leadership_and_customer_advocacy: buildEvidence(
+      [
+        `strategy_matches_job=${strategyMatchesJob}`,
+        `strategy_matches_baseline=${strategyMatchesBaseline}`,
+        `advocacy_matches_job=${advocacyMatchesJob}`,
+        `advocacy_matches_baseline=${advocacyMatchesBaseline}`,
+        `change_percent=${dimensionPercents.change_leadership_and_customer_advocacy.toFixed(1)}%`,
+      ],
+      [
+        { source: 'job', reference: 'normalized job summary', text: normalizedJobText },
+        { source: 'job', reference: 'job text preview', text: jobText },
+      ],
+    ),
+  };
+
+  return {
+    inputs: {
+      baselineId,
+      baselineVersionId,
+      jobId,
+      baselineHash,
+      jobHash,
+      jobTextSource,
+      truncation: {
+        baseline: {
+          originalChars: getCharCount(baselineText),
+          finalChars: getCharCount(normalizedBaselineText),
+          threshold: null,
+          truncated: false,
+        },
+        job: {
+          originalChars: getCharCount(jobText),
+          finalChars: getCharCount(normalizedJobText),
+          threshold: null,
+          truncated: false,
+        },
+      },
+      normalizedBaseline: {
+        totalChars: getCharCount(normalizedBaselineText),
+        sections: baselineSectionSummaries,
+        preview: baselinePreview,
+      },
+      normalizedJob: {
+        charCount: getCharCount(normalizedJobText),
+        preview: jobPreview,
+        rawDescriptionIncluded: hasRawDescription,
+        normalizedResponsibilitiesCount,
+        normalizedResponsibilitiesChars,
+        normalizedRequirementsCount,
+        normalizedRequirementsChars,
+        responsibilities: responsibilitySegments,
+        requirements: requirementSegments,
+      },
+    },
+    math: {
+      contractVersion: 'scoring_contract_v1',
+      weights: WEIGHTS,
+      dimensionPoints,
+      dimensionPercents,
+      penalties,
+      finalBeforeClamp,
+      roundingMethod: rounding,
+      finalScore,
+    },
+    evidence,
+    determinism: {
+      randomSeed: 0,
+      llmTemperature: 0,
+      llmModel: null,
+      llmMaxTokens: null,
+      notes: 'Deterministic rule-based scoring without randomness or LLMs.',
+    },
+  };
+};
+
+const buildEvidence = (
+  signals: string[],
+  snippetSources: Array<{ source: 'baseline' | 'job'; reference: string; text: string }>,
+): FitScoreDimensionEvidence => ({
+  signals,
+  snippets: snippetSources
+    .map(({ source, reference, text }) => createSnippet(source, reference, text))
+    .filter((snippet): snippet is FitScoreDebugSnippet => Boolean(snippet)),
+});
+
+const createSnippet = (
+  source: 'baseline' | 'job',
+  reference: string,
+  text: string,
+): FitScoreDebugSnippet | null => {
+  const snippet = safeSnippet(text, 120);
+  if (!snippet) return null;
+  return { source, reference, text: snippet };
+};
+
+const formatDomainTags = (tags: DomainTag[]): string => {
+  return tags.length ? tags.join(', ') : 'none';
 };

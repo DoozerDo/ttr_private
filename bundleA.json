@@ -1,0 +1,24 @@
+{
+  "baselineId": "3f75d395-70ba-476c-9534-6607848e6439",
+  "baselineVersionHash": "2f7130031913243e3ed224a666d2e93e0c97b66610649cd6fb0e204f015cc7fe",
+  "baselineSelectedSectionCount": 3,
+  "baselineTotalChars": 15077,
+  "jobId": "4afebbff-5d51-4796-87ea-bbdd301d5e84",
+  "jobRawChars": 5028,
+  "normalizedResponsibilitiesCount": 0,
+  "normalizedResponsibilitiesChars": 0,
+  "normalizedRequirementsCount": 0,
+  "normalizedRequirementsChars": 0,
+  "dimensionScores": {
+    "experienceAlignment": 75,
+    "leadershipLevel": 100,
+    "technicalPlatformFit": 70,
+    "industryContext": 75,
+    "strategicTacticalFit": 50
+  },
+  "totalScore": 71,
+  "jobRawTextCharCount": 5028,
+  "jobRawTextSha256": "51d97c1f6a2b59d5fdd720b3da598cd2560790ef6b64a5713274e660996ef615",
+  "jobRawTextTooShort": false,
+  "jobTextSource": "raw"
+}
