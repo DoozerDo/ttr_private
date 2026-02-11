@@ -1,0 +1,82 @@
+{
+  "clusters": [
+    {
+      "id": "cloud_infrastructure",
+      "label": "Cloud Infrastructure",
+      "keywords": ["aws", "azure", "gcp", "cloud", "vpc", "subnets", "iam"],
+      "phrases": ["cloud infrastructure", "virtual private cloud"]
+    },
+    {
+      "id": "containerization",
+      "label": "Containerization",
+      "keywords": ["kubernetes", "k8s", "docker", "ecs", "eks"],
+      "phrases": ["container orchestration", "containerized workloads"]
+    },
+    {
+      "id": "infrastructure_as_code",
+      "label": "Infrastructure as Code",
+      "keywords": ["terraform", "cloudformation", "pulumi"],
+      "phrases": ["infrastructure as code", "iac automation"]
+    },
+    {
+      "id": "deployment_pipeline",
+      "label": "Deployment Pipeline",
+      "keywords": ["ci", "cd", "cicd", "github actions", "jenkins", "pipelines"],
+      "phrases": ["continuous integration", "release automation", "deployment pipeline"]
+    },
+    {
+      "id": "observability",
+      "label": "Observability",
+      "keywords": ["logging", "metrics", "tracing", "prometheus", "grafana", "datadog", "splunk"],
+      "phrases": ["observability platform", "performance monitoring"]
+    },
+    {
+      "id": "reliability",
+      "label": "Reliability",
+      "keywords": ["sre", "reliability", "mttr", "mttd", "incident", "incident response"],
+      "phrases": ["service reliability", "reliability engineering"]
+    },
+    {
+      "id": "incident_management",
+      "label": "Incident Management",
+      "keywords": ["major incident", "incident management", "war room"],
+      "phrases": ["postmortem", "incident commander"]
+    },
+    {
+      "id": "escalation_management",
+      "label": "Escalation Management",
+      "keywords": ["escalations", "executive escalation"],
+      "phrases": ["escalation process", "escalation policy"]
+    },
+    {
+      "id": "stakeholder_comms",
+      "label": "Stakeholder Communications",
+      "keywords": ["stakeholders", "exec updates", "status updates"],
+      "phrases": ["stakeholder management", "executive communication"]
+    },
+    {
+      "id": "process_improvement",
+      "label": "Process Improvement",
+      "keywords": ["continuous improvement", "lean", "itil", "playbooks"],
+      "phrases": ["operational excellence", "process maturity"]
+    },
+    {
+      "id": "automation_process",
+      "label": "Automation Process",
+      "keywords": ["automation", "workflows", "runbooks"],
+      "phrases": ["automation workflows", "process automation"]
+    },
+    {
+      "id": "ticketing_tools",
+      "label": "Ticketing Tools",
+      "keywords": ["servicenow", "jira", "zendesk"],
+      "phrases": ["ticketing system", "incident ticket"]
+    },
+    {
+      "id": "crm_tools",
+      "label": "CRM Tools",
+      "keywords": ["salesforce", "crm"],
+      "phrases": ["customer relationship management"]
+    }
+  ]
+}

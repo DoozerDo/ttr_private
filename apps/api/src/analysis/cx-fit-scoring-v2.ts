@@ -1,6 +1,8 @@
 import { clamp, normalizeText } from '../scoring/fit-score/fit-score.utils';
 import { evaluateToolCoverage } from '../scoring/fit-score/tool-extractor';
 import { getCharCount, safeSnippet, sha256 } from '../common/text-metrics';
+import { getCapabilityClusterRegistry } from '../scoring-v2/config/capability-clusters';
+import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-cluster-extractor';
 
 type BaselineSection = { type?: string; content: string };
 
@@ -177,6 +179,11 @@ export type CxFitV2DebugInfo = {
   };
   baselineCoverageDetails?: BaselineCoverageDetails;
   bundle?: FitScoreDebugBundle;
+  jobClusters: string[];
+  baselineClusters: string[];
+  sharedClusters: string[];
+  jobClusterHits: Record<string, number>;
+  baselineClusterHits: Record<string, number>;
 };
 
 export type CxFitV2Result = {
@@ -516,6 +523,16 @@ const toWeightedPoints = (percent: number, weight: number) => {
   return raw;
 };
 
+const capabilityClusterRegistry = getCapabilityClusterRegistry();
+
+const formatClusterList = (clusters: string[]) => {
+  if (!clusters.length) return 'none';
+  if (clusters.length <= 8) {
+    return clusters.join(',');
+  }
+  return `${clusters.slice(0, 8).join(',')}...`;
+};
+
 export const scoreCxFitV2 = (
   input: CxFitV2Input,
   options?: { debugBundle?: boolean },
@@ -566,6 +583,35 @@ export const scoreCxFitV2 = (
 
   const normalizedJobText = normalizeText(jobTextForScoring);
   const normalizedBaselineText = normalizeText(baselineText);
+  const jobClusterData = extractCapabilityClusters(
+    normalizedJobText,
+    capabilityClusterRegistry,
+  );
+  const baselineClusterData = extractCapabilityClusters(
+    normalizedBaselineText,
+    capabilityClusterRegistry,
+  );
+  const jobClustersList = jobClusterData.clusters;
+  const baselineClustersList = baselineClusterData.clusters;
+  const jobClusterSet = new Set(jobClustersList);
+  const jobClusterHits = jobClusterData.hitsByCluster;
+  const baselineClusterHits = baselineClusterData.hitsByCluster;
+  const sharedClusters = baselineClustersList
+    .filter((clusterId) => jobClusterSet.has(clusterId))
+    .sort((a, b) => {
+      const jobHitsA = jobClusterHits[a] ?? 0;
+      const jobHitsB = jobClusterHits[b] ?? 0;
+      if (jobHitsB !== jobHitsA) {
+        return jobHitsB - jobHitsA;
+      }
+      const baselineHitsA = baselineClusterHits[a] ?? 0;
+      const baselineHitsB = baselineClusterHits[b] ?? 0;
+      if (baselineHitsB !== baselineHitsA) {
+        return baselineHitsB - baselineHitsA;
+      }
+      return a.localeCompare(b);
+    });
+
 
   // vector overlap stats
   const jobVectors = detectVectors(normalizedJobText);
@@ -578,9 +624,21 @@ export const scoreCxFitV2 = (
   const baselineRecallPercent =
     baselineVectors.length === 0 ? 0 : (sharedVectors.length / baselineVectors.length) * 100;
 
-  const responsibilityOverlapPercent = jobCoveragePercent;
+  const jobClustersDenominator = Math.max(1, jobClustersList.length);
+  const baselineClustersDenominator = Math.max(1, baselineClustersList.length);
+  const jobClusterCoveragePercent = (sharedClusters.length / jobClustersDenominator) * 100;
+  const baselineClusterCoveragePercent =
+    (sharedClusters.length / baselineClustersDenominator) * 100;
 
-  const baselineCoveragePercent = baselineRecallPercent;
+  const responsibilityOverlapPercent = Math.max(
+    jobCoveragePercent,
+    jobClusterCoveragePercent,
+  );
+
+  const baselineCoveragePercent = Math.max(
+    baselineRecallPercent,
+    baselineClusterCoveragePercent,
+  );
 
   // leadership band and scope gap
   const baselineBand = inferBaselineBand(normalizedBaselineText);
@@ -808,15 +866,15 @@ export const scoreCxFitV2 = (
           normalizedRequirements: normalizedJobRequirements,
           metadata: input.metadata,
           sharedVectors,
-      jobVectors,
-      baselineVectors,
-      responsibilityOverlapPercent,
-      baselineCoveragePercent,
-      jobCoveragePercent,
-      baselineRecallPercent,
-      bandDelta,
-      baselineBand,
-      roleBand,
+          jobVectors,
+          baselineVectors,
+          responsibilityOverlapPercent,
+          baselineCoveragePercent,
+          jobCoveragePercent,
+          baselineRecallPercent,
+          bandDelta,
+          baselineBand,
+          roleBand,
           toolingCoverage,
           toolingPercent,
           hasMissingHardTools,
@@ -836,6 +894,11 @@ export const scoreCxFitV2 = (
           originalAdvocacyRatioPercent,
           flooredAdvocacyRatioPercent,
           domainPercent,
+          jobClusters: jobClustersList,
+          baselineClusters: baselineClustersList,
+          sharedClusters,
+          jobClusterHits,
+          baselineClusterHits,
           domainTagsBaseline,
           domainTagsRole,
           hasRawDescription,
@@ -867,23 +930,28 @@ export const scoreCxFitV2 = (
       bandDelta,
       domainTagsBaseline,
       domainTagsRole,
-    responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
-    baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
-    baselineRecallPercent: clamp(Math.round(baselineRecallPercent)),
-    roleImpliedStrategyFloorApplied,
-    originalStrategyRatioPercent: clamp(Math.round(originalStrategyRatioPercent)),
-    flooredStrategyRatioPercent: clamp(Math.round(flooredStrategyRatioPercent)),
-    originalAdvocacyRatioPercent: clamp(Math.round(originalAdvocacyRatioPercent)),
-    flooredAdvocacyRatioPercent: clamp(Math.round(flooredAdvocacyRatioPercent)),
-    toolingCoverage: {
-      requiredCoverage: toolingCoverage.requiredCoverage,
-      preferredCoverage: toolingCoverage.preferredCoverage,
+      responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
+      baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
+      baselineRecallPercent: clamp(Math.round(baselineRecallPercent)),
+      roleImpliedStrategyFloorApplied,
+      originalStrategyRatioPercent: clamp(Math.round(originalStrategyRatioPercent)),
+      flooredStrategyRatioPercent: clamp(Math.round(flooredStrategyRatioPercent)),
+      originalAdvocacyRatioPercent: clamp(Math.round(originalAdvocacyRatioPercent)),
+      flooredAdvocacyRatioPercent: clamp(Math.round(flooredAdvocacyRatioPercent)),
+      jobClusters: jobClustersList,
+      baselineClusters: baselineClustersList,
+      sharedClusters,
+      jobClusterHits,
+      baselineClusterHits,
+      toolingCoverage: {
+        requiredCoverage: toolingCoverage.requiredCoverage,
+        preferredCoverage: toolingCoverage.preferredCoverage,
+      },
+      bundle: debugBundle,
+      changeLeadershipEligibility,
+      effectiveWeights,
+      redistributedWeightFrom: changeLeadershipRedistributedWeight,
     },
-    bundle: debugBundle,
-    changeLeadershipEligibility,
-    effectiveWeights,
-    redistributedWeightFrom: changeLeadershipRedistributedWeight,
-  },
   };
 };
 
@@ -927,13 +995,18 @@ type BuildFitScoreDebugBundleParams = {
   effectiveWeights: ScoringContractV1Weights;
   changeLeadershipRedistributedWeight: number;
   domainPercent: number;
-    domainTagsRole: DomainTag[];
-    domainTagsBaseline: DomainTag[];
-    dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
-    penalties: ScoringContractV1Penalty[];
-    finalBeforeClamp: number;
-    finalScore: number;
-    rounding: string;
+  jobClusters: string[];
+  baselineClusters: string[];
+  sharedClusters: string[];
+  jobClusterHits: Record<string, number>;
+  baselineClusterHits: Record<string, number>;
+  domainTagsRole: DomainTag[];
+  domainTagsBaseline: DomainTag[];
+  dimensionPoints: Record<ScoringContractV1DimensionKey, number>;
+  penalties: ScoringContractV1Penalty[];
+  finalBeforeClamp: number;
+  finalScore: number;
+  rounding: string;
     hasRawDescription: boolean;
     jobCoveragePercent: number;
     baselineRecallPercent: number;
@@ -972,16 +1045,21 @@ const buildFitScoreDebugBundle = (
     changeLeadershipEligibility,
     changeLeadershipPercentUsed,
     effectiveWeights,
-    changeLeadershipRedistributedWeight,
-    roleImpliedStrategyFloorApplied,
-    originalStrategyRatioPercent,
-    flooredStrategyRatioPercent,
-    originalAdvocacyRatioPercent,
-    flooredAdvocacyRatioPercent,
-    domainPercent,
-    domainTagsBaseline,
-    domainTagsRole,
-    dimensionPoints,
+  changeLeadershipRedistributedWeight,
+  roleImpliedStrategyFloorApplied,
+  originalStrategyRatioPercent,
+  flooredStrategyRatioPercent,
+  originalAdvocacyRatioPercent,
+  flooredAdvocacyRatioPercent,
+  domainPercent,
+  domainTagsBaseline,
+  domainTagsRole,
+  jobClusters,
+  baselineClusters,
+  sharedClusters,
+  jobClusterHits,
+  baselineClusterHits,
+  dimensionPoints,
     penalties,
     finalBeforeClamp,
     finalScore,
@@ -1050,8 +1128,11 @@ const buildFitScoreDebugBundle = (
         `job_vectors=${jobVectors.length ? jobVectors.join(',') : 'none'}`,
         `baseline_vectors=${baselineVectors.length ? baselineVectors.join(',') : 'none'}`,
         `responsibility_overlap=${responsibilityOverlapPercent.toFixed(1)}%`,
-        `job_coverage=${jobCoveragePercent.toFixed(1)}%`,
-        `baseline_recall=${baselineRecallPercent.toFixed(1)}%`,
+        `job_coverage=${responsibilityOverlapPercent.toFixed(1)}%`,
+        `baseline_recall=${baselineCoveragePercent.toFixed(1)}%`,
+        `job_clusters=${formatClusterList(jobClusters)}`,
+        `baseline_clusters=${formatClusterList(baselineClusters)}`,
+        `shared_clusters=${formatClusterList(sharedClusters)}`,
         `band_delta=${bandDelta}`,
         `baseline_band=L${baselineBand}`,
         `role_band=L${roleBand}`,
