@@ -56,6 +56,15 @@ describe('scoreCxFitV2 role implied strategy floor', () => {
     expect(result.debug.roleImpliedStrategyFloorApplied).toBe(true);
     expect(result.debug.flooredStrategyRatioPercent).toBe(65);
     expect(result.debug.flooredAdvocacyRatioPercent).toBe(60);
+    expect(result.debug.changeLeadershipEligibility).toBe('eligible');
+    expect(result.debug.redistributedWeightFrom).toBe(0);
+    expect(result.debug.effectiveWeights).toEqual({
+      role_scope_and_seniority: 25,
+      support_operations_and_process_rigor: 25,
+      tooling_and_platform_experience: 20,
+      domain_and_business_context: 15,
+      change_leadership_and_customer_advocacy: 15,
+    });
     const changePercent = result.rubric.dimensionPercents.change_leadership_and_customer_advocacy;
     expect(changePercent).toBeGreaterThanOrEqual(65);
     expect(changePercent).toBe(65);
@@ -64,28 +73,25 @@ describe('scoreCxFitV2 role implied strategy floor', () => {
     expect(changeSignals).toContain('change_percent=65.0%');
   });
 
-  it('does not floor non-senior or misleveled roles and uses originals', () => {
+  it('redistributes leadership weight for IC roles and skips the change dimension', () => {
     const result = scoreCxFitV2({
       job: managerJob,
       baselineSections: managerBaselineSections,
     });
 
-    expect(result.debug.roleImpliedStrategyFloorApplied).toBe(false);
-    const expectedChangePercent = Math.min(
-      100,
-      Math.max(
-        0,
-        Math.round(
-          result.debug.originalStrategyRatioPercent * 0.55 +
-            result.debug.originalAdvocacyRatioPercent * 0.45,
-        ),
-      ),
+    expect(result.debug.changeLeadershipEligibility).toBe('ineligible_ic_role');
+    expect(result.debug.redistributedWeightFrom).toBe(15);
+    expect(result.debug.effectiveWeights.change_leadership_and_customer_advocacy).toBe(0);
+    const totalEffectiveWeight = Object.values(result.debug.effectiveWeights).reduce(
+      (sum, weight) => sum + weight,
+      0,
     );
-    expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBe(
-      expectedChangePercent,
-    );
+    expect(totalEffectiveWeight).toBeCloseTo(100, 5);
+    expect(result.rubric.dimensionPercents.change_leadership_and_customer_advocacy).toBe(0);
+    expect(result.rubric.dimensionPoints.change_leadership_and_customer_advocacy).toBe(0);
     const changeSignals =
       result.debug.bundle?.evidence.change_leadership_and_customer_advocacy.signals ?? [];
-    expect(changeSignals).toContain(`change_percent=${expectedChangePercent.toFixed(1)}%`);
+    expect(changeSignals).toContain('dimension_ineligible_ic_role=true');
+    expect(changeSignals).toContain('change_percent=ineligible_ic_role');
   });
 });

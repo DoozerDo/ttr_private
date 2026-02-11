@@ -181,6 +181,7 @@ export class RealityCheckService {
         normalizedResponsibilities: job.normalizedResponsibilities ?? [],
         normalizedRequirements: job.normalizedRequirements ?? [],
       },
+      jobTitle: job.title ?? undefined,
       baselineSections: baselinePayloadSections,
     });
 
@@ -532,12 +533,13 @@ export class RealityCheckService {
       cxFit.rubric.dimensionPercents.role_scope_and_seniority,
     );
     const bandDelta = cxFit.debug.bandDelta;
+    const bandGap = Math.abs(bandDelta);
     const leadershipScore = Math.round(
-      Math.max(0, Math.min(100, 100 - Math.min(100, bandDelta * 15))),
+      Math.max(0, Math.min(100, 100 - Math.min(100, bandGap * 15))),
     );
     const missingToolCount = toolCoverage.missingRequired.length;
 
-    if (bandDelta >= 3 && scopeScore < 65 && leadershipScore < 60) {
+    if (bandGap >= 3 && scopeScore < 65 && leadershipScore < 60) {
       reasons.push('seniority_mismatch');
     }
 

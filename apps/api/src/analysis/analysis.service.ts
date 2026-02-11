@@ -367,7 +367,8 @@ export class AnalysisService {
   }
 
   private leadershipLevelFromBandDelta(bandDelta: number) {
-    const raw = 100 - Math.min(100, bandDelta * 15);
+    const absoluteGap = Math.abs(bandDelta);
+    const raw = 100 - Math.min(100, absoluteGap * 15);
     return this.clampPercent(raw);
   }
 
@@ -1418,6 +1419,7 @@ export class AnalysisService {
             baselineVersionId:
               baselineVersion.versionNumber ?? baseline.version ?? null,
           },
+          jobTitle: jobPayload.title ?? undefined,
         },
         { debugBundle: allowDebug },
       );
@@ -1907,6 +1909,7 @@ export class AnalysisService {
             baselineId: baseline.id,
             baselineVersionId: baseline.version ?? null,
           },
+          jobTitle: job?.title ?? undefined,
         },
         { debugBundle: allowDebug },
       );
