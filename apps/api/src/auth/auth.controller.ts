@@ -38,9 +38,6 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const response = await this.authService.register(payload);
-    if ('accessToken' in response && response.accessToken) {
-      this.setAuthCookie(res, response.accessToken);
-    }
     return response;
   }
 
