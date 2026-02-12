@@ -31,8 +31,17 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
+  @Column({ type: 'character varying', length: 100, default: '' })
+  firstName!: string;
+
+  @Column({ type: 'character varying', length: 100, default: '' })
+  lastName!: string;
+
   @Column()
   passwordHash!: string;
+
+  @Column({ type: 'boolean', default: false })
+  emailConfirmed!: boolean;
 
   @Column({ type: 'character varying', length: 255, nullable: true })
   calibrationProfileName!: string | null;

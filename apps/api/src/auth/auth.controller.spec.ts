@@ -28,29 +28,20 @@ describe('AuthController', () => {
 
   it('handles registration', async () => {
     const dto: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
       email: 'test@example.com',
       password: 'Password123',
+      confirmPassword: 'Password123',
     };
-    const response = {
-      user: { id: '1', email: dto.email },
-      accessToken: 'token',
-    };
+    const response = { success: true, message: 'Check your email to confirm your account.' };
     authService.register.mockResolvedValue(response);
     const res = { cookie: jest.fn() };
 
     const result = await controller.register(dto, res as any);
 
     expect(authService.register).toHaveBeenCalledWith(dto);
-    expect(res.cookie).toHaveBeenCalledWith(
-      'access_token',
-      response.accessToken,
-      expect.objectContaining({
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/',
-      }),
-    );
+    expect(res.cookie).not.toHaveBeenCalled();
     expect(result).toEqual(response);
   });
 

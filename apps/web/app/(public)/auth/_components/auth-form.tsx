@@ -31,9 +31,13 @@ function extractAuthApiMessage(value: unknown): string | undefined {
 
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isLogin = mode === "login";
@@ -47,10 +51,21 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    setMessage(null);
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
       setError("Email and password are required.");
+      return;
+    }
+
+    if (!isLogin && (!firstName.trim() || !lastName.trim())) {
+      setError("First name and last name are required.");
+      return;
+    }
+
+    if (!isLogin && password !== confirmPassword) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -61,7 +76,17 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email: trimmedEmail, password }),
+        body: JSON.stringify(
+          isLogin
+            ? { email: trimmedEmail, password }
+            : {
+                firstName: firstName.trim(),
+                lastName: lastName.trim(),
+                email: trimmedEmail,
+                password,
+                confirmPassword,
+              },
+        ),
       });
 
       let data: unknown = null;
@@ -84,10 +109,13 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         return;
       }
 
-      // At this point, the API route should have:
-      // - validated credentials
-      // - set the auth cookie
-      // We just navigate.
+      if (!isLogin) {
+        const successMessage =
+          extractAuthApiMessage(data) ?? "Check your email to confirm your account.";
+        setMessage(successMessage);
+        return;
+      }
+
       router.push(returnPath ?? "/");
     } catch (submitError) {
       console.error("Auth request failed", submitError);
@@ -111,6 +139,41 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
       >
         <div className="space-y-2">
+          {!isLogin && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700" htmlFor="firstName">
+                  First Name
+                </label>
+                <input
+                  id="firstName"
+                  type="text"
+                  required={!isLogin}
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="First name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700" htmlFor="lastName">
+                  Last Name
+                </label>
+                <input
+                  id="lastName"
+                  type="text"
+                  required={!isLogin}
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="Last name"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
           <label
             className="block text-sm font-semibold text-gray-700"
             htmlFor="email"
@@ -127,6 +190,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             placeholder="you@example.com"
           />
+        </div>
         </div>
 
         <div className="space-y-2">
@@ -147,6 +211,31 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
             placeholder="••••••••"
           />
         </div>
+
+        {!isLogin && (
+          <div className="space-y-2">
+            <label
+              className="block text-sm font-semibold text-gray-700"
+              htmlFor="confirmPassword"
+            >
+              Confirm Password
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              required
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="••••••••"
+            />
+          </div>
+        )}
+
+        {message && (
+          <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>
+        )}
 
         {error && (
           <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">

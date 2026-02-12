@@ -1,57 +1,1262 @@
-diff --git a/apps/web/app/(app)/studio/page.tsx b/apps/web/app/(app)/studio/page.tsx
-index ecf4850dff46ebdcd63e1e0f353e7b6b07758104..18a3f9295a8f5dd410e27c20898bbdbdd261a750 100644
---- a/apps/web/app/(app)/studio/page.tsx
-+++ b/apps/web/app/(app)/studio/page.tsx
-@@ -695,51 +695,51 @@ export default function StudioPage() {
-         setSelectedBaselineVersionId("");
-       } finally {
-         if (!canceled) {
-           setVersionsLoading(false);
-         }
-       }
-     };
-     void loadVersions();
-     return () => {
-       canceled = true;
-     };
-   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
+# diff --git a/apps/api/.env.development.local.example b/apps/api/.env.development.local.example
+# index 3dc8bf31afde047dde5b162367f33840abdb3f91..d3562e09ae2839b31e832b24e2ec6bc46cfabfc2 100644
+# --- a/apps/api/.env.development.local.example
+# +++ b/apps/api/.env.development.local.example
+# @@ -1,9 +1,12 @@
+#  PORT=3001
+#  CORS_ORIGIN=http://localhost:3000
+#  APP_VERSION=change-me
+#  DATABASE_URL=postgres://postgres:postgres@db:5432/targetthisrole
+#  JWT_SECRET=change-me
+#  BETA_UNLOCK_PRO=false
+#  ENABLE_LLM_PARITY_SCORE=true
+#  OPENAI_FIT_SCORE_MODEL=gpt-4o-mini
+# -OPENAI_API_KEY=OPENAI_API_KEY_VALUE
+# \ No newline at end of file
+# +OPENAI_API_KEY=OPENAI_API_KEY_VALUE
+# +REQUIRE_EMAIL_CONFIRMATION=false
+# +APP_BASE_URL=http://localhost:3000
+# +SUPPORT_EMAIL=support@targetthisrole.ai
+diff --git a/apps/api/src/auth/auth.controller.spec.ts b/apps/api/src/auth/auth.controller.spec.ts
+index a5388265e36800226f9024eaf6d29a1f13f59846..7d363d14458072d7609ba2ae9d582458333e9d6e 100644
+--- a/apps/api/src/auth/auth.controller.spec.ts
++++ b/apps/api/src/auth/auth.controller.spec.ts
+@@ -6,73 +6,64 @@ import { RegisterDto } from './dto/register.dto';
  
-   useEffect(() => {
-     if (!selectedJobId) {
-       setAnalysis(null);
-       setAnalysisError(null);
+ describe('AuthController', () => {
+   let controller: AuthController;
+   let authService: jest.Mocked<AuthService>;
+ 
+   beforeEach(async () => {
+     const module: TestingModule = await Test.createTestingModule({
+       controllers: [AuthController],
+       providers: [
+         {
+           provide: AuthService,
+           useValue: {
+             register: jest.fn(),
+             login: jest.fn(),
+           },
+         },
+       ],
+     }).compile();
+ 
+     controller = module.get<AuthController>(AuthController);
+     authService = module.get(AuthService);
+   });
+ 
+   it('handles registration', async () => {
+     const dto: RegisterDto = {
++      firstName: 'Test',
++      lastName: 'User',
+       email: 'test@example.com',
+       password: 'Password123',
++      confirmPassword: 'Password123',
+     };
+-    const response = {
+-      user: { id: '1', email: dto.email },
+-      accessToken: 'token',
+-    };
++    const response = { success: true, message: 'Check your email to confirm your account.' };
+     authService.register.mockResolvedValue(response);
+     const res = { cookie: jest.fn() };
+ 
+     const result = await controller.register(dto, res as any);
+ 
+     expect(authService.register).toHaveBeenCalledWith(dto);
+-    expect(res.cookie).toHaveBeenCalledWith(
+-      'access_token',
+-      response.accessToken,
+-      expect.objectContaining({
+-        httpOnly: true,
+-        secure: process.env.NODE_ENV === 'production',
+-        sameSite: 'lax',
+-        path: '/',
+-      }),
+-    );
++    expect(res.cookie).not.toHaveBeenCalled();
+     expect(result).toEqual(response);
+   });
+ 
+   it('handles login', async () => {
+     const dto: LoginDto = {
+       email: 'test@example.com',
+       password: 'Password123',
+     };
+     const response = {
+       user: { id: '1', email: dto.email },
+       accessToken: 'token',
+     };
+     authService.login.mockResolvedValue(response);
+     const res = { cookie: jest.fn() };
+ 
+     const result = await controller.login(dto, res as any);
+ 
+     expect(authService.login).toHaveBeenCalledWith(dto);
+     expect(res.cookie).toHaveBeenCalledWith(
+       'access_token',
+       response.accessToken,
+       expect.objectContaining({
+         httpOnly: true,
+         secure: process.env.NODE_ENV === 'production',
+         sameSite: 'lax',
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+index ae6559b0607a827fa80ad770d3692f8815b488b4..71d0661085395f85247b0438bc760f5fd7428bd1 100644
+--- a/apps/api/src/auth/auth.controller.ts
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -1,62 +1,76 @@
+ import {
+   Body,
+   Controller,
+   Get,
++  Query,
+   Post,
+   Req,
+   Res,
+   UseGuards,
++  UsePipes,
++  ValidationPipe,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import type { Response } from 'express';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import type { AuthUserDto } from './dto/auth-response.dto';
+ 
+ const AUTH_COOKIE_NAME = 'access_token';
+ const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
+ const NODE_ENV = process.env.NODE_ENV ?? 'development';
+ const COOKIE_IS_SECURE = NODE_ENV === 'production';
+ 
+ @Controller('auth')
++@UsePipes(
++  new ValidationPipe({
++    whitelist: true,
++    transform: true,
++  }),
++)
+ export class AuthController {
+   constructor(private readonly authService: AuthService) {}
+ 
+   @Post('register')
+   async register(
+     @Body() payload: RegisterDto,
+     @Res({ passthrough: true }) res: Response,
+   ) {
+     const response = await this.authService.register(payload);
+-    if (response.accessToken) {
++    if ('accessToken' in response && response.accessToken) {
+       this.setAuthCookie(res, response.accessToken);
+     }
+     return response;
+   }
+ 
++  @Get('confirm')
++  async confirmEmail(@Query('token') token: string) {
++    return this.authService.confirmEmail(token);
++  }
++
+   @Post('login')
+   async login(
+     @Body() payload: LoginDto,
+     @Res({ passthrough: true }) res: Response,
+   ) {
+     const response = await this.authService.login(payload);
+     this.setAuthCookie(res, response.accessToken);
+     return response;
+   }
+ 
+   @Post('logout')
+   logout(@Res({ passthrough: true }) res: Response) {
+     res.cookie(AUTH_COOKIE_NAME, '', {
+       httpOnly: true,
+       secure: COOKIE_IS_SECURE,
+       sameSite: 'lax',
+       path: '/',
+       maxAge: 0,
+     });
+     return { ok: true };
+   }
+ 
+   @UseGuards(AuthGuard('jwt'))
+   @Get('me')
+   me(@Req() request: { user?: AuthUserDto }) {
+diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
+index 89e9e43b2cbe54889d4bae3430af6e7e737bcf25..487399c0c94e499cdf051ad341e8ac6ba560cbad 100644
+--- a/apps/api/src/auth/auth.module.ts
++++ b/apps/api/src/auth/auth.module.ts
+@@ -1,27 +1,32 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { JwtModule } from '@nestjs/jwt';
+ import { PassportModule } from '@nestjs/passport';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { EmailModule } from '../email/email.module';
+ import { UsersModule } from '../users/users.module';
+ import { AuthController } from './auth.controller';
+ import { AuthService } from './auth.service';
+ import { JwtStrategy } from './jwt.strategy';
++import { UserToken } from './user-token.entity';
+ 
+ @Module({
+   imports: [
+     ConfigModule,
+     UsersModule,
++    EmailModule,
++    TypeOrmModule.forFeature([UserToken]),
+     PassportModule,
+     JwtModule.registerAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         secret: configService.get<string>('JWT_SECRET'),
+         signOptions: { expiresIn: '1h' },
+       }),
+     }),
+   ],
+   controllers: [AuthController],
+   providers: [AuthService, JwtStrategy],
+ })
+ export class AuthModule {}
+diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
+index ef2eef760843027ea08cf6dfb206a8d76bb3d007..ff0cf2d2321a0721515e7393ecbb52a08de8656f 100644
+--- a/apps/api/src/auth/auth.service.spec.ts
++++ b/apps/api/src/auth/auth.service.spec.ts
+@@ -1,106 +1,145 @@
+ import { JwtService } from '@nestjs/jwt';
+ import { Test, TestingModule } from '@nestjs/testing';
+ import * as bcrypt from 'bcryptjs';
++import { getRepositoryToken } from '@nestjs/typeorm';
++import { ConfigService } from '@nestjs/config';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { User } from '../users/user.entity';
+ import { UsersService } from '../users/users.service';
++import { AccountType } from '../users/account-type.enum';
++import { UserToken } from './user-token.entity';
++import { RelayEmailService } from '../email/relay-email.service';
+ 
+ describe('AuthService', () => {
+   let service: AuthService;
+   let usersService: jest.Mocked<UsersService>;
+   let jwtService: JwtService;
+ 
+   beforeEach(async () => {
+     const module: TestingModule = await Test.createTestingModule({
+       providers: [
+         AuthService,
+         JwtService,
+         {
+           provide: UsersService,
+           useValue: {
+             findByEmail: jest.fn(),
+             findById: jest.fn(),
+             create: jest.fn(),
++            setEmailConfirmed: jest.fn(),
++          },
++        },
++        {
++          provide: RelayEmailService,
++          useValue: {
++            sendRawRelayEmail: jest.fn(),
++          },
++        },
++        {
++          provide: ConfigService,
++          useValue: {
++            get: jest.fn((key: string) => {
++              if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
++                return 'false';
++              }
++              if (key === 'NODE_ENV') {
++                return 'test';
++              }
++              return undefined;
++            }),
++          },
++        },
++        {
++          provide: getRepositoryToken(UserToken),
++          useValue: {
++            save: jest.fn(),
++            create: jest.fn((value) => value),
++            findOne: jest.fn(),
++            delete: jest.fn(),
+           },
+         },
+       ],
+     }).compile();
+ 
+     service = module.get<AuthService>(AuthService);
+     usersService = module.get(UsersService);
+     jwtService = module.get(JwtService);
+     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
+   });
+ 
+-  it('registers a user and returns a token', async () => {
++  it('registers a user', async () => {
+     const payload: RegisterDto = {
++      firstName: 'Test',
++      lastName: 'User',
+       email: 'user@example.com',
+       password: 'Password123',
++      confirmPassword: 'Password123',
+     };
+     const savedUser: User = {
+       id: 'user-id',
+       email: payload.email,
++      firstName: payload.firstName,
++      lastName: payload.lastName,
++      emailConfirmed: true,
+       passwordHash: '',
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(null);
+-    usersService.create.mockImplementation(async (email, passwordHash) => ({
++    usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
+       ...savedUser,
+       email,
+       passwordHash,
+     }));
+ 
+     const result = await service.register(payload);
+-    const hashedPasswordArg = usersService.create.mock.calls[0][1];
++    const hashedPasswordArg = usersService.create.mock.calls[0][0].passwordHash;
+ 
+     expect(hashedPasswordArg).not.toEqual(payload.password);
+-    expect(result.accessToken).toEqual('signed-token');
+-    expect(result.user).toMatchObject({
+-      id: savedUser.id,
+-      email: savedUser.email,
+-      role: 'user',
+-      subscriptionTier: SubscriptionTier.FREE,
+-    });
+-    expect(result.user).not.toHaveProperty('passwordHash');
++    expect(result.success).toEqual(true);
+   });
+ 
+   it('logs in a user with valid credentials', async () => {
+     const payload: LoginDto = {
+       email: 'user@example.com',
+       password: 'Password123',
+     };
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const savedUser: User = {
+       id: 'user-id',
+       email: payload.email,
++      firstName: 'Test',
++      lastName: 'User',
++      emailConfirmed: true,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     const result = await service.login(payload);
+ 
+     expect(result.accessToken).toEqual('signed-token');
+     expect(result.user).toMatchObject({
+       id: savedUser.id,
+       email: savedUser.email,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+     });
+   });
+ });
+diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
+index 1c805eb344f0e5cd4a10918fc00c3677aec8ac14..4c9e8bdb40e5d5ecf407a6321f69f0ed9acdb9f3 100644
+--- a/apps/api/src/auth/auth.service.ts
++++ b/apps/api/src/auth/auth.service.ts
+@@ -1,78 +1,202 @@
+ import {
+   BadRequestException,
++  ForbiddenException,
+   Injectable,
+   UnauthorizedException,
+ } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
+ import { JwtService } from '@nestjs/jwt';
+ import * as bcrypt from 'bcryptjs';
++import { randomBytes } from 'node:crypto';
++import { existsSync } from 'node:fs';
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { Repository } from 'typeorm';
++import { InjectRepository } from '@nestjs/typeorm';
++import { RelayEmailService } from '../email/relay-email.service';
+ import { UsersService } from '../users/users.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { User } from '../users/user.entity';
+ import { getEntitlementsForTier } from '../features/feature-gates';
+ import type { AuthResponseDto } from './dto/auth-response.dto';
++import { UserToken } from './user-token.entity';
++
++type RegisterResponseDto = {
++  success: true;
++  message: string;
++};
+ 
+ @Injectable()
+ export class AuthService {
+   constructor(
+     private readonly usersService: UsersService,
+     private readonly jwtService: JwtService,
++    private readonly relayEmailService: RelayEmailService,
++    private readonly configService: ConfigService,
++    @InjectRepository(UserToken)
++    private readonly userTokensRepository: Repository<UserToken>,
+   ) {}
+ 
+-  async register(payload: RegisterDto): Promise<AuthResponseDto> {
++  async register(payload: RegisterDto): Promise<RegisterResponseDto> {
++    if (payload.password !== payload.confirmPassword) {
++      throw new BadRequestException('Passwords do not match');
++    }
++
+     const existing = await this.usersService.findByEmail(payload.email);
+ 
+     if (existing) {
+-      throw new BadRequestException('Email already registered');
++      return {
++        success: true,
++        message: this.requireEmailConfirmation
++          ? 'Check your email to confirm your account.'
++          : 'Account created.',
++      };
+     }
+ 
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+-    const user = await this.usersService.create(payload.email, passwordHash);
++    const user = await this.usersService.create({
++      email: payload.email,
++      passwordHash,
++      firstName: payload.firstName.trim(),
++      lastName: payload.lastName.trim(),
++      emailConfirmed: !this.requireEmailConfirmation,
++    });
++
++    if (!this.requireEmailConfirmation) {
++      return { success: true, message: 'Account created.' };
++    }
+ 
+-    return this.buildAuthResponse(user);
++    const token = randomBytes(32).toString('hex');
++    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
++
++    await this.userTokensRepository.save(
++      this.userTokensRepository.create({
++        userId: user.id,
++        token,
++        type: 'confirm',
++        expiresAt,
++      }),
++    );
++
++    const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
++    const supportEmail =
++      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
++      'support@targetthisrole.ai';
++    const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
++    const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
++
++    await this.relayEmailService.sendRawRelayEmail({
++      to: user.email,
++      subject: 'Confirm your account',
++      body: html,
++      replyTo: supportEmail,
++      type: 'signup_confirm',
++    });
++
++    return {
++      success: true,
++      message: 'Check your email to confirm your account.',
++    };
+   }
+ 
+   async login(payload: LoginDto): Promise<AuthResponseDto> {
+     const user = await this.usersService.findByEmail(payload.email);
+ 
+     if (!user) {
+       throw new UnauthorizedException('Invalid credentials');
+     }
+ 
+     const isValidPassword = await bcrypt.compare(
+       payload.password,
+       user.passwordHash,
+     );
+ 
+     if (!isValidPassword) {
+       throw new UnauthorizedException('Invalid credentials');
+     }
+ 
++    if (this.requireEmailConfirmation && !user.emailConfirmed) {
++      throw new ForbiddenException(
++        'Please confirm your email before logging in.',
++      );
++    }
++
+     return this.buildAuthResponse(user);
+   }
+ 
++  async confirmEmail(token: string): Promise<{ success: true; message: string }> {
++    if (!token) {
++      throw new BadRequestException('Missing confirmation token');
++    }
++    const match = await this.userTokensRepository.findOne({
++      where: { token, type: 'confirm' },
++    });
++
++    if (!match || match.expiresAt.getTime() <= Date.now()) {
++      throw new BadRequestException('Invalid or expired confirmation token');
++    }
++
++    const user = await this.usersService.findById(match.userId);
++    if (!user) {
++      throw new BadRequestException('Invalid confirmation token');
++    }
++
++    await this.usersService.setEmailConfirmed(user.id);
++    await this.userTokensRepository.delete({ id: match.id });
++
++    return { success: true, message: 'Email confirmed. You can now log in.' };
++  }
++
++  private get requireEmailConfirmation(): boolean {
++    const raw = this.configService.get<string>('REQUIRE_EMAIL_CONFIRMATION');
++    if (raw === 'true') {
++      return true;
++    }
++    if (raw === 'false') {
++      return false;
++    }
++    return this.configService.get<string>('NODE_ENV') === 'production';
++  }
++
++  private renderSignupConfirmationTemplate(
++    confirmUrl: string,
++    supportEmail: string,
++  ): string {
++    const candidatePaths = [
++      join(process.cwd(), 'src', 'emailTemplates', 'signup-confirmation.html'),
++      '/usr/src/app/src/emailTemplates/signup-confirmation.html',
++    ];
++    const templatePath =
++      candidatePaths.find((path) => existsSync(path)) ?? candidatePaths[0];
++    const template = readFileSync(templatePath, 'utf-8');
++    return template
++      .replaceAll('{{confirm_url}}', confirmUrl)
++      .replaceAll('{{support_email}}', supportEmail);
++  }
++
+   private buildAuthResponse(user: User): AuthResponseDto {
+     const entitlements = getEntitlementsForTier(user.subscriptionTier);
+ 
+     const payload = {
+       sub: user.id,
+       email: user.email,
+       subscriptionTier: user.subscriptionTier,
+       entitlements,
+     };
+ 
+     const accessToken = this.jwtService.sign(payload);
+ 
+     const { passwordHash, ...sanitizedUser } = user;
+ 
+     const stableId = sanitizedUser.id ?? user.id;
+ 
+     return {
+       accessToken,
+       user: {
+         ...sanitizedUser,
+         id: stableId,
+         userId: stableId,
+         entitlements,
+       },
+     };
+diff --git a/apps/api/src/auth/dto/login.dto.ts b/apps/api/src/auth/dto/login.dto.ts
+index 7d158ad4b75b3c0910ecc048cb9de16f72b58e0d..205887be81ae4127a6840b0edfce2a022f3daba4 100644
+--- a/apps/api/src/auth/dto/login.dto.ts
++++ b/apps/api/src/auth/dto/login.dto.ts
+@@ -1,4 +1,10 @@
++import { IsEmail, IsString, MinLength } from 'class-validator';
++
+ export class LoginDto {
++  @IsEmail()
+   email!: string;
++
++  @IsString()
++  @MinLength(8)
+   password!: string;
+ }
+diff --git a/apps/api/src/auth/dto/register.dto.ts b/apps/api/src/auth/dto/register.dto.ts
+index 1f089937c08614cf568f3729c39203fc382c25ea..03708908c47310545cab817bbd6f9adb8bd7cbfb 100644
+--- a/apps/api/src/auth/dto/register.dto.ts
++++ b/apps/api/src/auth/dto/register.dto.ts
+@@ -1,4 +1,22 @@
++import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
++
+ export class RegisterDto {
++  @IsString()
++  @IsNotEmpty()
++  firstName!: string;
++
++  @IsString()
++  @IsNotEmpty()
++  lastName!: string;
++
++  @IsEmail()
+   email!: string;
++
++  @IsString()
++  @MinLength(8)
+   password!: string;
++
++  @IsString()
++  @MinLength(8)
++  confirmPassword!: string;
+ }
+diff --git a/apps/api/src/auth/user-token.entity.ts b/apps/api/src/auth/user-token.entity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..43dc393d40d29f5441c5e005d95d8a7a814f837f
+--- /dev/null
++++ b/apps/api/src/auth/user-token.entity.ts
+@@ -0,0 +1,39 @@
++import {
++  Column,
++  CreateDateColumn,
++  Entity,
++  Index,
++  JoinColumn,
++  ManyToOne,
++  PrimaryGeneratedColumn,
++} from 'typeorm';
++import { User } from '../users/user.entity';
++
++export type UserTokenType = 'confirm';
++
++@Entity({ name: 'user_tokens' })
++export class UserToken {
++  @PrimaryGeneratedColumn('uuid')
++  id!: string;
++
++  @Index()
++  @Column({ type: 'uuid' })
++  userId!: string;
++
++  @ManyToOne(() => User, { onDelete: 'CASCADE' })
++  @JoinColumn({ name: 'userId' })
++  user!: User;
++
++  @Index({ unique: true })
++  @Column({ type: 'character varying', length: 64, unique: true })
++  token!: string;
++
++  @Column({ type: 'character varying', length: 20 })
++  type!: UserTokenType;
++
++  @Column({ type: 'timestamptz' })
++  expiresAt!: Date;
++
++  @CreateDateColumn({ type: 'timestamptz' })
++  createdAt!: Date;
++}
+diff --git a/apps/api/src/emailTemplates/signup-confirmation.html b/apps/api/src/emailTemplates/signup-confirmation.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..1d9f0b2ed7f50c5f0f550d030fb84a7e5fb63280
+--- /dev/null
++++ b/apps/api/src/emailTemplates/signup-confirmation.html
+@@ -0,0 +1,21 @@
++<!doctype html>
++<html lang="en">
++  <head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1" />
++    <title>Confirm your account</title>
++  </head>
++  <body style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
++    <h1 style="font-size: 20px;">Confirm your account</h1>
++    <p>Thanks for signing up for Target This Role.</p>
++    <p>
++      Please confirm your email address by clicking this link:
++      <a href="{{confirm_url}}">{{confirm_url}}</a>
++    </p>
++    <p>If you did not create this account, you can safely ignore this email.</p>
++    <p>
++      Need help? Contact us at
++      <a href="mailto:{{support_email}}">{{support_email}}</a>.
++    </p>
++  </body>
++</html>
+diff --git a/apps/api/src/migrations/2090000000000-EmailConfirmation.ts b/apps/api/src/migrations/2090000000000-EmailConfirmation.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7572cc7771593eb9a05af156e768bea2e9acfa5d
+--- /dev/null
++++ b/apps/api/src/migrations/2090000000000-EmailConfirmation.ts
+@@ -0,0 +1,44 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class EmailConfirmation2090000000000 implements MigrationInterface {
++  name = 'EmailConfirmation2090000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "firstName" character varying(100) NOT NULL DEFAULT ''`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "lastName" character varying(100) NOT NULL DEFAULT ''`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "emailConfirmed" boolean NOT NULL DEFAULT false`,
++    );
++
++    await queryRunner.query(`
++      CREATE TABLE "user_tokens" (
++        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
++        "userId" uuid NOT NULL,
++        "token" character varying(64) NOT NULL,
++        "type" character varying(20) NOT NULL,
++        "expiresAt" TIMESTAMP WITH TIME ZONE NOT NULL,
++        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
++        CONSTRAINT "PK_user_tokens_id" PRIMARY KEY ("id"),
++        CONSTRAINT "UQ_user_tokens_token" UNIQUE ("token"),
++        CONSTRAINT "FK_user_tokens_user" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE
++      )
++    `);
++
++    await queryRunner.query(
++      `CREATE INDEX "IDX_user_tokens_userId" ON "user_tokens" ("userId")`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`DROP INDEX IF EXISTS "IDX_user_tokens_userId"`);
++    await queryRunner.query(`DROP TABLE IF EXISTS "user_tokens"`);
++
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "emailConfirmed"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "lastName"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "firstName"`);
++  }
++}
+diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
+index b7a8d290a05fc89c234a2ff6b25c8124dcbf3f57..a7e671d728da9247328f2a482f049c55d432d287 100644
+--- a/apps/api/src/users/user.entity.ts
++++ b/apps/api/src/users/user.entity.ts
+@@ -9,53 +9,62 @@ import {
+ 
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { AccountType } from './account-type.enum';
+ 
+ export type CalibrationWeights = {
+   dimensionA: number;
+   dimensionB: number;
+   dimensionC: number;
+   dimensionD: number;
+   dimensionE: number;
+ };
+ 
+ export type UserRole = 'user' | 'coach' | 'admin';
+ 
+ // VERIFY: Confirm calibration dimension labels and structure.
+ 
+ @Entity({ name: 'users' })
+ export class User {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Index({ unique: true })
+   @Column({ unique: true })
+   email!: string;
+ 
++  @Column({ type: 'character varying', length: 100, default: '' })
++  firstName!: string;
++
++  @Column({ type: 'character varying', length: 100, default: '' })
++  lastName!: string;
++
+   @Column()
+   passwordHash!: string;
+ 
++  @Column({ type: 'boolean', default: false })
++  emailConfirmed!: boolean;
++
+   @Column({ type: 'character varying', length: 255, nullable: true })
+   calibrationProfileName!: string | null;
+ 
+   // VERIFY: Ensure null defaults are acceptable for calibration weights.
+   @Column({ type: 'jsonb', nullable: true })
+   calibrationWeights!: CalibrationWeights | null;
+ 
+   @Column({ type: 'character varying', length: 50, default: 'user' })
+   role!: UserRole;
+ 
+   @Column({
+     type: 'enum',
+     enum: SubscriptionTier,
+     default: SubscriptionTier.FREE,
+   })
+   subscriptionTier!: SubscriptionTier;
+ 
+   @Column({
+     type: 'enum',
+     enum: AccountType,
+     default: AccountType.FREE,
+   })
+   accountType!: AccountType;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
+index b6048a3169c06ad631ceb4068077e593f7b6176d..06e45e81592c53cc71d58f672c0b8607cdcd44a1 100644
+--- a/apps/api/src/users/users.service.ts
++++ b/apps/api/src/users/users.service.ts
+@@ -1,50 +1,63 @@
+ import { Injectable, NotFoundException } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { Repository } from 'typeorm';
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { User } from './user.entity';
+ import { AccountType } from './account-type.enum';
+ 
+ @Injectable()
+ export class UsersService {
+   constructor(
+     @InjectRepository(User)
+     private readonly usersRepository: Repository<User>,
+   ) {}
+ 
+-  async create(email: string, passwordHash: string): Promise<User> {
++  async create(input: {
++    email: string;
++    passwordHash: string;
++    firstName: string;
++    lastName: string;
++    emailConfirmed: boolean;
++  }): Promise<User> {
+     const user = this.usersRepository.create({
+-      email,
+-      passwordHash,
++      email: input.email,
++      passwordHash: input.passwordHash,
++      firstName: input.firstName,
++      lastName: input.lastName,
++      emailConfirmed: input.emailConfirmed,
+       // VERIFY: Confirm null calibration defaults are desired on signup.
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+     });
+     return this.usersRepository.save(user);
+   }
+ 
+   findByEmail(email: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { email } });
+   }
+ 
+   findById(id: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { id } });
+   }
+ 
+   async updateSubscriptionTier(
+     userId: string,
+     tier: SubscriptionTier,
+   ): Promise<User> {
+     const user = await this.findById(userId);
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+     user.subscriptionTier = tier;
+     return this.usersRepository.save(user);
+   }
++
++  async setEmailConfirmed(userId: string): Promise<void> {
++    await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
++  }
+ }
+diff --git a/apps/web/app/(public)/auth/_components/auth-form.tsx b/apps/web/app/(public)/auth/_components/auth-form.tsx
+index ecf01fc66405d475917866f9a1b9f3570484cbf3..26edf2abde38b0de8cb1ea1ee7ef3e225442bda2 100644
+--- a/apps/web/app/(public)/auth/_components/auth-form.tsx
++++ b/apps/web/app/(public)/auth/_components/auth-form.tsx
+@@ -9,167 +9,256 @@ interface AuthFormProps {
+   returnPath?: string | null;
+ }
+ 
+ function extractAuthApiMessage(value: unknown): string | undefined {
+   if (!value || typeof value !== "object") {
+     return undefined;
+   }
+   const candidate = value as { message?: unknown; error?: unknown };
+   if (typeof candidate.message === "string" && candidate.message.length) {
+     return candidate.message;
+   }
+   if (Array.isArray(candidate.message)) {
+     const filtered = candidate.message.filter((item): item is string => typeof item === "string");
+     if (filtered.length) {
+       return filtered.join(", ");
+     }
+   }
+   if (typeof candidate.error === "string" && candidate.error.length) {
+     return candidate.error;
+   }
+   return undefined;
+ }
+ 
+ export function AuthForm({ mode, returnPath }: AuthFormProps) {
+   const router = useRouter();
++  const [firstName, setFirstName] = useState("");
++  const [lastName, setLastName] = useState("");
+   const [email, setEmail] = useState("");
+   const [password, setPassword] = useState("");
++  const [confirmPassword, setConfirmPassword] = useState("");
+   const [error, setError] = useState<string | null>(null);
++  const [message, setMessage] = useState<string | null>(null);
+   const [isSubmitting, setIsSubmitting] = useState(false);
+ 
+   const isLogin = mode === "login";
+   const title = isLogin ? "Log in" : "Create an account";
+   const actionLabel = isLogin ? "Log in" : "Register";
+   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
+   const helperHref = isLogin ? "/auth/signup" : "/auth/login";
+   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
+   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+ 
+   const onSubmit = async (event: FormEvent) => {
+     event.preventDefault();
+     setError(null);
++    setMessage(null);
+ 
+     const trimmedEmail = email.trim();
+     if (!trimmedEmail || !password) {
+       setError("Email and password are required.");
        return;
      }
-     let canceled = false;
-     setAnalysisLoading(true);
-     setAnalysisError(null);
-     const loadAnalysis = async () => {
-       try {
-         const response = await fetch(
--          `/api/analysis/latest?jobId=${encodeURIComponent(selectedJobId)}`,
-+          `/api/analysis/job/${encodeURIComponent(selectedJobId)}/latest`,
-         );
-         const payload = await readResponsePayload(response);
-         if (canceled) return;
-         if (!response.ok) {
-           const message = formatErrorMessage(payload, "Fit analysis could not be loaded.");
-           setAnalysis(null);
-           setAnalysisError(message);
-           return;
-         }
-         setAnalysis(payload as LatestAnalysis);
-         setAnalysisError(null);
-       } catch (error) {
-         if (canceled) return;
-         const message =
-           error instanceof Error ? error.message : "Fit analysis could not be loaded.";
-         setAnalysis(null);
-         setAnalysisError(message);
-       } finally {
-         if (!canceled) {
-           setAnalysisLoading(false);
+ 
++    if (!isLogin && (!firstName.trim() || !lastName.trim())) {
++      setError("First name and last name are required.");
++      return;
++    }
++
++    if (!isLogin && password !== confirmPassword) {
++      setError("Passwords do not match.");
++      return;
++    }
++
+     setIsSubmitting(true);
+ 
+     try {
+       const response = await fetch(endpoint, {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         credentials: "include",
+-        body: JSON.stringify({ email: trimmedEmail, password }),
++        body: JSON.stringify(
++          isLogin
++            ? { email: trimmedEmail, password }
++            : {
++                firstName: firstName.trim(),
++                lastName: lastName.trim(),
++                email: trimmedEmail,
++                password,
++                confirmPassword,
++              },
++        ),
+       });
+ 
+       let data: unknown = null;
+ 
+       // Try to parse JSON if there is a body; ignore parse errors
+       const text = await response.text();
+       if (text) {
+         try {
+           data = JSON.parse(text);
+         } catch {
+           // non-JSON body (e.g. 404 HTML) – data stays null
          }
        }
-     };
-     void loadAnalysis();
-     return () => {
+ 
+       if (!response.ok) {
+         const messageFromApi =
+           extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
+ 
+         setError(messageFromApi);
+         return;
+       }
+ 
+-      // At this point, the API route should have:
+-      // - validated credentials
+-      // - set the auth cookie
+-      // We just navigate.
++      if (!isLogin) {
++        const successMessage =
++          extractAuthApiMessage(data) ?? "Check your email to confirm your account.";
++        setMessage(successMessage);
++        return;
++      }
++
+       router.push(returnPath ?? "/");
+     } catch (submitError) {
+       console.error("Auth request failed", submitError);
+       setError("Unable to reach authentication service");
+     } finally {
+       setIsSubmitting(false);
+     }
+   };
+ 
+   return (
+     <div className="mx-auto w-full max-w-md space-y-6">
+       <div className="space-y-2 text-center">
+         <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
+         <p className="text-sm text-gray-600">
+           Use your Target This Role credentials to continue.
+         </p>
+       </div>
+ 
+       <form
+         onSubmit={onSubmit}
+         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+       >
+         <div className="space-y-2">
++          {!isLogin && (
++            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
++              <div className="space-y-2">
++                <label className="block text-sm font-semibold text-gray-700" htmlFor="firstName">
++                  First Name
++                </label>
++                <input
++                  id="firstName"
++                  type="text"
++                  required={!isLogin}
++                  value={firstName}
++                  onChange={(event) => setFirstName(event.target.value)}
++                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++                  placeholder="First name"
++                />
++              </div>
++
++              <div className="space-y-2">
++                <label className="block text-sm font-semibold text-gray-700" htmlFor="lastName">
++                  Last Name
++                </label>
++                <input
++                  id="lastName"
++                  type="text"
++                  required={!isLogin}
++                  value={lastName}
++                  onChange={(event) => setLastName(event.target.value)}
++                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++                  placeholder="Last name"
++                />
++              </div>
++            </div>
++          )}
++
++          <div className="space-y-2">
+           <label
+             className="block text-sm font-semibold text-gray-700"
+             htmlFor="email"
+           >
+             Email
+           </label>
+           <input
+             id="email"
+             type="email"
+             required
+             autoComplete="email"
+             value={email}
+             onChange={(event) => setEmail(event.target.value)}
+             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+             placeholder="you@example.com"
+           />
+         </div>
++        </div>
+ 
+         <div className="space-y-2">
+           <label
+             className="block text-sm font-semibold text-gray-700"
+             htmlFor="password"
+           >
+             Password
+           </label>
+           <input
+             id="password"
+             type="password"
+             required
+             autoComplete={isLogin ? "current-password" : "new-password"}
+             value={password}
+             onChange={(event) => setPassword(event.target.value)}
+             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+             placeholder="••••••••"
+           />
+         </div>
+ 
++        {!isLogin && (
++          <div className="space-y-2">
++            <label
++              className="block text-sm font-semibold text-gray-700"
++              htmlFor="confirmPassword"
++            >
++              Confirm Password
++            </label>
++            <input
++              id="confirmPassword"
++              type="password"
++              required
++              autoComplete="new-password"
++              value={confirmPassword}
++              onChange={(event) => setConfirmPassword(event.target.value)}
++              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++              placeholder="••••••••"
++            />
++          </div>
++        )}
++
++        {message && (
++          <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>
++        )}
++
+         {error && (
+           <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+             {error}
+           </p>
+         )}
+ 
+         <button
+           type="submit"
+           disabled={isSubmitting}
+           className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
+         >
+           {isSubmitting ? "Working..." : actionLabel}
+         </button>
+       </form>
+ 
+       <p className="text-center text-sm text-gray-700">
+         {helperText}{" "}
+         <Link
+           href={helperHref}
+           className="font-semibold text-blue-600 hover:underline"
+         >
+           {helperLinkLabel}
+         </Link>
+       </p>
+     </div>
+diff --git a/apps/web/app/(public)/auth/confirm/page.tsx b/apps/web/app/(public)/auth/confirm/page.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd552b84db4197d38367c19d2b0d81f9fce963d1
+--- /dev/null
++++ b/apps/web/app/(public)/auth/confirm/page.tsx
+@@ -0,0 +1,63 @@
++"use client";
++
++import Link from "next/link";
++import { useSearchParams } from "next/navigation";
++import { useEffect, useState } from "react";
++
++export default function ConfirmPage() {
++  const searchParams = useSearchParams();
++  const token = searchParams.get("token") ?? "";
++  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
++  const [message, setMessage] = useState("Confirming your email...");
++
++  useEffect(() => {
++    async function runConfirmation() {
++      if (!token) {
++        setStatus("error");
++        setMessage("Missing confirmation token.");
++        return;
++      }
++
++      try {
++        const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
++          method: "GET",
++        });
++        const data = await response.json().catch(() => ({}));
++        if (!response.ok) {
++          setStatus("error");
++          setMessage(data?.message ?? "Unable to confirm email.");
++          return;
++        }
++
++        setStatus("success");
++        setMessage(data?.message ?? "Email confirmed. You can now log in.");
++      } catch (error) {
++        console.error("Failed to confirm email", error);
++        setStatus("error");
++        setMessage("Unable to confirm email.");
++      }
++    }
++
++    void runConfirmation();
++  }, [token]);
++
++  return (
++    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++      <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
++        <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
++        <p
++          className={
++            status === "error"
++              ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
++              : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
++          }
++        >
++          {message}
++        </p>
++        <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
++          Go to login
++        </Link>
++      </div>
++    </main>
++  );
++}
+diff --git a/apps/web/app/api/auth/confirm/route.ts b/apps/web/app/api/auth/confirm/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..06a7a3a9dfefa7e1ce3e68c3f0d9f5ed23aa48c6
+--- /dev/null
++++ b/apps/web/app/api/auth/confirm/route.ts
+@@ -0,0 +1,9 @@
++import { NextRequest } from "next/server";
++import { forwardAuthRequest } from "../helpers";
++
++export const runtime = "nodejs";
++
++export async function GET(request: NextRequest) {
++  const endpoint = `/auth/confirm?${request.nextUrl.searchParams.toString()}`;
++  return forwardAuthRequest(request, endpoint);
++}
+diff --git a/infra/docker/.env.example b/infra/docker/.env.example
+index 3f0d8a1b66b528b124d3148386e0a8143e8ca359..f8e692cf71b4becb51543f6fb9dc3ad6f5afe0a9 100644
+--- a/infra/docker/.env.example
++++ b/infra/docker/.env.example
+@@ -1,9 +1,12 @@
+ # DigitalOcean dev environment variables
+ APP_VERSION=dev
+ DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/targetthisrole?sslmode=require
+ CORS_ORIGIN=https://app.dev.targetthisrole.ai
+ CADDY_EMAIL=you@example.com
+ APP_DOMAIN=app.dev.targetthisrole.ai
+ 
+ TYPEORM_SYNCHRONIZE=true
+ ENABLE_LLM_PARITY_SCORE=true
++APP_BASE_URL=https://app.dev.targetthisrole.ai
++SUPPORT_EMAIL=support@targetthisrole.ai
++REQUIRE_EMAIL_CONFIRMATION=true

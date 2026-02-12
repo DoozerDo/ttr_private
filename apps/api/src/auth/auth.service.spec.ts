@@ -1,12 +1,17 @@
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
+import { AccountType } from '../users/account-type.enum';
+import { UserToken } from './user-token.entity';
+import { RelayEmailService } from '../email/relay-email.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -24,6 +29,36 @@ describe('AuthService', () => {
             findByEmail: jest.fn(),
             findById: jest.fn(),
             create: jest.fn(),
+            setEmailConfirmed: jest.fn(),
+          },
+        },
+        {
+          provide: RelayEmailService,
+          useValue: {
+            sendRawRelayEmail: jest.fn(),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+                return 'false';
+              }
+              if (key === 'NODE_ENV') {
+                return 'test';
+              }
+              return undefined;
+            }),
+          },
+        },
+        {
+          provide: getRepositoryToken(UserToken),
+          useValue: {
+            save: jest.fn(),
+            create: jest.fn((value) => value),
+            findOne: jest.fn(),
+            delete: jest.fn(),
           },
         },
       ],
@@ -35,42 +70,42 @@ describe('AuthService', () => {
     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
   });
 
-  it('registers a user and returns a token', async () => {
+  it('registers a user', async () => {
     const payload: RegisterDto = {
+      firstName: 'Test',
+      lastName: 'User',
       email: 'user@example.com',
       password: 'Password123',
+      confirmPassword: 'Password123',
     };
     const savedUser: User = {
       id: 'user-id',
       email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      emailConfirmed: true,
       passwordHash: '',
       calibrationProfileName: null,
       calibrationWeights: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
     usersService.findByEmail.mockResolvedValue(null);
-    usersService.create.mockImplementation(async (email, passwordHash) => ({
+    usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
       ...savedUser,
       email,
       passwordHash,
     }));
 
     const result = await service.register(payload);
-    const hashedPasswordArg = usersService.create.mock.calls[0][1];
+    const hashedPasswordArg = usersService.create.mock.calls[0][0].passwordHash;
 
     expect(hashedPasswordArg).not.toEqual(payload.password);
-    expect(result.accessToken).toEqual('signed-token');
-    expect(result.user).toMatchObject({
-      id: savedUser.id,
-      email: savedUser.email,
-      role: 'user',
-      subscriptionTier: SubscriptionTier.FREE,
-    });
-    expect(result.user).not.toHaveProperty('passwordHash');
+    expect(result.success).toEqual(true);
   });
 
   it('logs in a user with valid credentials', async () => {
@@ -82,11 +117,15 @@ describe('AuthService', () => {
     const savedUser: User = {
       id: 'user-id',
       email: payload.email,
+      firstName: 'Test',
+      lastName: 'User',
+      emailConfirmed: true,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
