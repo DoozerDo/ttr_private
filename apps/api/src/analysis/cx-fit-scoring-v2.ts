@@ -160,8 +160,6 @@ export type CxFitV2DebugInfo = {
   baselineBand: string;
   roleBand: string;
   bandDelta: number;
-  domainTagsBaseline: DomainTag[];
-  domainTagsRole: DomainTag[];
   responsibilityOverlapPercent: number;
   baselineCoveragePercent: number;
   baselineRecallPercent: number;
@@ -177,6 +175,42 @@ export type CxFitV2DebugInfo = {
     requiredCoverage: number;
     preferredCoverage: number;
   };
+  platformGroups: {
+    totalBoost: number;
+    evidence: PlatformGroupEvidence[];
+  };
+  strategicDensity: {
+    baseline: number;
+    job: number;
+    appliedBoost: boolean;
+  };
+  executiveScopeDensity: {
+    baseline: number;
+    job: number;
+    appliedBoost: boolean;
+  };
+  strategicGuard: {
+    leadershipLevel: number;
+    baselineExecutiveScopeDensity: number;
+    executiveScopeThreshold: number;
+    leadershipThreshold: number;
+    guardEnabled: boolean;
+    tacticalSuppressionSkipped: boolean;
+  };
+  industryBundles: {
+    evidence: {
+      id: string;
+      jobHits: number;
+      baselineHits: number;
+      qualifies: boolean;
+      addRoleTags: DomainTag[];
+      suppressRoleTags: DomainTag[];
+    }[];
+  };
+  domainTagsBaselineOriginal: DomainTag[];
+  domainTagsRoleOriginal: DomainTag[];
+  domainTagsBaseline: DomainTag[];
+  domainTagsRole: DomainTag[];
   baselineCoverageDetails?: BaselineCoverageDetails;
   bundle?: FitScoreDebugBundle;
   jobClusters: string[];
@@ -378,6 +412,185 @@ const DOMAIN_MATCHERS: Array<{ tag: DomainTag; patterns: RegExp[] }> = [
 
 const HARD_TOOL_GUARDS = ['servicenow', 'service desk'];
 
+const STRATEGIC_SIGNAL_TERMS = [
+  'define',
+  'defined',
+  'execute',
+  'executed',
+  'establish',
+  'established',
+  'build',
+  'built',
+  'scale',
+  'scaled',
+  'direct',
+  'directed',
+  'own',
+  'owned',
+  'p&l',
+  'governance',
+  'strategy',
+  'vision',
+  'enterprise',
+  'organizational',
+  'operationalized',
+  'architected',
+  'instituted',
+  'executive',
+  'global',
+  'framework',
+  'program',
+  'portfolio',
+  'board',
+  'cab',
+];
+
+const EXECUTIVE_SCOPE_TERMS = [
+  'p&l',
+  'global',
+  'enterprise',
+  'board',
+  'cab',
+  'portfolio',
+  'program',
+  'organizational',
+  'governance',
+  'executive',
+  'multi region',
+  'cross regional',
+  'enterprise level',
+  'global team',
+  'follow the sun',
+];
+
+const EXEC_THRESHOLD = 0.002;
+const STRATEGIC_THRESHOLD = 0.004;
+const EXECUTIVE_STRATEGIC_GUARD_LEADERSHIP_THRESHOLD = 85;
+
+type PlatformGroup = {
+  id: string;
+  terms: string[];
+  minHitsJob: number;
+  minHitsBaseline: number;
+  boost: number;
+};
+
+type PlatformGroupEvidence = {
+  id: string;
+  jobHits: number;
+  baselineHits: number;
+  qualifies: boolean;
+  boost: number;
+};
+
+const PLATFORM_GROUPS: PlatformGroup[] = [
+  {
+    id: 'cloud_native_operations',
+    terms: [
+      'saas',
+      'cloud',
+      'cloud native',
+      'cloud-native',
+      'distributed',
+      'multi cloud',
+      'multi-cloud',
+      'edge',
+      'service reliability',
+      'high availability',
+      'uptime',
+      'slo',
+      'sla',
+      'mttr',
+      'mttd',
+      'incident',
+      'major incident',
+      'on call',
+      'on-call',
+      'runbook',
+      'post incident',
+      'post-incident',
+      'rca',
+      'root cause',
+      'pagerduty',
+      'jira service management',
+      'service now',
+      'servicenow',
+    ],
+    minHitsJob: 3,
+    minHitsBaseline: 3,
+    boost: 8,
+  },
+  {
+    id: 'security_and_compliance_operations',
+    terms: [
+      'security',
+      'cybersecurity',
+      'soc 2',
+      'soc2',
+      'iso 27001',
+      'iso27001',
+      'iso/iec 27035',
+      '27035',
+      'sirt',
+      'fedramp',
+      'compliance',
+      'governance',
+      'risk management',
+      'incident response',
+      'security incident',
+    ],
+    minHitsJob: 2,
+    minHitsBaseline: 2,
+    boost: 6,
+  },
+];
+
+type IndustryBundle = {
+  id: string;
+  terms: string[];
+  minHitsJob: number;
+  minHitsBaseline: number;
+  addRoleTags: DomainTag[];
+  addBaselineTags: DomainTag[];
+  suppressRoleTags: DomainTag[];
+};
+
+const INDUSTRY_BUNDLES: IndustryBundle[] = [
+  {
+    id: 'cybersecurity_saas_cloud',
+    terms: [
+      'saas',
+      'cloud',
+      'cloud native',
+      'cloud-native',
+      'distributed cloud',
+      'distributed',
+      'multi cloud',
+      'multi-cloud',
+      'edge',
+      'security',
+      'cybersecurity',
+      'zero trust',
+      'soc 2',
+      'soc2',
+      'iso 27001',
+      'iso27001',
+      'iso/iec 27035',
+      '27035',
+      'sirt',
+      'incident response',
+      'security incident',
+      'customer trust',
+      'service reliability',
+    ],
+    minHitsJob: 4,
+    minHitsBaseline: 2,
+    addRoleTags: ['SaaS', 'External Delivery'],
+    addBaselineTags: [],
+    suppressRoleTags: ['Enterprise IT', 'Internal Delivery'],
+  },
+];
+
 const detectVectors = (text: string) =>
   RESPONSIBILITY_VECTORS.filter((vector) =>
     vector.keywords.some((keyword) => text.includes(keyword)),
@@ -556,6 +769,8 @@ export const scoreCxFitV2 = (
     .join(' ');
 
   const jobText = [jobSegments, input.job.rawDescription].filter(Boolean).join('\n');
+  const baselineRawText = baselineText;
+  const jobRawText = jobText;
 
   const hasRawDescription = Boolean((input.job.rawDescription ?? '').trim());
 
@@ -649,11 +864,74 @@ export const scoreCxFitV2 = (
   });
   const bandDelta = baselineBand - roleBand;
   const bandGap = Math.abs(bandDelta);
+  const leadershipLevel = clamp(100 - Math.min(100, bandGap * 15));
 
   // domain
-  const domainTagsBaseline = detectDomainTags(normalizedBaselineText);
-  const domainTagsRole = detectDomainTags(normalizedJobText);
-  const domainPercent = computeDomainPercent(domainTagsBaseline, domainTagsRole);
+  const domainTagsBaselineOriginal = detectDomainTags(normalizedBaselineText);
+  const domainTagsRoleOriginal = detectDomainTags(normalizedJobText);
+
+  const jobScoringTextForBundles = jobTextForScoring;
+  const baselineScoringTextForBundles = baselineText;
+
+  let domainTagsRole = [...domainTagsRoleOriginal];
+  let domainTagsBaseline = [...domainTagsBaselineOriginal];
+
+  const industryBundleEvidence = INDUSTRY_BUNDLES.map((bundle) => {
+    const jobHits = countBundleHits(jobScoringTextForBundles, bundle.terms);
+    const baselineHits = countBundleHits(baselineScoringTextForBundles, bundle.terms);
+    const qualifies =
+      jobHits >= bundle.minHitsJob && baselineHits >= bundle.minHitsBaseline;
+
+    return {
+      id: bundle.id,
+      jobHits,
+      baselineHits,
+      qualifies,
+      addRoleTags: qualifies ? bundle.addRoleTags : [],
+      suppressRoleTags: qualifies ? bundle.suppressRoleTags : [],
+    };
+  });
+
+  for (const evidence of industryBundleEvidence) {
+    if (!evidence.qualifies) continue;
+
+    const bundle = INDUSTRY_BUNDLES.find((b) => b.id === evidence.id);
+    if (!bundle) continue;
+
+    for (const tag of evidence.addRoleTags) {
+      if (!domainTagsRole.includes(tag)) {
+        domainTagsRole.push(tag);
+      }
+    }
+
+    for (const tag of bundle?.addBaselineTags ?? []) {
+      if (!domainTagsBaseline.includes(tag)) {
+        domainTagsBaseline.push(tag);
+      }
+    }
+
+    for (const tag of evidence.suppressRoleTags) {
+      domainTagsRole = domainTagsRole.filter((x) => x !== tag);
+    }
+  }
+
+  if (
+    domainTagsRoleOriginal.includes('External Delivery') &&
+    !domainTagsRole.includes('External Delivery')
+  ) {
+    domainTagsRole.push('External Delivery');
+  }
+
+  const domainPercent = computeDomainPercent(
+    domainTagsBaseline,
+    domainTagsRole,
+  );
+
+  const baselineExecDensity = calculateExecutiveScopeDensity(baselineRawText);
+  const jobExecDensity = calculateExecutiveScopeDensity(jobRawText);
+  const executiveOperationalGuardEnabled =
+    leadershipLevel >= EXECUTIVE_STRATEGIC_GUARD_LEADERSHIP_THRESHOLD &&
+    baselineExecDensity > EXEC_THRESHOLD;
 
   // strategy and execution signals
   const strategyMatchesJob = countPatternMatches(normalizedJobText, STRATEGY_PATTERNS);
@@ -678,6 +956,34 @@ export const scoreCxFitV2 = (
   );
 
   const toolingPercent = hasMissingHardTools ? 0 : rawToolingPercent;
+  let toolingAndPlatformPercent = toolingPercent;
+
+  const platformGroupEvidence: PlatformGroupEvidence[] = PLATFORM_GROUPS.map(
+    (group) => {
+      const jobHits = countGroupHits(jobTextForScoring, group.terms);
+      const baselineHits = countGroupHits(baselineText, group.terms);
+      const qualifies =
+        jobHits >= group.minHitsJob && baselineHits >= group.minHitsBaseline;
+
+      return {
+        id: group.id,
+        jobHits,
+        baselineHits,
+        qualifies,
+        boost: qualifies ? group.boost : 0,
+      };
+    },
+  );
+
+  const platformGroupBoost = platformGroupEvidence.reduce(
+    (sum, evidence) => sum + evidence.boost,
+    0,
+  );
+
+  toolingAndPlatformPercent = Math.min(
+    100,
+    toolingAndPlatformPercent + platformGroupBoost,
+  );
 
   // ---- contract dimension percents (0-100) ----
   // 1) role_scope_and_seniority (scope + seniority alignment)
@@ -710,8 +1016,6 @@ export const scoreCxFitV2 = (
   );
 
   // 3) tooling_and_platform_experience
-  const toolingAndPlatformPercent = toolingPercent;
-
   // 4) domain_and_business_context
   const domainAndContextPercent = domainPercent;
 
@@ -749,13 +1053,51 @@ export const scoreCxFitV2 = (
       : originalAdvocacyRatioPercent,
   );
 
-  const changeLeadershipAndAdvocacyPercent = clamp(
+  const defaultStrategicTacticalFit = clamp(
     Math.round(flooredStrategyRatioPercent * 0.55 + flooredAdvocacyRatioPercent * 0.45),
   );
+
+  let strategicTacticalFit: number;
+  let tacticalSuppressionSkipped = false;
+
+  if (executiveOperationalGuardEnabled) {
+    tacticalSuppressionSkipped = true;
+    strategicTacticalFit = clamp(
+      Math.round(Math.max(flooredStrategyRatioPercent, flooredAdvocacyRatioPercent)),
+    );
+  } else {
+    strategicTacticalFit = defaultStrategicTacticalFit;
+  }
+
+  const baselineStrategicDensity = calculateStrategicDensity(baselineRawText);
+  const jobStrategicDensity = calculateStrategicDensity(jobRawText);
+
+  let execBoostApplied = false;
+  if (
+    baselineExecDensity > EXEC_THRESHOLD &&
+    jobExecDensity > EXEC_THRESHOLD
+  ) {
+    strategicTacticalFit += 10;
+    execBoostApplied = true;
+  }
+
+  strategicTacticalFit = Math.min(strategicTacticalFit, 100);
+
+  let strategicBoostApplied = false;
+  if (
+    baselineStrategicDensity > STRATEGIC_THRESHOLD &&
+    jobStrategicDensity > STRATEGIC_THRESHOLD
+  ) {
+    strategicTacticalFit = strategicTacticalFit * 1.15;
+    strategicBoostApplied = true;
+  }
+
+  strategicTacticalFit = Math.min(strategicTacticalFit, 100);
+
   const changeLeadershipAndAdvocacyPercentFloored = clamp(
     roleImpliedStrategyFloorApplied
-      ? Math.max(changeLeadershipAndAdvocacyPercent, 65)
-      : changeLeadershipAndAdvocacyPercent,
+      ? Math.max(strategicTacticalFit, 65)
+      : strategicTacticalFit,
   );
   const changeLeadershipEligibility: 'eligible' | 'ineligible_ic_role' =
     roleBand < 7 ? 'ineligible_ic_role' : 'eligible';
@@ -899,8 +1241,8 @@ export const scoreCxFitV2 = (
           sharedClusters,
           jobClusterHits,
           baselineClusterHits,
-          domainTagsBaseline,
-          domainTagsRole,
+    domainTagsBaseline: domainTagsBaseline,
+    domainTagsRole: domainTagsRole,
           hasRawDescription,
           dimensionPoints,
           dimensionPercents,
@@ -928,8 +1270,10 @@ export const scoreCxFitV2 = (
       baselineBand: `L${baselineBand}`,
       roleBand: `L${roleBand}`,
       bandDelta,
-      domainTagsBaseline,
-      domainTagsRole,
+      domainTagsBaseline: domainTagsBaseline,
+      domainTagsRole: domainTagsRole,
+      domainTagsBaselineOriginal,
+      domainTagsRoleOriginal,
       responsibilityOverlapPercent: clamp(Math.round(responsibilityOverlapPercent)),
       baselineCoveragePercent: clamp(Math.round(baselineCoveragePercent)),
       baselineRecallPercent: clamp(Math.round(baselineRecallPercent)),
@@ -946,6 +1290,31 @@ export const scoreCxFitV2 = (
       toolingCoverage: {
         requiredCoverage: toolingCoverage.requiredCoverage,
         preferredCoverage: toolingCoverage.preferredCoverage,
+      },
+      platformGroups: {
+        totalBoost: platformGroupBoost,
+        evidence: platformGroupEvidence,
+      },
+      industryBundles: {
+        evidence: industryBundleEvidence,
+      },
+      strategicDensity: {
+        baseline: baselineStrategicDensity,
+        job: jobStrategicDensity,
+        appliedBoost: strategicBoostApplied,
+      },
+      executiveScopeDensity: {
+        baseline: baselineExecDensity,
+        job: jobExecDensity,
+        appliedBoost: execBoostApplied,
+      },
+      strategicGuard: {
+        leadershipLevel,
+        baselineExecutiveScopeDensity: baselineExecDensity,
+        executiveScopeThreshold: EXEC_THRESHOLD,
+        leadershipThreshold: EXECUTIVE_STRATEGIC_GUARD_LEADERSHIP_THRESHOLD,
+        guardEnabled: executiveOperationalGuardEnabled,
+        tacticalSuppressionSkipped,
       },
       bundle: debugBundle,
       changeLeadershipEligibility,
@@ -1295,3 +1664,75 @@ const createSnippet = (
 const formatDomainTags = (tags: DomainTag[]): string => {
   return tags.length ? tags.join(', ') : 'none';
 };
+
+function calculateStrategicDensity(text: string): number {
+  if (!text) return 0;
+
+  const normalized = text
+    .toLowerCase()
+    .replace(/[^a-z0-9&\s]/g, ' ');
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+
+  if (wordCount === 0) return 0;
+
+  let matches = 0;
+
+  for (const term of STRATEGIC_SIGNAL_TERMS) {
+    const regex = new RegExp(`\\b${term}\\b`, 'g');
+    const found = normalized.match(regex);
+    if (found) {
+      matches += found.length;
+    }
+  }
+
+  return matches / wordCount;
+}
+
+function calculateExecutiveScopeDensity(text: string): number {
+  if (!text) return 0;
+
+  const normalized = text.toLowerCase();
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+
+  if (wordCount === 0) return 0;
+
+  let matches = 0;
+
+  for (const term of EXECUTIVE_SCOPE_TERMS) {
+    const regex = new RegExp(`\\b${term}\\b`, 'g');
+    const found = normalized.match(regex);
+    if (found) {
+      matches += found.length;
+    }
+  }
+
+  return matches / wordCount;
+}
+
+function countGroupHits(text: string, terms: string[]): number {
+  if (!text) return 0;
+
+  const normalized = text.toLowerCase();
+  let hits = 0;
+
+  for (const term of terms) {
+    const t = term.toLowerCase().trim();
+    if (!t) continue;
+
+    const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${escaped}\\b`, 'g');
+    const found = normalized.match(re);
+    if (found) {
+      hits += found.length;
+    }
+  }
+
+  return hits;
+}
+
+function countBundleHits(text: string, terms: string[]): number {
+  return countGroupHits(text, terms);
+}
