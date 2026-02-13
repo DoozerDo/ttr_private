@@ -5,11 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
-import {
-  ComplianceFlagPanel,
-  ComplianceViolationPanel,
-  type ComplianceFlag,
-} from "@/components/ComplianceViolationPanel";
+import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { ScoreGauge } from "@/components/ScoreGauge";
@@ -25,8 +21,8 @@ import {
 import { useAutoGenerateThreshold } from "../lib/settings";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 import {
-  buildReasonSummary,
   mapComplianceFlags,
+  sanitizeGapMessage,
   sortComplianceFlagsBySeverity,
 } from "@/lib/resultsInsights";
 import {
@@ -400,10 +396,8 @@ export default function ResultsPage() {
   useEffect(() => {
     setHasMounted(true);
   }, []);
-  const [showAllComplianceFlags, setShowAllComplianceFlags] = useState(false);
   const [experienceActionTarget, setExperienceActionTarget] = useState<string | null>(null);
   const confidenceSettingsRef = useRef<HTMLDivElement | null>(null);
-  const complianceDetailsRef = useRef<HTMLDetailsElement | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -469,40 +463,7 @@ export default function ResultsPage() {
     [activeAnalysis?.verdict],
   );
 
-  const currentVerdictInfo = useMemo(
-    () => getVerdictDisplayOrDefault(latest?.verdict ?? null),
-    [latest?.verdict],
-  );
-
-  const verdictToneClass = useMemo(() => {
-    switch (activeVerdictInfo.label) {
-      case "Apply":
-        return "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
-      case "Consider":
-        return "border-amber-300/40 bg-amber-500/10 text-amber-200";
-      case "Skip":
-        return "border-rose-400/40 bg-rose-500/10 text-rose-200";
-      default:
-        return "border-slate-500/30 bg-slate-800/40 text-slate-200";
-    }
-  }, [activeVerdictInfo.label]);
-  const displayActiveVerdictLabel =
-    activeVerdictInfo.label === "Verdict pending" ? "Score pending" : activeVerdictInfo.label;
-  const displayCurrentVerdictLabel =
-    currentVerdictInfo.label === "Verdict pending" ? "Score pending" : currentVerdictInfo.label;
-
-  const jobDescriptor = useMemo(() => {
-    if (latest?.jobTitle) {
-      return latest.company ? `${latest.jobTitle} at ${latest.company}` : latest.jobTitle;
-    }
-    return latest?.jobId ? "Job details loaded" : "No job selected";
-  }, [latest?.company, latest?.jobId, latest?.jobTitle]);
-
-  const baselineDescriptor = useMemo(() => {
-    if (latest?.baselineId) return "Baseline selected";
-    if (baselineId) return "Baseline context provided";
-    return "No baseline selected";
-  }, [baselineId, latest?.baselineId]);
+  const gaugeVerdictLabel = activeVerdictInfo.label.toUpperCase();
 
   const fitReviewPath = useMemo(() => {
     const candidateJobId = (latest?.jobId || jobId || "").trim();
@@ -525,22 +486,6 @@ export default function ResultsPage() {
     }
     return `/studio?${params.toString()}`;
   }, [latest?.jobId, latestBaselineVersionId]);
-
-  const oneTapEligible = useMemo(() => {
-    if (activeScore === null) return false;
-    return activeScore >= autoGenerateThreshold;
-  }, [activeScore, autoGenerateThreshold]);
-
-  const qualityBadge = useMemo(() => {
-    if (activeScore === null) return null;
-    const optimized = activeScore >= autoGenerateThreshold;
-    return {
-      label: optimized ? "Ready" : "Draft",
-      toneClass: optimized
-        ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
-        : "border-amber-300/40 bg-amber-500/10 text-amber-200",
-    };
-  }, [activeScore, autoGenerateThreshold]);
 
   const nextSteps = useMemo(
     () =>
@@ -600,10 +545,6 @@ export default function ResultsPage() {
     return "Confidence is unchanged—proceed with the next action.";
   }, [calibrationResult]);
 
-  const domainContextPerfect = useMemo(() => {
-    const value = scoringRubric?.dimensionPercents?.domain_and_business_context;
-    return typeof value === "number" && value >= 99.5;
-  }, [scoringRubric?.dimensionPercents]);
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(activeAnalysis ?? null),
     [activeAnalysis],
@@ -673,34 +614,15 @@ export default function ResultsPage() {
     }
   }, [debugJsonPayload]);
 
-  const reasonSummary = useMemo(
-    () => buildReasonSummary(latest?.strengths ?? [], latest?.gaps ?? []),
-    [latest?.gaps, latest?.strengths],
-  );
-  const highlightedStrengths = useMemo(() => {
-    const all = [...reasonSummary.primary, ...reasonSummary.extras];
-    return all.filter((item) => item.type === "strength").slice(0, 3);
-  }, [reasonSummary]);
-  const highlightedGaps = useMemo(() => {
-    const all = [...reasonSummary.primary, ...reasonSummary.extras];
-    return all
-      .filter((item) => item.type === "gap")
-      .filter((item) => {
-      if (!domainContextPerfect) return true;
-        return !item.message.toLowerCase().includes("industry");
-      })
-      .slice(0, 3);
-  }, [reasonSummary, domainContextPerfect]);
-
   const summaryCopy = useMemo(() => {
     if (!latest) {
-      return "Load the latest analysis to surface the strengths, gaps, and experience areas behind this score.";
+      return "Load the latest analysis to surface how the score reflects your context.";
     }
     const raw = typeof latest.summary === "string" ? latest.summary.trim() : "";
     if (raw.length && !/key term/i.test(raw)) {
       return raw;
     }
-    return "Review the strengths, gaps, and experience area contributions that shaped this score.";
+    return "Load the latest analysis to surface how the score reflects your context.";
   }, [latest]);
 
   const rubricDescription = useMemo(
@@ -756,8 +678,27 @@ export default function ResultsPage() {
     [latest?.complianceFlags],
   );
 
-  const topComplianceFlags = complianceFlagList.slice(0, 3);
-  const hasMoreComplianceFlags = complianceFlagList.length > 3;
+  const strengthItems = useMemo(() => {
+    if (!latest?.strengths?.length) return [];
+    return latest.strengths
+      .map((item) => item?.trim?.())
+      .filter((item): item is string => typeof item === "string" && item.length > 0)
+      .slice(0, 4);
+  }, [latest?.strengths]);
+
+  const gapItems = useMemo(() => {
+    const normalizedGaps = (latest?.gaps ?? [])
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item): item is string => item.length > 0)
+      .map(sanitizeGapMessage);
+
+    const complianceEntries = complianceFlagList.map((flag) => {
+      const label = flag.severity === "block" ? "Required boundary" : "Advisory boundary";
+      return `${label}: ${flag.message}`;
+    });
+
+    return [...normalizedGaps, ...complianceEntries].slice(0, 4);
+  }, [latest?.gaps, complianceFlagList]);
 
   const debugMode = debugUiEnabled;
 
@@ -882,18 +823,6 @@ export default function ResultsPage() {
     }
   }
 
-  const handleScrollToConfidenceSettings = useCallback(() => {
-    if (!confidenceSettingsRef.current) return;
-    confidenceSettingsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    const focusTarget = confidenceSettingsRef.current.querySelector<HTMLElement>("select, button");
-    focusTarget?.focus();
-  }, []);
-
-  const handleReviewComplianceFlags = useCallback(() => {
-    setShowAllComplianceFlags(true);
-    complianceDetailsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
-
   const handleExperienceAction = useCallback((area: string) => {
     setExperienceActionTarget(area);
   }, []);
@@ -1000,80 +929,58 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <>
-              <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Score summary
-                      </p>
-                      {qualityBadge ? (
-                        <span
-                          className={`rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${qualityBadge.toneClass}`}
-                        >
-                          {qualityBadge.label}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-4 flex justify-center">
-                      <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} label="CX Fit Score" />
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 space-y-2">
-                    <span
-                      className={`inline-flex items-center gap-2 rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.35em] ${verdictToneClass}`}
-                    >
-                      {displayActiveVerdictLabel}
-                    </span>
-                    <p className="text-sm text-slate-200">{activeVerdictInfo.description}</p>
-                    <p className="text-xs text-slate-400">{jobDescriptor}</p>
-                    <p className="text-xs text-slate-400">{baselineDescriptor}</p>
-                    <p className="text-xs text-slate-400">
-                      The active score reflects the live lens on this page while the stored score stays until you refresh.
-                    </p>
-                  </div>
+            <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] items-start">
+              <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-6">
+                <div className="flex flex-col items-center gap-4">
+                  <ScoreGauge
+                    score={activeScore ?? undefined}
+                    loading={activeScore === null}
+                    label={gaugeVerdictLabel}
+                  />
+                  <p className="text-center text-sm text-slate-200">{activeVerdictInfo.description}</p>
                 </div>
-                <div className="space-y-4 flex flex-col items-end">
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-3 max-w-[220px] text-right">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                      Current score
-                    </p>
-                    <p className="mt-1 text-2xl font-semibold text-white">
-                      {latestScore !== null ? latestScore.toFixed(1) : "Not available"}
-                    </p>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">
-                      {displayCurrentVerdictLabel}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Saved until you choose to rerun the analysis.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 max-w-[280px] text-left">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Confidence Check
-                      </p>
-                      <span className="text-xs text-slate-400">Optional</span>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-300">
-                      Confidence Check reruns the score with the profile you choose below so you can see how stable this signal is. Press the button to jump to the controls and try a different lens.
-                    </p>
-                    <FormButton className="mt-4 w-full" onClick={handleScrollToConfidenceSettings}>
-                      Run Confidence Check
-                    </FormButton>
-                    <p className="mt-2 text-xs text-slate-400">
-                      The section below lets you pick a profile, rerun the analysis, and compare the resulting score with the one above.
-                    </p>
-                  </div>
-                </div>
-                </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200">
-                {summaryCopy}
               </div>
-
-            </>
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
+                    Strengths
+                  </p>
+                  {strengthItems.length ? (
+                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                      {strengthItems.map((item, index) => (
+                        <li key={`${item}-${index}`} className="flex items-start gap-2">
+                          <span className="text-emerald-300">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-400">
+                      No strengths surfaced yet; run the latest analysis to reveal them.
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">
+                    Gaps
+                  </p>
+                  {gapItems.length ? (
+                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                      {gapItems.map((item, index) => (
+                        <li key={`${item}-${index}`} className="flex items-start gap-2">
+                          <span className="text-amber-300">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-400">
+                      No gaps surfaced yet; run the latest analysis to highlight where to tighten the story.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </section>
 
@@ -1100,86 +1007,6 @@ export default function ResultsPage() {
             </ul>
           </section>
         ) : null}
-
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Compliance status
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Resume truth & boundary checks</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                These indicators highlight compliance considerations before we produce materials so you can review them calmly.
-              </p>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Sorted by impact</span>
-          </div>
-
-          {!latest ? (
-            <p className="mt-4 text-sm text-slate-400">
-              Load the latest analysis to surface how the resume aligns with compliance signals.
-            </p>
-          ) : topComplianceFlags.length ? (
-            <>
-              <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-50">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">Compliance flags detected</p>
-                    <p className="text-xs text-amber-100">
-                      Review these warnings before generating documents or exports.
-                    </p>
-                  </div>
-                  <FormButton variant="secondary" onClick={handleReviewComplianceFlags}>
-                    Review flagged claims
-                  </FormButton>
-                </div>
-              </div>
-              <ul className="mt-4 space-y-3 text-sm text-slate-200">
-                {topComplianceFlags.map((flag) => (
-                  <li key={flag.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      <span>{flag.severity === "block" ? "Required boundary" : "Advisory boundary"}</span>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-100">{flag.message}</p>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
-              <span className="text-emerald-300 text-lg" aria-hidden="true">
-                ✓
-              </span>
-              <p>No compliance issues detected for this assessment.</p>
-            </div>
-          )}
-
-          {latest && hasMoreComplianceFlags ? (
-            <details
-              ref={complianceDetailsRef}
-              open={showAllComplianceFlags}
-              onToggle={(event) => setShowAllComplianceFlags(event.currentTarget.open)}
-              className="mt-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4"
-            >
-              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-                Show all {complianceFlagList.length} flags
-              </summary>
-              <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                {complianceFlagList.map((flag) => (
-                  <li
-                    key={`all-${flag.id}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/50 p-3"
-                  >
-                    <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      {flag.severity === "block" ? "Required boundary" : "Advisory boundary"}
-                    </p>
-                    <p className="text-sm text-slate-100">{flag.message}</p>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </section>
 
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
 
@@ -1519,44 +1346,6 @@ export default function ResultsPage() {
                 ) : null}
               </div>
             ))}
-          </div>
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">Strengths</p>
-              <div className="mt-3 space-y-3">
-                {highlightedStrengths.length ? (
-                  highlightedStrengths.map((item, index) => (
-                    <div key={`${item.message}-${index}`} className="space-y-1">
-                      <p className="text-sm font-semibold text-white">{item.message}</p>
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Confidence</p>
-                      <p className="text-sm text-slate-300">Lean on this strength as you tailor your story.</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-400">Generate or load an analysis to see the confirming signals.</p>
-                )}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">Gaps</p>
-              <div className="mt-3 space-y-3">
-                {highlightedGaps.length ? (
-                  highlightedGaps.map((item, index) => (
-                    <div key={`${item.message}-${index}`} className="space-y-1">
-                      <p className="text-sm font-semibold text-white">{item.message}</p>
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Action</p>
-                      <p className="text-sm text-slate-300">
-                        Frame this area with role-specific impact examples to reinforce defensibility before exporting.
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-400">
-                    No gaps surfaced yet; run the latest analysis to highlight where to focus.
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200">
             <div className="flex items-center justify-between">

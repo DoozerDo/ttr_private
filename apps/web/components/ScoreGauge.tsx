@@ -72,21 +72,22 @@ export function ScoreGauge({ score = 0, loading = false, label = "CX Fit Score" 
       >
         <div
           style={{
-            fontSize: 36,
+            fontSize: 42,
             fontWeight: 800,
-            color: "#bbf7d0",
-            textShadow: "0 2px 14px rgba(0,0,0,0.35)",
+            color: "#f8fafc",
+            textShadow: "0 2px 12px rgba(2,6,23,0.5)",
           }}
         >
           {Math.round(clampedScore)}
         </div>
         <span
           style={{
-            marginTop: 6,
-            fontSize: 11,
-            letterSpacing: 2.5,
+            marginTop: 8,
+            fontSize: 16,
+            letterSpacing: 1,
             textTransform: "uppercase",
-            color: "rgba(187,247,208,0.8)",
+            fontWeight: 600,
+            color: "#fefce8",
           }}
         >
           {label}
