@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EmailModule } from '../email/email.module';
+import { AccessCodesModule } from '../access-codes/access-codes.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -14,6 +15,7 @@ import { UserToken } from './user-token.entity';
   imports: [
     ConfigModule,
     UsersModule,
+    AccessCodesModule,
     EmailModule,
     TypeOrmModule.forFeature([UserToken]),
     PassportModule,

@@ -12,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { AccountType } from '../users/account-type.enum';
 import { UserToken } from './user-token.entity';
 import { RelayEmailService } from '../email/relay-email.service';
+import { AccessCodesService } from '../access-codes/access-codes.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -36,6 +37,12 @@ describe('AuthService', () => {
           provide: RelayEmailService,
           useValue: {
             sendRawRelayEmail: jest.fn(),
+          },
+        },
+        {
+          provide: AccessCodesService,
+          useValue: {
+            redeemCodeForUser: jest.fn(),
           },
         },
         {
@@ -84,6 +91,7 @@ describe('AuthService', () => {
       firstName: payload.firstName,
       lastName: payload.lastName,
       emailConfirmed: true,
+      betaAccessApproved: false,
       passwordHash: '',
       calibrationProfileName: null,
       calibrationWeights: null,
@@ -120,6 +128,7 @@ describe('AuthService', () => {
       firstName: 'Test',
       lastName: 'User',
       emailConfirmed: true,
+      betaAccessApproved: false,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,

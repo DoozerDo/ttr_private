@@ -43,6 +43,9 @@ export class User {
   @Column({ type: 'boolean', default: false })
   emailConfirmed!: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  betaAccessApproved!: boolean;
+
   @Column({ type: 'character varying', length: 255, nullable: true })
   calibrationProfileName!: string | null;
 

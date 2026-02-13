@@ -13,7 +13,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import type { AuthUserDto } from './dto/auth-response.dto';
 
@@ -52,6 +52,17 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const response = await this.authService.login(payload);
+    this.setAuthCookie(res, response.accessToken);
+    return response;
+  }
+
+
+  @Post('redeem-access-code-and-login')
+  async redeemAccessCodeAndLogin(
+    @Body() payload: RedeemAccessCodeAndLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const response = await this.authService.redeemAccessCodeAndLogin(payload);
     this.setAuthCookie(res, response.accessToken);
     return response;
   }

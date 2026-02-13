@@ -15,12 +15,13 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { RelayEmailService } from '../email/relay-email.service';
 import { UsersService } from '../users/users.service';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/user.entity';
 import { getEntitlementsForTier } from '../features/feature-gates';
 import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
+import { AccessCodesService } from '../access-codes/access-codes.service';
 
 type RegisterResponseDto = {
   success: true;
@@ -36,6 +37,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @InjectRepository(UserToken)
     private readonly userTokensRepository: Repository<UserToken>,
+    private readonly accessCodesService: AccessCodesService,
   ) {}
 
   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
@@ -101,27 +103,27 @@ export class AuthService {
   }
 
   async login(payload: LoginDto): Promise<AuthResponseDto> {
-    const user = await this.usersService.findByEmail(payload.email);
+    const user = await this.validateCredentials(payload);
 
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (this.requireAccessCode && !user.betaAccessApproved) {
+      throw new ForbiddenException({
+        code: 'ACCESS_CODE_REQUIRED',
+        message: 'Access code required.',
+      });
     }
 
-    const isValidPassword = await bcrypt.compare(
-      payload.password,
-      user.passwordHash,
-    );
+    return this.buildAuthResponse(user);
+  }
 
-    if (!isValidPassword) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
 
-    if (this.requireEmailConfirmation && !user.emailConfirmed) {
-      throw new ForbiddenException(
-        'Please confirm your email before logging in.',
-      );
-    }
+  async redeemAccessCodeAndLogin(
+    payload: RedeemAccessCodeAndLoginDto,
+  ): Promise<AuthResponseDto> {
+    const user = await this.validateCredentials(payload);
 
+    await this.accessCodesService.redeemCodeForUser(user, payload.code);
+
+    user.betaAccessApproved = true;
     return this.buildAuthResponse(user);
   }
 
@@ -148,6 +150,32 @@ export class AuthService {
     return { success: true, message: 'Email confirmed. You can now log in.' };
   }
 
+
+  private async validateCredentials(payload: LoginDto): Promise<User> {
+    const user = await this.usersService.findByEmail(payload.email);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isValidPassword = await bcrypt.compare(
+      payload.password,
+      user.passwordHash,
+    );
+
+    if (!isValidPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (this.requireEmailConfirmation && !user.emailConfirmed) {
+      throw new ForbiddenException(
+        'Please confirm your email before logging in.',
+      );
+    }
+
+    return user;
+  }
+
   private get requireEmailConfirmation(): boolean {
     const raw = this.configService.get<string>('REQUIRE_EMAIL_CONFIRMATION');
     if (raw === 'true') {
@@ -157,6 +185,10 @@ export class AuthService {
       return false;
     }
     return this.configService.get<string>('NODE_ENV') === 'production';
+  }
+
+  private get requireAccessCode(): boolean {
+    return this.configService.get<string>('REQUIRE_ACCESS_CODE') === 'true';
   }
 
   private renderSignupConfirmationTemplate(

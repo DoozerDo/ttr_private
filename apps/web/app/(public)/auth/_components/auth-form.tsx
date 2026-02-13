@@ -105,6 +105,21 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         const messageFromApi =
           extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
 
+        if (isLogin && response.status === 403 && typeof data === "object" && data) {
+          const accessCodeRequired = (data as { message?: unknown })?.message;
+          const code =
+            typeof accessCodeRequired === "object" && accessCodeRequired
+              ? (accessCodeRequired as { code?: unknown }).code
+              : undefined;
+          if (code === "ACCESS_CODE_REQUIRED") {
+            const params = new URLSearchParams();
+            params.set("email", trimmedEmail);
+            params.set("next", returnPath ?? "/");
+            router.push(`/auth/access-code?${params.toString()}`);
+            return;
+          }
+        }
+
         setError(messageFromApi);
         return;
       }
