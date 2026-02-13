@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: "/admin/users", label: "Users" },
   { href: "/admin/jobs", label: "Jobs" },
   { href: "/admin/baselines", label: "Baselines" },
+  { href: "/admin/access-codes", label: "Access Codes" },
 ];
 
 export default function AdminLayout({ children }: AdminLayoutProps) {

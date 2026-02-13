@@ -18,6 +18,6 @@ import { User } from '../users/user.entity';
     AdminBaselinesController,
   ],
   providers: [AdminUsersService, AdminCleanupService, AdminBypassGuard],
-  exports: [AdminUsersService],
+  exports: [AdminUsersService, AdminBypassGuard],
 })
 export class AdminUsersModule {}

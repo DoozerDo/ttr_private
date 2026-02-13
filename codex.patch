@@ -1,209 +1,437 @@
-diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
-index 71d0661085395f85247b0438bc760f5fd7428bd1..13a489f48b44987852491844a7d87ff227da91ac 100644
---- a/apps/api/src/auth/auth.controller.ts
-+++ b/apps/api/src/auth/auth.controller.ts
-@@ -16,53 +16,50 @@ import { AuthService } from './auth.service';
- import { LoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import type { AuthUserDto } from './dto/auth-response.dto';
+diff --git a/apps/api/src/access-codes/access-codes.service.ts b/apps/api/src/access-codes/access-codes.service.ts
+index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc7840215981581714 100644
+--- a/apps/api/src/access-codes/access-codes.service.ts
++++ b/apps/api/src/access-codes/access-codes.service.ts
+@@ -1,34 +1,34 @@
+ import {
+   BadRequestException,
+   ForbiddenException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash, randomBytes } from 'node:crypto';
+-import { Repository } from 'typeorm';
++import { IsNull, Repository } from 'typeorm';
+ import { User } from '../users/user.entity';
+ import { UsersService } from '../users/users.service';
+ import { BetaAccessCode } from './beta-access-code.entity';
  
- const AUTH_COOKIE_NAME = 'access_token';
- const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
- const NODE_ENV = process.env.NODE_ENV ?? 'development';
- const COOKIE_IS_SECURE = NODE_ENV === 'production';
+ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
  
- @Controller('auth')
- @UsePipes(
-   new ValidationPipe({
-     whitelist: true,
-     transform: true,
-   }),
- )
- export class AuthController {
-   constructor(private readonly authService: AuthService) {}
+ function randomSegment(length: number): string {
+   const bytes = randomBytes(length);
+   let out = '';
+   for (let i = 0; i < length; i += 1) {
+     out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+   }
+   return out;
+ }
  
-   @Post('register')
-   async register(
-     @Body() payload: RegisterDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.register(payload);
--    if ('accessToken' in response && response.accessToken) {
--      this.setAuthCookie(res, response.accessToken);
--    }
-     return response;
+ function hashCode(code: string): string {
+   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
+ }
+ 
+ function normalizeCode(input: string): string {
+   return input.trim().toUpperCase();
+ }
+ 
+ @Injectable()
+ export class AccessCodesService {
+@@ -138,50 +138,76 @@ export class AccessCodesService {
+       throw new BadRequestException('Invalid access code');
+     }
+ 
+     if (code.revokedAt) {
+       throw new BadRequestException('Access code has been revoked');
+     }
+     if (code.redeemedAt) {
+       throw new BadRequestException('Access code has already been redeemed');
+     }
+ 
+     if (code.assignedUserId && code.assignedUserId !== user.id) {
+       throw new ForbiddenException('Access code is assigned to a different user');
+     }
+ 
+     code.assignedUserId = code.assignedUserId ?? user.id;
+     code.redeemedByUserId = user.id;
+     code.redeemedAt = new Date();
+     await this.accessCodesRepository.save(code);
+ 
+     if (!user.betaAccessApproved) {
+       user.betaAccessApproved = true;
+       await this.usersRepository.save(user);
+     }
    }
  
-   @Get('confirm')
-   async confirmEmail(@Query('token') token: string) {
-     return this.authService.confirmEmail(token);
-   }
- 
-   @Post('login')
-   async login(
-     @Body() payload: LoginDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.login(payload);
-     this.setAuthCookie(res, response.accessToken);
-     return response;
-   }
- 
-   @Post('logout')
-   logout(@Res({ passthrough: true }) res: Response) {
-     res.cookie(AUTH_COOKIE_NAME, '', {
-       httpOnly: true,
-       secure: COOKIE_IS_SECURE,
-       sameSite: 'lax',
-       path: '/',
-diff --git a/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..d9c86288e3c008d103b364850a67427cfcbb13ea
---- /dev/null
-+++ b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
-@@ -0,0 +1,63 @@
-+"use client";
++  async redeemAssignedCodeForUser(user: User): Promise<boolean> {
++    const code = await this.accessCodesRepository.findOne({
++      where: {
++        assignedUserId: user.id,
++        revokedAt: IsNull(),
++        redeemedAt: IsNull(),
++      },
++      order: { createdAt: 'ASC' },
++    });
 +
-+import Link from "next/link";
-+import { useSearchParams } from "next/navigation";
-+import { useEffect, useState } from "react";
-+
-+export default function ConfirmClient() {
-+  const searchParams = useSearchParams();
-+  const token = searchParams.get("token") ?? "";
-+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-+  const [message, setMessage] = useState("Confirming your email...");
-+
-+  useEffect(() => {
-+    async function runConfirmation() {
-+      if (!token) {
-+        setStatus("error");
-+        setMessage("Missing confirmation token.");
-+        return;
-+      }
-+
-+      try {
-+        const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
-+          method: "GET",
-+        });
-+        const data = await response.json().catch(() => ({}));
-+        if (!response.ok) {
-+          setStatus("error");
-+          setMessage(data?.message ?? "Unable to confirm email.");
-+          return;
-+        }
-+
-+        setStatus("success");
-+        setMessage(data?.message ?? "Email confirmed. You can now log in.");
-+      } catch (error) {
-+        console.error("Failed to confirm email", error);
-+        setStatus("error");
-+        setMessage("Unable to confirm email.");
-+      }
++    if (!code) {
++      return false;
 +    }
 +
-+    void runConfirmation();
-+  }, [token]);
++    code.redeemedByUserId = user.id;
++    code.redeemedAt = new Date();
++    await this.accessCodesRepository.save(code);
 +
-+  return (
-+    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+      <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-+        <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
-+        <p
-+          className={
-+            status === "error"
-+              ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
-+              : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
-+          }
-+        >
-+          {message}
-+        </p>
-+        <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
-+          Go to login
-+        </Link>
-+      </div>
-+    </main>
-+  );
-+}
-diff --git a/apps/web/app/(public)/auth/confirm/page.tsx b/apps/web/app/(public)/auth/confirm/page.tsx
-index dd552b84db4197d38367c19d2b0d81f9fce963d1..fb6eef613d4fdbdce02b9ef38408dae4541f1a42 100644
---- a/apps/web/app/(public)/auth/confirm/page.tsx
-+++ b/apps/web/app/(public)/auth/confirm/page.tsx
-@@ -1,63 +1,20 @@
--"use client";
-+import { Suspense } from "react";
++    if (!user.betaAccessApproved) {
++      user.betaAccessApproved = true;
++      await this.usersRepository.save(user);
++    }
++
++    return true;
++  }
++
+   toAdminListRow(code: BetaAccessCode) {
+     const status = code.revokedAt
+       ? 'revoked'
+       : code.redeemedAt
+         ? 'redeemed'
+         : code.assignedUserId
+           ? 'assigned'
+           : 'unused';
  
--import Link from "next/link";
--import { useSearchParams } from "next/navigation";
--import { useEffect, useState } from "react";
-+import ConfirmClient from "./ConfirmClient";
+     return {
+       id: code.id,
+       codePrefix: code.codePrefix,
+       codeMasked: code.codePrefix
+         ? `TTR-${code.codePrefix.slice(0, 4)}-****-****`
+         : 'TTR-****-****-****',
+       createdAt: code.createdAt,
+       createdByUserId: code.createdByUserId,
+       createdByEmail: code.createdBy?.email ?? null,
+       assignedUserId: code.assignedUserId,
+       assignedUserEmail: code.assignedUser?.email ?? null,
+       redeemedByUserId: code.redeemedByUserId,
+       redeemedByUserEmail: code.redeemedBy?.email ?? null,
+       redeemedAt: code.redeemedAt,
+       revokedAt: code.revokedAt,
+       revokedByUserId: code.revokedByUserId,
+diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
+index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77ed3343c72 100644
+--- a/apps/api/src/auth/auth.service.spec.ts
++++ b/apps/api/src/auth/auth.service.spec.ts
+@@ -1,112 +1,115 @@
+ import { JwtService } from '@nestjs/jwt';
+ import { Test, TestingModule } from '@nestjs/testing';
+ import * as bcrypt from 'bcryptjs';
+ import { getRepositoryToken } from '@nestjs/typeorm';
+ import { ConfigService } from '@nestjs/config';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { User } from '../users/user.entity';
+ import { UsersService } from '../users/users.service';
+ import { AccountType } from '../users/account-type.enum';
+ import { UserToken } from './user-token.entity';
+ import { RelayEmailService } from '../email/relay-email.service';
+ import { AccessCodesService } from '../access-codes/access-codes.service';
+ import { AdminUsersService } from '../admin-users/admin-users.service';
  
--export default function ConfirmPage() {
--  const searchParams = useSearchParams();
--  const token = searchParams.get("token") ?? "";
--  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
--  const [message, setMessage] = useState("Confirming your email...");
--
--  useEffect(() => {
--    async function runConfirmation() {
--      if (!token) {
--        setStatus("error");
--        setMessage("Missing confirmation token.");
--        return;
--      }
--
--      try {
--        const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
--          method: "GET",
--        });
--        const data = await response.json().catch(() => ({}));
--        if (!response.ok) {
--          setStatus("error");
--          setMessage(data?.message ?? "Unable to confirm email.");
--          return;
--        }
--
--        setStatus("success");
--        setMessage(data?.message ?? "Email confirmed. You can now log in.");
--      } catch (error) {
--        console.error("Failed to confirm email", error);
--        setStatus("error");
--        setMessage("Unable to confirm email.");
--      }
--    }
--
--    void runConfirmation();
--  }, [token]);
-+const ConfirmFallback = () => (
-+  <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+    <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-+      <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
-+      <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">Confirming your email...</p>
-+    </div>
-+  </main>
-+);
+ describe('AuthService', () => {
+   let service: AuthService;
+   let usersService: jest.Mocked<UsersService>;
+   let jwtService: JwtService;
+   let configService: { get: jest.Mock };
+   let adminUsersService: { isAdmin: jest.Mock };
++  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
  
-+export default function ConfirmPage() {
-   return (
--    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
--      <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
--        <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
--        <p
--          className={
--            status === "error"
--              ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
--              : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
--          }
--        >
--          {message}
--        </p>
--        <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
--          Go to login
--        </Link>
--      </div>
--    </main>
-+    <Suspense fallback={<ConfirmFallback />}>
-+      <ConfirmClient />
-+    </Suspense>
-   );
- }
+   beforeEach(async () => {
+     const module: TestingModule = await Test.createTestingModule({
+       providers: [
+         AuthService,
+         JwtService,
+         {
+           provide: UsersService,
+           useValue: {
+             findByEmail: jest.fn(),
+             findById: jest.fn(),
+             create: jest.fn(),
+             setEmailConfirmed: jest.fn(),
+           },
+         },
+         {
+           provide: RelayEmailService,
+           useValue: {
+             sendRawRelayEmail: jest.fn(),
+           },
+         },
+         {
+           provide: AccessCodesService,
+           useValue: {
+             redeemCodeForUser: jest.fn(),
++            redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
+           },
+         },
+         {
+           provide: AdminUsersService,
+           useValue: {
+             isAdmin: jest.fn().mockResolvedValue(false),
+           },
+         },
+         {
+           provide: ConfigService,
+           useValue: {
+             get: jest.fn((key: string) => {
+               if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+                 return 'false';
+               }
+               if (key === 'NODE_ENV') {
+                 return 'test';
+               }
+               return undefined;
+             }),
+           },
+         },
+         {
+           provide: getRepositoryToken(UserToken),
+           useValue: {
+             save: jest.fn(),
+             create: jest.fn((value) => value),
+             findOne: jest.fn(),
+             delete: jest.fn(),
+           },
+         },
+       ],
+     }).compile();
+ 
+     service = module.get<AuthService>(AuthService);
+     usersService = module.get(UsersService);
+     jwtService = module.get(JwtService);
+     configService = module.get(ConfigService);
+     adminUsersService = module.get(AdminUsersService);
++    accessCodesService = module.get(AccessCodesService);
+     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
+   });
+ 
+   it('registers a user', async () => {
+     const payload: RegisterDto = {
+       firstName: 'Test',
+       lastName: 'User',
+       email: 'user@example.com',
+       password: 'Password123',
+       confirmPassword: 'Password123',
+     };
+     const savedUser: User = {
+       id: 'user-id',
+       email: payload.email,
+       firstName: payload.firstName,
+       lastName: payload.lastName,
+       emailConfirmed: true,
+       betaAccessApproved: false,
+       passwordHash: '',
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+@@ -189,26 +192,131 @@ describe('AuthService', () => {
+     usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     configService.get.mockImplementation((key: string) => {
+       if (key === 'REQUIRE_ACCESS_CODE') {
+         return 'true';
+       }
+       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+         return 'false';
+       }
+       if (key === 'NODE_ENV') {
+         return 'test';
+       }
+       return undefined;
+     });
+ 
+     adminUsersService.isAdmin.mockResolvedValue(true);
+ 
+     const result = await service.login(payload);
+ 
+     expect(result.accessToken).toEqual('signed-token');
+     expect(result.user).toMatchObject({
+       id: savedUser.id,
+       email: savedUser.email,
+     });
+   });
++
++  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
++    const payload: LoginDto = {
++      email: 'member@example.com',
++      password: 'Password123',
++    };
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const savedUser: User = {
++      id: 'member-user-id',
++      email: payload.email,
++      firstName: 'Member',
++      lastName: 'User',
++      emailConfirmed: true,
++      betaAccessApproved: false,
++      passwordHash,
++      calibrationProfileName: null,
++      calibrationWeights: null,
++      role: 'user',
++      subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    usersService.findByEmail.mockResolvedValue(savedUser);
++
++    configService.get.mockImplementation((key: string) => {
++      if (key === 'REQUIRE_ACCESS_CODE') {
++        return 'true';
++      }
++      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
++        return 'false';
++      }
++      if (key === 'NODE_ENV') {
++        return 'test';
++      }
++      return undefined;
++    });
++
++    adminUsersService.isAdmin.mockResolvedValue(false);
++
++    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
++
++    const result = await service.login(payload);
++
++    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
++    expect(result.accessToken).toEqual('signed-token');
++    expect(result.user).toMatchObject({
++      id: savedUser.id,
++      email: savedUser.email,
++    });
++  });
++
++  it('returns access code required when no assigned code can be auto-redeemed', async () => {
++    const payload: LoginDto = {
++      email: 'member2@example.com',
++      password: 'Password123',
++    };
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const savedUser: User = {
++      id: 'member2-user-id',
++      email: payload.email,
++      firstName: 'Member',
++      lastName: 'User',
++      emailConfirmed: true,
++      betaAccessApproved: false,
++      passwordHash,
++      calibrationProfileName: null,
++      calibrationWeights: null,
++      role: 'user',
++      subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    usersService.findByEmail.mockResolvedValue(savedUser);
++
++    configService.get.mockImplementation((key: string) => {
++      if (key === 'REQUIRE_ACCESS_CODE') {
++        return 'true';
++      }
++      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
++        return 'false';
++      }
++      if (key === 'NODE_ENV') {
++        return 'test';
++      }
++      return undefined;
++    });
++
++    adminUsersService.isAdmin.mockResolvedValue(false);
++
++    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
++
++    await expect(service.login(payload)).rejects.toMatchObject({
++      response: {
++        code: 'ACCESS_CODE_REQUIRED',
++        message: 'Access code required.',
++      },
++    });
++
++    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
++  });
++
+ });
+diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
+index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a14eb1e86 100644
+--- a/apps/api/src/auth/auth.service.ts
++++ b/apps/api/src/auth/auth.service.ts
+@@ -88,54 +88,59 @@ export class AuthService {
+       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
+       'support@targetthisrole.ai';
+     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
+     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
+ 
+     await this.relayEmailService.sendRawRelayEmail({
+       to: user.email,
+       subject: 'Confirm your account',
+       body: html,
+       replyTo: supportEmail,
+       type: 'signup_confirm',
+     });
+ 
+     return {
+       success: true,
+       message: 'Check your email to confirm your account.',
+     };
+   }
+ 
+   async login(payload: LoginDto): Promise<AuthResponseDto> {
+     const user = await this.validateCredentials(payload);
+ 
+     const isAdmin = await this.adminUsersService.isAdmin(user.id);
+ 
+     if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
+-      throw new ForbiddenException({
+-        code: 'ACCESS_CODE_REQUIRED',
+-        message: 'Access code required.',
+-      });
++      const redeemedAssignedCode =
++        await this.accessCodesService.redeemAssignedCodeForUser(user);
++
++      if (!redeemedAssignedCode) {
++        throw new ForbiddenException({
++          code: 'ACCESS_CODE_REQUIRED',
++          message: 'Access code required.',
++        });
++      }
+     }
+ 
+     return this.buildAuthResponse(user);
+   }
+ 
+ 
+   async redeemAccessCodeAndLogin(
+     payload: RedeemAccessCodeAndLoginDto,
+   ): Promise<AuthResponseDto> {
+     const user = await this.validateCredentials(payload);
+ 
+     await this.accessCodesService.redeemCodeForUser(user, payload.code);
+ 
+     user.betaAccessApproved = true;
+     return this.buildAuthResponse(user);
+   }
+ 
+   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
+     if (!token) {
+       throw new BadRequestException('Missing confirmation token');
+     }
+     const match = await this.userTokensRepository.findOne({
+       where: { token, type: 'confirm' },
+     });
+ 

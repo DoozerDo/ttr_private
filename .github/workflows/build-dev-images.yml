@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - develop
-      - newregistration
+      - generate_code
 
 permissions:
   contents: read

@@ -8,3 +8,10 @@ export class LoginDto {
   @MinLength(8)
   password!: string;
 }
+
+
+export class RedeemAccessCodeAndLoginDto extends LoginDto {
+  @IsString()
+  @MinLength(8)
+  code!: string;
+}

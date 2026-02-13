@@ -19,6 +19,7 @@ import { StarStoriesModule } from './star-stories/star-stories.module';
 import { JobTrackerModule } from './job-tracker/job-tracker.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
+import { AccessCodesModule } from './access-codes/access-codes.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
       }),
     }),
     AdminUsersModule,
+    AccessCodesModule,
     UsersModule,
     AuthModule,
     AnalysisModule,
