@@ -1,1730 +1,271 @@
-# diff --git a/apps/api/.env.development.local.example b/apps/api/.env.development.local.example
-# index 4119fa886dfa1b25de30a959f3ede70b0b529410..ba51ad579671c8969a19aff1ceaad04d3f8b4d02 100644
-# --- a/apps/api/.env.development.local.example
-# +++ b/apps/api/.env.development.local.example
-# @@ -1,10 +1,11 @@
-#  PORT=3001
-#  CORS_ORIGIN=http://localhost:3000
-#  APP_VERSION=change-me
-#  DATABASE_URL=postgres://postgres:postgres@db:5432/targetthisrole
-#  JWT_SECRET=change-me
-#  BETA_UNLOCK_PRO=false
-#  TTR_SILENCE_BASELINE_BROWSER_MAPPING_WARNING=1
-#  REQUIRE_EMAIL_CONFIRMATION=false
-#  APP_BASE_URL=http://localhost:3000
-# -SUPPORT_EMAIL=support@DOMAIN.ai
-# \ No newline at end of file
-# +SUPPORT_EMAIL=support@DOMAIN.ai
-# +REQUIRE_ACCESS_CODE=false
-diff --git a/apps/api/src/access-codes/access-codes.controller.ts b/apps/api/src/access-codes/access-codes.controller.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..be79b230001bb4dc52c3fbd0bc29862d3e36acb2
---- /dev/null
-+++ b/apps/api/src/access-codes/access-codes.controller.ts
-@@ -0,0 +1,88 @@
-+import {
-+  Body,
-+  Controller,
-+  Delete,
-+  Get,
-+  Param,
-+  Patch,
-+  Post,
-+  Req,
-+  UseGuards,
-+} from '@nestjs/common';
-+import { AuthGuard } from '@nestjs/passport';
-+import {
-+  IsOptional,
-+  IsString,
-+  IsUUID,
-+  MaxLength,
-+  ValidateIf,
-+} from 'class-validator';
-+import { AdminBypassGuard } from '../admin-users/admin-bypass.guard';
-+import type { AuthUserDto } from '../auth/dto/auth-response.dto';
-+import { AccessCodesService } from './access-codes.service';
-+
-+class CreateAccessCodeDto {
-+  @IsOptional()
-+  @IsUUID()
-+  assignedUserId?: string;
-+
-+  @IsOptional()
-+  @IsString()
-+  @MaxLength(255)
-+  notes?: string;
-+}
-+
-+class UpdateAccessCodeDto {
-+  @IsOptional()
-+  @ValidateIf((_, value) => value !== null)
-+  @IsUUID()
-+  assignedUserId?: string | null;
-+
-+  @IsOptional()
-+  @ValidateIf((_, value) => value !== null)
-+  @IsString()
-+  @MaxLength(255)
-+  notes?: string | null;
-+}
-+
-+@UseGuards(AuthGuard('jwt'), AdminBypassGuard)
-+@Controller('admin/access-codes')
-+export class AccessCodesController {
-+  constructor(private readonly accessCodesService: AccessCodesService) {}
-+
-+  @Get()
-+  async list() {
-+    const rows = await this.accessCodesService.listCodes();
-+    return rows.map((row) => this.accessCodesService.toAdminListRow(row));
-+  }
-+
-+  @Post()
-+  async create(
-+    @Body() dto: CreateAccessCodeDto,
-+    @Req() req: { user?: AuthUserDto },
-+  ) {
-+    const createdByUserId = req.user?.userId ?? req.user?.id;
-+    return this.accessCodesService.generateCode({
-+      assignedUserId: dto.assignedUserId,
-+      notes: dto.notes,
-+      createdByUserId,
-+    });
-+  }
-+
-+  @Patch(':id')
-+  async update(@Param('id') id: string, @Body() dto: UpdateAccessCodeDto) {
-+    return this.accessCodesService.updateCode(id, {
-+      assignedUserId: dto.assignedUserId,
-+      notes: dto.notes,
-+    });
-+  }
-+
-+  @Delete(':id')
-+  async remove(
-+    @Param('id') id: string,
-+    @Req() req: { user?: AuthUserDto },
-+  ) {
-+    const revokedByUserId = req.user?.userId ?? req.user?.id;
-+    return this.accessCodesService.revokeCode(id, revokedByUserId);
-+  }
-+}
-diff --git a/apps/api/src/access-codes/access-codes.module.ts b/apps/api/src/access-codes/access-codes.module.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..020507eb34d6e16378392fb8341f774cb2c5afdb
---- /dev/null
-+++ b/apps/api/src/access-codes/access-codes.module.ts
-@@ -0,0 +1,16 @@
-+import { Module } from '@nestjs/common';
-+import { TypeOrmModule } from '@nestjs/typeorm';
-+import { UsersModule } from '../users/users.module';
-+import { AdminUsersModule } from '../admin-users/admin-users.module';
-+import { User } from '../users/user.entity';
-+import { AccessCodesController } from './access-codes.controller';
-+import { AccessCodesService } from './access-codes.service';
-+import { BetaAccessCode } from './beta-access-code.entity';
-+
-+@Module({
-+  imports: [TypeOrmModule.forFeature([BetaAccessCode, User]), UsersModule, AdminUsersModule],
-+  controllers: [AccessCodesController],
-+  providers: [AccessCodesService],
-+  exports: [AccessCodesService],
-+})
-+export class AccessCodesModule {}
-diff --git a/apps/api/src/access-codes/access-codes.service.ts b/apps/api/src/access-codes/access-codes.service.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..a0a463ebb46e7a03bc413b702c985d1358e405c9
---- /dev/null
-+++ b/apps/api/src/access-codes/access-codes.service.ts
-@@ -0,0 +1,193 @@
-+import {
-+  BadRequestException,
-+  ForbiddenException,
-+  Injectable,
-+  NotFoundException,
-+} from '@nestjs/common';
-+import { InjectRepository } from '@nestjs/typeorm';
-+import { createHash, randomBytes } from 'node:crypto';
-+import { Repository } from 'typeorm';
-+import { User } from '../users/user.entity';
-+import { UsersService } from '../users/users.service';
-+import { BetaAccessCode } from './beta-access-code.entity';
-+
-+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-+
-+function randomSegment(length: number): string {
-+  const bytes = randomBytes(length);
-+  let out = '';
-+  for (let i = 0; i < length; i += 1) {
-+    out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-+  }
-+  return out;
-+}
-+
-+function hashCode(code: string): string {
-+  return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
-+}
-+
-+function normalizeCode(input: string): string {
-+  return input.trim().toUpperCase();
-+}
-+
-+@Injectable()
-+export class AccessCodesService {
-+  constructor(
-+    @InjectRepository(BetaAccessCode)
-+    private readonly accessCodesRepository: Repository<BetaAccessCode>,
-+    @InjectRepository(User)
-+    private readonly usersRepository: Repository<User>,
-+    private readonly usersService: UsersService,
-+  ) {}
-+
-+  async listCodes(): Promise<BetaAccessCode[]> {
-+    return this.accessCodesRepository.find({
-+      order: { createdAt: 'DESC' },
-+      relations: ['createdBy', 'assignedUser', 'redeemedBy', 'revokedBy'],
-+    });
-+  }
-+
-+  async generateCode(input: {
-+    assignedUserId?: string;
-+    notes?: string;
-+    createdByUserId?: string;
-+  }) {
-+    const rawCode = `TTR-${randomSegment(4)}-${randomSegment(4)}-${randomSegment(4)}`;
-+    const normalized = normalizeCode(rawCode);
-+    const codeHash = hashCode(normalized);
-+    const codePrefix = normalized.replaceAll('-', '').slice(0, 8);
-+
-+    if (input.assignedUserId) {
-+      const assignedUser = await this.usersService.findById(input.assignedUserId);
-+      if (!assignedUser) {
-+        throw new BadRequestException('Assigned user not found');
-+      }
-+    }
-+
-+    const entity = this.accessCodesRepository.create({
-+      codeHash,
-+      codePrefix,
-+      assignedUserId: input.assignedUserId?.trim() || null,
-+      notes: input.notes?.trim() || null,
-+      createdByUserId: input.createdByUserId?.trim() || null,
-+    });
-+
-+    const saved = await this.accessCodesRepository.save(entity);
-+
-+    return {
-+      id: saved.id,
-+      createdAt: saved.createdAt,
-+      assignedUserId: saved.assignedUserId,
-+      notes: saved.notes,
-+      code: normalized,
-+      codePrefix,
-+    };
-+  }
-+
-+  async updateCode(
-+    id: string,
-+    input: { assignedUserId?: string | null; notes?: string | null },
-+  ): Promise<BetaAccessCode> {
-+    const code = await this.accessCodesRepository.findOne({ where: { id } });
-+    if (!code) {
-+      throw new NotFoundException('Access code not found');
-+    }
-+    if (code.redeemedAt || code.revokedAt) {
-+      throw new BadRequestException(
-+        'Cannot update assignment for redeemed or revoked code',
-+      );
-+    }
-+
-+    if (input.assignedUserId !== undefined) {
-+      const nextAssigned = input.assignedUserId?.trim() || null;
-+      if (nextAssigned) {
-+        const assignedUser = await this.usersService.findById(nextAssigned);
-+        if (!assignedUser) {
-+          throw new BadRequestException('Assigned user not found');
-+        }
-+      }
-+      code.assignedUserId = nextAssigned;
-+    }
-+
-+    if (input.notes !== undefined) {
-+      code.notes = input.notes?.trim() || null;
-+    }
-+
-+    return this.accessCodesRepository.save(code);
-+  }
-+
-+  async revokeCode(id: string, revokedByUserId?: string): Promise<BetaAccessCode> {
-+    const code = await this.accessCodesRepository.findOne({ where: { id } });
-+    if (!code) {
-+      throw new NotFoundException('Access code not found');
-+    }
-+
-+    if (!code.revokedAt) {
-+      code.revokedAt = new Date();
-+      code.revokedByUserId = revokedByUserId?.trim() || null;
-+    }
-+
-+    return this.accessCodesRepository.save(code);
-+  }
-+
-+  async redeemCodeForUser(user: User, rawCode: string): Promise<void> {
-+    const codeHash = hashCode(normalizeCode(rawCode));
-+    const code = await this.accessCodesRepository.findOne({ where: { codeHash } });
-+
-+    if (!code) {
-+      throw new BadRequestException('Invalid access code');
-+    }
-+
-+    if (code.revokedAt) {
-+      throw new BadRequestException('Access code has been revoked');
-+    }
-+    if (code.redeemedAt) {
-+      throw new BadRequestException('Access code has already been redeemed');
-+    }
-+
-+    if (code.assignedUserId && code.assignedUserId !== user.id) {
-+      throw new ForbiddenException('Access code is assigned to a different user');
-+    }
-+
-+    code.assignedUserId = code.assignedUserId ?? user.id;
-+    code.redeemedByUserId = user.id;
-+    code.redeemedAt = new Date();
-+    await this.accessCodesRepository.save(code);
-+
-+    if (!user.betaAccessApproved) {
-+      user.betaAccessApproved = true;
-+      await this.usersRepository.save(user);
-+    }
-+  }
-+
-+  toAdminListRow(code: BetaAccessCode) {
-+    const status = code.revokedAt
-+      ? 'revoked'
-+      : code.redeemedAt
-+        ? 'redeemed'
-+        : code.assignedUserId
-+          ? 'assigned'
-+          : 'unused';
-+
-+    return {
-+      id: code.id,
-+      codePrefix: code.codePrefix,
-+      codeMasked: code.codePrefix
-+        ? `TTR-${code.codePrefix.slice(0, 4)}-****-****`
-+        : 'TTR-****-****-****',
-+      createdAt: code.createdAt,
-+      createdByUserId: code.createdByUserId,
-+      createdByEmail: code.createdBy?.email ?? null,
-+      assignedUserId: code.assignedUserId,
-+      assignedUserEmail: code.assignedUser?.email ?? null,
-+      redeemedByUserId: code.redeemedByUserId,
-+      redeemedByUserEmail: code.redeemedBy?.email ?? null,
-+      redeemedAt: code.redeemedAt,
-+      revokedAt: code.revokedAt,
-+      revokedByUserId: code.revokedByUserId,
-+      revokedByUserEmail: code.revokedBy?.email ?? null,
-+      notes: code.notes,
-+      status,
-+    };
-+  }
-+}
-diff --git a/apps/api/src/access-codes/beta-access-code.entity.ts b/apps/api/src/access-codes/beta-access-code.entity.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..43c671ececc7ed9901855253cd1859ab02d128e8
---- /dev/null
-+++ b/apps/api/src/access-codes/beta-access-code.entity.ts
-@@ -0,0 +1,67 @@
-+import {
-+  Column,
-+  CreateDateColumn,
-+  Entity,
-+  Index,
-+  JoinColumn,
-+  ManyToOne,
-+  PrimaryGeneratedColumn,
-+} from 'typeorm';
-+import { User } from '../users/user.entity';
-+
-+@Entity({ name: 'beta_access_codes' })
-+export class BetaAccessCode {
-+  @PrimaryGeneratedColumn('uuid')
-+  id!: string;
-+
-+  @Index({ unique: true })
-+  @Column({ type: 'character varying', length: 128, unique: true })
-+  codeHash!: string;
-+
-+  @Column({ type: 'character varying', length: 16, nullable: true })
-+  codePrefix!: string | null;
-+
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  @Index()
-+  createdAt!: Date;
-+
-+  @Column({ type: 'uuid', nullable: true })
-+  createdByUserId!: string | null;
-+
-+  @Column({ type: 'uuid', nullable: true })
-+  @Index()
-+  assignedUserId!: string | null;
-+
-+  @Column({ type: 'uuid', nullable: true })
-+  redeemedByUserId!: string | null;
-+
-+  @Column({ type: 'timestamptz', nullable: true })
-+  @Index()
-+  redeemedAt!: Date | null;
-+
-+  @Column({ type: 'timestamptz', nullable: true })
-+  @Index()
-+  revokedAt!: Date | null;
-+
-+  @Column({ type: 'uuid', nullable: true })
-+  revokedByUserId!: string | null;
-+
-+  @Column({ type: 'character varying', length: 255, nullable: true })
-+  notes!: string | null;
-+
-+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'createdByUserId' })
-+  createdBy?: User | null;
-+
-+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'assignedUserId' })
-+  assignedUser?: User | null;
-+
-+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'redeemedByUserId' })
-+  redeemedBy?: User | null;
-+
-+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'revokedByUserId' })
-+  revokedBy?: User | null;
-+}
-diff --git a/apps/api/src/admin-users/admin-users.module.ts b/apps/api/src/admin-users/admin-users.module.ts
-index 818e0e36de91baa60a8ce1a3abd2642a0c4873d8..22ed9e086aafd25ac03d05c995396bb1db09a6fd 100644
---- a/apps/api/src/admin-users/admin-users.module.ts
-+++ b/apps/api/src/admin-users/admin-users.module.ts
-@@ -1,23 +1,23 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- 
- import { AdminBypassGuard } from './admin-bypass.guard';
- import { AdminBaselinesController } from './admin-baselines.controller';
- import { AdminCleanupService } from './admin-cleanup.service';
- import { AdminJobsController } from './admin-jobs.controller';
- import { AdminUser } from './admin-user.entity';
- import { AdminUsersController } from './admin-users.controller';
- import { AdminUsersService } from './admin-users.service';
- import { User } from '../users/user.entity';
- 
- @Module({
-   imports: [TypeOrmModule.forFeature([User, AdminUser])],
-   controllers: [
-     AdminUsersController,
-     AdminJobsController,
-     AdminBaselinesController,
-   ],
-   providers: [AdminUsersService, AdminCleanupService, AdminBypassGuard],
--  exports: [AdminUsersService],
-+  exports: [AdminUsersService, AdminBypassGuard],
- })
- export class AdminUsersModule {}
-diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
-index a3fa24e52cfb1695140d32c80c383de4ef33ba0a..073d882d541e87007a2491a74abc8f99cebba2ae 100644
---- a/apps/api/src/app.module.ts
-+++ b/apps/api/src/app.module.ts
-@@ -1,62 +1,64 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { AppController } from './app.controller';
- import { AppService } from './app.service';
- import { AdminUsersModule } from './admin-users/admin-users.module';
- import { AuthModule } from './auth/auth.module';
- import { AnalysisModule } from './analysis/analysis.module';
- import { ApplicationsModule } from './applications/applications.module';
- import { BaselineModule } from './baseline/baseline.module';
- import { ComplianceModule } from './compliance/compliance.module';
- import { InterviewsModule } from './interviews/interviews.module';
- import { JobsModule } from './jobs/jobs.module';
- import { CoverLettersModule } from './cover-letters/cover-letters.module';
- import { EmailModule } from './email/email.module';
- import { RealityCheckModule } from './reality-check/reality-check.module';
- import { ResumeModule } from './resume/resume.module';
- import { StarStoriesModule } from './star-stories/star-stories.module';
- import { JobTrackerModule } from './job-tracker/job-tracker.module';
- import { User } from './users/user.entity';
- import { UsersModule } from './users/users.module';
-+import { AccessCodesModule } from './access-codes/access-codes.module';
- 
- @Module({
-   imports: [
-     ConfigModule.forRoot({
-       isGlobal: true,
-       envFilePath: ['.env.development.local', '.env.local', '.env'],
-     }),
-     TypeOrmModule.forRootAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         type: 'postgres',
-         url:
-           configService.get<string>('DATABASE_URL') ??
-           'postgresql://postgres:postgres@db:5432/targetthisrole',
-         entities: [User],
-         synchronize:
-           configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
-         autoLoadEntities: true,
-       }),
-     }),
-     AdminUsersModule,
-+    AccessCodesModule,
-     UsersModule,
-     AuthModule,
-     AnalysisModule,
-     RealityCheckModule,
-     ApplicationsModule,
-     BaselineModule,
-     ComplianceModule,
-     InterviewsModule,
-     JobsModule,
-     JobTrackerModule,
-     ResumeModule,
-     CoverLettersModule,
-     EmailModule,
-     StarStoriesModule,
-   ],
-   controllers: [AppController],
-   providers: [AppService],
- })
- export class AppModule {}
-diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
-index 13a489f48b44987852491844a7d87ff227da91ac..f2f8764f0a571a217f3613eeaa8d55411f70b912 100644
---- a/apps/api/src/auth/auth.controller.ts
-+++ b/apps/api/src/auth/auth.controller.ts
-@@ -1,83 +1,94 @@
- import {
-   Body,
-   Controller,
-   Get,
-   Query,
-   Post,
-   Req,
-   Res,
-   UseGuards,
-   UsePipes,
-   ValidationPipe,
- } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Response } from 'express';
- import { AuthService } from './auth.service';
--import { LoginDto } from './dto/login.dto';
-+import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import type { AuthUserDto } from './dto/auth-response.dto';
- 
- const AUTH_COOKIE_NAME = 'access_token';
- const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
- const NODE_ENV = process.env.NODE_ENV ?? 'development';
- const COOKIE_IS_SECURE = NODE_ENV === 'production';
- 
- @Controller('auth')
- @UsePipes(
-   new ValidationPipe({
-     whitelist: true,
-     transform: true,
-   }),
- )
- export class AuthController {
-   constructor(private readonly authService: AuthService) {}
- 
-   @Post('register')
-   async register(
-     @Body() payload: RegisterDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.register(payload);
-     return response;
-   }
- 
-   @Get('confirm')
-   async confirmEmail(@Query('token') token: string) {
-     return this.authService.confirmEmail(token);
-   }
- 
-   @Post('login')
-   async login(
-     @Body() payload: LoginDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.login(payload);
-     this.setAuthCookie(res, response.accessToken);
-     return response;
-   }
- 
-+
-+  @Post('redeem-access-code-and-login')
-+  async redeemAccessCodeAndLogin(
-+    @Body() payload: RedeemAccessCodeAndLoginDto,
-+    @Res({ passthrough: true }) res: Response,
-+  ) {
-+    const response = await this.authService.redeemAccessCodeAndLogin(payload);
-+    this.setAuthCookie(res, response.accessToken);
-+    return response;
-+  }
-+
-   @Post('logout')
-   logout(@Res({ passthrough: true }) res: Response) {
-     res.cookie(AUTH_COOKIE_NAME, '', {
-       httpOnly: true,
-       secure: COOKIE_IS_SECURE,
-       sameSite: 'lax',
-       path: '/',
-       maxAge: 0,
-     });
-     return { ok: true };
-   }
- 
-   @UseGuards(AuthGuard('jwt'))
-   @Get('me')
-   me(@Req() request: { user?: AuthUserDto }) {
-     return { user: request.user };
-   }
- 
-   private setAuthCookie(res: Response, accessToken: string) {
-     res.cookie(AUTH_COOKIE_NAME, accessToken, {
-       httpOnly: true,
-       secure: COOKIE_IS_SECURE,
-       sameSite: 'lax',
-       path: '/',
-       maxAge: AUTH_COOKIE_MAX_AGE_MS,
-diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
-index 487399c0c94e499cdf051ad341e8ac6ba560cbad..59addb70cc5ecbe295c83c5d9c9c5d95655068ec 100644
---- a/apps/api/src/auth/auth.module.ts
-+++ b/apps/api/src/auth/auth.module.ts
-@@ -1,32 +1,34 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { JwtModule } from '@nestjs/jwt';
- import { PassportModule } from '@nestjs/passport';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { EmailModule } from '../email/email.module';
-+import { AccessCodesModule } from '../access-codes/access-codes.module';
- import { UsersModule } from '../users/users.module';
- import { AuthController } from './auth.controller';
- import { AuthService } from './auth.service';
- import { JwtStrategy } from './jwt.strategy';
- import { UserToken } from './user-token.entity';
- 
- @Module({
-   imports: [
-     ConfigModule,
-     UsersModule,
-+    AccessCodesModule,
-     EmailModule,
-     TypeOrmModule.forFeature([UserToken]),
-     PassportModule,
-     JwtModule.registerAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         secret: configService.get<string>('JWT_SECRET'),
-         signOptions: { expiresIn: '1h' },
-       }),
-     }),
-   ],
-   controllers: [AuthController],
-   providers: [AuthService, JwtStrategy],
- })
- export class AuthModule {}
-diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
-index ff0cf2d2321a0721515e7393ecbb52a08de8656f..f1f18c70a0fbf48b865009077324e7237419243d 100644
---- a/apps/api/src/auth/auth.service.spec.ts
-+++ b/apps/api/src/auth/auth.service.spec.ts
-@@ -1,145 +1,154 @@
- import { JwtService } from '@nestjs/jwt';
- import { Test, TestingModule } from '@nestjs/testing';
- import * as bcrypt from 'bcryptjs';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { ConfigService } from '@nestjs/config';
- import { AuthService } from './auth.service';
- import { LoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import { SubscriptionTier } from '../subscription/subscription-tier.enum';
- import { User } from '../users/user.entity';
- import { UsersService } from '../users/users.service';
- import { AccountType } from '../users/account-type.enum';
- import { UserToken } from './user-token.entity';
- import { RelayEmailService } from '../email/relay-email.service';
-+import { AccessCodesService } from '../access-codes/access-codes.service';
- 
- describe('AuthService', () => {
-   let service: AuthService;
-   let usersService: jest.Mocked<UsersService>;
-   let jwtService: JwtService;
- 
-   beforeEach(async () => {
-     const module: TestingModule = await Test.createTestingModule({
-       providers: [
-         AuthService,
-         JwtService,
-         {
-           provide: UsersService,
-           useValue: {
-             findByEmail: jest.fn(),
-             findById: jest.fn(),
-             create: jest.fn(),
-             setEmailConfirmed: jest.fn(),
-           },
-         },
-         {
-           provide: RelayEmailService,
-           useValue: {
-             sendRawRelayEmail: jest.fn(),
-           },
-         },
-+        {
-+          provide: AccessCodesService,
-+          useValue: {
-+            redeemCodeForUser: jest.fn(),
-+          },
-+        },
-         {
-           provide: ConfigService,
-           useValue: {
-             get: jest.fn((key: string) => {
-               if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-                 return 'false';
-               }
-               if (key === 'NODE_ENV') {
-                 return 'test';
-               }
-               return undefined;
-             }),
-           },
-         },
-         {
-           provide: getRepositoryToken(UserToken),
-           useValue: {
-             save: jest.fn(),
-             create: jest.fn((value) => value),
-             findOne: jest.fn(),
-             delete: jest.fn(),
-           },
-         },
-       ],
-     }).compile();
- 
-     service = module.get<AuthService>(AuthService);
-     usersService = module.get(UsersService);
-     jwtService = module.get(JwtService);
-     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
-   });
- 
-   it('registers a user', async () => {
-     const payload: RegisterDto = {
-       firstName: 'Test',
-       lastName: 'User',
-       email: 'user@example.com',
-       password: 'Password123',
-       confirmPassword: 'Password123',
-     };
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       firstName: payload.firstName,
-       lastName: payload.lastName,
-       emailConfirmed: true,
-+      betaAccessApproved: false,
-       passwordHash: '',
-       calibrationProfileName: null,
-       calibrationWeights: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(null);
-     usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
-       ...savedUser,
-       email,
-       passwordHash,
-     }));
- 
-     const result = await service.register(payload);
-     const hashedPasswordArg = usersService.create.mock.calls[0][0].passwordHash;
- 
-     expect(hashedPasswordArg).not.toEqual(payload.password);
-     expect(result.success).toEqual(true);
-   });
- 
-   it('logs in a user with valid credentials', async () => {
-     const payload: LoginDto = {
-       email: 'user@example.com',
-       password: 'Password123',
-     };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       firstName: 'Test',
-       lastName: 'User',
-       emailConfirmed: true,
-+      betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     const result = await service.login(payload);
- 
-     expect(result.accessToken).toEqual('signed-token');
-     expect(result.user).toMatchObject({
-       id: savedUser.id,
-       email: savedUser.email,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-     });
-   });
- });
-diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
-index 4c9e8bdb40e5d5ecf407a6321f69f0ed9acdb9f3..b11a3a6170d70944495b018787674b19aad6383d 100644
---- a/apps/api/src/auth/auth.service.ts
-+++ b/apps/api/src/auth/auth.service.ts
-@@ -1,63 +1,65 @@
- import {
-   BadRequestException,
-   ForbiddenException,
-   Injectable,
-   UnauthorizedException,
- } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
- import { JwtService } from '@nestjs/jwt';
- import * as bcrypt from 'bcryptjs';
- import { randomBytes } from 'node:crypto';
- import { existsSync } from 'node:fs';
- import { readFileSync } from 'node:fs';
- import { join } from 'node:path';
- import { Repository } from 'typeorm';
- import { InjectRepository } from '@nestjs/typeorm';
- import { RelayEmailService } from '../email/relay-email.service';
- import { UsersService } from '../users/users.service';
--import { LoginDto } from './dto/login.dto';
-+import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import { User } from '../users/user.entity';
- import { getEntitlementsForTier } from '../features/feature-gates';
- import type { AuthResponseDto } from './dto/auth-response.dto';
- import { UserToken } from './user-token.entity';
-+import { AccessCodesService } from '../access-codes/access-codes.service';
- 
- type RegisterResponseDto = {
-   success: true;
-   message: string;
- };
- 
- @Injectable()
- export class AuthService {
-   constructor(
-     private readonly usersService: UsersService,
-     private readonly jwtService: JwtService,
-     private readonly relayEmailService: RelayEmailService,
-     private readonly configService: ConfigService,
-     @InjectRepository(UserToken)
-     private readonly userTokensRepository: Repository<UserToken>,
-+    private readonly accessCodesService: AccessCodesService,
-   ) {}
- 
-   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
-     if (payload.password !== payload.confirmPassword) {
-       throw new BadRequestException('Passwords do not match');
-     }
- 
-     const existing = await this.usersService.findByEmail(payload.email);
- 
-     if (existing) {
-       return {
-         success: true,
-         message: this.requireEmailConfirmation
-           ? 'Check your email to confirm your account.'
-           : 'Account created.',
-       };
-     }
- 
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const user = await this.usersService.create({
-       email: payload.email,
-       passwordHash,
-       firstName: payload.firstName.trim(),
-       lastName: payload.lastName.trim(),
-       emailConfirmed: !this.requireEmailConfirmation,
-@@ -79,108 +81,138 @@ export class AuthService {
-       }),
-     );
- 
-     const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-     const supportEmail =
-       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-       'support@targetthisrole.ai';
-     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
- 
-     await this.relayEmailService.sendRawRelayEmail({
-       to: user.email,
-       subject: 'Confirm your account',
-       body: html,
-       replyTo: supportEmail,
-       type: 'signup_confirm',
-     });
- 
-     return {
-       success: true,
-       message: 'Check your email to confirm your account.',
-     };
-   }
- 
-   async login(payload: LoginDto): Promise<AuthResponseDto> {
--    const user = await this.usersService.findByEmail(payload.email);
-+    const user = await this.validateCredentials(payload);
- 
--    if (!user) {
--      throw new UnauthorizedException('Invalid credentials');
-+    if (this.requireAccessCode && !user.betaAccessApproved) {
-+      throw new ForbiddenException({
-+        code: 'ACCESS_CODE_REQUIRED',
-+        message: 'Access code required.',
-+      });
-     }
- 
--    const isValidPassword = await bcrypt.compare(
--      payload.password,
--      user.passwordHash,
--    );
-+    return this.buildAuthResponse(user);
-+  }
- 
--    if (!isValidPassword) {
--      throw new UnauthorizedException('Invalid credentials');
--    }
- 
--    if (this.requireEmailConfirmation && !user.emailConfirmed) {
--      throw new ForbiddenException(
--        'Please confirm your email before logging in.',
--      );
--    }
-+  async redeemAccessCodeAndLogin(
-+    payload: RedeemAccessCodeAndLoginDto,
-+  ): Promise<AuthResponseDto> {
-+    const user = await this.validateCredentials(payload);
- 
-+    await this.accessCodesService.redeemCodeForUser(user, payload.code);
-+
-+    user.betaAccessApproved = true;
-     return this.buildAuthResponse(user);
-   }
- 
-   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
-     if (!token) {
-       throw new BadRequestException('Missing confirmation token');
-     }
-     const match = await this.userTokensRepository.findOne({
-       where: { token, type: 'confirm' },
-     });
- 
-     if (!match || match.expiresAt.getTime() <= Date.now()) {
-       throw new BadRequestException('Invalid or expired confirmation token');
-     }
- 
-     const user = await this.usersService.findById(match.userId);
-     if (!user) {
-       throw new BadRequestException('Invalid confirmation token');
-     }
- 
-     await this.usersService.setEmailConfirmed(user.id);
-     await this.userTokensRepository.delete({ id: match.id });
- 
-     return { success: true, message: 'Email confirmed. You can now log in.' };
-   }
- 
-+
-+  private async validateCredentials(payload: LoginDto): Promise<User> {
-+    const user = await this.usersService.findByEmail(payload.email);
-+
-+    if (!user) {
-+      throw new UnauthorizedException('Invalid credentials');
-+    }
-+
-+    const isValidPassword = await bcrypt.compare(
-+      payload.password,
-+      user.passwordHash,
-+    );
-+
-+    if (!isValidPassword) {
-+      throw new UnauthorizedException('Invalid credentials');
-+    }
-+
-+    if (this.requireEmailConfirmation && !user.emailConfirmed) {
-+      throw new ForbiddenException(
-+        'Please confirm your email before logging in.',
-+      );
-+    }
-+
-+    return user;
-+  }
-+
-   private get requireEmailConfirmation(): boolean {
-     const raw = this.configService.get<string>('REQUIRE_EMAIL_CONFIRMATION');
-     if (raw === 'true') {
-       return true;
-     }
-     if (raw === 'false') {
-       return false;
-     }
-     return this.configService.get<string>('NODE_ENV') === 'production';
-   }
- 
-+  private get requireAccessCode(): boolean {
-+    return this.configService.get<string>('REQUIRE_ACCESS_CODE') === 'true';
-+  }
-+
-   private renderSignupConfirmationTemplate(
-     confirmUrl: string,
-     supportEmail: string,
-   ): string {
-     const candidatePaths = [
-       join(process.cwd(), 'src', 'emailTemplates', 'signup-confirmation.html'),
-       '/usr/src/app/src/emailTemplates/signup-confirmation.html',
-     ];
-     const templatePath =
-       candidatePaths.find((path) => existsSync(path)) ?? candidatePaths[0];
-     const template = readFileSync(templatePath, 'utf-8');
-     return template
-       .replaceAll('{{confirm_url}}', confirmUrl)
-       .replaceAll('{{support_email}}', supportEmail);
-   }
- 
-   private buildAuthResponse(user: User): AuthResponseDto {
-     const entitlements = getEntitlementsForTier(user.subscriptionTier);
- 
-     const payload = {
-       sub: user.id,
-       email: user.email,
-       subscriptionTier: user.subscriptionTier,
-       entitlements,
-     };
-diff --git a/apps/api/src/auth/dto/login.dto.ts b/apps/api/src/auth/dto/login.dto.ts
-index 205887be81ae4127a6840b0edfce2a022f3daba4..f5339d5af9148c46621eec02fe1fcf2b97155cc8 100644
---- a/apps/api/src/auth/dto/login.dto.ts
-+++ b/apps/api/src/auth/dto/login.dto.ts
-@@ -1,10 +1,17 @@
- import { IsEmail, IsString, MinLength } from 'class-validator';
- 
- export class LoginDto {
-   @IsEmail()
-   email!: string;
- 
-   @IsString()
-   @MinLength(8)
-   password!: string;
- }
-+
-+
-+export class RedeemAccessCodeAndLoginDto extends LoginDto {
-+  @IsString()
-+  @MinLength(8)
-+  code!: string;
-+}
-diff --git a/apps/api/src/migrations/2100000000000-BetaAccessCodes.ts b/apps/api/src/migrations/2100000000000-BetaAccessCodes.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..c455a23d4ab832d8b6a38e34a6ad778bc6fe8aee
---- /dev/null
-+++ b/apps/api/src/migrations/2100000000000-BetaAccessCodes.ts
-@@ -0,0 +1,66 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class BetaAccessCodes2100000000000 implements MigrationInterface {
-+  name = 'BetaAccessCodes2100000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "betaAccessApproved" boolean NOT NULL DEFAULT false`,
-+    );
-+
-+    await queryRunner.query(`
-+      CREATE TABLE "beta_access_codes" (
-+        "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-+        "codeHash" character varying(128) NOT NULL,
-+        "codePrefix" character varying(16),
-+        "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-+        "createdByUserId" uuid,
-+        "assignedUserId" uuid,
-+        "redeemedByUserId" uuid,
-+        "redeemedAt" TIMESTAMP WITH TIME ZONE,
-+        "revokedAt" TIMESTAMP WITH TIME ZONE,
-+        "revokedByUserId" uuid,
-+        "notes" character varying(255),
-+        CONSTRAINT "PK_beta_access_codes_id" PRIMARY KEY ("id"),
-+        CONSTRAINT "UQ_beta_access_codes_codeHash" UNIQUE ("codeHash"),
-+        CONSTRAINT "FK_beta_access_codes_createdBy" FOREIGN KEY ("createdByUserId") REFERENCES "users"("id") ON DELETE SET NULL,
-+        CONSTRAINT "FK_beta_access_codes_assigned" FOREIGN KEY ("assignedUserId") REFERENCES "users"("id") ON DELETE SET NULL,
-+        CONSTRAINT "FK_beta_access_codes_redeemedBy" FOREIGN KEY ("redeemedByUserId") REFERENCES "users"("id") ON DELETE SET NULL,
-+        CONSTRAINT "FK_beta_access_codes_revokedBy" FOREIGN KEY ("revokedByUserId") REFERENCES "users"("id") ON DELETE SET NULL
-+      )
-+    `);
-+
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_beta_access_codes_assignedUserId" ON "beta_access_codes" ("assignedUserId")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_beta_access_codes_redeemedAt" ON "beta_access_codes" ("redeemedAt")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_beta_access_codes_revokedAt" ON "beta_access_codes" ("revokedAt")`,
-+    );
-+    await queryRunner.query(
-+      `CREATE INDEX "IDX_beta_access_codes_createdAt" ON "beta_access_codes" ("createdAt")`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_beta_access_codes_createdAt"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_beta_access_codes_revokedAt"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_beta_access_codes_redeemedAt"`,
-+    );
-+    await queryRunner.query(
-+      `DROP INDEX IF EXISTS "IDX_beta_access_codes_assignedUserId"`,
-+    );
-+
-+    await queryRunner.query(`DROP TABLE IF EXISTS "beta_access_codes"`);
-+    await queryRunner.query(
-+      `ALTER TABLE "users" DROP COLUMN "betaAccessApproved"`,
-+    );
-+  }
-+}
-diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
-index a7e671d728da9247328f2a482f049c55d432d287..65b614cf507690a001a818bfb6c5acfaaa960f43 100644
---- a/apps/api/src/users/user.entity.ts
-+++ b/apps/api/src/users/user.entity.ts
-@@ -21,50 +21,53 @@ export type CalibrationWeights = {
- export type UserRole = 'user' | 'coach' | 'admin';
- 
- // VERIFY: Confirm calibration dimension labels and structure.
- 
- @Entity({ name: 'users' })
- export class User {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Index({ unique: true })
-   @Column({ unique: true })
-   email!: string;
- 
-   @Column({ type: 'character varying', length: 100, default: '' })
-   firstName!: string;
- 
-   @Column({ type: 'character varying', length: 100, default: '' })
-   lastName!: string;
- 
-   @Column()
-   passwordHash!: string;
- 
-   @Column({ type: 'boolean', default: false })
-   emailConfirmed!: boolean;
- 
-+  @Column({ type: 'boolean', default: false })
-+  betaAccessApproved!: boolean;
-+
-   @Column({ type: 'character varying', length: 255, nullable: true })
-   calibrationProfileName!: string | null;
- 
-   // VERIFY: Ensure null defaults are acceptable for calibration weights.
-   @Column({ type: 'jsonb', nullable: true })
-   calibrationWeights!: CalibrationWeights | null;
- 
-   @Column({ type: 'character varying', length: 50, default: 'user' })
-   role!: UserRole;
- 
-   @Column({
-     type: 'enum',
-     enum: SubscriptionTier,
-     default: SubscriptionTier.FREE,
-   })
-   subscriptionTier!: SubscriptionTier;
- 
-   @Column({
-     type: 'enum',
-     enum: AccountType,
-     default: AccountType.FREE,
-   })
-   accountType!: AccountType;
- 
-   @CreateDateColumn({ type: 'timestamptz' })
 diff --git a/apps/web/app/(app)/admin/access-codes/page.tsx b/apps/web/app/(app)/admin/access-codes/page.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..834bb8dd9adc901c4de38a9854ffe655bac8bd8a
---- /dev/null
+index 834bb8dd9adc901c4de38a9854ffe655bac8bd8a..63af394d1b84d850ee1bdc22633a40a2622a524b 100644
+--- a/apps/web/app/(app)/admin/access-codes/page.tsx
 +++ b/apps/web/app/(app)/admin/access-codes/page.tsx
-@@ -0,0 +1,171 @@
-+import { redirect } from "next/navigation";
-+import { revalidatePath } from "next/cache";
-+import { adminServerFetch } from "../_lib/adminServerFetch";
-+
-+type AccessCodeRow = {
-+  id: string;
-+  codeMasked: string;
-+  status: "unused" | "assigned" | "redeemed" | "revoked";
-+  assignedUserEmail: string | null;
-+  assignedUserId: string | null;
-+  createdAt: string;
-+  createdByEmail: string | null;
-+  redeemedAt: string | null;
-+  notes: string | null;
-+};
-+
-+type GeneratedAccessCodeResponse = {
-+  id: string;
-+  code: string;
-+  codePrefix: string;
-+  createdAt: string;
-+  assignedUserId: string | null;
-+  notes: string | null;
-+};
-+
-+async function loadCodes() {
-+  return adminServerFetch<AccessCodeRow[]>("/admin/access-codes", "Load access codes");
-+}
-+
-+async function generateAction(formData: FormData) {
-+  "use server";
-+  const assignedUserId = (formData.get("assignedUserId") as string | null)?.trim();
-+  const notes = (formData.get("notes") as string | null)?.trim();
-+
-+  const result = await adminServerFetch<GeneratedAccessCodeResponse>(
-+    "/admin/access-codes",
-+    "Generate access code",
-+    {
-+      method: "POST",
-+      headers: { "content-type": "application/json" },
-+      body: JSON.stringify({ assignedUserId: assignedUserId || undefined, notes: notes || undefined }),
-+    },
-+  );
-+
-+  redirect(`/admin/access-codes?generatedCode=${encodeURIComponent(result.code)}`);
-+}
-+
-+async function updateAssignmentAction(formData: FormData) {
-+  "use server";
-+  const id = String(formData.get("id") || "").trim();
-+  const assignedUserId = String(formData.get("assignedUserId") || "").trim();
-+
-+  if (!id) {
-+    throw new Error("Missing code id");
-+  }
-+
-+  await adminServerFetch(`/admin/access-codes/${id}`, "Update access code assignment", {
-+    method: "PATCH",
-+    headers: { "content-type": "application/json" },
-+    body: JSON.stringify({ assignedUserId: assignedUserId || null }),
-+  });
-+
-+  revalidatePath("/admin/access-codes");
-+}
-+
-+async function revokeAction(formData: FormData) {
-+  "use server";
-+  const id = String(formData.get("id") || "");
-+  await adminServerFetch(`/admin/access-codes/${id}`, "Revoke access code", { method: "DELETE" });
-+  revalidatePath("/admin/access-codes");
-+}
-+
-+export default async function AdminAccessCodesPage({
-+  searchParams,
-+}: {
-+  searchParams?: { generatedCode?: string };
-+}) {
-+  const rows = await loadCodes();
-+  const generatedCode = searchParams?.generatedCode?.trim() || "";
-+
-+  return (
-+    <div className="space-y-6">
-+      <header>
-+        <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Admins</p>
-+        <h1 className="text-3xl font-semibold tracking-tight text-slate-50">Access codes</h1>
-+        <p className="mt-2 text-sm text-slate-300">
-+          Generate and manage one-time access codes. Code values are hashed at rest and only visible right after generation.
-+        </p>
-+      </header>
-+
-+      {generatedCode ? (
-+        <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
-+          <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Code generated (shown once)</p>
-+          <p className="mt-2 font-mono text-lg text-emerald-100">{generatedCode}</p>
-+          <p className="mt-1 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
-+        </section>
-+      ) : null}
-+
-+      <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-+        <form action={generateAction} className="grid gap-3 md:grid-cols-3">
-+          <input
-+            name="assignedUserId"
-+            placeholder="Assigned user id (optional)"
-+            className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-+          />
-+          <input
-+            name="notes"
-+            placeholder="Notes (optional)"
-+            className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-+          />
-+          <button className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold">Generate code</button>
-+        </form>
-+      </section>
-+
-+      <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-+        <table className="min-w-full text-sm">
-+          <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
-+            <tr>
-+              <th className="px-4 py-3">Code</th>
-+              <th className="px-4 py-3">Assigned</th>
-+              <th className="px-4 py-3">Created</th>
-+              <th className="px-4 py-3">Created by</th>
-+              <th className="px-4 py-3">Redeemed</th>
-+              <th className="px-4 py-3">Status</th>
-+              <th className="px-4 py-3">Actions</th>
-+            </tr>
-+          </thead>
-+          <tbody>
-+            {rows.map((row) => (
-+              <tr key={row.id} className="border-t border-white/10 align-top">
-+                <td className="px-4 py-3">{row.codeMasked}</td>
-+                <td className="px-4 py-3">
-+                  <form action={updateAssignmentAction} className="space-y-2">
-+                    <input type="hidden" name="id" value={row.id} />
-+                    <input
-+                      name="assignedUserId"
-+                      defaultValue={row.assignedUserId ?? ""}
-+                      placeholder="user id or blank"
-+                      className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-+                      disabled={row.status === "redeemed" || row.status === "revoked"}
-+                    />
-+                    <div className="flex gap-2">
-+                      <button
-+                        type="submit"
-+                        disabled={row.status === "redeemed" || row.status === "revoked"}
-+                        className="rounded border border-blue-500/60 px-2 py-1 text-xs text-blue-200 disabled:opacity-50"
-+                      >
-+                        Save
-+                      </button>
-+                    </div>
-+                    <p className="text-xs text-slate-400">{row.assignedUserEmail ?? "Unassigned"}</p>
-+                  </form>
-+                </td>
-+                <td className="px-4 py-3">{new Date(row.createdAt).toLocaleString()}</td>
-+                <td className="px-4 py-3">{row.createdByEmail ?? "-"}</td>
-+                <td className="px-4 py-3">{row.redeemedAt ? new Date(row.redeemedAt).toLocaleString() : "-"}</td>
-+                <td className="px-4 py-3 uppercase">{row.status}</td>
-+                <td className="px-4 py-3">
-+                  <form action={revokeAction}>
-+                    <input type="hidden" name="id" value={row.id} />
-+                    <button className="rounded border border-rose-500/60 px-2 py-1 text-xs">Delete</button>
-+                  </form>
-+                </td>
-+              </tr>
-+            ))}
-+          </tbody>
-+        </table>
-+      </section>
-+    </div>
-+  );
-+}
-diff --git a/apps/web/app/(app)/admin/layout.tsx b/apps/web/app/(app)/admin/layout.tsx
-index 56fcf458cc6ab635b91637d9989131c1a20be42f..5a961667066f951f97485057b76a02266b63f95e 100644
---- a/apps/web/app/(app)/admin/layout.tsx
-+++ b/apps/web/app/(app)/admin/layout.tsx
-@@ -1,36 +1,37 @@
- import type { ReactNode } from "react";
- import Link from "next/link";
+@@ -1,171 +1,223 @@
+ import { redirect } from "next/navigation";
+ import { revalidatePath } from "next/cache";
+ import { adminServerFetch } from "../_lib/adminServerFetch";
  
- type AdminLayoutProps = {
-   children: ReactNode;
+ type AccessCodeRow = {
+   id: string;
+   codeMasked: string;
+   status: "unused" | "assigned" | "redeemed" | "revoked";
+   assignedUserEmail: string | null;
+   assignedUserId: string | null;
+   createdAt: string;
+   createdByEmail: string | null;
+   redeemedAt: string | null;
+   notes: string | null;
  };
  
- const NAV_LINKS = [
-   { href: "/admin/users", label: "Users" },
-   { href: "/admin/jobs", label: "Jobs" },
-   { href: "/admin/baselines", label: "Baselines" },
-+  { href: "/admin/access-codes", label: "Access Codes" },
- ];
++type AdminUserRow = {
++  id: string;
++  email: string | null;
++};
++
++type SearchParamsShape = {
++  generatedCode?: string | string[];
++};
++
+ type GeneratedAccessCodeResponse = {
+   id: string;
+   code: string;
+   codePrefix: string;
+   createdAt: string;
+   assignedUserId: string | null;
+   notes: string | null;
+ };
  
- export default function AdminLayout({ children }: AdminLayoutProps) {
-   return (
-     <div className="flex min-h-screen bg-slate-950 text-slate-50">
-       <nav className="w-48 border-r border-slate-800 bg-slate-900/70 px-4 py-6">
-         <p className="mb-4 text-xs uppercase tracking-[0.3em] text-slate-400">
-           Admin
-         </p>
-         <ul className="space-y-2">
-           {NAV_LINKS.map((link) => (
-             <li key={link.href}>
-               <Link
-                 className="block rounded-md px-3 py-2 text-sm font-medium transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-                 href={link.href}
-               >
-                 {link.label}
-               </Link>
-             </li>
-           ))}
-         </ul>
-       </nav>
-       <main className="flex-1 p-6">{children}</main>
-     </div>
+ async function loadCodes() {
+   return adminServerFetch<AccessCodeRow[]>("/admin/access-codes", "Load access codes");
+ }
+ 
++async function loadUsers() {
++  return adminServerFetch<AdminUserRow[]>("/admin/users", "Load admin users for access code assignment");
++}
++
+ async function generateAction(formData: FormData) {
+   "use server";
+   const assignedUserId = (formData.get("assignedUserId") as string | null)?.trim();
+   const notes = (formData.get("notes") as string | null)?.trim();
+ 
+   const result = await adminServerFetch<GeneratedAccessCodeResponse>(
+     "/admin/access-codes",
+     "Generate access code",
+     {
+       method: "POST",
+       headers: { "content-type": "application/json" },
+       body: JSON.stringify({ assignedUserId: assignedUserId || undefined, notes: notes || undefined }),
+     },
    );
-diff --git a/apps/web/app/(app)/admin/page.tsx b/apps/web/app/(app)/admin/page.tsx
-index 33234442048c6d8d338520225540caaf806aaba1..fb929d2609bce1ab6793ec32e1b0591a7c07675c 100644
---- a/apps/web/app/(app)/admin/page.tsx
-+++ b/apps/web/app/(app)/admin/page.tsx
-@@ -12,29 +12,35 @@ export default function AdminPage() {
-         </h1>
+ 
+   redirect(`/admin/access-codes?generatedCode=${encodeURIComponent(result.code)}`);
+ }
+ 
+ async function updateAssignmentAction(formData: FormData) {
+   "use server";
+   const id = String(formData.get("id") || "").trim();
+   const assignedUserId = String(formData.get("assignedUserId") || "").trim();
+ 
+   if (!id) {
+     throw new Error("Missing code id");
+   }
+ 
+   await adminServerFetch(`/admin/access-codes/${id}`, "Update access code assignment", {
+     method: "PATCH",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ assignedUserId: assignedUserId || null }),
+   });
+ 
+   revalidatePath("/admin/access-codes");
+ }
+ 
+ async function revokeAction(formData: FormData) {
+   "use server";
+   const id = String(formData.get("id") || "");
+   await adminServerFetch(`/admin/access-codes/${id}`, "Revoke access code", { method: "DELETE" });
+   revalidatePath("/admin/access-codes");
+ }
+ 
+ export default async function AdminAccessCodesPage({
+   searchParams,
+ }: {
+-  searchParams?: { generatedCode?: string };
++  searchParams?: SearchParamsShape | Promise<SearchParamsShape>;
+ }) {
+-  const rows = await loadCodes();
+-  const generatedCode = searchParams?.generatedCode?.trim() || "";
++  const [rows, users, resolvedSearchParams] = await Promise.all([
++    loadCodes(),
++    loadUsers(),
++    Promise.resolve(searchParams ?? {}),
++  ]);
++
++  const generatedCodeParam = resolvedSearchParams.generatedCode;
++  const generatedCode = (Array.isArray(generatedCodeParam) ? generatedCodeParam[0] : generatedCodeParam)?.trim() || "";
++
++  const assignedUserIds = new Set(
++    rows
++      .filter((row) => row.status === "assigned")
++      .map((row) => row.assignedUserId)
++      .filter((id): id is string => Boolean(id)),
++  );
++
++  const sortedAssignableUsers = users
++    .filter((user) => !assignedUserIds.has(user.id))
++    .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
+ 
+   return (
+     <div className="space-y-6">
+       <header>
+         <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Admins</p>
+         <h1 className="text-3xl font-semibold tracking-tight text-slate-50">Access codes</h1>
          <p className="mt-2 text-sm text-slate-300">
-           Central place for managing users, jobs, and baselines.
+           Generate and manage one-time access codes. Code values are hashed at rest and only visible right after generation.
          </p>
        </header>
  
-       <section className="grid gap-4">
-         <Link
-           className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-           href="/admin/users"
-         >
-           Manage Users
-         </Link>
-         <Link
-           className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-           href="/admin/jobs"
-         >
-           View Jobs
-         </Link>
-         <Link
-           className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-           href="/admin/baselines"
-         >
-           View Baselines
-         </Link>
-+        <Link
-+          className="block rounded-md border border-slate-800 bg-slate-900/70 px-4 py-3 text-base font-medium text-slate-50 transition hover:border-slate-600 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-+          href="/admin/access-codes"
-+        >
-+          Manage Access Codes
-+        </Link>
+       {generatedCode ? (
+         <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+           <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Code generated (shown once)</p>
+           <p className="mt-2 font-mono text-lg text-emerald-100">{generatedCode}</p>
+           <p className="mt-1 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
+         </section>
+       ) : null}
+ 
+       <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+         <form action={generateAction} className="grid gap-3 md:grid-cols-3">
+-          <input
++          <select
+             name="assignedUserId"
+-            placeholder="Assigned user id (optional)"
+             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+-          />
++            defaultValue=""
++          >
++            <option value="">Unassigned</option>
++            {sortedAssignableUsers.map((user) => (
++              <option key={user.id} value={user.id}>
++                {user.email ?? user.id}
++              </option>
++            ))}
++          </select>
+           <input
+             name="notes"
+             placeholder="Notes (optional)"
+             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+           />
+           <button className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold">Generate code</button>
+         </form>
+       </section>
+ 
+       <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+         <table className="min-w-full text-sm">
+           <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
+             <tr>
+               <th className="px-4 py-3">Code</th>
+               <th className="px-4 py-3">Assigned</th>
+               <th className="px-4 py-3">Created</th>
+               <th className="px-4 py-3">Created by</th>
+               <th className="px-4 py-3">Redeemed</th>
+               <th className="px-4 py-3">Status</th>
+               <th className="px-4 py-3">Actions</th>
+             </tr>
+           </thead>
+           <tbody>
+-            {rows.map((row) => (
+-              <tr key={row.id} className="border-t border-white/10 align-top">
+-                <td className="px-4 py-3">{row.codeMasked}</td>
+-                <td className="px-4 py-3">
+-                  <form action={updateAssignmentAction} className="space-y-2">
+-                    <input type="hidden" name="id" value={row.id} />
+-                    <input
+-                      name="assignedUserId"
+-                      defaultValue={row.assignedUserId ?? ""}
+-                      placeholder="user id or blank"
+-                      className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+-                      disabled={row.status === "redeemed" || row.status === "revoked"}
+-                    />
+-                    <div className="flex gap-2">
+-                      <button
+-                        type="submit"
+-                        disabled={row.status === "redeemed" || row.status === "revoked"}
+-                        className="rounded border border-blue-500/60 px-2 py-1 text-xs text-blue-200 disabled:opacity-50"
+-                      >
+-                        Save
+-                      </button>
+-                    </div>
+-                    <p className="text-xs text-slate-400">{row.assignedUserEmail ?? "Unassigned"}</p>
+-                  </form>
+-                </td>
+-                <td className="px-4 py-3">{new Date(row.createdAt).toLocaleString()}</td>
+-                <td className="px-4 py-3">{row.createdByEmail ?? "-"}</td>
+-                <td className="px-4 py-3">{row.redeemedAt ? new Date(row.redeemedAt).toLocaleString() : "-"}</td>
+-                <td className="px-4 py-3 uppercase">{row.status}</td>
+-                <td className="px-4 py-3">
+-                  <form action={revokeAction}>
+-                    <input type="hidden" name="id" value={row.id} />
+-                    <button className="rounded border border-rose-500/60 px-2 py-1 text-xs">Delete</button>
+-                  </form>
+-                </td>
+-              </tr>
+-            ))}
++            {rows.map((row) => {
++              const availableUsers = users
++                .filter((user) => !assignedUserIds.has(user.id))
++                .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
++              const canAssignInTable = row.status === "unused" && !row.assignedUserId;
++
++              return (
++                <tr key={row.id} className="border-t border-white/10 align-top">
++                  <td className="px-4 py-3">{row.codeMasked}</td>
++                  <td className="px-4 py-3">
++                    {canAssignInTable ? (
++                      <form action={updateAssignmentAction} className="space-y-2">
++                        <input type="hidden" name="id" value={row.id} />
++                        <select
++                          name="assignedUserId"
++                          defaultValue=""
++                          className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
++                        >
++                          <option value="">Unassigned</option>
++                          {availableUsers.map((user) => (
++                            <option key={user.id} value={user.id}>
++                              {user.email ?? user.id}
++                            </option>
++                          ))}
++                        </select>
++                        <div className="flex gap-2">
++                          <button
++                            type="submit"
++                            className="rounded border border-blue-500/60 px-2 py-1 text-xs text-blue-200"
++                          >
++                            Save
++                          </button>
++                        </div>
++                        <p className="text-xs text-slate-400">Unassigned</p>
++                      </form>
++                    ) : (
++                      <p className="text-xs text-slate-300">{row.assignedUserEmail ?? "Unassigned"}</p>
++                    )}
++                  </td>
++                  <td className="px-4 py-3">{new Date(row.createdAt).toLocaleString()}</td>
++                  <td className="px-4 py-3">{row.createdByEmail ?? "-"}</td>
++                  <td className="px-4 py-3">{row.redeemedAt ? new Date(row.redeemedAt).toLocaleString() : "-"}</td>
++                  <td className="px-4 py-3 uppercase">{row.status}</td>
++                  <td className="px-4 py-3">
++                    <form action={revokeAction}>
++                      <input type="hidden" name="id" value={row.id} />
++                      <button className="rounded border border-rose-500/60 px-2 py-1 text-xs">Delete</button>
++                    </form>
++                  </td>
++                </tr>
++              );
++            })}
+           </tbody>
+         </table>
        </section>
      </div>
    );
  }
-diff --git a/apps/web/app/(public)/auth/_components/auth-form.tsx b/apps/web/app/(public)/auth/_components/auth-form.tsx
-index 26edf2abde38b0de8cb1ea1ee7ef3e225442bda2..b49c0d763ee9eaea3bb5827a7e2030b490d7511c 100644
---- a/apps/web/app/(public)/auth/_components/auth-form.tsx
-+++ b/apps/web/app/(public)/auth/_components/auth-form.tsx
-@@ -83,50 +83,65 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
-                 firstName: firstName.trim(),
-                 lastName: lastName.trim(),
-                 email: trimmedEmail,
-                 password,
-                 confirmPassword,
-               },
-         ),
-       });
- 
-       let data: unknown = null;
- 
-       // Try to parse JSON if there is a body; ignore parse errors
-       const text = await response.text();
-       if (text) {
-         try {
-           data = JSON.parse(text);
-         } catch {
-           // non-JSON body (e.g. 404 HTML) – data stays null
-         }
-       }
- 
-       if (!response.ok) {
-         const messageFromApi =
-           extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
- 
-+        if (isLogin && response.status === 403 && typeof data === "object" && data) {
-+          const accessCodeRequired = (data as { message?: unknown })?.message;
-+          const code =
-+            typeof accessCodeRequired === "object" && accessCodeRequired
-+              ? (accessCodeRequired as { code?: unknown }).code
-+              : undefined;
-+          if (code === "ACCESS_CODE_REQUIRED") {
-+            const params = new URLSearchParams();
-+            params.set("email", trimmedEmail);
-+            params.set("next", returnPath ?? "/");
-+            router.push(`/auth/access-code?${params.toString()}`);
-+            return;
-+          }
-+        }
-+
-         setError(messageFromApi);
-         return;
-       }
- 
-       if (!isLogin) {
-         const successMessage =
-           extractAuthApiMessage(data) ?? "Check your email to confirm your account.";
-         setMessage(successMessage);
-         return;
-       }
- 
-       router.push(returnPath ?? "/");
-     } catch (submitError) {
-       console.error("Auth request failed", submitError);
-       setError("Unable to reach authentication service");
-     } finally {
-       setIsSubmitting(false);
-     }
-   };
- 
-   return (
-     <div className="mx-auto w-full max-w-md space-y-6">
-       <div className="space-y-2 text-center">
-         <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
-         <p className="text-sm text-gray-600">
-diff --git a/apps/web/app/(public)/auth/access-code/access-code-form.tsx b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..6931ff27416efbd7bd84587cdd1c77b1416d8a7f
---- /dev/null
-+++ b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
-@@ -0,0 +1,63 @@
-+"use client";
-+
-+import { FormEvent, useState } from "react";
-+import { useRouter } from "next/navigation";
-+
-+export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: string; returnPath: string }) {
-+  const router = useRouter();
-+  const [email, setEmail] = useState(initialEmail);
-+  const [password, setPassword] = useState("");
-+  const [code, setCode] = useState("");
-+  const [error, setError] = useState<string | null>(null);
-+  const [isSubmitting, setIsSubmitting] = useState(false);
-+
-+  const onSubmit = async (event: FormEvent) => {
-+    event.preventDefault();
-+    setError(null);
-+
-+    if (!email.trim() || !password || !code.trim()) {
-+      setError("Email, password, and access code are required.");
-+      return;
-+    }
-+
-+    setIsSubmitting(true);
-+    try {
-+      const response = await fetch("/api/auth/redeem-access-code-and-login", {
-+        method: "POST",
-+        headers: { "Content-Type": "application/json" },
-+        credentials: "include",
-+        body: JSON.stringify({ email: email.trim(), password, code: code.trim() }),
-+      });
-+
-+      const body = await response.text();
-+      if (!response.ok) {
-+        setError(body || "Unable to redeem access code.");
-+        return;
-+      }
-+
-+      router.push(returnPath || "/");
-+    } catch {
-+      setError("Unable to reach authentication service");
-+    } finally {
-+      setIsSubmitting(false);
-+    }
-+  };
-+
-+  return (
-+    <div className="mx-auto w-full max-w-md space-y-6">
-+      <div className="space-y-2 text-center">
-+        <h1 className="text-3xl font-bold text-gray-900">Enter Access Code</h1>
-+        <p className="text-sm text-gray-600">Your account needs a beta access code before login.</p>
-+      </div>
-+      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase" type="text" placeholder="TTR-XXXX-XXXX-XXXX" value={code} onChange={(e)=>setCode(e.target.value.toUpperCase())} required />
-+        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-+        <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-+          {isSubmitting ? "Working..." : "Redeem code and log in"}
-+        </button>
-+      </form>
-+    </div>
-+  );
-+}
-diff --git a/apps/web/app/(public)/auth/access-code/page.tsx b/apps/web/app/(public)/auth/access-code/page.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..3ca8ddc079d4df33adb3ab37536d334ad8c3d7bd
---- /dev/null
-+++ b/apps/web/app/(public)/auth/access-code/page.tsx
-@@ -0,0 +1,9 @@
-+import { AccessCodeForm } from "./access-code-form";
-+
-+export default function AccessCodePage({
-+  searchParams,
-+}: {
-+  searchParams?: { email?: string; next?: string };
-+}) {
-+  return <AccessCodeForm initialEmail={searchParams?.email ?? ""} returnPath={searchParams?.next ?? "/"} />;
-+}
-diff --git a/apps/web/app/api/admin/access-codes/[id]/route.ts b/apps/web/app/api/admin/access-codes/[id]/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..4ea8e870e3e4146fbacecdff33ab059f524e021d
---- /dev/null
-+++ b/apps/web/app/api/admin/access-codes/[id]/route.ts
-@@ -0,0 +1,44 @@
-+import { NextRequest, NextResponse } from "next/server";
-+import { getApiBaseUrl, relayApiResponse, requireAdminOrBypass } from "../../helpers";
-+
-+export const runtime = "nodejs";
-+
-+async function send(req: NextRequest, method: string, id: string) {
-+  const access = requireAdminOrBypass(req);
-+  if ("error" in access) return access.error;
-+
-+  const base = getApiBaseUrl();
-+  if (!base) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-+
-+  const body = method === "PATCH" ? await req.text() : undefined;
-+
-+  const response = await fetch(`${base}/admin/access-codes/${id}`, {
-+    method,
-+    headers: {
-+      "content-type": req.headers.get("content-type") ?? "application/json",
-+      "x-dev-user-id": req.headers.get("x-dev-user-id") ?? "",
-+      authorization: req.headers.get("authorization") ?? "",
-+      cookie: req.headers.get("cookie") ?? "",
-+    },
-+    body,
-+    cache: "no-store",
-+  });
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function PATCH(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+  return send(req, "PATCH", id);
-+}
-+
-+export async function DELETE(
-+  req: NextRequest,
-+  context: { params: Promise<{ id: string }> },
-+) {
-+  const { id } = await context.params;
-+  return send(req, "DELETE", id);
-+}
-diff --git a/apps/web/app/api/admin/access-codes/route.ts b/apps/web/app/api/admin/access-codes/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..797610c6ccc46f284b96f0b4fd29cc6f24931827
---- /dev/null
-+++ b/apps/web/app/api/admin/access-codes/route.ts
-@@ -0,0 +1,48 @@
-+import { NextRequest, NextResponse } from "next/server";
-+import { getApiBaseUrl, relayApiResponse, requireAdminOrBypass } from "../helpers";
-+
-+export const runtime = "nodejs";
-+
-+export async function GET(req: NextRequest) {
-+  const access = requireAdminOrBypass(req);
-+  if ("error" in access) return access.error;
-+
-+  const base = getApiBaseUrl();
-+  if (!base) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-+
-+  const response = await fetch(`${base}/admin/access-codes`, {
-+    method: "GET",
-+    headers: {
-+      "x-dev-user-id": req.headers.get("x-dev-user-id") ?? "",
-+      authorization: req.headers.get("authorization") ?? "",
-+      cookie: req.headers.get("cookie") ?? "",
-+    },
-+    cache: "no-store",
-+  });
-+
-+  return relayApiResponse(response);
-+}
-+
-+export async function POST(req: NextRequest) {
-+  const access = requireAdminOrBypass(req);
-+  if ("error" in access) return access.error;
-+
-+  const base = getApiBaseUrl();
-+  if (!base) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
-+
-+  const body = await req.text();
-+
-+  const response = await fetch(`${base}/admin/access-codes`, {
-+    method: "POST",
-+    headers: {
-+      "content-type": req.headers.get("content-type") ?? "application/json",
-+      "x-dev-user-id": req.headers.get("x-dev-user-id") ?? "",
-+      authorization: req.headers.get("authorization") ?? "",
-+      cookie: req.headers.get("cookie") ?? "",
-+    },
-+    body: body || undefined,
-+    cache: "no-store",
-+  });
-+
-+  return relayApiResponse(response);
-+}
-diff --git a/apps/web/app/api/auth/redeem-access-code-and-login/route.ts b/apps/web/app/api/auth/redeem-access-code-and-login/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..215b880d9e57e42e55c49385527472db9f8ea83d
---- /dev/null
-+++ b/apps/web/app/api/auth/redeem-access-code-and-login/route.ts
-@@ -0,0 +1,8 @@
-+import { NextRequest } from "next/server";
-+import { forwardAuthRequest } from "../helpers";
-+
-+export const runtime = "nodejs";
-+
-+export async function POST(req: NextRequest) {
-+  return forwardAuthRequest(req, "/auth/redeem-access-code-and-login");
-+}
-diff --git a/infra/docker/.env.example b/infra/docker/.env.example
-index 0b7f77172967eca6183430b06e536b00dddc50b8..9784f3fe32d63b9dcbb08614870b82a208696268 100644
---- a/infra/docker/.env.example
-+++ b/infra/docker/.env.example
-@@ -1,13 +1,15 @@
- # DigitalOcean dev environment variables
- APP_VERSION=dev
- DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/targetthisrole?sslmode=require
- CORS_ORIGIN=https://app.dev.targetthisrole.ai
- CADDY_EMAIL=you@example.com
- APP_DOMAIN=app.dev.targetthisrole.ai
- 
- TYPEORM_SYNCHRONIZE=true
- ENABLE_LLM_PARITY_SCORE=true
- JWT_SECRET=CHANGEME
- APP_BASE_URL=https://app.dev.targetthisrole.ai
- SUPPORT_EMAIL=support@targetthisrole.ai
- REQUIRE_EMAIL_CONFIRMATION=true
-+
-+REQUIRE_ACCESS_CODE=true
