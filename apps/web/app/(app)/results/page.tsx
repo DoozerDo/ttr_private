@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -18,21 +18,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import { useAutoGenerateThreshold } from "../lib/settings";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
-import {
-  mapComplianceFlags,
-  sanitizeGapMessage,
-  sortComplianceFlagsBySeverity,
-} from "@/lib/resultsInsights";
-import {
-  InterviewFocusTag,
-  mapTextToInterviewFocusTag,
-} from "@/lib/interviewToolkit/focus";
-import {
-  CALIBRATION_PROFILE_OPTIONS,
-  type CalibrationProfile,
-} from "@/lib/calibration/profiles";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -129,73 +115,7 @@ type LatestAnalysis = {
   scoring_v2?: ScoringV2Result | null;
 };
 
-type CalibrationMetadata = {
-  profile: CalibrationProfile;
-  label: string;
-  delta: number;
-};
-
-type CalibratedResult = LatestAnalysis & {
-  calibration?: CalibrationMetadata;
-};
-
-type NextStep = {
-  title: string;
-  description: string;
-};
-
-type NextStepArgs = {
-  score: number | null | undefined;
-  verdict?: string | null;
-  hasAnalysis: boolean;
-  autoGenerateThreshold: number;
-};
-
-type FocusListItem = {
-  text: string;
-  focusTag: InterviewFocusTag | null;
-};
-
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
-
-function buildInterviewToolkitHref(focusTag: InterviewFocusTag, assessmentId?: string | null) {
-  const params = new URLSearchParams({
-    focus: focusTag,
-    source: "results",
-  });
-  if (assessmentId?.trim()) {
-    params.set("assessmentId", assessmentId.trim());
-  }
-  return `${INTERVIEW_TOOLKIT_PATH}?${params.toString()}`;
-}
-
-function ResultsFocusRow({
-  item,
-  assessmentId,
-}: {
-  item: FocusListItem;
-  assessmentId?: string | null;
-}) {
-  const { text, focusTag } = item;
-  const commonClasses =
-    "w-full rounded-2xl border border-white/10 bg-slate-900/30 px-4 py-3 text-left text-sm font-normal transition";
-
-  if (!focusTag) {
-    return <div className={`${commonClasses} text-slate-400`}>{text}</div>;
-  }
-
-  return (
-    <Link
-      href={buildInterviewToolkitHref(focusTag, assessmentId)}
-      className={`${commonClasses} flex items-center justify-between gap-3 text-slate-100 hover:border-sky-400/70 hover:bg-slate-900/50`}
-    >
-      <span>{text}</span>
-      <span aria-hidden="true" className="text-lg text-slate-400">
-        →
-      </span>
-    </Link>
-  );
-}
 
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -228,6 +148,277 @@ const LOW_EXPERIENCE_THRESHOLD = 70;
 
 const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
+
+type ScoreDriver = {
+  key: ScoringContractV1DimensionKey;
+  label: string;
+  percent: number | null;
+  points: number | null;
+  weight: number | null;
+  bucket: DriverBucket;
+  why: string;
+  action: string;
+  evidence: string[];
+  extraLine?: string;
+  cta: { label: string; href: string } | null;
+  showNoChangesMessage: boolean;
+  ctaDisabled?: boolean;
+};
+
+type DriverBucket = "strong" | "watch" | "fix" | "pending";
+
+type DriverCopy = {
+  why: string;
+  action: string;
+};
+
+const DRIVER_COPY: Record<
+  ScoringContractV1DimensionKey,
+  Record<Exclude<DriverBucket, "pending">, DriverCopy>
+> = {
+  role_scope_and_seniority: {
+    strong: {
+      why: "Role scope and seniority sits at {percent} and matches the leadership level the role demands.",
+      action: "Document a recent enterprise initiative in Resume Studio so the leadership story stays current.",
+    },
+    watch: {
+      why: "Role scope and seniority sits at {percent}, leaving the verdict on the fence until large scale ownership stands out.",
+      action: "Add a leadership narrative in Fit Review that spells out your ownership of critical outcomes.",
+    },
+    fix: {
+      why: "Role scope and seniority sits at {percent} and is the biggest limiter before apply.",
+      action: "Clarify the senior scope and outcome in Fit Review to unlock this dimension.",
+    },
+  },
+  support_operations_and_process_rigor: {
+    strong: {
+      why: "Support operations and process rigor sits at {percent}, showing you sustain the reliability the role expects.",
+      action: "Review the process stories in Resume Studio to keep these examples tied to current work.",
+    },
+    watch: {
+      why: "Support operations and process rigor sits at {percent}, so deeper process detail would raise confidence.",
+      action: "Add a process example in Resume Studio and connect the steps in Fit Review.",
+    },
+    fix: {
+      why: "Support operations and process rigor sits at {percent} and is the main gap slowing readiness.",
+      action: "Map the process leadership evidence inside Fit Review before moving toward apply.",
+    },
+  },
+  tooling_and_platform_experience: {
+    strong: {
+      why: "Tooling and platform experience sits at {percent}, aligning with the technical checklist.",
+      action: "Keep tooling ownership language current in Resume Studio so the story stays sharp.",
+    },
+    watch: {
+      why: "Tooling and platform experience sits at {percent} which means depth on key systems would tip it upward.",
+      action: "Outline how you led platform migrations in Fit Review to raise this signal.",
+    },
+    fix: {
+      why: "Tooling and platform experience sits at {percent} and keeps the score from rising.",
+      action: "Detail the missing platform coverage in Fit Review before reapplying.",
+    },
+  },
+  domain_and_business_context: {
+    strong: {
+      why: "Domain and business context sits at {percent} and mirrors the employer language.",
+      action: "Refresh domain language in Resume Studio to keep this alignment visible.",
+    },
+    watch: {
+      why: "Domain and business context sits at {percent}, so clarifying industry stories would lift the score.",
+      action: "Highlight the immediate business impact of past work inside Fit Review.",
+    },
+    fix: {
+      why: "Domain and business context sits at {percent} and is suppressing the verdict.",
+      action: "Add domain context and customer outcomes inside Fit Review before moving forward.",
+    },
+  },
+  change_leadership_and_customer_advocacy: {
+    strong: {
+      why: "Change leadership and customer advocacy sits at {percent} and shows strategic momentum.",
+      action: "Summarize the latest change leadership wins in Resume Studio for ongoing polish.",
+    },
+    watch: {
+      why: "Change leadership and customer advocacy sits at {percent} and would move up with fresher impact stories.",
+      action: "Highlight those wins in Fit Review so this signal stops slipping.",
+    },
+    fix: {
+      why: "Change leadership and customer advocacy sits at {percent} and is the readiness limiter.",
+      action: "Build targeted Interview Toolkit practice around these change leadership moments.",
+    },
+  },
+};
+
+const WATCH_FIX_CTA_DESTINATIONS: Record<
+  ScoringContractV1DimensionKey,
+  { label: string; target: "fitReview" | "studio" | "interviewToolkit" }
+> = {
+  role_scope_and_seniority: { label: "Open Fit Review", target: "fitReview" },
+  support_operations_and_process_rigor: { label: "Generate in Resume Studio", target: "studio" },
+  tooling_and_platform_experience: { label: "Open Fit Review", target: "fitReview" },
+  domain_and_business_context: { label: "Open Fit Review", target: "fitReview" },
+  change_leadership_and_customer_advocacy: { label: "Open Interview Toolkit", target: "interviewToolkit" },
+};
+
+function percentLabelForCopy(percent?: number | null): string {
+  return typeof percent === "number" ? `${percent.toFixed(1)}%` : "pending";
+}
+
+function getBucketFromPercent(percent?: number | null): DriverBucket {
+  if (typeof percent !== "number") return "pending";
+  if (percent >= 90) return "strong";
+  if (percent >= 80) return "watch";
+  return "fix";
+}
+
+function buildDriverWhy(
+  key: ScoringContractV1DimensionKey,
+  bucket: DriverBucket,
+  percentLabel: string,
+): string {
+  if (bucket === "pending") {
+    return "This dimension is still pending a percent so hold before acting.";
+  }
+  const templates = DRIVER_COPY[key];
+  const copy = templates?.[bucket];
+  if (!copy) return "This dimension requires a closer look.";
+  return copy.why.replace("{percent}", percentLabel);
+}
+
+function buildDriverAction(key: ScoringContractV1DimensionKey, bucket: DriverBucket): string {
+  if (bucket === "pending") {
+    return "Wait for the percent to appear before updating this dimension.";
+  }
+  const templates = DRIVER_COPY[key];
+  const copy = templates?.[bucket];
+  if (!copy) return "Review this dimension in the next step.";
+  return copy.action;
+}
+
+function getCtaForDimension(
+  key: ScoringContractV1DimensionKey,
+  bucket: DriverBucket,
+  paths: {
+    fitReviewPath: string;
+    studioHref: string;
+    interviewToolkitHref: string;
+  },
+) {
+  if (bucket === "strong") {
+    return { label: "Polish in Resume Studio", href: paths.studioHref };
+  }
+  if (bucket === "pending") return null;
+  const mapping = WATCH_FIX_CTA_DESTINATIONS[key];
+  if (!mapping) return null;
+  const href =
+    mapping.target === "fitReview"
+      ? paths.fitReviewPath
+      : mapping.target === "interviewToolkit"
+      ? paths.interviewToolkitHref
+      : paths.studioHref;
+  return { label: mapping.label, href };
+}
+
+function pickEvidenceForDimension(
+  debugFields: ScoringV2DebugInfo | null,
+  key: ScoringContractV1DimensionKey,
+  summary?: string | null,
+): string[] {
+  const evidence: string[] = [];
+  if (debugFields) {
+    switch (key) {
+      case "role_scope_and_seniority":
+        if (debugFields.roleBand) evidence.push(`Role band ${debugFields.roleBand}`);
+        if (typeof debugFields.bandDelta === "number") {
+          evidence.push(`Band delta ${debugFields.bandDelta.toFixed(1)} compared to baseline`);
+        }
+        break;
+      case "support_operations_and_process_rigor":
+        if (typeof debugFields.baselineCoveragePercent === "number") {
+          evidence.push(
+            `Baseline coverage ${debugFields.baselineCoveragePercent.toFixed(1)} percent`,
+          );
+        }
+        if (typeof debugFields.responsibilityOverlapPercent === "number") {
+          evidence.push(
+            `Responsibility overlap ${debugFields.responsibilityOverlapPercent.toFixed(1)} percent`,
+          );
+        }
+        break;
+      case "tooling_and_platform_experience":
+        if (typeof debugFields.toolingCoverage?.requiredCoverage === "number") {
+          evidence.push(
+            `Required tooling coverage ${debugFields.toolingCoverage.requiredCoverage.toFixed(1)} percent`,
+          );
+        }
+        if (typeof debugFields.toolingCoverage?.preferredCoverage === "number") {
+          evidence.push(
+            `Preferred tooling coverage ${debugFields.toolingCoverage.preferredCoverage.toFixed(1)} percent`,
+          );
+        }
+        break;
+      case "domain_and_business_context":
+        if (debugFields.domainTagsRole?.length) {
+          evidence.push(`Role tags ${debugFields.domainTagsRole.join(", ")}`);
+        }
+        if (debugFields.domainTagsBaseline?.length) {
+          evidence.push(`Baseline tags ${debugFields.domainTagsBaseline.join(", ")}`);
+        }
+        break;
+      case "change_leadership_and_customer_advocacy":
+        if (debugFields.jobScoringTextSource) {
+          evidence.push(`Job scoring source ${debugFields.jobScoringTextSource}`);
+        }
+        if (debugFields.domainTagsBaseline?.length) {
+          evidence.push(`Domain checkpoint ${debugFields.domainTagsBaseline.join(", ")}`);
+        }
+        break;
+    }
+  }
+  if (!evidence.length && typeof summary === "string" && summary.trim().length) {
+    const snippet = summary.trim().split(/\r?\n/)[0];
+    if (snippet) evidence.push(snippet);
+  }
+  return evidence.slice(0, 2);
+}
+
+function pickLeverForDimension(
+  debugFields: ScoringV2DebugInfo | null,
+  key: ScoringContractV1DimensionKey,
+  bucket: DriverBucket,
+): string | undefined {
+  if (bucket !== "watch") return undefined;
+  switch (key) {
+    case "role_scope_and_seniority": {
+      if (debugFields?.roleBand) {
+        return `Tie the ${debugFields.roleBand} band story to a senior outcome`;
+      }
+      return "Tie a senior outcome to the role scope story";
+    }
+    case "support_operations_and_process_rigor": {
+      if (typeof debugFields?.baselineCoveragePercent === "number") {
+        return `Map the ${debugFields.baselineCoveragePercent.toFixed(1)} percent baseline coverage to a process impact`;
+      }
+      return "Link a process improvement story to the expectations for support operations";
+    }
+    case "tooling_and_platform_experience": {
+      if (typeof debugFields?.toolingCoverage?.requiredCoverage === "number") {
+        return `Highlight the ${debugFields.toolingCoverage.requiredCoverage.toFixed(1)} percent required tooling coverage you owned`;
+      }
+      return "Specify the core platform work that shows you own the tooling";
+    }
+    case "domain_and_business_context": {
+      if (debugFields?.domainTagsRole?.length) {
+        return `Frame a story around ${debugFields.domainTagsRole[0]} to match the domain language`;
+      }
+      return "Describe the business context that connects you to the role";
+    }
+    case "change_leadership_and_customer_advocacy": {
+      return "Link a change leadership win to the customer impact you delivered";
+    }
+    default:
+      return undefined;
+  }
+}
 
 function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionScores {
   if (!data) return {};
@@ -262,41 +453,6 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
   return {};
 }
 
-const getNextSteps = ({
-  score,
-  verdict,
-  hasAnalysis,
-  autoGenerateThreshold,
-}: NextStepArgs): NextStep[] => {
-  const verdictInfo = getVerdictDisplayOrDefault(verdict);
-  const scoreLabel = typeof score === "number" ? score.toFixed(1) : "pending";
-
-  return [
-    {
-      title: "Understand the score summary",
-      description: hasAnalysis
-        ? `Review the strengths, gaps, and experience area contributions above to see how the ${scoreLabel} score came together.`
-        : "Load the latest analysis to reveal the score summary and supporting context.",
-    },
-    {
-      title: "Decide whether to apply",
-      description:
-        "Weigh the highlighted gaps against the role priorities and your timing, and open Fit Review if you want deeper context before moving forward.",
-    },
-    {
-      title: "Generate or polish a resume",
-      description: `Open the Studio to generate a draft, copy the text, or download documents. Exports remain available anytime, regardless of score.`,
-    },
-    {
-      title: "Apply and log the progress",
-      description: "Capture the opportunity in your tracker, confirm next steps, and secure the application window.",
-    },
-    {
-      title: "Prepare for interviews",
-      description: "Once you've decided to apply, leverage the Interview Toolkit to practice around the gaps exposed above.",
-    },
-  ];
-};
 
 type AnyObject = Record<string, unknown>;
 
@@ -434,20 +590,7 @@ export default function ResultsPage() {
   const [complianceError, setComplianceError] = useState<ParsedComplianceError | null>(null);
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
-  const [autoGenerateThreshold] = useAutoGenerateThreshold();
-  const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfile>("balanced");
-  const [calibrationResult, setCalibrationResult] = useState<CalibratedResult | null>(null);
-  const [calibrating, setCalibrating] = useState(false);
-  const [calibrationError, setCalibrationError] = useState<string | null>(null);
-  const [useCalibratedScore, setUseCalibratedScore] = useState(false);
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
-  // Prevent SSR hydration mismatches for locale and timezone dependent formatting.
-  const [hasMounted, setHasMounted] = useState(false);
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
-  const [experienceActionTarget, setExperienceActionTarget] = useState<string | null>(null);
-  const confidenceSettingsRef = useRef<HTMLDivElement | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -475,7 +618,7 @@ export default function ResultsPage() {
     return { jobId: jobIdValue, baselineVersionId: baselineVersionIdValue };
   };
 
-  const latestScore: number | null = useMemo(() => {
+  const activeScore = useMemo(() => {
     if (!latest) return null;
     const scoringV2Score = latest.scoring_v2?.score;
     if (typeof scoringV2Score === "number") return scoringV2Score;
@@ -485,36 +628,34 @@ export default function ResultsPage() {
     return typeof fallback === "number" ? fallback : null;
   }, [latest]);
 
-  const activeAnalysis = useMemo(() => {
-    if (useCalibratedScore && calibrationResult) return calibrationResult;
-    return latest;
-  }, [useCalibratedScore, calibrationResult, latest]);
-
-  const activeScore = useMemo(() => {
-    if (!activeAnalysis) return null;
-    const scoringV2Score = activeAnalysis.scoring_v2?.score;
-    if (typeof scoringV2Score === "number") return scoringV2Score;
-    const fallback =
-      activeAnalysis.overallScore ??
-      (typeof activeAnalysis.score === "number" ? activeAnalysis.score : activeAnalysis.score ?? null);
-    return typeof fallback === "number" ? fallback : null;
-  }, [activeAnalysis]);
-
-  const analysis = latest;
-  const scoringV2 = analysis?.scoring_v2 ?? null;
-  const resultsAssessmentId = latest?.assessmentId ?? activeAnalysis?.assessmentId ?? null;
+  const scoringV2 = latest?.scoring_v2 ?? null;
+  const resultsAssessmentId = latest?.assessmentId ?? null;
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
-  const analysisKeys = analysis ? Object.keys(analysis) : [];
-  const hasAnalysis = Boolean(analysis);
-  const diagnosticAssessmentId = analysis?.assessmentId ?? runIdentifier ?? "N/A";
+  const analysisKeys = latest ? Object.keys(latest) : [];
+  const hasAnalysis = Boolean(latest);
+  const diagnosticAssessmentId = latest?.assessmentId ?? runIdentifier ?? "N/A";
 
   const activeVerdictInfo = useMemo(
-    () => getVerdictDisplayOrDefault(activeAnalysis?.verdict ?? null),
-    [activeAnalysis?.verdict],
+    () => getVerdictDisplayOrDefault(latest?.verdict ?? null),
+    [latest?.verdict],
   );
 
-  const gaugeVerdictLabel = activeVerdictInfo.label.toUpperCase();
+  const executionMode = typeof activeScore === "number" && activeScore >= 70;
+  const heroScoreText = `Score: ${activeScore?.toFixed(1) ?? "Pending"}`;
+  const heroHeading = executionMode ? "You’re Clear to Apply" : "Alignment Needs Attention";
+  const heroSupportText = executionMode
+    ? "This role aligns with your verified baseline."
+    : "Review gaps and strengthen alignment before applying.";
+
+  const jobTrackerHref = "/job-tracker";
+  const interviewToolkitHref = useMemo(() => {
+    const params = new URLSearchParams({ source: "results" });
+    if (resultsAssessmentId) {
+      params.set("assessmentId", resultsAssessmentId);
+    }
+    return `${INTERVIEW_TOOLKIT_PATH}?${params.toString()}`;
+  }, [resultsAssessmentId]);
 
   const fitReviewPath = useMemo(() => {
     const candidateJobId = (latest?.jobId || jobId || "").trim();
@@ -538,67 +679,9 @@ export default function ResultsPage() {
     return `/studio?${params.toString()}`;
   }, [latest?.jobId, latestBaselineVersionId]);
 
-  const nextSteps = useMemo(
-    () =>
-      getNextSteps({
-        score: activeScore,
-        verdict: activeAnalysis?.verdict ?? null,
-        hasAnalysis: !!latest,
-        autoGenerateThreshold,
-      }),
-    [activeAnalysis?.verdict, activeScore, autoGenerateThreshold, latest],
-  );
-
-  const selectedCalibrationProfile = useMemo(
-    () => CALIBRATION_PROFILE_OPTIONS.find((option) => option.value === calibrationProfile),
-    [calibrationProfile],
-  );
-
-  const calibrationDeltaText = useMemo(() => {
-    const delta = calibrationResult?.calibration?.delta;
-    if (typeof delta !== "number") return null;
-    if (delta > 0) return `+${delta.toFixed(1)}`;
-    if (delta < 0) return delta.toFixed(1);
-    return "0.0";
-  }, [calibrationResult?.calibration?.delta]);
-
-  const calibrationConfidenceSummary = useMemo(() => {
-    if (!calibrationResult) {
-      return "Run a calibration when you want to pressure-test how confident you feel about this score.";
-    }
-    const delta = calibrationResult.calibration?.delta;
-    if (typeof delta !== "number") {
-      return "Calibration complete. Compare the adjusted score above.";
-    }
-    if (delta > 0) {
-      return `Confidence increased by ${delta.toFixed(1)} points.`;
-    }
-    if (delta < 0) {
-      return `Confidence decreased by ${Math.abs(delta).toFixed(1)} points.`;
-    }
-    return "Confidence steady.";
-  }, [calibrationResult]);
-
-  const calibrationConfidenceRecommendation = useMemo(() => {
-    if (!calibrationResult) {
-      return "Keep the stored score unchanged; revisit calibration when you want to try a different weighting.";
-    }
-    const delta = calibrationResult.calibration?.delta;
-    if (typeof delta !== "number") {
-      return "Compare the calibrated score before you export.";
-    }
-    if (delta > 0) {
-      return "Confidence is higher—move toward document generation while highlighting the strengths above.";
-    }
-    if (delta < 0) {
-      return "Confidence dipped—address the gaps highlighted above before exporting.";
-    }
-    return "Confidence is unchanged—proceed with the next action.";
-  }, [calibrationResult]);
-
   const normalizedDimensionScores = useMemo(
-    () => normalizeDimensionScores(activeAnalysis ?? null),
-    [activeAnalysis],
+    () => normalizeDimensionScores(latest ?? null),
+    [latest],
   );
   const dimensionEntries = useMemo(() => {
     const keys = Object.keys(DIMENSION_LABELS) as Array<keyof FitDimensionScores>;
@@ -626,6 +709,108 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
+
+  const canOpenStudio = Boolean(latest?.jobId && latestBaselineVersionId);
+  const formatDriverValue = (value?: number | null) =>
+    typeof value === "number" ? value.toFixed(1) : "n/a";
+  const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
+  const scoreDrivers = useMemo<ScoreDriver[]>(() => {
+    if (!scoringRubric) return [];
+    return rubricDimensionEntries.map((dimension) => {
+      const bucket = getBucketFromPercent(dimension.percent);
+      const percentLabel = percentLabelForCopy(dimension.percent);
+      const why = buildDriverWhy(dimension.key, bucket, percentLabel);
+      const action = buildDriverAction(dimension.key, bucket);
+      const evidence = pickEvidenceForDimension(debugFields, dimension.key, summarySnippet);
+      const cta = getCtaForDimension(dimension.key, bucket, {
+        fitReviewPath,
+        studioHref,
+        interviewToolkitHref,
+      });
+      const lever = pickLeverForDimension(debugFields, dimension.key, bucket);
+      const extraLine =
+        bucket === "watch"
+          ? lever
+            ? `Biggest lever: ${lever}`
+            : undefined
+          : bucket === "fix"
+          ? "This is the main limiter right now."
+          : undefined;
+      const ctaDisabled = Boolean(cta?.label.includes("Studio") && !canOpenStudio);
+      return {
+        ...dimension,
+        bucket,
+        why,
+        action,
+        evidence,
+        extraLine,
+        cta,
+        ctaDisabled,
+        showNoChangesMessage: bucket === "strong" && !cta,
+      };
+    });
+  }, [
+    rubricDimensionEntries,
+    scoringRubric,
+    debugFields,
+    fitReviewPath,
+    studioHref,
+    interviewToolkitHref,
+    summarySnippet,
+    canOpenStudio,
+  ]);
+
+  const renderDriverGrid = (showExtraLine: boolean) => (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {scoreDrivers.map((driver) => {
+        const cta = driver.cta;
+        return (
+          <article
+            key={driver.key}
+            className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-4"
+          >
+            <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{driver.label}</p>
+            <p className="text-sm text-slate-400">
+              Current score {formatDriverValue(driver.points)} of {formatDriverValue(driver.weight)} points
+            </p>
+            <div className="space-y-2 text-sm text-slate-200">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Why this mattered</p>
+              <p>{driver.why}</p>
+              {driver.evidence.length ? (
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Evidence</p>
+                  <ul className="space-y-1 text-sm text-slate-200 list-disc list-inside">
+                    {driver.evidence.map((item, index) => (
+                      <li key={`${driver.key}-evidence-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">Evidence unavailable for this dimension.</p>
+              )}
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Next action</p>
+              <p>{driver.action}</p>
+              {showExtraLine && driver.extraLine ? (
+                <p className="text-xs text-slate-400">{driver.extraLine}</p>
+              ) : null}
+            </div>
+            {cta ? (
+              <div>
+                <FormButton
+                  onClick={() => void router.push(cta.href)}
+                  disabled={!!driver.ctaDisabled}
+                >
+                  {cta.label}
+                </FormButton>
+              </div>
+            ) : driver.showNoChangesMessage ? (
+              <p className="text-xs text-slate-400">No changes needed here.</p>
+            ) : null}
+          </article>
+        );
+      })}
+    </div>
+  );
 
   const debugJsonPayload = useMemo(() => {
     if (!scoringV2) return null;
@@ -676,14 +861,6 @@ export default function ResultsPage() {
     return "Load the latest analysis to surface how the score reflects your context.";
   }, [latest]);
 
-  const rubricDescription = useMemo(
-    () =>
-      scoringV2?.rubric
-        ? "The scoring_contract_v1 rubric captures how each dimension contributes to the CX Fit score."
-        : summaryCopy,
-    [scoringV2?.rubric, summaryCopy],
-  );
-
   const keyTermDetails = useMemo(() => {
     if (!latest) {
       return { matchedKeyTerms: [], missingKeyTerms: [] };
@@ -724,41 +901,6 @@ export default function ResultsPage() {
     return `Matched ${keyTermDetails.matchedKeyTerms.length} of ${totalTerms} key terms from the job description.`;
   }, [keyTermDetails]);
 
-  const complianceFlagList = useMemo(
-    () => sortComplianceFlagsBySeverity(mapComplianceFlags(latest?.complianceFlags ?? undefined)),
-    [latest?.complianceFlags],
-  );
-
-  const toFocusListItem = (text: string): FocusListItem => ({
-    text,
-    focusTag: mapTextToInterviewFocusTag(text),
-  });
-
-  const strengthItems = useMemo(() => {
-    if (!latest?.strengths?.length) return [];
-    return latest.strengths
-      .map((item) => item?.trim?.())
-      .filter((item): item is string => typeof item === "string" && item.length > 0)
-      .slice(0, 4)
-      .map((text) => toFocusListItem(text));
-  }, [latest?.strengths]);
-
-  const gapItems = useMemo(() => {
-    const normalizedGaps = (latest?.gaps ?? [])
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter((item): item is string => item.length > 0)
-      .map(sanitizeGapMessage);
-
-    const complianceEntries = complianceFlagList.map((flag) => {
-      const label = flag.severity === "block" ? "Required boundary" : "Advisory boundary";
-      return `${label}: ${flag.message}`;
-    });
-
-    return [...normalizedGaps, ...complianceEntries]
-      .slice(0, 4)
-      .map((text) => toFocusListItem(text));
-  }, [latest?.gaps, complianceFlagList]);
-
   const debugMode = debugUiEnabled;
 
   const latestStatusMessage = useMemo(() => {
@@ -766,7 +908,7 @@ export default function ResultsPage() {
     if (!jobId) return "Enter a job ID to load the latest analysis.";
     if (!baselineId) return "Select a baseline to load the latest analysis.";
     if (analysisSource === "latest" && latest) return "Latest analysis loaded.";
-    return "Load latest analysis to populate the score and unlock one tap export.";
+    return "Load latest analysis to populate the score and clarify your next move.";
   }, [analysisSource, jobId, baselineId, latest, loadingLatest]);
 
   const loadAssessmentById = useCallback(
@@ -882,10 +1024,6 @@ export default function ResultsPage() {
     }
   }
 
-  const handleExperienceAction = useCallback((area: string) => {
-    setExperienceActionTarget(area);
-  }, []);
-
   useEffect(() => {
     if (!runIdentifier) {
       setLastLoadedRunIdentifier(null);
@@ -897,65 +1035,6 @@ export default function ResultsPage() {
     setLastLoadedRunIdentifier(runIdentifier);
     void loadAssessmentById(runIdentifier);
   }, [loadAssessmentById, runIdentifier, lastLoadedRunIdentifier]);
-
-  useEffect(() => {
-    setCalibrationResult(null);
-    setUseCalibratedScore(false);
-    setCalibrationError(null);
-  }, [latest?.assessmentId]);
-
-  const handleCalibrate = useCallback(async () => {
-    if (!latest?.assessmentId) return;
-
-    const profileOption = selectedCalibrationProfile;
-    if (!profileOption?.weights) {
-      setCalibrationError("Calibration failed. The selected profile is missing weights.");
-      setCalibrationResult(null);
-      return;
-    }
-
-    setCalibrating(true);
-    setCalibrationError(null);
-
-    try {
-      const res = await fetch("/api/calibration", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          assessmentId: latest.assessmentId,
-          profileName: calibrationProfile,
-          weights: profileOption.weights,
-        }),
-      });
-
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("application/json")) {
-        await res.text();
-        setCalibrationError(
-          "Calibration failed. The server returned an unexpected response. This is usually a routing or auth issue.",
-        );
-        setCalibrationResult(null);
-        return;
-      }
-
-      const payload = await readResponsePayload(res.clone());
-
-      if (!res.ok) {
-        const message = formatErrorMessage(payload, "Unable to calibrate the latest analysis.");
-        setCalibrationError(message);
-        setCalibrationResult(null);
-        return;
-      }
-
-      const data = await res.json();
-      setCalibrationResult(data as CalibratedResult);
-    } catch (error: unknown) {
-      setCalibrationError(resolveUnknownMessage(error) ?? "Calibration failed.");
-      setCalibrationResult(null);
-    } finally {
-      setCalibrating(false);
-    }
-  }, [calibrationProfile, latest?.assessmentId, selectedCalibrationProfile]);
 
   useEffect(() => {
     const job = searchParams?.get("jobId");
@@ -988,61 +1067,105 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] items-start">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
-                <div className="flex flex-col items-center">
-                  <ScoreGauge
-                    score={activeScore ?? undefined}
-                    loading={activeScore === null}
-                    label={gaugeVerdictLabel}
-                  />
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-white/10 bg-slate-900/30 p-6 shadow-inner">
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
+                  <div className="flex justify-center lg:justify-start lg:w-[240px]">
+                    <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} />
+                  </div>
+                  <div className="space-y-4 text-center lg:text-left">
+                    <p className="text-3xl font-semibold text-white">{heroHeading}</p>
+                    <p className="text-xl font-semibold text-white">{heroScoreText}</p>
+                    <p className="text-sm text-slate-300">{heroSupportText}</p>
+                    <div className="flex flex-wrap justify-center gap-3 lg:justify-start">
+                      {executionMode ? (
+                        <FormButton
+                          onClick={() => void router.push(studioHref)}
+                          disabled={!canOpenStudio}
+                        >
+                          Open Resume &amp; Cover Letter Studio
+                        </FormButton>
+                      ) : (
+                        <>
+                          <FormButton onClick={() => void router.push(fitReviewPath)}>
+                            Open Fit Review
+                          </FormButton>
+                          <FormButton
+                            variant="secondary"
+                            onClick={() => void router.push(studioHref)}
+                            disabled={!canOpenStudio}
+                          >
+                            Open Resume &amp; Cover Letter Studio
+                          </FormButton>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
-                    STRENGTHS
-                  </p>
-                  {strengthItems.length ? (
-                    <div className="mt-3 space-y-2">
-                      {strengthItems.map((item, index) => (
-                        <ResultsFocusRow
-                          key={`${item.text}-${index}`}
-                          item={item}
-                          assessmentId={resultsAssessmentId}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-slate-400">
-                      No strengths surfaced yet; run the latest analysis to reveal them.
-                    </p>
-                  )}
+              {scoringRubric ? (
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    {rubricDimensionEntries.map((dimension) => (
+                      <div
+                        key={dimension.key}
+                        className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
+                      >
+                        <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                          {dimension.label}
+                        </p>
+                        <p className="mt-1 text-lg font-semibold text-white">
+                          {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
+                          {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} points
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">
-                    GAPS
+              ) : (
+                <div className="rounded-2xl border border-rose-600/40 bg-rose-950/10 p-4 text-sm text-rose-200">
+                  <p className="font-semibold text-rose-100">
+                    scoring_v2 missing from analysis payload
                   </p>
-                  {gapItems.length ? (
-                    <div className="mt-3 space-y-2">
-                      {gapItems.map((item, index) => (
-                        <ResultsFocusRow
-                          key={`${item.text}-${index}`}
-                          item={item}
-                          assessmentId={resultsAssessmentId}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-slate-400">
-                      No gaps surfaced yet; run the latest analysis to highlight where to tighten the story.
-                    </p>
-                  )}
+                  <p className="text-rose-300">
+                    <strong>Assessment ID:</strong> {diagnosticAssessmentId}
+                  </p>
+                  <p className="text-rose-300">
+                    <strong>Analysis loaded:</strong> {hasAnalysis ? "true" : "false"}
+                  </p>
+                  <p className="text-rose-300">
+                    <strong>Top-level keys:</strong> {analysisKeys.length ? analysisKeys.join(", ") : "none"}
+                  </p>
+                  <p className="mt-2 text-xs text-rose-300">
+                    Rubric breakdown requires scoring_v2.rubric. Refresh or rerun the analysis to load that payload.
+                  </p>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </section>
+
+        {scoringRubric && scoreDrivers.length ? (
+          executionMode ? (
+            <details className="group rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+              <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
+                <span>Score drivers</span>
+                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Tap to expand</span>
+              </summary>
+              <div className="mt-4">{renderDriverGrid(false)}</div>
+            </details>
+          ) : (
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Score drivers</p>
+              </div>
+              {renderDriverGrid(true)}
+            </section>
+          )
+        ) : null}
 
         {evaluationNotesAvailable ? (
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -1052,7 +1175,7 @@ export default function ResultsPage() {
               </p>
               <h2 className="text-lg font-semibold text-slate-100">Evaluation notes</h2>
               <p className="mt-1 text-sm text-slate-300">
-                Evaluation notes describe the guardrails or context the scoring model followed; they are usually informational and do not require action unless you see a compliance flag.
+                Evaluation notes capture the context or guardrails tied to this run; review them if compliance notices appear.
               </p>
             </div>
             <ul className="space-y-2 text-sm text-slate-200">
@@ -1070,298 +1193,7 @@ export default function ResultsPage() {
 
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
 
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5 shadow">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-              Scoring contract
-            </p>
-            <h2 className="text-lg font-semibold text-slate-100">Rubric breakdown</h2>
-            <p className="mt-1 text-sm text-slate-300">{rubricDescription}</p>
-          </div>
-          {scoringV2?.rubric ? (
-            <>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                {rubricDimensionEntries.map((dimension) => (
-                  <div
-                    key={dimension.key}
-                    className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
-                  >
-                    <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                      {dimension.label}
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-white">
-                      {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      Points {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
-                      {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} weight
-                    </p>
-                    {dimension.percent !== null && dimension.percent < LOW_EXPERIENCE_THRESHOLD ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleExperienceAction(dimension.label)}
-                          className="mt-2 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300 hover:text-amber-200"
-                        >
-                          Add or clarify experience
-                        </button>
-                        <p className="mt-2 text-[11px] text-slate-400">
-                          Coming soon: this action will launch the Baseline Expansion Interview. In the meantime, refine the baseline in{" "}
-                          <Link href={fitReviewPath} className="text-amber-300 underline">
-                            Fit Review
-                          </Link>
-                          .
-                        </p>
-                      </>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 grid gap-4 lg:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
-                    Subtotal
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-white">
-                    {scoringRubric?.subtotal.toFixed(1)}
-                  </p>
-                  <p className="text-xs text-slate-400">Subtotal before penalties</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
-                    Penalties
-                  </p>
-                  {scoringRubric?.penalties.length ? (
-                    <ul className="mt-2 space-y-2 text-sm text-slate-200">
-                      {scoringRubric.penalties.map((penalty) => (
-                        <li key={`${penalty.code}-${penalty.points}`} className="flex gap-2">
-                          <span className="font-semibold text-amber-300">
-                            {penalty.points.toFixed(1)} pts
-                          </span>
-                          <span className="text-slate-300">
-                            <span className="font-semibold text-white">{penalty.code}</span> — {penalty.reason}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-400">No penalties applied.</p>
-                  )}
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
-                    Final score
-                  </p>
-                  <p className="mt-2 text-3xl font-semibold text-white">
-                    {typeof scoringV2?.score === "number" ? scoringV2.score.toFixed(1) : "Pending"}
-                  </p>
-                  <p className="text-xs text-slate-400">Rounded via {scoringRubric?.rounding}</p>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="mt-4 rounded-2xl border border-rose-600/40 bg-rose-950/10 p-4 text-sm text-rose-200">
-              <p className="font-semibold text-rose-100">
-                scoring_v2 missing from analysis payload
-              </p>
-              <p className="text-rose-300">
-                <strong>Assessment ID:</strong> {diagnosticAssessmentId}
-              </p>
-              <p className="text-rose-300">
-                <strong>Analysis loaded:</strong> {hasAnalysis ? "true" : "false"}
-              </p>
-              <p className="text-rose-300">
-                <strong>Top-level keys:</strong> {analysisKeys.length ? analysisKeys.join(", ") : "none"}
-              </p>
-              <p className="mt-2 text-xs text-rose-300">
-                Rubric breakdown requires scoring_v2.rubric. Refresh or rerun the analysis to load that payload.
-              </p>
-            </div>
-          )}
-          {scoringV2?.rubric ? (
-            <details className="group rounded-2xl border border-white/10 bg-white/5 p-4">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-                Debug details
-              </summary>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline band</p>
-                  <p className="text-sm text-white">{debugFields?.baselineBand ?? "n/a"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Role band</p>
-                  <p className="text-sm text-white">{debugFields?.roleBand ?? "n/a"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline coverage</p>
-                  <p className="text-sm text-white">
-                    {formatPercentValue(debugFields?.baselineCoveragePercent)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Responsibility overlap</p>
-                  <p className="text-sm text-white">
-                    {formatPercentValue(debugFields?.responsibilityOverlapPercent)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job scoring source</p>
-                  <p className="text-sm text-white">
-                    {debugFields?.jobScoringTextSource ?? scoringV2.jobTextSource ?? "n/a"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline ID</p>
-                  <p className="text-sm text-white">{latest?.baselineId ?? "n/a"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline version hash</p>
-                  <p className="text-sm text-white">{latest?.baselineVersionHash ?? "n/a"}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job ID</p>
-                  <p className="text-sm text-white">{latest?.jobId ?? "n/a"}</p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
-                  <p className="text-sm text-white">
-                    Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
-                    {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (role)</p>
-                  <p className="text-sm text-white">
-                    {debugFields?.domainTagsRole?.join(", ") || "None"}
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (baseline)</p>
-                  <p className="text-sm text-white">
-                    {debugFields?.domainTagsBaseline?.join(", ") || "None"}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-col items-start gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyDebugJson}
-                  className="rounded-full border border-white/20 bg-slate-800 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 hover:border-white/40"
-                >
-                  Copy debug JSON
-                </button>
-                {debugCopyStatus ? <p className="text-xs text-slate-400">{debugCopyStatus}</p> : null}
-              </div>
-            </details>
-          ) : null}
-        </section>
-
-        <section ref={confidenceSettingsRef} className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Confidence Check Settings
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Stress-test the score</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Confidence Check reruns the score with the profile you select so you can see how the result shifts while keeping the stored score untouched.
-              </p>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Optional</span>
-          </div>
-
-          {latest ? (
-            <div className="space-y-4">
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="space-y-3">
-                  <label
-                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
-                    htmlFor="calibration-profile"
-                  >
-                    Confidence profile
-                  </label>
-                  <select
-                    id="calibration-profile"
-                    value={calibrationProfile}
-                    onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
-                    className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
-                  >
-                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="text-xs text-slate-400 space-y-1">
-                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
-                      <p key={option.value} className="flex gap-2">
-                        <span
-                          className={`font-semibold ${option.value === calibrationProfile ? "text-slate-100" : "text-slate-400"}`}
-                        >
-                          {option.label}:
-                        </span>
-                        <span>{option.description}</span>
-                      </p>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  {calibrationResult ? (
-                    <>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Latest result
-                      </p>
-                      <p className="mt-3 text-3xl font-semibold text-white">
-                        {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
-                      </p>
-                      <p className="text-sm text-slate-300">
-                        {calibrationConfidenceSummary}
-                        {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
-                      </p>
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Recommendation
-                      </p>
-                      <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
-                      <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
-                        <input
-                          id="use-calibrated-score"
-                          type="checkbox"
-                          checked={useCalibratedScore}
-                          onChange={(event) => setUseCalibratedScore(event.target.checked)}
-                          className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
-                        />
-                        <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
-                          Apply this confidence lens for downstream actions
-                        </span>
-                      </label>
-                    </>
-                  ) : (
-                    <p className="text-sm text-slate-400">
-                      Run a confidence check to preview how a different lens shifts the score.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
-                  {calibrating ? "Calibrating..." : "Run Confidence Check"}
-                </FormButton>
-                <p className="text-xs text-slate-400">
-                  Confidence check reruns the analysis under the selected profile without overwriting the stored score.
-                </p>
-              </div>
-              {calibrationError ? (
-                <Alert intent="error" title="Calibration failed">
-                  {calibrationError}
-                </Alert>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">
-              Load the latest analysis to configure the confidence check.
-            </p>
-          )}
-        </section>
+        
 
         {!scoringV2?.rubric ? (
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
@@ -1385,24 +1217,6 @@ export default function ResultsPage() {
                 <p className="mt-1 text-lg font-semibold text-white">
                   {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
                 </p>
-                {dimension.value !== null && dimension.value < LOW_EXPERIENCE_THRESHOLD ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleExperienceAction(dimension.label)}
-                      className="mt-2 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300 hover:text-amber-200"
-                    >
-                      Add or clarify experience
-                    </button>
-                    <p className="mt-2 text-[11px] text-slate-400">
-                      Coming soon: this action will launch the Baseline Expansion Interview. In the meantime, refine the baseline in{" "}
-                      <Link href={fitReviewPath} className="text-amber-300 underline">
-                        Fit Review
-                      </Link>
-                      .
-                    </p>
-                  </>
-                ) : null}
               </div>
             ))}
           </div>
@@ -1463,31 +1277,63 @@ export default function ResultsPage() {
         ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Recommended next move
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Follow this path</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                This sequence mirrors the real-life cadence: understand the score, decide if and how to apply, polish your materials, apply, then prep for interviews.
-              </p>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Ordered flow</span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Next move</p>
+            <h2 className="text-lg font-semibold text-slate-100">Next Move</h2>
+            <p className="mt-1 text-sm text-slate-300">
+              Follow these five steps to translate the score into execution.
+            </p>
           </div>
-
-          <ol className="list-decimal space-y-4 pl-4 text-sm text-slate-300 marker:text-slate-500">
-            {nextSteps.map((step, index) => (
-              <li key={step.title + "-" + index} className="space-y-1">
-                <p className="text-sm font-semibold text-slate-100">{step.title}</p>
-                <p>{step.description}</p>
-              </li>
-            ))}
-          </ol>
-
-          <p className="text-sm text-slate-300">
-            Tools in this flow include the document generation controls below and the Interview Toolkit mentioned in step 5.
-          </p>
+          <div className="grid gap-4">
+            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-slate-100">1. Understand the Score</p>
+              <p className="text-sm text-slate-300">
+                {hasAnalysis
+                  ? "Review the rubric and driver cards above to see how the verdict formed."
+                  : "Load the latest analysis to populate the score and supporting context."}
+              </p>
+            </article>
+            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-slate-100">2. Decide Whether to Apply</p>
+              <p className="text-sm text-slate-300">
+                Use Fit Review to weigh the highlighted gaps and confirm the path forward.
+              </p>
+              <div className="mt-2">
+                <FormButton onClick={() => void router.push(fitReviewPath)}>Open Fit Review</FormButton>
+              </div>
+            </article>
+            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-slate-100">3. Generate or Polish Resume</p>
+              <p className="text-sm text-slate-300">
+                Generate a tailored resume and cover letter from this job and your selected baseline. This does not change the fit score.
+              </p>
+              <div className="mt-2">
+                <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
+                  Open Resume &amp; Cover Letter Studio
+                </FormButton>
+              </div>
+            </article>
+            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-slate-100">4. Apply and Log</p>
+              <p className="text-sm text-slate-300">
+                Capture the opportunity in your tracker so the next steps stay visible.
+              </p>
+              <div className="mt-2">
+                <FormButton onClick={() => void router.push(jobTrackerHref)}>Add to Tracker</FormButton>
+              </div>
+            </article>
+            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-slate-100">5. Prepare for Interviews</p>
+              <p className="text-sm text-slate-300">
+                Practice around the highlighted gaps with the Interview Toolkit.
+              </p>
+              <div className="mt-2">
+                <FormButton onClick={() => void router.push(interviewToolkitHref)}>
+                  Open Interview Toolkit
+                </FormButton>
+              </div>
+            </article>
+          </div>
         </section>
 
         {error ? (
@@ -1495,33 +1341,6 @@ export default function ResultsPage() {
             {error}
           </Alert>
         ) : null}
-
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Resume and Cover Letter Studio
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Open the Studio</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Generate curated drafts and exportable documents that reflect the score above.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <p className="text-sm text-slate-400">
-                Studio pulls in the latest job, baseline, and analysis data so you can keep the momentum going.
-              </p>
-              <FormButton
-                onClick={() => {
-                  void router.push(studioHref);
-                }}
-                disabled={!latest?.jobId || !latestBaselineVersionId}
-              >
-                Open Resume and Cover Letter Studio
-              </FormButton>
-            </div>
-          </div>
-        </section>
 
         {debugMode ? (
           <div className="space-y-6">
@@ -1603,27 +1422,85 @@ export default function ResultsPage() {
             </section>
           </div>
         ) : null}
-        {experienceActionTarget ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-6">
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="experience-cta-title"
-              className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-6 text-slate-50 shadow-2xl shadow-black/80"
-            >
-              <h2 id="experience-cta-title" className="text-xl font-semibold text-slate-100">
-                Coming soon
-              </h2>
-              <p className="mt-3 text-sm text-slate-300">
-                Adding or clarifying experience for {experienceActionTarget} is coming soon. We&apos;ll open the Baseline Expansion Interview for this action in a future release.
-              </p>
-              <div className="mt-6 flex justify-end">
-                <FormButton onClick={() => setExperienceActionTarget(null)}>Got it</FormButton>
+
+        {scoringV2?.rubric ? (
+          <details className="group rounded-2xl border border-white/10 bg-white/5 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+              Debug details
+            </summary>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline band</p>
+                <p className="text-sm text-white">{debugFields?.baselineBand ?? "n/a"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Role band</p>
+                <p className="text-sm text-white">{debugFields?.roleBand ?? "n/a"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline coverage</p>
+                <p className="text-sm text-white">
+                  {formatPercentValue(debugFields?.baselineCoveragePercent)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Responsibility overlap</p>
+                <p className="text-sm text-white">
+                  {formatPercentValue(debugFields?.responsibilityOverlapPercent)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job scoring source</p>
+                <p className="text-sm text-white">
+                  {debugFields?.jobScoringTextSource ?? scoringV2.jobTextSource ?? "n/a"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline ID</p>
+                <p className="text-sm text-white">{latest?.baselineId ?? "n/a"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline version hash</p>
+                <p className="text-sm text-white">{latest?.baselineVersionHash ?? "n/a"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job ID</p>
+                <p className="text-sm text-white">{latest?.jobId ?? "n/a"}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
+                <p className="text-sm text-white">
+                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
+                  {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (role)</p>
+                <p className="text-sm text-white">
+                  {debugFields?.domainTagsRole?.join(", ") || "None"}
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (baseline)</p>
+                <p className="text-sm text-white">
+                  {debugFields?.domainTagsBaseline?.join(", ") || "None"}
+                </p>
               </div>
             </div>
-          </div>
+            <div className="mt-4 flex flex-col items-start gap-2">
+              <button
+                type="button"
+                onClick={handleCopyDebugJson}
+                className="rounded-full border border-white/20 bg-slate-800 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 hover:border-white/40"
+              >
+                Copy debug JSON
+              </button>
+              {debugCopyStatus ? <p className="text-xs text-slate-400">{debugCopyStatus}</p> : null}
+            </div>
+          </details>
         ) : null}
-      </div>
-    </PageShell>
-  );
-}
+
+        </div>
+      </PageShell>
+    );
+  }
