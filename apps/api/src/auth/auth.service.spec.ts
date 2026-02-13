@@ -21,6 +21,7 @@ describe('AuthService', () => {
   let jwtService: JwtService;
   let configService: { get: jest.Mock };
   let adminUsersService: { isAdmin: jest.Mock };
+  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -46,6 +47,7 @@ describe('AuthService', () => {
           provide: AccessCodesService,
           useValue: {
             redeemCodeForUser: jest.fn(),
+            redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
           },
         },
         {
@@ -85,6 +87,7 @@ describe('AuthService', () => {
     jwtService = module.get(JwtService);
     configService = module.get(ConfigService);
     adminUsersService = module.get(AdminUsersService);
+    accessCodesService = module.get(AccessCodesService);
     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
   });
 
@@ -211,4 +214,109 @@ describe('AuthService', () => {
       email: savedUser.email,
     });
   });
+
+  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
+    const payload: LoginDto = {
+      email: 'member@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'member-user-id',
+      email: payload.email,
+      firstName: 'Member',
+      lastName: 'User',
+      emailConfirmed: true,
+      betaAccessApproved: false,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') {
+        return 'true';
+      }
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+        return 'false';
+      }
+      if (key === 'NODE_ENV') {
+        return 'test';
+      }
+      return undefined;
+    });
+
+    adminUsersService.isAdmin.mockResolvedValue(false);
+
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
+
+    const result = await service.login(payload);
+
+    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+    expect(result.accessToken).toEqual('signed-token');
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      email: savedUser.email,
+    });
+  });
+
+  it('returns access code required when no assigned code can be auto-redeemed', async () => {
+    const payload: LoginDto = {
+      email: 'member2@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'member2-user-id',
+      email: payload.email,
+      firstName: 'Member',
+      lastName: 'User',
+      emailConfirmed: true,
+      betaAccessApproved: false,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') {
+        return 'true';
+      }
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+        return 'false';
+      }
+      if (key === 'NODE_ENV') {
+        return 'test';
+      }
+      return undefined;
+    });
+
+    adminUsersService.isAdmin.mockResolvedValue(false);
+
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
+
+    await expect(service.login(payload)).rejects.toMatchObject({
+      response: {
+        code: 'ACCESS_CODE_REQUIRED',
+        message: 'Access code required.',
+      },
+    });
+
+    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+  });
+
 });

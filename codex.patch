@@ -1,49 +1,125 @@
-diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
-index 59addb70cc5ecbe295c83c5d9c9c5d95655068ec..9d65f1863b673f3c71cfbf684c63d06ec07090c5 100644
---- a/apps/api/src/auth/auth.module.ts
-+++ b/apps/api/src/auth/auth.module.ts
-@@ -1,34 +1,36 @@
- import { Module } from '@nestjs/common';
- import { ConfigModule, ConfigService } from '@nestjs/config';
- import { JwtModule } from '@nestjs/jwt';
- import { PassportModule } from '@nestjs/passport';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { EmailModule } from '../email/email.module';
- import { AccessCodesModule } from '../access-codes/access-codes.module';
-+import { AdminUsersModule } from '../admin-users/admin-users.module';
- import { UsersModule } from '../users/users.module';
- import { AuthController } from './auth.controller';
- import { AuthService } from './auth.service';
- import { JwtStrategy } from './jwt.strategy';
- import { UserToken } from './user-token.entity';
+diff --git a/apps/api/src/access-codes/access-codes.service.ts b/apps/api/src/access-codes/access-codes.service.ts
+index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc7840215981581714 100644
+--- a/apps/api/src/access-codes/access-codes.service.ts
++++ b/apps/api/src/access-codes/access-codes.service.ts
+@@ -1,34 +1,34 @@
+ import {
+   BadRequestException,
+   ForbiddenException,
+   Injectable,
+   NotFoundException,
+ } from '@nestjs/common';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { createHash, randomBytes } from 'node:crypto';
+-import { Repository } from 'typeorm';
++import { IsNull, Repository } from 'typeorm';
+ import { User } from '../users/user.entity';
+ import { UsersService } from '../users/users.service';
+ import { BetaAccessCode } from './beta-access-code.entity';
  
- @Module({
-   imports: [
-     ConfigModule,
-     UsersModule,
-     AccessCodesModule,
-+    AdminUsersModule,
-     EmailModule,
-     TypeOrmModule.forFeature([UserToken]),
-     PassportModule,
-     JwtModule.registerAsync({
-       imports: [ConfigModule],
-       inject: [ConfigService],
-       useFactory: (configService: ConfigService) => ({
-         secret: configService.get<string>('JWT_SECRET'),
-         signOptions: { expiresIn: '1h' },
-       }),
-     }),
-   ],
-   controllers: [AuthController],
-   providers: [AuthService, JwtStrategy],
- })
- export class AuthModule {}
+ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+ 
+ function randomSegment(length: number): string {
+   const bytes = randomBytes(length);
+   let out = '';
+   for (let i = 0; i < length; i += 1) {
+     out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+   }
+   return out;
+ }
+ 
+ function hashCode(code: string): string {
+   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
+ }
+ 
+ function normalizeCode(input: string): string {
+   return input.trim().toUpperCase();
+ }
+ 
+ @Injectable()
+ export class AccessCodesService {
+@@ -138,50 +138,76 @@ export class AccessCodesService {
+       throw new BadRequestException('Invalid access code');
+     }
+ 
+     if (code.revokedAt) {
+       throw new BadRequestException('Access code has been revoked');
+     }
+     if (code.redeemedAt) {
+       throw new BadRequestException('Access code has already been redeemed');
+     }
+ 
+     if (code.assignedUserId && code.assignedUserId !== user.id) {
+       throw new ForbiddenException('Access code is assigned to a different user');
+     }
+ 
+     code.assignedUserId = code.assignedUserId ?? user.id;
+     code.redeemedByUserId = user.id;
+     code.redeemedAt = new Date();
+     await this.accessCodesRepository.save(code);
+ 
+     if (!user.betaAccessApproved) {
+       user.betaAccessApproved = true;
+       await this.usersRepository.save(user);
+     }
+   }
+ 
++  async redeemAssignedCodeForUser(user: User): Promise<boolean> {
++    const code = await this.accessCodesRepository.findOne({
++      where: {
++        assignedUserId: user.id,
++        revokedAt: IsNull(),
++        redeemedAt: IsNull(),
++      },
++      order: { createdAt: 'ASC' },
++    });
++
++    if (!code) {
++      return false;
++    }
++
++    code.redeemedByUserId = user.id;
++    code.redeemedAt = new Date();
++    await this.accessCodesRepository.save(code);
++
++    if (!user.betaAccessApproved) {
++      user.betaAccessApproved = true;
++      await this.usersRepository.save(user);
++    }
++
++    return true;
++  }
++
+   toAdminListRow(code: BetaAccessCode) {
+     const status = code.revokedAt
+       ? 'revoked'
+       : code.redeemedAt
+         ? 'redeemed'
+         : code.assignedUserId
+           ? 'assigned'
+           : 'unused';
+ 
+     return {
+       id: code.id,
+       codePrefix: code.codePrefix,
+       codeMasked: code.codePrefix
+         ? `TTR-${code.codePrefix.slice(0, 4)}-****-****`
+         : 'TTR-****-****-****',
+       createdAt: code.createdAt,
+       createdByUserId: code.createdByUserId,
+       createdByEmail: code.createdBy?.email ?? null,
+       assignedUserId: code.assignedUserId,
+       assignedUserEmail: code.assignedUser?.email ?? null,
+       redeemedByUserId: code.redeemedByUserId,
+       redeemedByUserEmail: code.redeemedBy?.email ?? null,
+       redeemedAt: code.redeemedAt,
+       revokedAt: code.revokedAt,
+       revokedByUserId: code.revokedByUserId,
 diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
-index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5 100644
+index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77ed3343c72 100644
 --- a/apps/api/src/auth/auth.service.spec.ts
 +++ b/apps/api/src/auth/auth.service.spec.ts
-@@ -1,101 +1,112 @@
+@@ -1,112 +1,115 @@
  import { JwtService } from '@nestjs/jwt';
  import { Test, TestingModule } from '@nestjs/testing';
  import * as bcrypt from 'bcryptjs';
@@ -59,14 +135,15 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
  import { UserToken } from './user-token.entity';
  import { RelayEmailService } from '../email/relay-email.service';
  import { AccessCodesService } from '../access-codes/access-codes.service';
-+import { AdminUsersService } from '../admin-users/admin-users.service';
+ import { AdminUsersService } from '../admin-users/admin-users.service';
  
  describe('AuthService', () => {
    let service: AuthService;
    let usersService: jest.Mocked<UsersService>;
    let jwtService: JwtService;
-+  let configService: { get: jest.Mock };
-+  let adminUsersService: { isAdmin: jest.Mock };
+   let configService: { get: jest.Mock };
+   let adminUsersService: { isAdmin: jest.Mock };
++  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
  
    beforeEach(async () => {
      const module: TestingModule = await Test.createTestingModule({
@@ -92,14 +169,15 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
            provide: AccessCodesService,
            useValue: {
              redeemCodeForUser: jest.fn(),
++            redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
            },
          },
-+        {
-+          provide: AdminUsersService,
-+          useValue: {
-+            isAdmin: jest.fn().mockResolvedValue(false),
-+          },
-+        },
+         {
+           provide: AdminUsersService,
+           useValue: {
+             isAdmin: jest.fn().mockResolvedValue(false),
+           },
+         },
          {
            provide: ConfigService,
            useValue: {
@@ -129,8 +207,9 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
      service = module.get<AuthService>(AuthService);
      usersService = module.get(UsersService);
      jwtService = module.get(JwtService);
-+    configService = module.get(ConfigService);
-+    adminUsersService = module.get(AdminUsersService);
+     configService = module.get(ConfigService);
+     adminUsersService = module.get(AdminUsersService);
++    accessCodesService = module.get(AccessCodesService);
      jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
    });
  
@@ -156,21 +235,23 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
        subscriptionTier: SubscriptionTier.FREE,
        accountType: AccountType.FREE,
        createdAt: new Date(),
-@@ -129,26 +140,75 @@ describe('AuthService', () => {
-       lastName: 'User',
-       emailConfirmed: true,
-       betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
+@@ -189,26 +192,131 @@ describe('AuthService', () => {
      usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     configService.get.mockImplementation((key: string) => {
+       if (key === 'REQUIRE_ACCESS_CODE') {
+         return 'true';
+       }
+       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+         return 'false';
+       }
+       if (key === 'NODE_ENV') {
+         return 'test';
+       }
+       return undefined;
+     });
+ 
+     adminUsersService.isAdmin.mockResolvedValue(true);
  
      const result = await service.login(payload);
  
@@ -178,21 +259,19 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
      expect(result.user).toMatchObject({
        id: savedUser.id,
        email: savedUser.email,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
      });
    });
 +
-+  it('allows admin users to log in without beta access approval when access code is required', async () => {
++  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
 +    const payload: LoginDto = {
-+      email: 'admin@example.com',
++      email: 'member@example.com',
 +      password: 'Password123',
 +    };
 +    const passwordHash = await bcrypt.hash(payload.password, 10);
 +    const savedUser: User = {
-+      id: 'admin-user-id',
++      id: 'member-user-id',
 +      email: payload.email,
-+      firstName: 'Admin',
++      firstName: 'Member',
 +      lastName: 'User',
 +      emailConfirmed: true,
 +      betaAccessApproved: false,
@@ -221,93 +300,78 @@ index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e
 +      return undefined;
 +    });
 +
-+    adminUsersService.isAdmin.mockResolvedValue(true);
++    adminUsersService.isAdmin.mockResolvedValue(false);
++
++    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
 +
 +    const result = await service.login(payload);
 +
++    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
 +    expect(result.accessToken).toEqual('signed-token');
 +    expect(result.user).toMatchObject({
 +      id: savedUser.id,
 +      email: savedUser.email,
 +    });
 +  });
++
++  it('returns access code required when no assigned code can be auto-redeemed', async () => {
++    const payload: LoginDto = {
++      email: 'member2@example.com',
++      password: 'Password123',
++    };
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const savedUser: User = {
++      id: 'member2-user-id',
++      email: payload.email,
++      firstName: 'Member',
++      lastName: 'User',
++      emailConfirmed: true,
++      betaAccessApproved: false,
++      passwordHash,
++      calibrationProfileName: null,
++      calibrationWeights: null,
++      role: 'user',
++      subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
++
++    usersService.findByEmail.mockResolvedValue(savedUser);
++
++    configService.get.mockImplementation((key: string) => {
++      if (key === 'REQUIRE_ACCESS_CODE') {
++        return 'true';
++      }
++      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
++        return 'false';
++      }
++      if (key === 'NODE_ENV') {
++        return 'test';
++      }
++      return undefined;
++    });
++
++    adminUsersService.isAdmin.mockResolvedValue(false);
++
++    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
++
++    await expect(service.login(payload)).rejects.toMatchObject({
++      response: {
++        code: 'ACCESS_CODE_REQUIRED',
++        message: 'Access code required.',
++      },
++    });
++
++    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
++  });
++
  });
 diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
-index b11a3a6170d70944495b018787674b19aad6383d..e36351aaa22ee810b6c1230d45f8d3d6a061719b 100644
+index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a14eb1e86 100644
 --- a/apps/api/src/auth/auth.service.ts
 +++ b/apps/api/src/auth/auth.service.ts
-@@ -1,65 +1,67 @@
- import {
-   BadRequestException,
-   ForbiddenException,
-   Injectable,
-   UnauthorizedException,
- } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
- import { JwtService } from '@nestjs/jwt';
- import * as bcrypt from 'bcryptjs';
- import { randomBytes } from 'node:crypto';
- import { existsSync } from 'node:fs';
- import { readFileSync } from 'node:fs';
- import { join } from 'node:path';
- import { Repository } from 'typeorm';
- import { InjectRepository } from '@nestjs/typeorm';
- import { RelayEmailService } from '../email/relay-email.service';
- import { UsersService } from '../users/users.service';
- import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import { User } from '../users/user.entity';
- import { getEntitlementsForTier } from '../features/feature-gates';
- import type { AuthResponseDto } from './dto/auth-response.dto';
- import { UserToken } from './user-token.entity';
- import { AccessCodesService } from '../access-codes/access-codes.service';
-+import { AdminUsersService } from '../admin-users/admin-users.service';
- 
- type RegisterResponseDto = {
-   success: true;
-   message: string;
- };
- 
- @Injectable()
- export class AuthService {
-   constructor(
-     private readonly usersService: UsersService,
-     private readonly jwtService: JwtService,
-     private readonly relayEmailService: RelayEmailService,
-     private readonly configService: ConfigService,
-     @InjectRepository(UserToken)
-     private readonly userTokensRepository: Repository<UserToken>,
-     private readonly accessCodesService: AccessCodesService,
-+    private readonly adminUsersService: AdminUsersService,
-   ) {}
- 
-   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
-     if (payload.password !== payload.confirmPassword) {
-       throw new BadRequestException('Passwords do not match');
-     }
- 
-     const existing = await this.usersService.findByEmail(payload.email);
- 
-     if (existing) {
-       return {
-         success: true,
-         message: this.requireEmailConfirmation
-           ? 'Check your email to confirm your account.'
-           : 'Account created.',
-       };
-     }
- 
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const user = await this.usersService.create({
-       email: payload.email,
-       passwordHash,
-       firstName: payload.firstName.trim(),
-       lastName: payload.lastName.trim(),
-       emailConfirmed: !this.requireEmailConfirmation,
-@@ -83,51 +85,53 @@ export class AuthService {
- 
-     const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-     const supportEmail =
+@@ -88,54 +88,59 @@ export class AuthService {
        this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
        'support@targetthisrole.ai';
      const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
@@ -330,14 +394,22 @@ index b11a3a6170d70944495b018787674b19aad6383d..e36351aaa22ee810b6c1230d45f8d3d6
    async login(payload: LoginDto): Promise<AuthResponseDto> {
      const user = await this.validateCredentials(payload);
  
--    if (this.requireAccessCode && !user.betaAccessApproved) {
-+    const isAdmin = await this.adminUsersService.isAdmin(user.id);
+     const isAdmin = await this.adminUsersService.isAdmin(user.id);
+ 
+     if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
+-      throw new ForbiddenException({
+-        code: 'ACCESS_CODE_REQUIRED',
+-        message: 'Access code required.',
+-      });
++      const redeemedAssignedCode =
++        await this.accessCodesService.redeemAssignedCodeForUser(user);
 +
-+    if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
-       throw new ForbiddenException({
-         code: 'ACCESS_CODE_REQUIRED',
-         message: 'Access code required.',
-       });
++      if (!redeemedAssignedCode) {
++        throw new ForbiddenException({
++          code: 'ACCESS_CODE_REQUIRED',
++          message: 'Access code required.',
++        });
++      }
      }
  
      return this.buildAuthResponse(user);
@@ -359,3 +431,7 @@ index b11a3a6170d70944495b018787674b19aad6383d..e36351aaa22ee810b6c1230d45f8d3d6
      if (!token) {
        throw new BadRequestException('Missing confirmation token');
      }
+     const match = await this.userTokensRepository.findOne({
+       where: { token, type: 'confirm' },
+     });
+ 

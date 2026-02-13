@@ -110,10 +110,15 @@ export class AuthService {
     const isAdmin = await this.adminUsersService.isAdmin(user.id);
 
     if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
-      throw new ForbiddenException({
-        code: 'ACCESS_CODE_REQUIRED',
-        message: 'Access code required.',
-      });
+      const redeemedAssignedCode =
+        await this.accessCodesService.redeemAssignedCodeForUser(user);
+
+      if (!redeemedAssignedCode) {
+        throw new ForbiddenException({
+          code: 'ACCESS_CODE_REQUIRED',
+          message: 'Access code required.',
+        });
+      }
     }
 
     return this.buildAuthResponse(user);

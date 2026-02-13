@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { BetaAccessCode } from './beta-access-code.entity';
@@ -158,6 +158,32 @@ export class AccessCodesService {
       user.betaAccessApproved = true;
       await this.usersRepository.save(user);
     }
+  }
+
+  async redeemAssignedCodeForUser(user: User): Promise<boolean> {
+    const code = await this.accessCodesRepository.findOne({
+      where: {
+        assignedUserId: user.id,
+        revokedAt: IsNull(),
+        redeemedAt: IsNull(),
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    if (!code) {
+      return false;
+    }
+
+    code.redeemedByUserId = user.id;
+    code.redeemedAt = new Date();
+    await this.accessCodesRepository.save(code);
+
+    if (!user.betaAccessApproved) {
+      user.betaAccessApproved = true;
+      await this.usersRepository.save(user);
+    }
+
+    return true;
   }
 
   toAdminListRow(code: BetaAccessCode) {
