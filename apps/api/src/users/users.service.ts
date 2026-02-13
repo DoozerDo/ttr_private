@@ -12,10 +12,19 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
   ) {}
 
-  async create(email: string, passwordHash: string): Promise<User> {
+  async create(input: {
+    email: string;
+    passwordHash: string;
+    firstName: string;
+    lastName: string;
+    emailConfirmed: boolean;
+  }): Promise<User> {
     const user = this.usersRepository.create({
-      email,
-      passwordHash,
+      email: input.email,
+      passwordHash: input.passwordHash,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      emailConfirmed: input.emailConfirmed,
       // VERIFY: Confirm null calibration defaults are desired on signup.
       calibrationProfileName: null,
       calibrationWeights: null,
@@ -46,5 +55,9 @@ export class UsersService {
 
     user.subscriptionTier = tier;
     return this.usersRepository.save(user);
+  }
+
+  async setEmailConfirmed(userId: string): Promise<void> {
+    await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
   }
 }

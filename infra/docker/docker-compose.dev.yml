@@ -7,8 +7,8 @@ services:
     image: ghcr.io/targetthisrole/targetthisrole-api:dev
     restart: unless-stopped
     env_file:
-      - ../../.env
-      - ../../.env.dreamhost
+      - ./.env
+      - ./.env.dreamhost
     environment:
       NODE_ENV: production
       PORT: 3001

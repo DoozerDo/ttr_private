@@ -2,10 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  Query,
   Post,
   Req,
   Res,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
@@ -20,6 +23,12 @@ const NODE_ENV = process.env.NODE_ENV ?? 'development';
 const COOKIE_IS_SECURE = NODE_ENV === 'production';
 
 @Controller('auth')
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    transform: true,
+  }),
+)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
@@ -29,10 +38,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const response = await this.authService.register(payload);
-    if (response.accessToken) {
-      this.setAuthCookie(res, response.accessToken);
-    }
     return response;
+  }
+
+  @Get('confirm')
+  async confirmEmail(@Query('token') token: string) {
+    return this.authService.confirmEmail(token);
   }
 
   @Post('login')

@@ -1,57 +1,209 @@
-diff --git a/apps/web/app/(app)/studio/page.tsx b/apps/web/app/(app)/studio/page.tsx
-index ecf4850dff46ebdcd63e1e0f353e7b6b07758104..18a3f9295a8f5dd410e27c20898bbdbdd261a750 100644
---- a/apps/web/app/(app)/studio/page.tsx
-+++ b/apps/web/app/(app)/studio/page.tsx
-@@ -695,51 +695,51 @@ export default function StudioPage() {
-         setSelectedBaselineVersionId("");
-       } finally {
-         if (!canceled) {
-           setVersionsLoading(false);
-         }
-       }
-     };
-     void loadVersions();
-     return () => {
-       canceled = true;
-     };
-   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+index 71d0661085395f85247b0438bc760f5fd7428bd1..13a489f48b44987852491844a7d87ff227da91ac 100644
+--- a/apps/api/src/auth/auth.controller.ts
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -16,53 +16,50 @@ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import type { AuthUserDto } from './dto/auth-response.dto';
  
-   useEffect(() => {
-     if (!selectedJobId) {
-       setAnalysis(null);
-       setAnalysisError(null);
-       return;
-     }
-     let canceled = false;
-     setAnalysisLoading(true);
-     setAnalysisError(null);
-     const loadAnalysis = async () => {
-       try {
-         const response = await fetch(
--          `/api/analysis/latest?jobId=${encodeURIComponent(selectedJobId)}`,
-+          `/api/analysis/job/${encodeURIComponent(selectedJobId)}/latest`,
-         );
-         const payload = await readResponsePayload(response);
-         if (canceled) return;
-         if (!response.ok) {
-           const message = formatErrorMessage(payload, "Fit analysis could not be loaded.");
-           setAnalysis(null);
-           setAnalysisError(message);
-           return;
-         }
-         setAnalysis(payload as LatestAnalysis);
-         setAnalysisError(null);
-       } catch (error) {
-         if (canceled) return;
-         const message =
-           error instanceof Error ? error.message : "Fit analysis could not be loaded.";
-         setAnalysis(null);
-         setAnalysisError(message);
-       } finally {
-         if (!canceled) {
-           setAnalysisLoading(false);
-         }
-       }
-     };
-     void loadAnalysis();
-     return () => {
+ const AUTH_COOKIE_NAME = 'access_token';
+ const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
+ const NODE_ENV = process.env.NODE_ENV ?? 'development';
+ const COOKIE_IS_SECURE = NODE_ENV === 'production';
+ 
+ @Controller('auth')
+ @UsePipes(
+   new ValidationPipe({
+     whitelist: true,
+     transform: true,
+   }),
+ )
+ export class AuthController {
+   constructor(private readonly authService: AuthService) {}
+ 
+   @Post('register')
+   async register(
+     @Body() payload: RegisterDto,
+     @Res({ passthrough: true }) res: Response,
+   ) {
+     const response = await this.authService.register(payload);
+-    if ('accessToken' in response && response.accessToken) {
+-      this.setAuthCookie(res, response.accessToken);
+-    }
+     return response;
+   }
+ 
+   @Get('confirm')
+   async confirmEmail(@Query('token') token: string) {
+     return this.authService.confirmEmail(token);
+   }
+ 
+   @Post('login')
+   async login(
+     @Body() payload: LoginDto,
+     @Res({ passthrough: true }) res: Response,
+   ) {
+     const response = await this.authService.login(payload);
+     this.setAuthCookie(res, response.accessToken);
+     return response;
+   }
+ 
+   @Post('logout')
+   logout(@Res({ passthrough: true }) res: Response) {
+     res.cookie(AUTH_COOKIE_NAME, '', {
+       httpOnly: true,
+       secure: COOKIE_IS_SECURE,
+       sameSite: 'lax',
+       path: '/',
+diff --git a/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..d9c86288e3c008d103b364850a67427cfcbb13ea
+--- /dev/null
++++ b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
+@@ -0,0 +1,63 @@
++"use client";
++
++import Link from "next/link";
++import { useSearchParams } from "next/navigation";
++import { useEffect, useState } from "react";
++
++export default function ConfirmClient() {
++  const searchParams = useSearchParams();
++  const token = searchParams.get("token") ?? "";
++  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
++  const [message, setMessage] = useState("Confirming your email...");
++
++  useEffect(() => {
++    async function runConfirmation() {
++      if (!token) {
++        setStatus("error");
++        setMessage("Missing confirmation token.");
++        return;
++      }
++
++      try {
++        const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
++          method: "GET",
++        });
++        const data = await response.json().catch(() => ({}));
++        if (!response.ok) {
++          setStatus("error");
++          setMessage(data?.message ?? "Unable to confirm email.");
++          return;
++        }
++
++        setStatus("success");
++        setMessage(data?.message ?? "Email confirmed. You can now log in.");
++      } catch (error) {
++        console.error("Failed to confirm email", error);
++        setStatus("error");
++        setMessage("Unable to confirm email.");
++      }
++    }
++
++    void runConfirmation();
++  }, [token]);
++
++  return (
++    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++      <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
++        <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
++        <p
++          className={
++            status === "error"
++              ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
++              : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
++          }
++        >
++          {message}
++        </p>
++        <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
++          Go to login
++        </Link>
++      </div>
++    </main>
++  );
++}
+diff --git a/apps/web/app/(public)/auth/confirm/page.tsx b/apps/web/app/(public)/auth/confirm/page.tsx
+index dd552b84db4197d38367c19d2b0d81f9fce963d1..fb6eef613d4fdbdce02b9ef38408dae4541f1a42 100644
+--- a/apps/web/app/(public)/auth/confirm/page.tsx
++++ b/apps/web/app/(public)/auth/confirm/page.tsx
+@@ -1,63 +1,20 @@
+-"use client";
++import { Suspense } from "react";
+ 
+-import Link from "next/link";
+-import { useSearchParams } from "next/navigation";
+-import { useEffect, useState } from "react";
++import ConfirmClient from "./ConfirmClient";
+ 
+-export default function ConfirmPage() {
+-  const searchParams = useSearchParams();
+-  const token = searchParams.get("token") ?? "";
+-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+-  const [message, setMessage] = useState("Confirming your email...");
+-
+-  useEffect(() => {
+-    async function runConfirmation() {
+-      if (!token) {
+-        setStatus("error");
+-        setMessage("Missing confirmation token.");
+-        return;
+-      }
+-
+-      try {
+-        const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
+-          method: "GET",
+-        });
+-        const data = await response.json().catch(() => ({}));
+-        if (!response.ok) {
+-          setStatus("error");
+-          setMessage(data?.message ?? "Unable to confirm email.");
+-          return;
+-        }
+-
+-        setStatus("success");
+-        setMessage(data?.message ?? "Email confirmed. You can now log in.");
+-      } catch (error) {
+-        console.error("Failed to confirm email", error);
+-        setStatus("error");
+-        setMessage("Unable to confirm email.");
+-      }
+-    }
+-
+-    void runConfirmation();
+-  }, [token]);
++const ConfirmFallback = () => (
++  <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++    <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
++      <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
++      <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">Confirming your email...</p>
++    </div>
++  </main>
++);
+ 
++export default function ConfirmPage() {
+   return (
+-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
+-      <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+-        <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
+-        <p
+-          className={
+-            status === "error"
+-              ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+-              : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
+-          }
+-        >
+-          {message}
+-        </p>
+-        <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
+-          Go to login
+-        </Link>
+-      </div>
+-    </main>
++    <Suspense fallback={<ConfirmFallback />}>
++      <ConfirmClient />
++    </Suspense>
+   );
+ }
