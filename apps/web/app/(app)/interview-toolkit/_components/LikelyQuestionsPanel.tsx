@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import {
@@ -27,9 +27,10 @@ const createInitialGroupState = (): Record<InterviewQuestionGroup, boolean> =>
 
 interface LikelyQuestionsPanelProps {
   signals: Array<string | DiagnosticSignal | null | undefined>;
+  focusGroup?: InterviewQuestionGroup | null;
 }
 
-export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
+export function LikelyQuestionsPanel({ signals, focusGroup }: LikelyQuestionsPanelProps) {
   const signalFingerprint = useMemo(
     () =>
       signals
@@ -41,10 +42,16 @@ export function LikelyQuestionsPanel({ signals }: LikelyQuestionsPanelProps) {
     [signals],
   );
 
-  return <LikelyQuestionsPanelStateful key={signalFingerprint} signals={signals} />;
+  return (
+    <LikelyQuestionsPanelStateful
+      key={signalFingerprint}
+      signals={signals}
+      focusGroup={focusGroup}
+    />
+  );
 }
 
-function LikelyQuestionsPanelStateful({ signals }: LikelyQuestionsPanelProps) {
+function LikelyQuestionsPanelStateful({ signals, focusGroup }: LikelyQuestionsPanelProps) {
   const questions = useMemo(() => transformSignalsToInterviewQuestions(signals), [signals]);
 
   const [timeMode, setTimeMode] = useState<TimeModeValue>("15");
@@ -74,6 +81,11 @@ function LikelyQuestionsPanelStateful({ signals }: LikelyQuestionsPanelProps) {
       total: groupTotal,
     };
   }).filter((item) => item.total > 0);
+
+  useEffect(() => {
+    if (!focusGroup) return;
+    setExpandedGroups((prev) => ({ ...prev, [focusGroup]: true }));
+  }, [focusGroup]);
 
   const pinnedQuestions = pinnedQuestionIds
     .map((id) => questions.find((question) => question.signalId === id))
@@ -240,43 +252,53 @@ function LikelyQuestionsPanelStateful({ signals }: LikelyQuestionsPanelProps) {
         </Alert>
       ) : (
         <div className="space-y-3">
-          {groupedQuestions.map(({ group, visible, total }) => (
-            <div key={group} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    {group}
-                  </p>
-                  <p className="text-sm font-semibold text-white">
-                    {total} question{total !== 1 ? "s" : ""}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 underline decoration-dotted underline-offset-4"
-                  onClick={() => toggleGroup(group)}
-                  aria-expanded={expandedGroups[group]}
-                >
-                  {expandedGroups[group] ? "Collapse" : "Expand"}
-                </button>
-              </div>
-              {expandedGroups[group] ? (
-                visible.length ? (
-                  <div className="mt-4 space-y-3">
-                    {visible.map((question) => (
-                      <QuestionCard key={question.signalId} question={question} />
-                    ))}
+          {groupedQuestions.map(({ group, visible, total }) => {
+            const isFocusGroup = focusGroup === group;
+            return (
+              <div
+                key={group}
+                className={`rounded-2xl border p-4 ${
+                  isFocusGroup
+                    ? "border-amber-400/60 bg-slate-900/60 ring-1 ring-amber-500/30"
+                    : "border-white/10 bg-slate-900/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      {group}
+                    </p>
+                    <p className="text-sm font-semibold text-white">
+                      {total} question{total !== 1 ? "s" : ""}
+                    </p>
                   </div>
-                ) : (
-                  <p className="mt-4 text-xs text-slate-400">
-                    {shouldShowAll
-                      ? "No additional questions in this theme."
-                      : "Switch to a longer time mode or tap Show more to view these questions."}
-                  </p>
-                )
-              ) : null}
-            </div>
-          ))}
+                  <button
+                    type="button"
+                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 underline decoration-dotted underline-offset-4"
+                    onClick={() => toggleGroup(group)}
+                    aria-expanded={expandedGroups[group]}
+                  >
+                    {expandedGroups[group] ? "Collapse" : "Expand"}
+                  </button>
+                </div>
+                {expandedGroups[group] ? (
+                  visible.length ? (
+                    <div className="mt-4 space-y-3">
+                      {visible.map((question) => (
+                        <QuestionCard key={question.signalId} question={question} />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-slate-400">
+                      {shouldShowAll
+                        ? "No additional questions in this theme."
+                        : "Switch to a longer time mode or tap Show more to view these questions."}
+                    </p>
+                  )
+                ) : null}
+              </div>
+            );
+          })}
           {hiddenCount > 0 && timeMode !== "30" ? (
             <div className="flex justify-end">
               <button

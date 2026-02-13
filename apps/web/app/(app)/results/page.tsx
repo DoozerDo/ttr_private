@@ -26,6 +26,10 @@ import {
   sortComplianceFlagsBySeverity,
 } from "@/lib/resultsInsights";
 import {
+  InterviewFocusTag,
+  mapTextToInterviewFocusTag,
+} from "@/lib/interviewToolkit/focus";
+import {
   CALIBRATION_PROFILE_OPTIONS,
   type CalibrationProfile,
 } from "@/lib/calibration/profiles";
@@ -146,6 +150,52 @@ type NextStepArgs = {
   hasAnalysis: boolean;
   autoGenerateThreshold: number;
 };
+
+type FocusListItem = {
+  text: string;
+  focusTag: InterviewFocusTag | null;
+};
+
+const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
+
+function buildInterviewToolkitHref(focusTag: InterviewFocusTag, assessmentId?: string | null) {
+  const params = new URLSearchParams({
+    focus: focusTag,
+    source: "results",
+  });
+  if (assessmentId?.trim()) {
+    params.set("assessmentId", assessmentId.trim());
+  }
+  return `${INTERVIEW_TOOLKIT_PATH}?${params.toString()}`;
+}
+
+function ResultsFocusRow({
+  item,
+  assessmentId,
+}: {
+  item: FocusListItem;
+  assessmentId?: string | null;
+}) {
+  const { text, focusTag } = item;
+  const commonClasses =
+    "w-full rounded-2xl border border-white/10 bg-slate-900/30 px-4 py-3 text-left text-sm font-normal transition";
+
+  if (!focusTag) {
+    return <div className={`${commonClasses} text-slate-400`}>{text}</div>;
+  }
+
+  return (
+    <Link
+      href={buildInterviewToolkitHref(focusTag, assessmentId)}
+      className={`${commonClasses} flex items-center justify-between gap-3 text-slate-100 hover:border-sky-400/70 hover:bg-slate-900/50`}
+    >
+      <span>{text}</span>
+      <span aria-hidden="true" className="text-lg text-slate-400">
+        →
+      </span>
+    </Link>
+  );
+}
 
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -452,6 +502,7 @@ export default function ResultsPage() {
 
   const analysis = latest;
   const scoringV2 = analysis?.scoring_v2 ?? null;
+  const resultsAssessmentId = latest?.assessmentId ?? activeAnalysis?.assessmentId ?? null;
   const scoringRubric = scoringV2?.rubric ?? null;
   const debugFields = scoringV2?.debug ?? null;
   const analysisKeys = analysis ? Object.keys(analysis) : [];
@@ -678,12 +729,18 @@ export default function ResultsPage() {
     [latest?.complianceFlags],
   );
 
+  const toFocusListItem = (text: string): FocusListItem => ({
+    text,
+    focusTag: mapTextToInterviewFocusTag(text),
+  });
+
   const strengthItems = useMemo(() => {
     if (!latest?.strengths?.length) return [];
     return latest.strengths
       .map((item) => item?.trim?.())
       .filter((item): item is string => typeof item === "string" && item.length > 0)
-      .slice(0, 4);
+      .slice(0, 4)
+      .map((text) => toFocusListItem(text));
   }, [latest?.strengths]);
 
   const gapItems = useMemo(() => {
@@ -697,7 +754,9 @@ export default function ResultsPage() {
       return `${label}: ${flag.message}`;
     });
 
-    return [...normalizedGaps, ...complianceEntries].slice(0, 4);
+    return [...normalizedGaps, ...complianceEntries]
+      .slice(0, 4)
+      .map((text) => toFocusListItem(text));
   }, [latest?.gaps, complianceFlagList]);
 
   const debugMode = debugUiEnabled;
@@ -930,30 +989,30 @@ export default function ResultsPage() {
             />
           ) : (
             <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] items-start">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-6">
-                <div className="flex flex-col items-center gap-4">
+              <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
+                <div className="flex flex-col items-center">
                   <ScoreGauge
                     score={activeScore ?? undefined}
                     loading={activeScore === null}
                     label={gaugeVerdictLabel}
                   />
-                  <p className="text-center text-sm text-slate-200">{activeVerdictInfo.description}</p>
                 </div>
               </div>
               <div className="space-y-4">
                 <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-emerald-300">
-                    Strengths
+                    STRENGTHS
                   </p>
                   {strengthItems.length ? (
-                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                    <div className="mt-3 space-y-2">
                       {strengthItems.map((item, index) => (
-                        <li key={`${item}-${index}`} className="flex items-start gap-2">
-                          <span className="text-emerald-300">•</span>
-                          <span>{item}</span>
-                        </li>
+                        <ResultsFocusRow
+                          key={`${item.text}-${index}`}
+                          item={item}
+                          assessmentId={resultsAssessmentId}
+                        />
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <p className="mt-3 text-sm text-slate-400">
                       No strengths surfaced yet; run the latest analysis to reveal them.
@@ -962,17 +1021,18 @@ export default function ResultsPage() {
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-300">
-                    Gaps
+                    GAPS
                   </p>
                   {gapItems.length ? (
-                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                    <div className="mt-3 space-y-2">
                       {gapItems.map((item, index) => (
-                        <li key={`${item}-${index}`} className="flex items-start gap-2">
-                          <span className="text-amber-300">•</span>
-                          <span>{item}</span>
-                        </li>
+                        <ResultsFocusRow
+                          key={`${item.text}-${index}`}
+                          item={item}
+                          assessmentId={resultsAssessmentId}
+                        />
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <p className="mt-3 text-sm text-slate-400">
                       No gaps surfaced yet; run the latest analysis to highlight where to tighten the story.
@@ -1009,113 +1069,6 @@ export default function ResultsPage() {
         ) : null}
 
         {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
-
-        <section ref={confidenceSettingsRef} className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Confidence Check Settings
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Stress-test the score</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Confidence Check reruns the score with the profile you select so you can see how the result shifts while keeping the stored score untouched.
-              </p>
-            </div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Optional</span>
-          </div>
-
-          {latest ? (
-            <div className="space-y-4">
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="space-y-3">
-                  <label
-                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
-                    htmlFor="calibration-profile"
-                  >
-                    Confidence profile
-                  </label>
-                  <select
-                    id="calibration-profile"
-                    value={calibrationProfile}
-                    onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
-                    className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
-                  >
-                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="text-xs text-slate-400 space-y-1">
-                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
-                      <p key={option.value} className="flex gap-2">
-                        <span
-                          className={`font-semibold ${option.value === calibrationProfile ? "text-slate-100" : "text-slate-400"}`}
-                        >
-                          {option.label}:
-                        </span>
-                        <span>{option.description}</span>
-                      </p>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  {calibrationResult ? (
-                    <>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Latest result
-                      </p>
-                      <p className="mt-3 text-3xl font-semibold text-white">
-                        {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
-                      </p>
-                      <p className="text-sm text-slate-300">
-                        {calibrationConfidenceSummary}
-                        {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
-                      </p>
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                        Recommendation
-                      </p>
-                      <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
-                      <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
-                        <input
-                          id="use-calibrated-score"
-                          type="checkbox"
-                          checked={useCalibratedScore}
-                          onChange={(event) => setUseCalibratedScore(event.target.checked)}
-                          className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
-                        />
-                        <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
-                          Apply this confidence lens for downstream actions
-                        </span>
-                      </label>
-                    </>
-                  ) : (
-                    <p className="text-sm text-slate-400">
-                      Run a confidence check to preview how a different lens shifts the score.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
-                  {calibrating ? "Calibrating..." : "Run Confidence Check"}
-                </FormButton>
-                <p className="text-xs text-slate-400">
-                  Confidence check reruns the analysis under the selected profile without overwriting the stored score.
-                </p>
-              </div>
-              {calibrationError ? (
-                <Alert intent="error" title="Calibration failed">
-                  {calibrationError}
-                </Alert>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">
-              Load the latest analysis to configure the confidence check.
-            </p>
-          )}
-        </section>
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-5 shadow">
           <div>
@@ -1303,6 +1256,112 @@ export default function ResultsPage() {
           ) : null}
         </section>
 
+        <section ref={confidenceSettingsRef} className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Confidence Check Settings
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">Stress-test the score</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Confidence Check reruns the score with the profile you select so you can see how the result shifts while keeping the stored score untouched.
+              </p>
+            </div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Optional</span>
+          </div>
+
+          {latest ? (
+            <div className="space-y-4">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="space-y-3">
+                  <label
+                    className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400"
+                    htmlFor="calibration-profile"
+                  >
+                    Confidence profile
+                  </label>
+                  <select
+                    id="calibration-profile"
+                    value={calibrationProfile}
+                    onChange={(event) => setCalibrationProfile(event.target.value as CalibrationProfile)}
+                    className="rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none transition hover:border-white/30 focus:border-emerald-400"
+                  >
+                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-xs text-slate-400 space-y-1">
+                    {CALIBRATION_PROFILE_OPTIONS.map((option) => (
+                      <p key={option.value} className="flex gap-2">
+                        <span
+                          className={`font-semibold ${option.value === calibrationProfile ? "text-slate-100" : "text-slate-400"}`}
+                        >
+                          {option.label}:
+                        </span>
+                        <span>{option.description}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                  {calibrationResult ? (
+                    <>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                        Latest result
+                      </p>
+                      <p className="mt-3 text-3xl font-semibold text-white">
+                        {calibrationResult.overallScore?.toFixed(1) ?? "Not available"}
+                      </p>
+                      <p className="text-sm text-slate-300">
+                        {calibrationConfidenceSummary}
+                        {calibrationDeltaText ? ` (${calibrationDeltaText} vs current score)` : ""}
+                      </p>
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                        Recommendation
+                      </p>
+                      <p className="text-sm text-slate-300">{calibrationConfidenceRecommendation}</p>
+                      <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
+                        <input
+                          id="use-calibrated-score"
+                          type="checkbox"
+                          checked={useCalibratedScore}
+                          onChange={(event) => setUseCalibratedScore(event.target.checked)}
+                          className="h-4 w-4 cursor-pointer rounded border border-white/20 bg-slate-950 text-emerald-300 focus:ring-emerald-400"
+                        />
+                        <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                          Apply this confidence lens for downstream actions
+                        </span>
+                      </label>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      Run a confidence check to preview how a different lens shifts the score.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <FormButton onClick={() => void handleCalibrate()} disabled={calibrating}>
+                  {calibrating ? "Calibrating..." : "Run Confidence Check"}
+                </FormButton>
+                <p className="text-xs text-slate-400">
+                  Confidence check reruns the analysis under the selected profile without overwriting the stored score.
+                </p>
+              </div>
+              {calibrationError ? (
+                <Alert intent="error" title="Calibration failed">
+                  {calibrationError}
+                </Alert>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              Load the latest analysis to configure the confidence check.
+            </p>
+          )}
+        </section>
 
         {!scoringV2?.rubric ? (
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
