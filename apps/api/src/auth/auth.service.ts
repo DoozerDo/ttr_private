@@ -22,6 +22,7 @@ import { getEntitlementsForTier } from '../features/feature-gates';
 import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
 import { AccessCodesService } from '../access-codes/access-codes.service';
+import { AdminUsersService } from '../admin-users/admin-users.service';
 
 type RegisterResponseDto = {
   success: true;
@@ -38,6 +39,7 @@ export class AuthService {
     @InjectRepository(UserToken)
     private readonly userTokensRepository: Repository<UserToken>,
     private readonly accessCodesService: AccessCodesService,
+    private readonly adminUsersService: AdminUsersService,
   ) {}
 
   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
@@ -105,7 +107,9 @@ export class AuthService {
   async login(payload: LoginDto): Promise<AuthResponseDto> {
     const user = await this.validateCredentials(payload);
 
-    if (this.requireAccessCode && !user.betaAccessApproved) {
+    const isAdmin = await this.adminUsersService.isAdmin(user.id);
+
+    if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
       throw new ForbiddenException({
         code: 'ACCESS_CODE_REQUIRED',
         message: 'Access code required.',

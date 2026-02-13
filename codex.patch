@@ -1,271 +1,361 @@
-diff --git a/apps/web/app/(app)/admin/access-codes/page.tsx b/apps/web/app/(app)/admin/access-codes/page.tsx
-index 834bb8dd9adc901c4de38a9854ffe655bac8bd8a..63af394d1b84d850ee1bdc22633a40a2622a524b 100644
---- a/apps/web/app/(app)/admin/access-codes/page.tsx
-+++ b/apps/web/app/(app)/admin/access-codes/page.tsx
-@@ -1,171 +1,223 @@
- import { redirect } from "next/navigation";
- import { revalidatePath } from "next/cache";
- import { adminServerFetch } from "../_lib/adminServerFetch";
+diff --git a/apps/api/src/auth/auth.module.ts b/apps/api/src/auth/auth.module.ts
+index 59addb70cc5ecbe295c83c5d9c9c5d95655068ec..9d65f1863b673f3c71cfbf684c63d06ec07090c5 100644
+--- a/apps/api/src/auth/auth.module.ts
++++ b/apps/api/src/auth/auth.module.ts
+@@ -1,34 +1,36 @@
+ import { Module } from '@nestjs/common';
+ import { ConfigModule, ConfigService } from '@nestjs/config';
+ import { JwtModule } from '@nestjs/jwt';
+ import { PassportModule } from '@nestjs/passport';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { EmailModule } from '../email/email.module';
+ import { AccessCodesModule } from '../access-codes/access-codes.module';
++import { AdminUsersModule } from '../admin-users/admin-users.module';
+ import { UsersModule } from '../users/users.module';
+ import { AuthController } from './auth.controller';
+ import { AuthService } from './auth.service';
+ import { JwtStrategy } from './jwt.strategy';
+ import { UserToken } from './user-token.entity';
  
- type AccessCodeRow = {
-   id: string;
-   codeMasked: string;
-   status: "unused" | "assigned" | "redeemed" | "revoked";
-   assignedUserEmail: string | null;
-   assignedUserId: string | null;
-   createdAt: string;
-   createdByEmail: string | null;
-   redeemedAt: string | null;
-   notes: string | null;
- };
+ @Module({
+   imports: [
+     ConfigModule,
+     UsersModule,
+     AccessCodesModule,
++    AdminUsersModule,
+     EmailModule,
+     TypeOrmModule.forFeature([UserToken]),
+     PassportModule,
+     JwtModule.registerAsync({
+       imports: [ConfigModule],
+       inject: [ConfigService],
+       useFactory: (configService: ConfigService) => ({
+         secret: configService.get<string>('JWT_SECRET'),
+         signOptions: { expiresIn: '1h' },
+       }),
+     }),
+   ],
+   controllers: [AuthController],
+   providers: [AuthService, JwtStrategy],
+ })
+ export class AuthModule {}
+diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
+index f1f18c70a0fbf48b865009077324e7237419243d..a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5 100644
+--- a/apps/api/src/auth/auth.service.spec.ts
++++ b/apps/api/src/auth/auth.service.spec.ts
+@@ -1,101 +1,112 @@
+ import { JwtService } from '@nestjs/jwt';
+ import { Test, TestingModule } from '@nestjs/testing';
+ import * as bcrypt from 'bcryptjs';
+ import { getRepositoryToken } from '@nestjs/typeorm';
+ import { ConfigService } from '@nestjs/config';
+ import { AuthService } from './auth.service';
+ import { LoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { User } from '../users/user.entity';
+ import { UsersService } from '../users/users.service';
+ import { AccountType } from '../users/account-type.enum';
+ import { UserToken } from './user-token.entity';
+ import { RelayEmailService } from '../email/relay-email.service';
+ import { AccessCodesService } from '../access-codes/access-codes.service';
++import { AdminUsersService } from '../admin-users/admin-users.service';
  
-+type AdminUserRow = {
-+  id: string;
-+  email: string | null;
-+};
-+
-+type SearchParamsShape = {
-+  generatedCode?: string | string[];
-+};
-+
- type GeneratedAccessCodeResponse = {
-   id: string;
-   code: string;
-   codePrefix: string;
-   createdAt: string;
-   assignedUserId: string | null;
-   notes: string | null;
- };
+ describe('AuthService', () => {
+   let service: AuthService;
+   let usersService: jest.Mocked<UsersService>;
+   let jwtService: JwtService;
++  let configService: { get: jest.Mock };
++  let adminUsersService: { isAdmin: jest.Mock };
  
- async function loadCodes() {
-   return adminServerFetch<AccessCodeRow[]>("/admin/access-codes", "Load access codes");
- }
+   beforeEach(async () => {
+     const module: TestingModule = await Test.createTestingModule({
+       providers: [
+         AuthService,
+         JwtService,
+         {
+           provide: UsersService,
+           useValue: {
+             findByEmail: jest.fn(),
+             findById: jest.fn(),
+             create: jest.fn(),
+             setEmailConfirmed: jest.fn(),
+           },
+         },
+         {
+           provide: RelayEmailService,
+           useValue: {
+             sendRawRelayEmail: jest.fn(),
+           },
+         },
+         {
+           provide: AccessCodesService,
+           useValue: {
+             redeemCodeForUser: jest.fn(),
+           },
+         },
++        {
++          provide: AdminUsersService,
++          useValue: {
++            isAdmin: jest.fn().mockResolvedValue(false),
++          },
++        },
+         {
+           provide: ConfigService,
+           useValue: {
+             get: jest.fn((key: string) => {
+               if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+                 return 'false';
+               }
+               if (key === 'NODE_ENV') {
+                 return 'test';
+               }
+               return undefined;
+             }),
+           },
+         },
+         {
+           provide: getRepositoryToken(UserToken),
+           useValue: {
+             save: jest.fn(),
+             create: jest.fn((value) => value),
+             findOne: jest.fn(),
+             delete: jest.fn(),
+           },
+         },
+       ],
+     }).compile();
  
-+async function loadUsers() {
-+  return adminServerFetch<AdminUserRow[]>("/admin/users", "Load admin users for access code assignment");
-+}
-+
- async function generateAction(formData: FormData) {
-   "use server";
-   const assignedUserId = (formData.get("assignedUserId") as string | null)?.trim();
-   const notes = (formData.get("notes") as string | null)?.trim();
- 
-   const result = await adminServerFetch<GeneratedAccessCodeResponse>(
-     "/admin/access-codes",
-     "Generate access code",
-     {
-       method: "POST",
-       headers: { "content-type": "application/json" },
-       body: JSON.stringify({ assignedUserId: assignedUserId || undefined, notes: notes || undefined }),
-     },
-   );
- 
-   redirect(`/admin/access-codes?generatedCode=${encodeURIComponent(result.code)}`);
- }
- 
- async function updateAssignmentAction(formData: FormData) {
-   "use server";
-   const id = String(formData.get("id") || "").trim();
-   const assignedUserId = String(formData.get("assignedUserId") || "").trim();
- 
-   if (!id) {
-     throw new Error("Missing code id");
-   }
- 
-   await adminServerFetch(`/admin/access-codes/${id}`, "Update access code assignment", {
-     method: "PATCH",
-     headers: { "content-type": "application/json" },
-     body: JSON.stringify({ assignedUserId: assignedUserId || null }),
+     service = module.get<AuthService>(AuthService);
+     usersService = module.get(UsersService);
+     jwtService = module.get(JwtService);
++    configService = module.get(ConfigService);
++    adminUsersService = module.get(AdminUsersService);
+     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
    });
  
-   revalidatePath("/admin/access-codes");
- }
+   it('registers a user', async () => {
+     const payload: RegisterDto = {
+       firstName: 'Test',
+       lastName: 'User',
+       email: 'user@example.com',
+       password: 'Password123',
+       confirmPassword: 'Password123',
+     };
+     const savedUser: User = {
+       id: 'user-id',
+       email: payload.email,
+       firstName: payload.firstName,
+       lastName: payload.lastName,
+       emailConfirmed: true,
+       betaAccessApproved: false,
+       passwordHash: '',
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+@@ -129,26 +140,75 @@ describe('AuthService', () => {
+       lastName: 'User',
+       emailConfirmed: true,
+       betaAccessApproved: false,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
  
- async function revokeAction(formData: FormData) {
-   "use server";
-   const id = String(formData.get("id") || "");
-   await adminServerFetch(`/admin/access-codes/${id}`, "Revoke access code", { method: "DELETE" });
-   revalidatePath("/admin/access-codes");
- }
+     usersService.findByEmail.mockResolvedValue(savedUser);
  
- export default async function AdminAccessCodesPage({
-   searchParams,
- }: {
--  searchParams?: { generatedCode?: string };
-+  searchParams?: SearchParamsShape | Promise<SearchParamsShape>;
- }) {
--  const rows = await loadCodes();
--  const generatedCode = searchParams?.generatedCode?.trim() || "";
-+  const [rows, users, resolvedSearchParams] = await Promise.all([
-+    loadCodes(),
-+    loadUsers(),
-+    Promise.resolve(searchParams ?? {}),
-+  ]);
+     const result = await service.login(payload);
+ 
+     expect(result.accessToken).toEqual('signed-token');
+     expect(result.user).toMatchObject({
+       id: savedUser.id,
+       email: savedUser.email,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+     });
+   });
 +
-+  const generatedCodeParam = resolvedSearchParams.generatedCode;
-+  const generatedCode = (Array.isArray(generatedCodeParam) ? generatedCodeParam[0] : generatedCodeParam)?.trim() || "";
++  it('allows admin users to log in without beta access approval when access code is required', async () => {
++    const payload: LoginDto = {
++      email: 'admin@example.com',
++      password: 'Password123',
++    };
++    const passwordHash = await bcrypt.hash(payload.password, 10);
++    const savedUser: User = {
++      id: 'admin-user-id',
++      email: payload.email,
++      firstName: 'Admin',
++      lastName: 'User',
++      emailConfirmed: true,
++      betaAccessApproved: false,
++      passwordHash,
++      calibrationProfileName: null,
++      calibrationWeights: null,
++      role: 'user',
++      subscriptionTier: SubscriptionTier.FREE,
++      accountType: AccountType.FREE,
++      createdAt: new Date(),
++      updatedAt: new Date(),
++    };
 +
-+  const assignedUserIds = new Set(
-+    rows
-+      .filter((row) => row.status === "assigned")
-+      .map((row) => row.assignedUserId)
-+      .filter((id): id is string => Boolean(id)),
-+  );
++    usersService.findByEmail.mockResolvedValue(savedUser);
 +
-+  const sortedAssignableUsers = users
-+    .filter((user) => !assignedUserIds.has(user.id))
-+    .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
- 
-   return (
-     <div className="space-y-6">
-       <header>
-         <p className="text-sm uppercase tracking-[0.4em] text-slate-400">Admins</p>
-         <h1 className="text-3xl font-semibold tracking-tight text-slate-50">Access codes</h1>
-         <p className="mt-2 text-sm text-slate-300">
-           Generate and manage one-time access codes. Code values are hashed at rest and only visible right after generation.
-         </p>
-       </header>
- 
-       {generatedCode ? (
-         <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
-           <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Code generated (shown once)</p>
-           <p className="mt-2 font-mono text-lg text-emerald-100">{generatedCode}</p>
-           <p className="mt-1 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
-         </section>
-       ) : null}
- 
-       <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-         <form action={generateAction} className="grid gap-3 md:grid-cols-3">
--          <input
-+          <select
-             name="assignedUserId"
--            placeholder="Assigned user id (optional)"
-             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
--          />
-+            defaultValue=""
-+          >
-+            <option value="">Unassigned</option>
-+            {sortedAssignableUsers.map((user) => (
-+              <option key={user.id} value={user.id}>
-+                {user.email ?? user.id}
-+              </option>
-+            ))}
-+          </select>
-           <input
-             name="notes"
-             placeholder="Notes (optional)"
-             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-           />
-           <button className="rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold">Generate code</button>
-         </form>
-       </section>
- 
-       <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-         <table className="min-w-full text-sm">
-           <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
-             <tr>
-               <th className="px-4 py-3">Code</th>
-               <th className="px-4 py-3">Assigned</th>
-               <th className="px-4 py-3">Created</th>
-               <th className="px-4 py-3">Created by</th>
-               <th className="px-4 py-3">Redeemed</th>
-               <th className="px-4 py-3">Status</th>
-               <th className="px-4 py-3">Actions</th>
-             </tr>
-           </thead>
-           <tbody>
--            {rows.map((row) => (
--              <tr key={row.id} className="border-t border-white/10 align-top">
--                <td className="px-4 py-3">{row.codeMasked}</td>
--                <td className="px-4 py-3">
--                  <form action={updateAssignmentAction} className="space-y-2">
--                    <input type="hidden" name="id" value={row.id} />
--                    <input
--                      name="assignedUserId"
--                      defaultValue={row.assignedUserId ?? ""}
--                      placeholder="user id or blank"
--                      className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
--                      disabled={row.status === "redeemed" || row.status === "revoked"}
--                    />
--                    <div className="flex gap-2">
--                      <button
--                        type="submit"
--                        disabled={row.status === "redeemed" || row.status === "revoked"}
--                        className="rounded border border-blue-500/60 px-2 py-1 text-xs text-blue-200 disabled:opacity-50"
--                      >
--                        Save
--                      </button>
--                    </div>
--                    <p className="text-xs text-slate-400">{row.assignedUserEmail ?? "Unassigned"}</p>
--                  </form>
--                </td>
--                <td className="px-4 py-3">{new Date(row.createdAt).toLocaleString()}</td>
--                <td className="px-4 py-3">{row.createdByEmail ?? "-"}</td>
--                <td className="px-4 py-3">{row.redeemedAt ? new Date(row.redeemedAt).toLocaleString() : "-"}</td>
--                <td className="px-4 py-3 uppercase">{row.status}</td>
--                <td className="px-4 py-3">
--                  <form action={revokeAction}>
--                    <input type="hidden" name="id" value={row.id} />
--                    <button className="rounded border border-rose-500/60 px-2 py-1 text-xs">Delete</button>
--                  </form>
--                </td>
--              </tr>
--            ))}
-+            {rows.map((row) => {
-+              const availableUsers = users
-+                .filter((user) => !assignedUserIds.has(user.id))
-+                .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
-+              const canAssignInTable = row.status === "unused" && !row.assignedUserId;
++    configService.get.mockImplementation((key: string) => {
++      if (key === 'REQUIRE_ACCESS_CODE') {
++        return 'true';
++      }
++      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
++        return 'false';
++      }
++      if (key === 'NODE_ENV') {
++        return 'test';
++      }
++      return undefined;
++    });
 +
-+              return (
-+                <tr key={row.id} className="border-t border-white/10 align-top">
-+                  <td className="px-4 py-3">{row.codeMasked}</td>
-+                  <td className="px-4 py-3">
-+                    {canAssignInTable ? (
-+                      <form action={updateAssignmentAction} className="space-y-2">
-+                        <input type="hidden" name="id" value={row.id} />
-+                        <select
-+                          name="assignedUserId"
-+                          defaultValue=""
-+                          className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-+                        >
-+                          <option value="">Unassigned</option>
-+                          {availableUsers.map((user) => (
-+                            <option key={user.id} value={user.id}>
-+                              {user.email ?? user.id}
-+                            </option>
-+                          ))}
-+                        </select>
-+                        <div className="flex gap-2">
-+                          <button
-+                            type="submit"
-+                            className="rounded border border-blue-500/60 px-2 py-1 text-xs text-blue-200"
-+                          >
-+                            Save
-+                          </button>
-+                        </div>
-+                        <p className="text-xs text-slate-400">Unassigned</p>
-+                      </form>
-+                    ) : (
-+                      <p className="text-xs text-slate-300">{row.assignedUserEmail ?? "Unassigned"}</p>
-+                    )}
-+                  </td>
-+                  <td className="px-4 py-3">{new Date(row.createdAt).toLocaleString()}</td>
-+                  <td className="px-4 py-3">{row.createdByEmail ?? "-"}</td>
-+                  <td className="px-4 py-3">{row.redeemedAt ? new Date(row.redeemedAt).toLocaleString() : "-"}</td>
-+                  <td className="px-4 py-3 uppercase">{row.status}</td>
-+                  <td className="px-4 py-3">
-+                    <form action={revokeAction}>
-+                      <input type="hidden" name="id" value={row.id} />
-+                      <button className="rounded border border-rose-500/60 px-2 py-1 text-xs">Delete</button>
-+                    </form>
-+                  </td>
-+                </tr>
-+              );
-+            })}
-           </tbody>
-         </table>
-       </section>
-     </div>
-   );
- }
++    adminUsersService.isAdmin.mockResolvedValue(true);
++
++    const result = await service.login(payload);
++
++    expect(result.accessToken).toEqual('signed-token');
++    expect(result.user).toMatchObject({
++      id: savedUser.id,
++      email: savedUser.email,
++    });
++  });
+ });
+diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
+index b11a3a6170d70944495b018787674b19aad6383d..e36351aaa22ee810b6c1230d45f8d3d6a061719b 100644
+--- a/apps/api/src/auth/auth.service.ts
++++ b/apps/api/src/auth/auth.service.ts
+@@ -1,65 +1,67 @@
+ import {
+   BadRequestException,
+   ForbiddenException,
+   Injectable,
+   UnauthorizedException,
+ } from '@nestjs/common';
+ import { ConfigService } from '@nestjs/config';
+ import { JwtService } from '@nestjs/jwt';
+ import * as bcrypt from 'bcryptjs';
+ import { randomBytes } from 'node:crypto';
+ import { existsSync } from 'node:fs';
+ import { readFileSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { Repository } from 'typeorm';
+ import { InjectRepository } from '@nestjs/typeorm';
+ import { RelayEmailService } from '../email/relay-email.service';
+ import { UsersService } from '../users/users.service';
+ import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { User } from '../users/user.entity';
+ import { getEntitlementsForTier } from '../features/feature-gates';
+ import type { AuthResponseDto } from './dto/auth-response.dto';
+ import { UserToken } from './user-token.entity';
+ import { AccessCodesService } from '../access-codes/access-codes.service';
++import { AdminUsersService } from '../admin-users/admin-users.service';
+ 
+ type RegisterResponseDto = {
+   success: true;
+   message: string;
+ };
+ 
+ @Injectable()
+ export class AuthService {
+   constructor(
+     private readonly usersService: UsersService,
+     private readonly jwtService: JwtService,
+     private readonly relayEmailService: RelayEmailService,
+     private readonly configService: ConfigService,
+     @InjectRepository(UserToken)
+     private readonly userTokensRepository: Repository<UserToken>,
+     private readonly accessCodesService: AccessCodesService,
++    private readonly adminUsersService: AdminUsersService,
+   ) {}
+ 
+   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
+     if (payload.password !== payload.confirmPassword) {
+       throw new BadRequestException('Passwords do not match');
+     }
+ 
+     const existing = await this.usersService.findByEmail(payload.email);
+ 
+     if (existing) {
+       return {
+         success: true,
+         message: this.requireEmailConfirmation
+           ? 'Check your email to confirm your account.'
+           : 'Account created.',
+       };
+     }
+ 
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const user = await this.usersService.create({
+       email: payload.email,
+       passwordHash,
+       firstName: payload.firstName.trim(),
+       lastName: payload.lastName.trim(),
+       emailConfirmed: !this.requireEmailConfirmation,
+@@ -83,51 +85,53 @@ export class AuthService {
+ 
+     const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
+     const supportEmail =
+       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
+       'support@targetthisrole.ai';
+     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
+     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
+ 
+     await this.relayEmailService.sendRawRelayEmail({
+       to: user.email,
+       subject: 'Confirm your account',
+       body: html,
+       replyTo: supportEmail,
+       type: 'signup_confirm',
+     });
+ 
+     return {
+       success: true,
+       message: 'Check your email to confirm your account.',
+     };
+   }
+ 
+   async login(payload: LoginDto): Promise<AuthResponseDto> {
+     const user = await this.validateCredentials(payload);
+ 
+-    if (this.requireAccessCode && !user.betaAccessApproved) {
++    const isAdmin = await this.adminUsersService.isAdmin(user.id);
++
++    if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
+       throw new ForbiddenException({
+         code: 'ACCESS_CODE_REQUIRED',
+         message: 'Access code required.',
+       });
+     }
+ 
+     return this.buildAuthResponse(user);
+   }
+ 
+ 
+   async redeemAccessCodeAndLogin(
+     payload: RedeemAccessCodeAndLoginDto,
+   ): Promise<AuthResponseDto> {
+     const user = await this.validateCredentials(payload);
+ 
+     await this.accessCodesService.redeemCodeForUser(user, payload.code);
+ 
+     user.betaAccessApproved = true;
+     return this.buildAuthResponse(user);
+   }
+ 
+   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
+     if (!token) {
+       throw new BadRequestException('Missing confirmation token');
+     }

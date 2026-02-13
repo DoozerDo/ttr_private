@@ -13,11 +13,14 @@ import { AccountType } from '../users/account-type.enum';
 import { UserToken } from './user-token.entity';
 import { RelayEmailService } from '../email/relay-email.service';
 import { AccessCodesService } from '../access-codes/access-codes.service';
+import { AdminUsersService } from '../admin-users/admin-users.service';
 
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<UsersService>;
   let jwtService: JwtService;
+  let configService: { get: jest.Mock };
+  let adminUsersService: { isAdmin: jest.Mock };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -43,6 +46,12 @@ describe('AuthService', () => {
           provide: AccessCodesService,
           useValue: {
             redeemCodeForUser: jest.fn(),
+          },
+        },
+        {
+          provide: AdminUsersService,
+          useValue: {
+            isAdmin: jest.fn().mockResolvedValue(false),
           },
         },
         {
@@ -74,6 +83,8 @@ describe('AuthService', () => {
     service = module.get<AuthService>(AuthService);
     usersService = module.get(UsersService);
     jwtService = module.get(JwtService);
+    configService = module.get(ConfigService);
+    adminUsersService = module.get(AdminUsersService);
     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
   });
 
@@ -149,6 +160,55 @@ describe('AuthService', () => {
       email: savedUser.email,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
+    });
+  });
+
+  it('allows admin users to log in without beta access approval when access code is required', async () => {
+    const payload: LoginDto = {
+      email: 'admin@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'admin-user-id',
+      email: payload.email,
+      firstName: 'Admin',
+      lastName: 'User',
+      emailConfirmed: true,
+      betaAccessApproved: false,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') {
+        return 'true';
+      }
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+        return 'false';
+      }
+      if (key === 'NODE_ENV') {
+        return 'test';
+      }
+      return undefined;
+    });
+
+    adminUsersService.isAdmin.mockResolvedValue(true);
+
+    const result = await service.login(payload);
+
+    expect(result.accessToken).toEqual('signed-token');
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      email: savedUser.email,
     });
   });
 });
