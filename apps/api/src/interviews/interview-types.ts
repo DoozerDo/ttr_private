@@ -15,6 +15,28 @@ export type InterviewGap = {
   confidence: GapConfidence;
 };
 
+export type GapSimilarityRecord = {
+  sectionId: string;
+  similarity: number;
+  hasEmbedding: boolean;
+};
+
+export type GapScoreRecord = {
+  gapId: string;
+  sectionId: string | null;
+  vectorSimilarity: number;
+  heuristicScore: number;
+  finalScore: number;
+};
+
+export type GapDetectionDebug = {
+  embeddingsUsed: boolean;
+  jobEmbeddingAvailable: boolean;
+  threshold: number;
+  sectionSimilarities: GapSimilarityRecord[];
+  gapScores: GapScoreRecord[];
+};
+
 export type InterviewQuestionCategory =
   | 'Direct Experience'
   | 'Context'
@@ -59,5 +81,6 @@ export type GapDetectionResult = {
   baselineId: string;
   baselineVersionId: string;
   jobId: string;
+  debug?: GapDetectionDebug;
   gaps: InterviewGap[];
 };

@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Optional,
-} from '@nestjs/common';
-import type { GapEmbeddingProvider } from '../interviews/gap-detection.service';
-import { GAP_EMBEDDING_PROVIDER } from '../interviews/gap-detection.service';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { normalizeText } from '../scoring/fit-score/fit-score.utils';
 import {
   FitScoreEngine,
@@ -41,12 +34,8 @@ const MIN_TEXT_LENGTH = 200;
 export class FitScoringService {
   private readonly engine: FitScoreEngine;
 
-  constructor(
-    @Optional()
-    @Inject(GAP_EMBEDDING_PROVIDER)
-    embeddingProvider?: GapEmbeddingProvider,
-  ) {
-    this.engine = new FitScoreEngine(embeddingProvider);
+  constructor() {
+    this.engine = new FitScoreEngine();
   }
 
   async score(

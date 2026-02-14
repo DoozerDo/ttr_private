@@ -31,6 +31,7 @@ import {
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
+import { EmbeddingService } from '../ai/embedding.service';
 
 const BASELINE_LIMIT = 5;
 
@@ -131,6 +132,7 @@ export class BaselineService {
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
     @InjectRepository(BaselineParsed)
     private readonly baselineParsedRepository: Repository<BaselineParsed>,
+    private readonly embeddingService: EmbeddingService,
     private readonly baselineIngestionService: BaselineIngestionService,
   ) {}
 
@@ -215,6 +217,21 @@ export class BaselineService {
       },
       ...structuredSections,
     ];
+  }
+
+  private async attachEmbeddingsToSections(
+    sections: Array<{ content?: string | null; embedding?: number[] | null }>,
+  ) {
+    if (!sections.length) {
+      return;
+    }
+
+    await Promise.all(
+      sections.map(async (section) => {
+        section.embedding =
+          (await this.embeddingService.embed(section.content ?? '')) ?? null;
+      }),
+    );
   }
 
   private async computeFileHash(filePath: string): Promise<string> {
@@ -401,15 +418,8 @@ export class BaselineService {
     fileHash: string,
     parseResult?: BaselineFileParseResult,
   ): Promise<BaselineCreationResult> {
-    const baseline = manager.create(Baseline, {
-      userId,
-      originalFilename: file.originalname,
-      mimeType: file.mimetype,
-      storagePath: file.path,
-      hash: fileHash,
-      status: BaselineStatus.ACTIVE,
-      archivedAt: null,
-      sections: parseResult?.sections?.map((section, index) => ({
+    const sectionPayloads =
+      parseResult?.sections?.map((section, index) => ({
         sectionType: section.sectionType ?? BaselineSectionType.OTHER,
         title: this.getSectionTitle(section.sectionType, section.title),
         content: this.sanitizeSectionContent(section.content),
@@ -423,7 +433,19 @@ export class BaselineService {
           includePolicy: BaselineIncludePolicy.OPTIONAL,
           order: 0,
         },
-      ],
+      ];
+
+    await this.attachEmbeddingsToSections(sectionPayloads);
+
+    const baseline = manager.create(Baseline, {
+      userId,
+      originalFilename: file.originalname,
+      mimeType: file.mimetype,
+      storagePath: file.path,
+      hash: fileHash,
+      status: BaselineStatus.ACTIVE,
+      archivedAt: null,
+      sections: sectionPayloads,
     });
 
     const savedBaseline = await manager.save(baseline);
@@ -677,6 +699,7 @@ return {
         }),
       );
 
+      await this.attachEmbeddingsToSections(rebuiltEntities);
       await manager.save(rebuiltEntities);
 
       baseline.sections = rebuiltEntities;

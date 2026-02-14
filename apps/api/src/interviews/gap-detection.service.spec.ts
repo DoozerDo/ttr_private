@@ -4,10 +4,7 @@ import {
   BaselineSection,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
-import {
-  GapDetectionService,
-  GapEmbeddingProvider,
-} from './gap-detection.service';
+import { GapDetectionService } from './gap-detection.service';
 import { Job } from '../jobs/job.entity';
 import { Baseline } from '../baseline/baseline.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
@@ -23,14 +20,12 @@ describe('GapDetectionService', () => {
     baselineSectionRepository = createMockRepository(),
     baselineVersionRepository = createMockRepository(),
     baselineBlockPolicyRepository = createMockRepository(),
-    embeddingProvider?: GapEmbeddingProvider,
   ) =>
     new GapDetectionService(
       jobRepository as never,
       baselineSectionRepository as never,
       baselineVersionRepository as never,
       baselineBlockPolicyRepository as never,
-      embeddingProvider as never,
     );
 
   afterEach(() => {
@@ -180,23 +175,11 @@ describe('GapDetectionService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('uses embeddings to avoid false gaps and falls back to token overlap otherwise', async () => {
+  it('uses vector similarity to skip well-covered sections', async () => {
     const jobRepository = createMockRepository();
     const baselineVersionRepository = createMockRepository();
     const baselineSectionRepository = createMockRepository();
     const baselineBlockPolicyRepository = createMockRepository();
-
-    const embeddingVectors: Record<string, number[]> = {
-      'Stream processing and pipeline optimization': [1, 0],
-      'Backend architecture and api design': [0, 1],
-      'Optimize data pipelines': [0.99, 0.01],
-      'Customer support leadership': [0.5, 0.5],
-    };
-
-    const embeddingProvider: GapEmbeddingProvider = {
-      isEnabled: () => true,
-      embed: jest.fn((text: string) => embeddingVectors[text] ?? [0, 0]),
-    };
 
     const job: Job = {
       id: 'job-2',
@@ -214,6 +197,7 @@ describe('GapDetectionService', () => {
       jdParsedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
+      embedding: [0.99, 0.01],
     };
 
     const baseline: Baseline = {
@@ -258,6 +242,7 @@ describe('GapDetectionService', () => {
         updatedAt: new Date(),
         type: 'EXPERIENCE' as never,
         orderIndex: 1,
+        embedding: [0.99, 0.01],
       } as unknown as BaselineSection,
       {
         id: 'section-emb-2',
@@ -272,17 +257,16 @@ describe('GapDetectionService', () => {
         updatedAt: new Date(),
         type: 'EXPERIENCE' as never,
         orderIndex: 2,
+        embedding: [0, 1],
       } as unknown as BaselineSection,
     ]);
     baselineBlockPolicyRepository.find.mockResolvedValue([]);
 
-    const embedSpy = jest.spyOn(embeddingProvider, 'embed');
     const service = createService(
       jobRepository,
       baselineSectionRepository,
       baselineVersionRepository,
       baselineBlockPolicyRepository,
-      embeddingProvider,
     );
 
     const result = await service.detectGaps({
@@ -293,14 +277,7 @@ describe('GapDetectionService', () => {
 
     expect(result.gaps).toHaveLength(1);
     expect(result.gaps[0].jdExcerpt).toBe('Customer support leadership');
-    expect(embedSpy).toHaveBeenCalledWith('Optimize data pipelines');
-    expect(embedSpy).toHaveBeenCalledWith('Customer support leadership');
-    expect(embedSpy).toHaveBeenCalledWith(
-      'Stream processing and pipeline optimization',
-    );
-    expect(embedSpy).toHaveBeenCalledWith(
-      'Backend architecture and api design',
-    );
+    expect(result.debug?.embeddingsUsed).toBe(true);
   });
 
   it('clusters semantically similar JD gaps together while preserving deterministic ordering', async () => {
@@ -309,18 +286,6 @@ describe('GapDetectionService', () => {
     const baselineSectionRepository = createMockRepository();
     const baselineBlockPolicyRepository = createMockRepository();
 
-    const embeddingVectors: Record<string, number[]> = {
-      'Build analytics dashboards': [1, 0],
-      'Develop analytics dashboards and reporting': [0.98, 0.05],
-      'Scale distributed systems': [0, 1],
-      'Operations handbook': [0, 1],
-      'Team leadership': [0, 1],
-    };
-
-    const embeddingProvider: GapEmbeddingProvider = {
-      isEnabled: () => true,
-      embed: jest.fn((text: string) => embeddingVectors[text] ?? [0, 0]),
-    };
 
     const job: Job = {
       id: 'job-3',
@@ -406,7 +371,6 @@ describe('GapDetectionService', () => {
       baselineSectionRepository,
       baselineVersionRepository,
       baselineBlockPolicyRepository,
-      embeddingProvider,
     );
 
     const firstRun = await service.detectGaps({
@@ -437,11 +401,6 @@ describe('GapDetectionService', () => {
     const baselineVersionRepository = createMockRepository();
     const baselineSectionRepository = createMockRepository();
     const baselineBlockPolicyRepository = createMockRepository();
-
-    const embeddingProvider: GapEmbeddingProvider = {
-      isEnabled: () => false,
-      embed: jest.fn(),
-    };
 
     const job: Job = {
       id: 'job-4',
@@ -498,7 +457,6 @@ describe('GapDetectionService', () => {
       baselineSectionRepository,
       baselineVersionRepository,
       baselineBlockPolicyRepository,
-      embeddingProvider,
     );
 
     const result = await service.detectGaps({

@@ -21,9 +21,11 @@ import { BaselineTextExtractor } from './baseline-text-extractor.service';
 
 import { Interview } from '../interviews/interview.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
+    AiModule,
     ConfigModule,
     ComplianceModule,
     TypeOrmModule.forFeature([

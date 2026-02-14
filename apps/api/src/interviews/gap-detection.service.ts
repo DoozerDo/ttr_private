@@ -1,9 +1,8 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
+  Logger,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
@@ -17,8 +16,10 @@ import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { Job } from '../jobs/job.entity';
 import {
   GapConfidence,
+  GapDetectionDebug,
   GapDetectionResult,
   GapDomain,
+  GapScoreRecord,
   InterviewGap,
 } from './interview-types';
 
@@ -33,30 +34,18 @@ type SectionTokens = {
   tokens: Set<string>;
 };
 
-export interface GapEmbeddingProvider {
-  isEnabled(): boolean;
-  embed(text: string): Promise<number[]>;
-}
-
-export const GAP_EMBEDDING_PROVIDER = Symbol('GAP_EMBEDDING_PROVIDER');
-
-type SectionEmbedding = {
-  section: BaselineSection;
-  embedding: number[];
-};
-
-const GAP_EMBEDDING_MATCH_THRESHOLD = 0.75;
+const GAP_VECTOR_SIMILARITY_THRESHOLD = 0.25;
 const GAP_CLUSTER_EMBEDDING_THRESHOLD = 0.82;
 const GAP_CLUSTER_TOKEN_THRESHOLD = 0.6;
 
 type GapCandidate = {
   gap: InterviewGap;
   tokens: Set<string>;
-  embedding?: number[] | null;
 };
 
 @Injectable()
 export class GapDetectionService {
+  private readonly logger = new Logger(GapDetectionService.name);
   constructor(
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
@@ -66,9 +55,6 @@ export class GapDetectionService {
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
     @InjectRepository(BaselineBlockPolicy)
     private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>,
-    @Optional()
-    @Inject(GAP_EMBEDDING_PROVIDER)
-    private readonly embeddingProvider?: GapEmbeddingProvider,
   ) {}
 
   async detectGaps(inputs: DetectionInputs): Promise<GapDetectionResult> {
@@ -118,8 +104,24 @@ export class GapDetectionService {
     );
 
     const sectionTokens = this.buildSectionTokens(normalizedSections);
-    let sectionEmbeddings =
-      await this.buildSectionEmbeddings(normalizedSections);
+    const jobEmbedding =
+      Array.isArray(job.embedding) && job.embedding.length > 0
+        ? job.embedding
+        : null;
+    const sectionSimilarityMap = jobEmbedding
+      ? await this.buildSectionSimilarityMap(
+          baselineVersion.baselineId,
+          jobEmbedding,
+        )
+      : new Map<string, number>();
+    const embeddingsUsed =
+      Boolean(jobEmbedding) && sectionSimilarityMap.size > 0;
+
+    const sectionSimilarityRecords = normalizedSections.map((section) => ({
+      sectionId: section.id,
+      similarity: sectionSimilarityMap.get(section.id) ?? 0,
+      hasEmbedding: Array.isArray(section.embedding) && section.embedding.length > 0,
+    }));
 
     const jdItems = [
       ...(job.normalizedRequirements ?? []),
@@ -129,6 +131,7 @@ export class GapDetectionService {
       .filter(Boolean);
 
     const clusteringInputs: GapCandidate[] = [];
+    const gapScores: GapScoreRecord[] = [];
 
     for (const item of jdItems) {
       const jdTokens = this.tokenize(item);
@@ -139,30 +142,23 @@ export class GapDetectionService {
       const match = this.findBestSectionMatch(jdTokens, sectionTokens);
       const coverage = match?.overlap ?? 0;
       const coverageRatio = jdTokens.size === 0 ? 0 : coverage / jdTokens.size;
-      let jdEmbedding: number[] | null = null;
-
-      if (sectionEmbeddings) {
-        try {
-          jdEmbedding = await this.embeddingProvider!.embed(item);
-          const embeddingMatch = this.findBestEmbeddingMatch(
-            jdEmbedding ?? [],
-            sectionEmbeddings,
-          );
-          const similarity = embeddingMatch?.similarity ?? 0;
-          if (similarity >= GAP_EMBEDDING_MATCH_THRESHOLD) {
-            continue;
-          }
-        } catch {
-          sectionEmbeddings = null;
-          jdEmbedding = null;
-        }
-      }
 
       if (coverageRatio >= 0.5) {
         continue;
       }
 
-      const confidence = this.resolveConfidence(coverageRatio);
+      const matchedSectionId = match?.section?.id ?? null;
+      const vectorSimilarity = this.getSectionSimilarity(
+        matchedSectionId,
+        sectionSimilarityMap,
+      );
+
+      if (vectorSimilarity >= GAP_VECTOR_SIMILARITY_THRESHOLD) {
+        continue;
+      }
+      const heuristicScore = coverageRatio;
+      const finalScore = this.computeFinalScore(vectorSimilarity, heuristicScore);
+      const confidence = this.resolveConfidence(finalScore);
 
       const gap: InterviewGap = {
         gapId: randomUUID(),
@@ -177,17 +173,32 @@ export class GapDetectionService {
       clusteringInputs.push({
         gap,
         tokens: jdTokens,
-        embedding: jdEmbedding,
+      });
+
+      gapScores.push({
+        gapId: gap.gapId,
+        sectionId: matchedSectionId,
+        vectorSimilarity,
+        heuristicScore,
+        finalScore,
       });
     }
 
     const orderedGaps = this.clusterAndOrderGaps(clusteringInputs);
+    const debug: GapDetectionDebug = {
+      embeddingsUsed,
+      jobEmbeddingAvailable: Boolean(jobEmbedding),
+      threshold: GAP_VECTOR_SIMILARITY_THRESHOLD,
+      sectionSimilarities: sectionSimilarityRecords,
+      gapScores,
+    };
 
     return {
       baselineId: baselineVersion.baselineId,
       baselineVersionId,
       jobId,
       gaps: orderedGaps,
+      debug,
     };
   }
 
@@ -233,25 +244,6 @@ export class GapDetectionService {
     }));
   }
 
-  private async buildSectionEmbeddings(
-    sections: BaselineSection[],
-  ): Promise<SectionEmbedding[] | null> {
-    try {
-      if (!this.embeddingProvider?.isEnabled()) {
-        return null;
-      }
-
-      return Promise.all(
-        sections.map(async (section) => ({
-          section,
-          embedding: await this.embeddingProvider!.embed(section.content ?? ''),
-        })),
-      );
-    } catch {
-      return null;
-    }
-  }
-
   private findBestSectionMatch(
     jdTokens: Set<string>,
     sections: SectionTokens[],
@@ -270,58 +262,11 @@ export class GapDetectionService {
     return bestMatch;
   }
 
-  private findBestEmbeddingMatch(
-    jdEmbedding: number[],
-    sections: SectionEmbedding[],
-  ): { section: BaselineSection; similarity: number } | null {
-    if (!jdEmbedding.length) {
-      return null;
-    }
-
-    let bestMatch: { section: BaselineSection; similarity: number } | null =
-      null;
-
-    for (const candidate of sections) {
-      const similarity = this.cosineSimilarity(
-        jdEmbedding,
-        candidate.embedding,
-      );
-      if (!bestMatch || similarity > bestMatch.similarity) {
-        bestMatch = { section: candidate.section, similarity };
-      }
-    }
-
-    return bestMatch;
-  }
-
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (!a.length || !b.length || a.length !== b.length) {
-      return 0;
-    }
-
-    const dotProduct = a.reduce(
-      (sum, value, index) => sum + value * b[index],
-      0,
-    );
-    const magnitudeA = Math.sqrt(
-      a.reduce((sum, value) => sum + value * value, 0),
-    );
-    const magnitudeB = Math.sqrt(
-      b.reduce((sum, value) => sum + value * value, 0),
-    );
-
-    if (magnitudeA === 0 || magnitudeB === 0) {
-      return 0;
-    }
-
-    return dotProduct / (magnitudeA * magnitudeB);
-  }
-
-  private resolveConfidence(coverageRatio: number): GapConfidence {
-    if (coverageRatio === 0) {
+  private resolveConfidence(score: number): GapConfidence {
+    if (score === 0) {
       return 'high';
     }
-    if (coverageRatio < 0.25) {
+    if (score < GAP_VECTOR_SIMILARITY_THRESHOLD) {
       return 'medium';
     }
     return 'low';
@@ -397,11 +342,8 @@ export class GapDetectionService {
     return bestIndex;
   }
 
-  private resolveSimilarity(a: GapCandidate, b: GapCandidate): number {
-    if (!a.embedding || !b.embedding) {
-      return 0;
-    }
-    return this.cosineSimilarity(a.embedding, b.embedding);
+  private resolveSimilarity(_a: GapCandidate, _b: GapCandidate): number {
+    return 0;
   }
 
   private tokenSimilarity(a: Set<string>, b: Set<string>): number {
@@ -411,6 +353,92 @@ export class GapDetectionService {
 
     const shared = [...a].filter((token) => b.has(token)).length;
     return shared / Math.max(a.size, b.size);
+  }
+
+  private getSectionSimilarity(
+    sectionId: string | null,
+    map: Map<string, number>,
+  ): number {
+    if (!sectionId) {
+      return 0;
+    }
+
+    return this.clampSimilarity(map.get(sectionId) ?? 0);
+  }
+
+  private computeFinalScore(
+    vectorSimilarity: number,
+    heuristicScore: number,
+  ): number {
+    const vector = this.clampSimilarity(vectorSimilarity);
+    const heuristic = Math.min(Math.max(heuristicScore, 0), 1);
+    return vector * 0.6 + heuristic * 0.4;
+  }
+
+  private clampSimilarity(value: number): number {
+    if (Number.isNaN(value)) {
+      return 0;
+    }
+    return Math.min(Math.max(value, 0), 1);
+  }
+
+  private async buildSectionSimilarityMap(
+    baselineId: string,
+    jobEmbedding: number[],
+  ): Promise<Map<string, number>> {
+    try {
+      const vectorLiteral = `[${jobEmbedding.join(',')}]`;
+
+      const rows = await this.baselineSectionRepository
+        .createQueryBuilder('section')
+        .select(['section.id'])
+        .addSelect(
+          `section.embedding <=> :jobEmbedding::vector`,
+          'distance',
+        )
+        .where('section.baselineId = :baselineId', { baselineId })
+        .setParameter('jobEmbedding', vectorLiteral)
+        .getRawMany<{
+          section_id: string;
+          distance: string | number | null;
+        }>();
+
+      const map = new Map<string, number>();
+
+      for (const row of rows) {
+        const rawDistance = row.distance;
+        if (rawDistance === null || rawDistance === undefined) {
+          continue;
+        }
+        const distance =
+          typeof rawDistance === 'string'
+            ? parseFloat(rawDistance)
+            : Number(rawDistance);
+        if (!Number.isFinite(distance)) {
+          continue;
+        }
+        map.set(row.section_id, this.convertDistanceToSimilarity(distance));
+      }
+
+      return map;
+    } catch (error) {
+      this.logger.warn(
+        'Vector similarity query failed; falling back to heuristics',
+        this.describeError(error),
+      );
+      return new Map();
+    }
+  }
+
+  private convertDistanceToSimilarity(distance: number): number {
+    return this.clampSimilarity(1 - distance);
+  }
+
+  private describeError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
   }
 
   private inferDomain(text: string): GapDomain {

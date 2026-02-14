@@ -50,6 +50,9 @@ export class Job {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   normalizedRequirements!: string[];
 
+  @Column({ type: 'vector', length: 1536, nullable: true })
+  embedding?: number[] | null;
+
   @Column({
     type: 'enum',
     enum: JobIngestionMethod,

@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getServerApiBaseUrl } from "@/lib/apiBase";
 
-const AUTH_API_BASE_URL =
-  process.env.API_BASE_URL?.trim() ??
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ??
-  "http://localhost:3001";
+const AUTH_API_BASE_URL = getServerApiBaseUrl();
 
 export type RequireAuthTokenSuccess = {
   token: string;

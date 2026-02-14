@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerApiBaseUrl } from "@/lib/apiBase";
 
-/**
- * Resolve the API base URL for server side route handlers.
- * Priority: API_BASE_URL, then NEXT_PUBLIC_API_BASE_URL, then http://localhost:3001
- */
-export function getApiBaseUrl(): string | null {
-  const fromServer = process.env.API_BASE_URL;
-  if (fromServer && fromServer.trim()) return fromServer.trim();
-
-  const fromPublic = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (fromPublic && fromPublic.trim()) return fromPublic.trim();
-
-  // Safe default for local dev
-  return "http://localhost:3001";
+export function getApiBaseUrl(): string {
+  return getServerApiBaseUrl();
 }
 
 /**

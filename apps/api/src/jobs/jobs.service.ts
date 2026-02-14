@@ -11,6 +11,7 @@ import { Repository } from 'typeorm';
 import { Job, JobIngestionMethod } from './job.entity';
 import { extractTextFromHtml } from './html-utils';
 import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
+import { EmbeddingService } from '../ai/embedding.service';
 
 export type CreateJobInput = {
   title?: string | null;
@@ -82,6 +83,7 @@ export class JobsService {
   constructor(
     @InjectRepository(Job)
     private readonly jobRepository: Repository<Job>,
+    private readonly embeddingService: EmbeddingService,
   ) {}
 
   private readonly logger = new Logger(JobsService.name);
@@ -143,6 +145,7 @@ export class JobsService {
       originalRawDescription,
     );
     this.validateDescriptionLength(normalizedInput);
+    const embedding = await this.embeddingService.embed(normalizedInput);
 
     const normalizedOutcome = this.normalizeSafely(normalizedInput, {
       source: 'create-job',
@@ -206,6 +209,7 @@ export class JobsService {
       normalizedResponsibilities: responsibilities,
       normalizedRequirements: requirements,
       jdIngestionMethod: ingestionMethod,
+      embedding: embedding ?? null,
       jdParsedAt: new Date(),
     });
 

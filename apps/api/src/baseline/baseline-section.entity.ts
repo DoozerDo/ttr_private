@@ -53,6 +53,9 @@ export class BaselineSection {
   @Column({ type: 'text' })
   content!: string;
 
+  @Column({ type: 'vector', length: 1536, nullable: true })
+  embedding?: number[] | null;
+
   @Column({ type: 'varchar', default: BaselineIncludePolicy.OPTIONAL })
   includePolicy!: BaselineIncludePolicy;
 
