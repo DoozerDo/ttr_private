@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
 
 interface AuthFormProps {
   mode: "login" | "register";
@@ -131,7 +132,9 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         return;
       }
 
-      router.push(returnPath ?? "/");
+      const targetPath = sanitizeReturnPath(returnPath) ?? "/baselines";
+      await router.replace(targetPath);
+      await router.refresh();
     } catch (submitError) {
       console.error("Auth request failed", submitError);
       setError("Unable to reach authentication service");

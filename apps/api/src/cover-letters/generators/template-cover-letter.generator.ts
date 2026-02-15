@@ -1,10 +1,11 @@
-import {
+import type {
   AllowedBaselineBlock,
   CoverLetterGenerationInput,
   CoverLetterGenerationResult,
   CoverLetterGenerator,
   CoverLetterJobContext,
 } from './cover-letter-generator.interface';
+import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
 
 type NormalizedJob = CoverLetterJobContext & {
   title: string | null;
@@ -24,25 +25,41 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
     const targetWords = this.resolveTargetWords(input.maxWords);
-    const job = this.normalizeJob(input.job);
+    const normalizedJob = this.normalizeJob(input.job);
+    const constraints = input.complianceConstraints;
+    const constrainedJob = this.applyComplianceConstraintsToJob(
+      normalizedJob,
+      constraints,
+    );
     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
-    const baselineStatements = this.extractBaselineStatements(baselineBlocks);
-    const focusAreas = this.buildFocusAreas(job);
+    const baselineStatements = this.extractBaselineStatements(
+      baselineBlocks,
+      constraints,
+    );
+    const focusAreas = this.buildFocusAreas(constrainedJob);
     const tone = input.tone?.trim() || null;
     const safeMode = Boolean(input.safeMode);
 
     const paragraphs = safeMode
       ? [
-          this.composeSafeIntro(job, tone),
+          this.composeSafeIntro(constrainedJob, tone),
           this.composeSafeStrengths(baselineStatements, tone),
-          this.composeSafeExecution(job),
-          this.composeSafeClosing(job, tone, input.closingTemplate.text),
+          this.composeSafeExecution(constrainedJob),
+          this.composeSafeClosing(
+            constrainedJob,
+            tone,
+            input.closingTemplate.text,
+          ),
         ]
       : [
-          this.composeIntro(job, tone),
+          this.composeIntro(constrainedJob, tone),
           this.composeStrengths(baselineStatements, tone),
-          this.composeExecution(job, focusAreas, baselineStatements),
-          this.composeClosing(job, tone, input.closingTemplate.text),
+          this.composeExecution(constrainedJob, focusAreas, baselineStatements),
+          this.composeClosing(
+            constrainedJob,
+            tone,
+            input.closingTemplate.text,
+          ),
         ];
 
     const greeting = 'Dear Hiring Team,';
@@ -56,6 +73,8 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .filter(Boolean)
       .join('\n\n')
       .trim();
+
+    content = this.removeDisallowedPhrases(content, constraints);
 
     let wordCount = this.countWords(content);
 
@@ -81,6 +100,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       greeting: finalGreeting,
       paragraphs: finalParagraphs,
       closingParagraphs: finalClosing ? [finalClosing] : [],
+      constraintSummary: this.buildConstraintSummary(constraints),
     };
   }
 
@@ -108,6 +128,33 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     };
   }
 
+  private applyComplianceConstraintsToJob(
+    job: NormalizedJob,
+    constraints?: CoverLetterComplianceConstraints,
+  ): NormalizedJob {
+    if (!constraints || constraints.mode !== 'strict') {
+      return job;
+    }
+
+    const allowedCompanies = this.normalizeConstraintSet(
+      constraints.allowedCompanyNames,
+    );
+    const allowedRoles = this.normalizeConstraintSet(
+      constraints.allowedRoleTitles,
+    );
+
+    const sanitized: NormalizedJob = { ...job };
+
+    if (allowedCompanies.size > 0 && !this.isAllowedValue(job.company, allowedCompanies)) {
+      sanitized.company = null;
+    }
+    if (allowedRoles.size > 0 && !this.isAllowedValue(job.title, allowedRoles)) {
+      sanitized.title = null;
+    }
+
+    return sanitized;
+  }
+
   private normalizeBlocks(blocks: AllowedBaselineBlock[]): NormalizedBlock[] {
     return blocks
       .map((block, index) => ({
@@ -130,7 +177,10 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .trim();
   }
 
-  private extractBaselineStatements(blocks: NormalizedBlock[]) {
+  private extractBaselineStatements(
+    blocks: NormalizedBlock[],
+    constraints?: CoverLetterComplianceConstraints,
+  ) {
     const statements: string[] = [];
 
     blocks.forEach((block) => {
@@ -141,13 +191,31 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
       sentences.forEach((sentence) => {
         const limited = this.limitWords(sentence, 60);
-        if (limited.length > 0) {
-          statements.push(limited);
+        if (limited.length === 0) {
+          return;
         }
+        if (this.shouldSkipStatement(limited, constraints)) {
+          return;
+        }
+        statements.push(limited);
       });
     });
 
     return statements.slice(0, 15);
+  }
+
+  private shouldSkipStatement(
+    statement: string,
+    constraints?: CoverLetterComplianceConstraints,
+  ) {
+    if (!constraints || constraints.mode !== 'strict') {
+      return false;
+    }
+
+    return (
+      this.containsDisallowedValue(statement, constraints.disallowPhrases) ||
+      this.containsDisallowedValue(statement, constraints.disallowRoleTitles)
+    );
   }
 
   private buildFocusAreas(job: NormalizedJob) {
@@ -335,5 +403,100 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .split(/\n{2,}/)
       .map((segment) => segment.trim())
       .filter(Boolean);
+  }
+
+  private removeDisallowedPhrases(
+    content: string,
+    constraints?: CoverLetterComplianceConstraints,
+  ) {
+    if (!constraints || constraints.mode !== 'strict') {
+      return content;
+    }
+
+    const phrases = [
+      ...(constraints.disallowPhrases ?? []),
+      ...(constraints.disallowRoleTitles ?? []),
+    ];
+
+    let sanitized = content;
+    for (const phrase of phrases) {
+      const trimmed = phrase.trim();
+      if (!trimmed) continue;
+      const regex = new RegExp(
+        `\\b${this.escapeRegExp(trimmed)}\\b`,
+        'gi',
+      );
+      sanitized = sanitized.replace(regex, '');
+    }
+    return sanitized.replace(/\s{2,}/g, ' ').trim();
+  }
+
+  private buildConstraintSummary(
+    constraints?: CoverLetterComplianceConstraints,
+  ): string | null {
+    if (!constraints || constraints.mode !== 'strict') {
+      return null;
+    }
+
+    const segments: string[] = [];
+    if (constraints.allowedCompanyNames?.length) {
+      segments.push(
+        `Allowed companies: ${constraints.allowedCompanyNames.join(', ')}.`,
+      );
+    }
+    if (constraints.allowedRoleTitles?.length) {
+      segments.push(
+        `Allowed titles: ${constraints.allowedRoleTitles.join(', ')}.`,
+      );
+    }
+    if (constraints.disallowPhrases?.length) {
+      segments.push(
+        `Avoid phrases such as ${constraints.disallowPhrases.join(', ')}.`,
+      );
+    }
+    if (constraints.disallowRoleTitles?.length) {
+      segments.push(
+        `Avoid titles such as ${constraints.disallowRoleTitles.join(', ')}.`,
+      );
+    }
+    if (constraints.notes) {
+      segments.push(constraints.notes);
+    }
+
+    return segments.length ? segments.join(' ') : null;
+  }
+
+  private escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private normalizeConstraintSet(values?: string[] | null): Set<string> {
+    const set = new Set<string>();
+    if (!values) {
+      return set;
+    }
+    for (const raw of values) {
+      const cleaned = this.cleanText(raw);
+      if (!cleaned) continue;
+      set.add(cleaned.toLowerCase());
+    }
+    return set;
+  }
+
+  private isAllowedValue(value: string | null, allowedSet: Set<string>) {
+    if (!value) {
+      return false;
+    }
+    return allowedSet.has(value.toLowerCase());
+  }
+
+  private containsDisallowedValue(statement: string, disallowList?: string[]) {
+    if (!disallowList || disallowList.length === 0) {
+      return false;
+    }
+    const normalized = statement.toLowerCase();
+    return disallowList.some(
+      (value) => value && normalized.includes(value.toLowerCase()),
+    );
   }
 }

@@ -40,6 +40,7 @@ import {
   CoverLetterGenerator,
 } from './generators/cover-letter-generator.interface';
 import { TemplateCoverLetterGenerator } from './generators/template-cover-letter.generator';
+import { CoverLetterComplianceConstraints } from './types/cover-letter-compliance-constraints';
 import '../docx-templates/templates';
 import {
   DEFAULT_COVER_LETTER_TEMPLATE_KEY,
@@ -306,6 +307,11 @@ export class CoverLettersService {
       jobContext,
     );
 
+    const complianceConstraints = this.normalizeComplianceConstraints(
+      input.complianceConstraints,
+    );
+    const requestSafeMode = complianceConstraints?.mode === 'strict';
+
     let generation = this.generator.generate({
       baselineId: baseline.id,
       jobId: job.id,
@@ -314,6 +320,8 @@ export class CoverLettersService {
       closingTemplate,
       maxWords: input.maxWords,
       tone: input.tone,
+      safeMode: requestSafeMode,
+      complianceConstraints,
     });
 
     const requestedJobContext = this.normalizeRequestedJobContext(
@@ -351,6 +359,7 @@ export class CoverLettersService {
         maxWords: input.maxWords,
         tone: input.tone,
         safeMode: true,
+        complianceConstraints,
       });
 
       complianceResult = await this.evaluateCompliance(
@@ -572,6 +581,74 @@ export class CoverLettersService {
     }
 
     return DocumentType.COVER_LETTER;
+  }
+
+  private normalizeComplianceConstraints(
+    constraints?: CoverLetterComplianceConstraints | null,
+  ): CoverLetterComplianceConstraints | undefined {
+    if (!constraints || constraints.mode !== 'strict') {
+      return undefined;
+    }
+
+    const normalizeList = (values?: string[] | null) => {
+      if (!Array.isArray(values)) return [];
+      const seen = new Set<string>();
+      const normalized: string[] = [];
+      for (const raw of values) {
+        const cleaned = this.cleanText(raw);
+        if (!cleaned) continue;
+        const normalizedKey = cleaned.toLowerCase();
+        if (seen.has(normalizedKey)) continue;
+        seen.add(normalizedKey);
+        normalized.push(cleaned);
+      }
+      return normalized;
+    };
+
+    const normalized: CoverLetterComplianceConstraints = {
+      mode: 'strict',
+    };
+
+    const disallowPhrases = normalizeList(constraints.disallowPhrases);
+    if (disallowPhrases.length) {
+      normalized.disallowPhrases = disallowPhrases;
+    }
+
+    const disallowRoleTitles = normalizeList(constraints.disallowRoleTitles);
+    if (disallowRoleTitles.length) {
+      normalized.disallowRoleTitles = disallowRoleTitles;
+    }
+
+    const allowedCompanyNames = normalizeList(constraints.allowedCompanyNames);
+    if (allowedCompanyNames.length) {
+      normalized.allowedCompanyNames = allowedCompanyNames;
+    }
+
+    const allowedRoleTitles = normalizeList(constraints.allowedRoleTitles);
+    if (allowedRoleTitles.length) {
+      normalized.allowedRoleTitles = allowedRoleTitles;
+    }
+
+    const baselineCompanyNames = normalizeList(
+      constraints.baselineCompanyNames,
+    );
+    if (baselineCompanyNames.length) {
+      normalized.baselineCompanyNames = baselineCompanyNames;
+    }
+
+    const jobCompanyNames = normalizeList(constraints.jobCompanyNames);
+    if (jobCompanyNames.length) {
+      normalized.jobCompanyNames = jobCompanyNames;
+    }
+
+    if (constraints.notes) {
+      const notes = this.cleanText(constraints.notes);
+      if (notes) {
+        normalized.notes = notes;
+      }
+    }
+
+    return normalized;
   }
 
   private computeGenerationInputsHash(

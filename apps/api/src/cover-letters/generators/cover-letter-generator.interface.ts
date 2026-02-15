@@ -25,6 +25,8 @@ export type CoverLetterClosingTemplate = {
   text: string;
 };
 
+import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
+
 export type CoverLetterGenerationInput = {
   baselineId: string;
   jobId: string;
@@ -34,6 +36,7 @@ export type CoverLetterGenerationInput = {
   maxWords?: number;
   tone?: string;
   safeMode?: boolean;
+  complianceConstraints?: CoverLetterComplianceConstraints;
 };
 
 export type CoverLetterGenerationResult = {
@@ -42,6 +45,7 @@ export type CoverLetterGenerationResult = {
   greeting: string;
   paragraphs: string[];
   closingParagraphs: string[];
+  constraintSummary?: string | null;
 };
 
 export interface CoverLetterGenerator {

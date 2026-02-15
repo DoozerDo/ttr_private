@@ -137,4 +137,40 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(countParagraphs(output.content)).toBe(4);
     expect(countWords(output.content)).toBeLessThanOrEqual(350);
   });
+
+  it('surfaces constraints summary when strict mode is requested', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const input = {
+      job: {
+        title: 'Director, Customer Support Operations',
+        company: 'Acme Corp',
+        responsibilities: ['Build programs.'],
+        requirements: ['Partner with engineering.'],
+      },
+      allowedBaselineBlocks: [
+        {
+          title: 'Summary',
+          content:
+            'Documented program growth anchored in customer focus.',
+          order: 0,
+        },
+      ],
+      closingTemplate: {
+        key: 'steady',
+        text: 'I am ready to execute steadily, stay aligned with documented scope, and keep communication clear and predictable.',
+      },
+      tone: 'neutral',
+      complianceConstraints: {
+        mode: 'strict',
+        allowedCompanyNames: ['Acme Corp'],
+        disallowPhrases: ['the Director'],
+      },
+    };
+
+    const output = generator.generate(input as any);
+
+    expect(output.constraintSummary).toContain('Allowed companies: Acme Corp');
+    expect(output.constraintSummary).toContain('Avoid phrases such as the Director');
+  });
 });

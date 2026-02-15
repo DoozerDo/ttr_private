@@ -1,4 +1,5 @@
 import { DocumentType, JobApplicationContext } from '../../compliance/compliance.types';
+import { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
 
 export class GenerateCoverLetterDto {
   baselineId!: string;
@@ -18,4 +19,5 @@ export class GenerateCoverLetterDto {
   maxWords?: number;
 
   tone?: string;
+  complianceConstraints?: CoverLetterComplianceConstraints;
 }

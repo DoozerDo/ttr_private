@@ -22,6 +22,38 @@ import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 
+function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
+  const className = props.className ?? "h-5 w-5";
+  return (
+    <svg
+      aria-hidden={props["aria-hidden"] ?? true}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M7 11V8.5C7 5.462 9.462 3 12.5 3C15.538 3 18 5.462 18 8.5V11"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6.5 11H18.5C19.328 11 20 11.672 20 12.5V19.5C20 20.328 19.328 21 18.5 21H6.5C5.672 21 5 20.328 5 19.5V12.5C5 11.672 5.672 11 6.5 11Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12.5 15V17"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 type Job = Awaited<ReturnType<typeof listJobs>>[number];
 
 type LatestAnalysis = {
@@ -74,18 +106,19 @@ type CoverLetterComplianceBlocked = {
 };
 
 const complianceFlagLabelMap: Record<string, string> = {
-  invented_company: "Unsupported company reference",
-  invented_role: "Unsupported role or title reference",
-  invented_metric: "Unsupported metric or result",
-  invented_scope: "Unsupported scope or ownership",
-  missing_baseline_support: "Not supported by baseline",
+  invented_company: "Company name needs support",
+  invented_role: "Role or title needs support",
+  invented_metric: "Metric needs support",
+  invented_scope: "Scope statement needs support",
+  missing_baseline_support: "Statement needs support",
 };
 
 function mapComplianceFlagLabel(code?: string): string {
-  if (!code) return "Unsupported content";
-  const normalized = code.trim().toLowerCase();
-  if (!normalized) return "Unsupported content";
-  return complianceFlagLabelMap[normalized] ?? "Unsupported content";
+  const normalized = typeof code === "string" ? code.trim().toLowerCase() : "";
+  if (!normalized) {
+    return "Statement needs support";
+  }
+  return complianceFlagLabelMap[normalized] ?? "Statement needs support";
 }
 
 function normalizeComplianceFlagEntry(value: unknown): CoverLetterComplianceFlag | null {
@@ -142,8 +175,8 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
   }
   const auditId = trimToString(detailRecord.audit_id ?? detailRecord.auditId);
   return {
-    title: "Cover letter blocked by compliance",
-    body: "We found content that is not supported by your verified baseline.",
+    title: "Draft needs verification",
+    body: "Some content is not supported by your verified baseline yet.",
     flags,
     auditId,
   };
@@ -1472,12 +1505,18 @@ export default function StudioPage() {
         ) : null}
 
         {coverLetterComplianceBlocked ? (
-          <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4 text-sm text-slate-200">
-            <div>
-              <p className="text-xs font-semibold tracking-[0.3em] text-amber-200">
-                {coverLetterComplianceBlocked.title}
+          <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200 shadow-sm">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <LockIcon className="h-5 w-5 text-amber-300" aria-hidden />
+                <p className="text-xs font-semibold tracking-[0.3em] text-slate-300">
+                  {coverLetterComplianceBlocked.title}
+                </p>
+              </div>
+              <p className="text-sm text-slate-100">{coverLetterComplianceBlocked.body}</p>
+              <p className="text-sm text-slate-400">
+                Regenerate safely to keep every claim anchored to verified content.
               </p>
-              <p className="mt-1 text-sm text-slate-100">{coverLetterComplianceBlocked.body}</p>
             </div>
             {coverLetterComplianceBlocked.flags.length ? (
               <ul className="space-y-2 pl-4 text-slate-100">
@@ -1505,7 +1544,7 @@ export default function StudioPage() {
                   className="text-sm font-medium text-slate-300 underline-offset-4 transition hover:text-white"
                   onClick={() => setShowComplianceDetails((prev) => !prev)}
                 >
-                  {showComplianceDetails ? "Hide details" : "View details"}
+                  {showComplianceDetails ? "Hide details" : "See details"}
                 </button>
               ) : null}
             </div>
