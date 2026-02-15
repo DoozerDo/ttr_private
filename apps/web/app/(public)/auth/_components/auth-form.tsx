@@ -132,7 +132,7 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         return;
       }
 
-      const targetPath = sanitizeReturnPath(returnPath) ?? "/baselines";
+      const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
       await router.replace(targetPath);
       await router.refresh();
     } catch (submitError) {
