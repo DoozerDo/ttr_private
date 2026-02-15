@@ -1,1294 +1,8 @@
-diff --git a/apps/api/src/access-codes/beta-access-code.entity.ts b/apps/api/src/access-codes/access-code.entity.ts
-similarity index 58%
-rename from apps/api/src/access-codes/beta-access-code.entity.ts
-rename to apps/api/src/access-codes/access-code.entity.ts
-index 43c671ececc7ed9901855253cd1859ab02d128e8..b9988b3416f5da0599ed5f1d405574b480248bc8 100644
---- a/apps/api/src/access-codes/beta-access-code.entity.ts
-+++ b/apps/api/src/access-codes/access-code.entity.ts
-@@ -1,67 +1,71 @@
- import {
-   Column,
-   CreateDateColumn,
-   Entity,
-   Index,
-   JoinColumn,
-   ManyToOne,
-   PrimaryGeneratedColumn,
-+  UpdateDateColumn,
- } from 'typeorm';
- import { User } from '../users/user.entity';
- 
--@Entity({ name: 'beta_access_codes' })
--export class BetaAccessCode {
-+@Entity({ name: 'access_codes' })
-+export class AccessCode {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
--  @Index({ unique: true })
--  @Column({ type: 'character varying', length: 128, unique: true })
-+  @Column({ type: 'character varying', length: 64, unique: true })
-   codeHash!: string;
- 
--  @Column({ type: 'character varying', length: 16, nullable: true })
--  codePrefix!: string | null;
-+  @Column({ type: 'character varying', length: 12 })
-+  codePrefix!: string;
- 
--  @CreateDateColumn({ type: 'timestamptz' })
-   @Index()
--  createdAt!: Date;
--
-   @Column({ type: 'uuid', nullable: true })
-   createdByUserId!: string | null;
- 
--  @Column({ type: 'uuid', nullable: true })
-+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'createdByUserId' })
-+  createdBy!: User | null;
-+
-   @Index()
-+  @Column({ type: 'uuid', nullable: true })
-   assignedUserId!: string | null;
- 
-+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'assignedUserId' })
-+  assignedUser!: User | null;
-+
-   @Column({ type: 'uuid', nullable: true })
-   redeemedByUserId!: string | null;
- 
--  @Column({ type: 'timestamptz', nullable: true })
--  @Index()
--  redeemedAt!: Date | null;
-+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'redeemedByUserId' })
-+  redeemedBy!: User | null;
- 
--  @Column({ type: 'timestamptz', nullable: true })
-   @Index()
--  revokedAt!: Date | null;
-+  @Column({ type: 'timestamptz', nullable: true })
-+  redeemedAt!: Date | null;
- 
-   @Column({ type: 'uuid', nullable: true })
-   revokedByUserId!: string | null;
- 
--  @Column({ type: 'character varying', length: 255, nullable: true })
--  notes!: string | null;
-+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-+  @JoinColumn({ name: 'revokedByUserId' })
-+  revokedBy!: User | null;
- 
--  @ManyToOne(() => User, { onDelete: 'SET NULL' })
--  @JoinColumn({ name: 'createdByUserId' })
--  createdBy?: User | null;
-+  @Index()
-+  @Column({ type: 'timestamptz', nullable: true })
-+  revokedAt!: Date | null;
- 
--  @ManyToOne(() => User, { onDelete: 'SET NULL' })
--  @JoinColumn({ name: 'assignedUserId' })
--  assignedUser?: User | null;
-+  @Column({ type: 'text', nullable: true })
-+  notes!: string | null;
- 
--  @ManyToOne(() => User, { onDelete: 'SET NULL' })
--  @JoinColumn({ name: 'redeemedByUserId' })
--  redeemedBy?: User | null;
-+  @CreateDateColumn({ type: 'timestamptz' })
-+  @Index()
-+  createdAt!: Date;
- 
--  @ManyToOne(() => User, { onDelete: 'SET NULL' })
--  @JoinColumn({ name: 'revokedByUserId' })
--  revokedBy?: User | null;
-+  @UpdateDateColumn({ type: 'timestamptz' })
-+  updatedAt!: Date;
- }
-diff --git a/apps/api/src/access-codes/access-codes.module.ts b/apps/api/src/access-codes/access-codes.module.ts
-index 020507eb34d6e16378392fb8341f774cb2c5afdb..3ae1ce308be4169a8916b0326f01bb0773de3c86 100644
---- a/apps/api/src/access-codes/access-codes.module.ts
-+++ b/apps/api/src/access-codes/access-codes.module.ts
-@@ -1,16 +1,15 @@
- import { Module } from '@nestjs/common';
- import { TypeOrmModule } from '@nestjs/typeorm';
- import { UsersModule } from '../users/users.module';
- import { AdminUsersModule } from '../admin-users/admin-users.module';
--import { User } from '../users/user.entity';
- import { AccessCodesController } from './access-codes.controller';
- import { AccessCodesService } from './access-codes.service';
--import { BetaAccessCode } from './beta-access-code.entity';
-+import { AccessCode } from './access-code.entity';
- 
- @Module({
--  imports: [TypeOrmModule.forFeature([BetaAccessCode, User]), UsersModule, AdminUsersModule],
-+  imports: [TypeOrmModule.forFeature([AccessCode]), UsersModule, AdminUsersModule],
-   controllers: [AccessCodesController],
-   providers: [AccessCodesService],
-   exports: [AccessCodesService],
- })
- export class AccessCodesModule {}
-diff --git a/apps/api/src/access-codes/access-codes.service.ts b/apps/api/src/access-codes/access-codes.service.ts
-index 1398efb887eabd8271abfcdc7840215981581714..8e2ba1712d50c796413d10425f514ec4f9e69da2 100644
---- a/apps/api/src/access-codes/access-codes.service.ts
-+++ b/apps/api/src/access-codes/access-codes.service.ts
-@@ -1,214 +1,215 @@
- import {
-   BadRequestException,
-   ForbiddenException,
-   Injectable,
-   NotFoundException,
- } from '@nestjs/common';
- import { InjectRepository } from '@nestjs/typeorm';
- import { createHash, randomBytes } from 'node:crypto';
- import { IsNull, Repository } from 'typeorm';
- import { User } from '../users/user.entity';
- import { UsersService } from '../users/users.service';
--import { BetaAccessCode } from './beta-access-code.entity';
-+import { AccessCode } from './access-code.entity';
- 
- const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
- 
- function randomSegment(length: number): string {
-   const bytes = randomBytes(length);
-   let out = '';
-   for (let i = 0; i < length; i += 1) {
-     out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-   }
-   return out;
- }
- 
- function hashCode(code: string): string {
-   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
- }
- 
- function normalizeCode(input: string): string {
-   return input.trim().toUpperCase();
- }
- 
- @Injectable()
- export class AccessCodesService {
-   constructor(
--    @InjectRepository(BetaAccessCode)
--    private readonly accessCodesRepository: Repository<BetaAccessCode>,
--    @InjectRepository(User)
--    private readonly usersRepository: Repository<User>,
-+    @InjectRepository(AccessCode)
-+    private readonly accessCodesRepository: Repository<AccessCode>,
-     private readonly usersService: UsersService,
-   ) {}
- 
--  async listCodes(): Promise<BetaAccessCode[]> {
-+  async listCodes(): Promise<AccessCode[]> {
-     return this.accessCodesRepository.find({
-       order: { createdAt: 'DESC' },
-       relations: ['createdBy', 'assignedUser', 'redeemedBy', 'revokedBy'],
-     });
-   }
- 
-   async generateCode(input: {
-     assignedUserId?: string;
-     notes?: string;
-     createdByUserId?: string;
-   }) {
-     const rawCode = `TTR-${randomSegment(4)}-${randomSegment(4)}-${randomSegment(4)}`;
-     const normalized = normalizeCode(rawCode);
-     const codeHash = hashCode(normalized);
-     const codePrefix = normalized.replaceAll('-', '').slice(0, 8);
- 
-     if (input.assignedUserId) {
-       const assignedUser = await this.usersService.findById(input.assignedUserId);
-       if (!assignedUser) {
-         throw new BadRequestException('Assigned user not found');
-       }
-     }
- 
-     const entity = this.accessCodesRepository.create({
-       codeHash,
-       codePrefix,
-       assignedUserId: input.assignedUserId?.trim() || null,
-       notes: input.notes?.trim() || null,
-       createdByUserId: input.createdByUserId?.trim() || null,
-     });
- 
-     const saved = await this.accessCodesRepository.save(entity);
- 
-     return {
-       id: saved.id,
-       createdAt: saved.createdAt,
-       assignedUserId: saved.assignedUserId,
-       notes: saved.notes,
-       code: normalized,
-       codePrefix,
-     };
-   }
- 
-   async updateCode(
-     id: string,
-     input: { assignedUserId?: string | null; notes?: string | null },
--  ): Promise<BetaAccessCode> {
-+  ): Promise<AccessCode> {
-     const code = await this.accessCodesRepository.findOne({ where: { id } });
-     if (!code) {
-       throw new NotFoundException('Access code not found');
-     }
-     if (code.redeemedAt || code.revokedAt) {
-       throw new BadRequestException(
-         'Cannot update assignment for redeemed or revoked code',
-       );
-     }
- 
-     if (input.assignedUserId !== undefined) {
-       const nextAssigned = input.assignedUserId?.trim() || null;
-       if (nextAssigned) {
-         const assignedUser = await this.usersService.findById(nextAssigned);
-         if (!assignedUser) {
-           throw new BadRequestException('Assigned user not found');
-         }
-       }
-       code.assignedUserId = nextAssigned;
-     }
- 
-     if (input.notes !== undefined) {
-       code.notes = input.notes?.trim() || null;
-     }
- 
-     return this.accessCodesRepository.save(code);
-   }
- 
--  async revokeCode(id: string, revokedByUserId?: string): Promise<BetaAccessCode> {
-+  async revokeCode(id: string, revokedByUserId?: string): Promise<AccessCode> {
-     const code = await this.accessCodesRepository.findOne({ where: { id } });
-     if (!code) {
-       throw new NotFoundException('Access code not found');
-     }
- 
-     if (!code.revokedAt) {
-       code.revokedAt = new Date();
-       code.revokedByUserId = revokedByUserId?.trim() || null;
-     }
- 
-     return this.accessCodesRepository.save(code);
-   }
- 
-+  async userHasActiveAccess(userId: string): Promise<boolean> {
-+    const count = await this.accessCodesRepository
-+      .createQueryBuilder('accessCode')
-+      .where('accessCode.redeemedByUserId = :userId', { userId })
-+      .andWhere('accessCode.redeemedAt IS NOT NULL')
-+      .andWhere('accessCode.revokedAt IS NULL')
-+      .getCount();
-+
-+    return count > 0;
-+  }
-+
-   async redeemCodeForUser(user: User, rawCode: string): Promise<void> {
-     const codeHash = hashCode(normalizeCode(rawCode));
-     const code = await this.accessCodesRepository.findOne({ where: { codeHash } });
- 
-     if (!code) {
-       throw new BadRequestException('Invalid access code');
-     }
- 
-     if (code.revokedAt) {
-       throw new BadRequestException('Access code has been revoked');
-     }
-     if (code.redeemedAt) {
-       throw new BadRequestException('Access code has already been redeemed');
-     }
- 
-     if (code.assignedUserId && code.assignedUserId !== user.id) {
-       throw new ForbiddenException('Access code is assigned to a different user');
-     }
- 
-     code.assignedUserId = code.assignedUserId ?? user.id;
-     code.redeemedByUserId = user.id;
-     code.redeemedAt = new Date();
-     await this.accessCodesRepository.save(code);
- 
--    if (!user.betaAccessApproved) {
--      user.betaAccessApproved = true;
--      await this.usersRepository.save(user);
--    }
-   }
- 
-   async redeemAssignedCodeForUser(user: User): Promise<boolean> {
-     const code = await this.accessCodesRepository.findOne({
-       where: {
-         assignedUserId: user.id,
-         revokedAt: IsNull(),
-         redeemedAt: IsNull(),
-       },
-       order: { createdAt: 'ASC' },
-     });
- 
-     if (!code) {
-       return false;
-     }
- 
-     code.redeemedByUserId = user.id;
-     code.redeemedAt = new Date();
-     await this.accessCodesRepository.save(code);
- 
--    if (!user.betaAccessApproved) {
--      user.betaAccessApproved = true;
--      await this.usersRepository.save(user);
--    }
- 
-     return true;
-   }
- 
--  toAdminListRow(code: BetaAccessCode) {
-+  toAdminListRow(code: AccessCode) {
-     const status = code.revokedAt
-       ? 'revoked'
-       : code.redeemedAt
-         ? 'redeemed'
-         : code.assignedUserId
-           ? 'assigned'
-           : 'unused';
- 
-     return {
-       id: code.id,
-       codePrefix: code.codePrefix,
-       codeMasked: code.codePrefix
-         ? `TTR-${code.codePrefix.slice(0, 4)}-****-****`
-         : 'TTR-****-****-****',
-       createdAt: code.createdAt,
-       createdByUserId: code.createdByUserId,
-       createdByEmail: code.createdBy?.email ?? null,
-       assignedUserId: code.assignedUserId,
-       assignedUserEmail: code.assignedUser?.email ?? null,
-       redeemedByUserId: code.redeemedByUserId,
-       redeemedByUserEmail: code.redeemedBy?.email ?? null,
-       redeemedAt: code.redeemedAt,
-       revokedAt: code.revokedAt,
-       revokedByUserId: code.revokedByUserId,
-       revokedByUserEmail: code.revokedBy?.email ?? null,
-diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
-index 40accd0e0b3b1c4176dd15419c88f77ed3343c72..f06cc77f56acc70064a197bbd6937d633c1dac37 100644
---- a/apps/api/src/auth/auth.service.spec.ts
-+++ b/apps/api/src/auth/auth.service.spec.ts
-@@ -1,75 +1,80 @@
- import { JwtService } from '@nestjs/jwt';
- import { Test, TestingModule } from '@nestjs/testing';
- import * as bcrypt from 'bcryptjs';
- import { getRepositoryToken } from '@nestjs/typeorm';
- import { ConfigService } from '@nestjs/config';
- import { AuthService } from './auth.service';
- import { LoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import { SubscriptionTier } from '../subscription/subscription-tier.enum';
- import { User } from '../users/user.entity';
- import { UsersService } from '../users/users.service';
- import { AccountType } from '../users/account-type.enum';
- import { UserToken } from './user-token.entity';
- import { RelayEmailService } from '../email/relay-email.service';
- import { AccessCodesService } from '../access-codes/access-codes.service';
- import { AdminUsersService } from '../admin-users/admin-users.service';
- 
- describe('AuthService', () => {
-   let service: AuthService;
-   let usersService: jest.Mocked<UsersService>;
-   let jwtService: JwtService;
-   let configService: { get: jest.Mock };
-   let adminUsersService: { isAdmin: jest.Mock };
--  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
-+  let accessCodesService: {
-+    redeemCodeForUser: jest.Mock;
-+    redeemAssignedCodeForUser: jest.Mock;
-+    userHasActiveAccess: jest.Mock;
-+  };
- 
-   beforeEach(async () => {
-     const module: TestingModule = await Test.createTestingModule({
-       providers: [
-         AuthService,
-         JwtService,
-         {
-           provide: UsersService,
-           useValue: {
-             findByEmail: jest.fn(),
-             findById: jest.fn(),
-             create: jest.fn(),
-             setEmailConfirmed: jest.fn(),
-           },
-         },
-         {
-           provide: RelayEmailService,
-           useValue: {
-             sendRawRelayEmail: jest.fn(),
-           },
-         },
-         {
-           provide: AccessCodesService,
-           useValue: {
-             redeemCodeForUser: jest.fn(),
-             redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
-+            userHasActiveAccess: jest.fn().mockResolvedValue(false),
-           },
-         },
-         {
-           provide: AdminUsersService,
-           useValue: {
-             isAdmin: jest.fn().mockResolvedValue(false),
-           },
-         },
-         {
-           provide: ConfigService,
-           useValue: {
-             get: jest.fn((key: string) => {
-               if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-                 return 'false';
-               }
-               if (key === 'NODE_ENV') {
-                 return 'test';
-               }
-               return undefined;
-             }),
-           },
-         },
-         {
-           provide: getRepositoryToken(UserToken),
-           useValue: {
-@@ -83,240 +88,309 @@ describe('AuthService', () => {
-     }).compile();
- 
-     service = module.get<AuthService>(AuthService);
-     usersService = module.get(UsersService);
-     jwtService = module.get(JwtService);
-     configService = module.get(ConfigService);
-     adminUsersService = module.get(AdminUsersService);
-     accessCodesService = module.get(AccessCodesService);
-     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
-   });
- 
-   it('registers a user', async () => {
-     const payload: RegisterDto = {
-       firstName: 'Test',
-       lastName: 'User',
-       email: 'user@example.com',
-       password: 'Password123',
-       confirmPassword: 'Password123',
-     };
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       firstName: payload.firstName,
-       lastName: payload.lastName,
-       emailConfirmed: true,
--      betaAccessApproved: false,
-       passwordHash: '',
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(null);
-     usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
-       ...savedUser,
-       email,
-       passwordHash,
-     }));
- 
-     const result = await service.register(payload);
-     const hashedPasswordArg = usersService.create.mock.calls[0][0].passwordHash;
- 
-     expect(hashedPasswordArg).not.toEqual(payload.password);
-     expect(result.success).toEqual(true);
-   });
- 
-   it('logs in a user with valid credentials', async () => {
-     const payload: LoginDto = {
-       email: 'user@example.com',
-       password: 'Password123',
-     };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'user-id',
-       email: payload.email,
-       firstName: 'Test',
-       lastName: 'User',
-       emailConfirmed: true,
--      betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     const result = await service.login(payload);
- 
-     expect(result.accessToken).toEqual('signed-token');
-     expect(result.user).toMatchObject({
-       id: savedUser.id,
-       email: savedUser.email,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-     });
-   });
- 
--  it('allows admin users to log in without beta access approval when access code is required', async () => {
-+  it('allows admin users to log in when access code is required', async () => {
-     const payload: LoginDto = {
-       email: 'admin@example.com',
-       password: 'Password123',
-     };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'admin-user-id',
-       email: payload.email,
-       firstName: 'Admin',
-       lastName: 'User',
-       emailConfirmed: true,
--      betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     configService.get.mockImplementation((key: string) => {
-       if (key === 'REQUIRE_ACCESS_CODE') {
-         return 'true';
-       }
-       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-         return 'false';
-       }
-       if (key === 'NODE_ENV') {
-         return 'test';
-       }
-       return undefined;
-     });
- 
-     adminUsersService.isAdmin.mockResolvedValue(true);
- 
-     const result = await service.login(payload);
- 
-     expect(result.accessToken).toEqual('signed-token');
-     expect(result.user).toMatchObject({
-       id: savedUser.id,
-       email: savedUser.email,
-     });
-   });
- 
--  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
-+  it('auto-redeems an assigned access code during login when no active access code exists', async () => {
-     const payload: LoginDto = {
-       email: 'member@example.com',
-       password: 'Password123',
-     };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'member-user-id',
-       email: payload.email,
-       firstName: 'Member',
-       lastName: 'User',
-       emailConfirmed: true,
--      betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     configService.get.mockImplementation((key: string) => {
-       if (key === 'REQUIRE_ACCESS_CODE') {
-         return 'true';
-       }
-       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-         return 'false';
-       }
-       if (key === 'NODE_ENV') {
-         return 'test';
-       }
-       return undefined;
-     });
- 
-     adminUsersService.isAdmin.mockResolvedValue(false);
- 
-+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
-     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
- 
-     const result = await service.login(payload);
- 
-+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
-     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
-     expect(result.accessToken).toEqual('signed-token');
-     expect(result.user).toMatchObject({
-       id: savedUser.id,
-       email: savedUser.email,
-     });
-   });
- 
-   it('returns access code required when no assigned code can be auto-redeemed', async () => {
-     const payload: LoginDto = {
-       email: 'member2@example.com',
-       password: 'Password123',
-     };
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const savedUser: User = {
-       id: 'member2-user-id',
-       email: payload.email,
-       firstName: 'Member',
-       lastName: 'User',
-       emailConfirmed: true,
--      betaAccessApproved: false,
-       passwordHash,
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-       createdAt: new Date(),
-       updatedAt: new Date(),
-     };
- 
-     usersService.findByEmail.mockResolvedValue(savedUser);
- 
-     configService.get.mockImplementation((key: string) => {
-       if (key === 'REQUIRE_ACCESS_CODE') {
-         return 'true';
-       }
-       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-         return 'false';
-       }
-       if (key === 'NODE_ENV') {
-         return 'test';
-       }
-       return undefined;
-     });
- 
-     adminUsersService.isAdmin.mockResolvedValue(false);
- 
-+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
-     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
- 
-     await expect(service.login(payload)).rejects.toMatchObject({
-       response: {
-         code: 'ACCESS_CODE_REQUIRED',
-         message: 'Access code required.',
-       },
-     });
- 
-+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
-     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
-   });
- 
-+  it('allows login with an existing active access code when required', async () => {
-+    const payload: LoginDto = {
-+      email: 'active@example.com',
-+      password: 'Password123',
-+    };
-+    const passwordHash = await bcrypt.hash(payload.password, 10);
-+    const savedUser: User = {
-+      id: 'active-user-id',
-+      email: payload.email,
-+      firstName: 'Active',
-+      lastName: 'User',
-+      emailConfirmed: true,
-+      passwordHash,
-+      calibrationProfileName: null,
-+      calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-+      role: 'user',
-+      subscriptionTier: SubscriptionTier.FREE,
-+      accountType: AccountType.FREE,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    usersService.findByEmail.mockResolvedValue(savedUser);
-+
-+    configService.get.mockImplementation((key: string) => {
-+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
-+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
-+      if (key === 'NODE_ENV') return 'test';
-+      return undefined;
-+    });
-+
-+    accessCodesService.userHasActiveAccess.mockResolvedValue(true);
-+
-+    const result = await service.login(payload);
-+
-+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
-+    expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
-+    expect(result.accessToken).toEqual('signed-token');
-+  });
-+
- });
-diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
-index 684d770e65b7155eaad249ffa9ff181a14eb1e86..4fd67b7bc8814ec1915b860ef2fbd6e63d68c44b 100644
---- a/apps/api/src/auth/auth.service.ts
-+++ b/apps/api/src/auth/auth.service.ts
-@@ -87,74 +87,79 @@ export class AuthService {
-     const supportEmail =
-       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-       'support@targetthisrole.ai';
-     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
- 
-     await this.relayEmailService.sendRawRelayEmail({
-       to: user.email,
-       subject: 'Confirm your account',
-       body: html,
-       replyTo: supportEmail,
-       type: 'signup_confirm',
-     });
- 
-     return {
-       success: true,
-       message: 'Check your email to confirm your account.',
-     };
-   }
- 
-   async login(payload: LoginDto): Promise<AuthResponseDto> {
-     const user = await this.validateCredentials(payload);
- 
-     const isAdmin = await this.adminUsersService.isAdmin(user.id);
- 
--    if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
--      const redeemedAssignedCode =
--        await this.accessCodesService.redeemAssignedCodeForUser(user);
--
--      if (!redeemedAssignedCode) {
--        throw new ForbiddenException({
--          code: 'ACCESS_CODE_REQUIRED',
--          message: 'Access code required.',
--        });
-+    if (this.requireAccessCode && !isAdmin) {
-+      const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
-+        user.id,
-+      );
-+
-+      if (!hasActiveAccess) {
-+        const redeemedAssignedCode =
-+          await this.accessCodesService.redeemAssignedCodeForUser(user);
-+
-+        if (!redeemedAssignedCode) {
-+          throw new ForbiddenException({
-+            code: 'ACCESS_CODE_REQUIRED',
-+            message: 'Access code required.',
-+          });
-+        }
-       }
-     }
- 
-     return this.buildAuthResponse(user);
-   }
- 
- 
-   async redeemAccessCodeAndLogin(
-     payload: RedeemAccessCodeAndLoginDto,
-   ): Promise<AuthResponseDto> {
-     const user = await this.validateCredentials(payload);
- 
-     await this.accessCodesService.redeemCodeForUser(user, payload.code);
- 
--    user.betaAccessApproved = true;
-     return this.buildAuthResponse(user);
-   }
- 
-   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
-     if (!token) {
-       throw new BadRequestException('Missing confirmation token');
-     }
-     const match = await this.userTokensRepository.findOne({
-       where: { token, type: 'confirm' },
-     });
- 
-     if (!match || match.expiresAt.getTime() <= Date.now()) {
-       throw new BadRequestException('Invalid or expired confirmation token');
-     }
- 
-     const user = await this.usersService.findById(match.userId);
-     if (!user) {
-       throw new BadRequestException('Invalid confirmation token');
-     }
- 
-     await this.usersService.setEmailConfirmed(user.id);
-     await this.userTokensRepository.delete({ id: match.id });
- 
-     return { success: true, message: 'Email confirmed. You can now log in.' };
-   }
-diff --git a/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts b/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..ec876e35421f12cafdffe8bcde08a2518a4a70df
---- /dev/null
-+++ b/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts
-@@ -0,0 +1,107 @@
-+import { MigrationInterface, QueryRunner } from 'typeorm';
-+
-+export class AccessCodesAndUserProfile2110000000000
-+  implements MigrationInterface
-+{
-+  name = 'AccessCodesAndUserProfile2110000000000';
-+
-+  public async up(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "betaAccessApproved"`);
-+
-+    await queryRunner.query(`ALTER TABLE "beta_access_codes" RENAME TO "access_codes"`);
-+
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_beta_access_codes_id" TO "PK_access_codes_id"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_beta_access_codes_codeHash" TO "UQ_access_codes_codeHash"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_createdBy" TO "FK_access_codes_createdBy"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_assigned" TO "FK_access_codes_assigned"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_redeemedBy" TO "FK_access_codes_redeemedBy"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_revokedBy" TO "FK_access_codes_revokedBy"`,
-+    );
-+
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_beta_access_codes_assignedUserId" RENAME TO "IDX_access_codes_assignedUserId"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_beta_access_codes_redeemedAt" RENAME TO "IDX_access_codes_redeemedAt"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_beta_access_codes_revokedAt" RENAME TO "IDX_access_codes_revokedAt"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_beta_access_codes_createdAt" RENAME TO "IDX_access_codes_createdAt"`,
-+    );
-+
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "roleTitle" character varying(150)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "company" character varying(150)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "linkedinUrl" character varying(255)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "intendedUse" character varying(255)`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "profileCompletedAt" TIMESTAMP WITH TIME ZONE`,
-+    );
-+  }
-+
-+  public async down(queryRunner: QueryRunner): Promise<void> {
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "profileCompletedAt"`);
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "intendedUse"`);
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "linkedinUrl"`);
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "company"`);
-+    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "roleTitle"`);
-+
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_access_codes_createdAt" RENAME TO "IDX_beta_access_codes_createdAt"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_access_codes_revokedAt" RENAME TO "IDX_beta_access_codes_revokedAt"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_access_codes_redeemedAt" RENAME TO "IDX_beta_access_codes_redeemedAt"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER INDEX "IDX_access_codes_assignedUserId" RENAME TO "IDX_beta_access_codes_assignedUserId"`,
-+    );
-+
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_revokedBy" TO "FK_beta_access_codes_revokedBy"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_redeemedBy" TO "FK_beta_access_codes_redeemedBy"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_assigned" TO "FK_beta_access_codes_assigned"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_createdBy" TO "FK_beta_access_codes_createdBy"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_access_codes_codeHash" TO "UQ_beta_access_codes_codeHash"`,
-+    );
-+    await queryRunner.query(
-+      `ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_access_codes_id" TO "PK_beta_access_codes_id"`,
-+    );
-+
-+    await queryRunner.query(`ALTER TABLE "access_codes" RENAME TO "beta_access_codes"`);
-+
-+    await queryRunner.query(
-+      `ALTER TABLE "users" ADD "betaAccessApproved" boolean NOT NULL DEFAULT false`,
-+    );
-+  }
-+}
-diff --git a/apps/api/src/users/dto/update-profile.dto.ts b/apps/api/src/users/dto/update-profile.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..a748a7419e0242a9065da26c241b6e0fceaaf44e
---- /dev/null
-+++ b/apps/api/src/users/dto/update-profile.dto.ts
-@@ -0,0 +1,22 @@
-+import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
-+
-+export class UpdateProfileDto {
-+  @IsString()
-+  @MaxLength(150)
-+  roleTitle!: string;
-+
-+  @IsOptional()
-+  @IsString()
-+  @MaxLength(150)
-+  company?: string;
-+
-+  @IsOptional()
-+  @IsString()
-+  @IsUrl({ require_protocol: true })
-+  @MaxLength(255)
-+  linkedinUrl?: string;
-+
-+  @IsString()
-+  @MaxLength(255)
-+  intendedUse!: string;
-+}
-diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
-index 65b614cf507690a001a818bfb6c5acfaaa960f43..4497e50b4f8fcebca9c8e7985266b8d19fc9ac9c 100644
---- a/apps/api/src/users/user.entity.ts
-+++ b/apps/api/src/users/user.entity.ts
-@@ -21,58 +21,70 @@ export type CalibrationWeights = {
- export type UserRole = 'user' | 'coach' | 'admin';
- 
- // VERIFY: Confirm calibration dimension labels and structure.
- 
- @Entity({ name: 'users' })
- export class User {
-   @PrimaryGeneratedColumn('uuid')
-   id!: string;
- 
-   @Index({ unique: true })
-   @Column({ unique: true })
-   email!: string;
- 
-   @Column({ type: 'character varying', length: 100, default: '' })
-   firstName!: string;
- 
-   @Column({ type: 'character varying', length: 100, default: '' })
-   lastName!: string;
- 
-   @Column()
-   passwordHash!: string;
- 
-   @Column({ type: 'boolean', default: false })
-   emailConfirmed!: boolean;
- 
--  @Column({ type: 'boolean', default: false })
--  betaAccessApproved!: boolean;
--
-   @Column({ type: 'character varying', length: 255, nullable: true })
-   calibrationProfileName!: string | null;
- 
-   // VERIFY: Ensure null defaults are acceptable for calibration weights.
-   @Column({ type: 'jsonb', nullable: true })
-   calibrationWeights!: CalibrationWeights | null;
- 
-+  @Column({ type: 'character varying', length: 150, nullable: true })
-+  roleTitle?: string | null;
-+
-+  @Column({ type: 'character varying', length: 150, nullable: true })
-+  company?: string | null;
-+
-+  @Column({ type: 'character varying', length: 255, nullable: true })
-+  linkedinUrl?: string | null;
-+
-+  @Column({ type: 'character varying', length: 255, nullable: true })
-+  intendedUse?: string | null;
-+
-+  @Column({ type: 'timestamptz', nullable: true })
-+  profileCompletedAt?: Date | null;
-+
-   @Column({ type: 'character varying', length: 50, default: 'user' })
-   role!: UserRole;
- 
-   @Column({
-     type: 'enum',
-     enum: SubscriptionTier,
-     default: SubscriptionTier.FREE,
-   })
-   subscriptionTier!: SubscriptionTier;
- 
-   @Column({
-     type: 'enum',
-     enum: AccountType,
-     default: AccountType.FREE,
-   })
-   accountType!: AccountType;
- 
-   @CreateDateColumn({ type: 'timestamptz' })
-   createdAt!: Date;
- 
-   @UpdateDateColumn({ type: 'timestamptz' })
-   updatedAt!: Date;
- }
-diff --git a/apps/api/src/users/users.controller.ts b/apps/api/src/users/users.controller.ts
-index 5815227f586f1373728258a447d1a78f3ab5cdfd..ce6056ad0ff8313c7a48b871e062e80646a429cd 100644
---- a/apps/api/src/users/users.controller.ts
-+++ b/apps/api/src/users/users.controller.ts
-@@ -1,69 +1,100 @@
- import {
-   BadRequestException,
-   Body,
-   Controller,
-   ForbiddenException,
-   Get,
-   Patch,
-   Req,
-   UseGuards,
- } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Request } from 'express';
- import { UpdateSubscriptionTierDto } from './dto/update-subscription-tier.dto';
-+import { UpdateProfileDto } from './dto/update-profile.dto';
- import { UsersService } from './users.service';
- import { SubscriptionTier } from '../subscription/subscription-tier.enum';
- import { UserRole } from './user.entity';
- import { Entitlements } from '../features/feature-gates';
- 
- type UserRequest = Request & {
-   user?: {
-     id?: string;
-     email?: string;
-     role?: UserRole;
-     subscriptionTier?: SubscriptionTier;
-     entitlements?: Entitlements;
-   };
- };
- 
- @Controller('users')
- @UseGuards(AuthGuard('jwt'))
- export class UsersController {
-   constructor(private readonly usersService: UsersService) {}
- 
-   @Get('me')
-   me(@Req() request: UserRequest) {
-     const user = request.user;
- 
-     if (!user) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     return user;
-   }
- 
-+
-+  @Patch('me/profile')
-+  async updateMyProfile(
-+    @Body() body: UpdateProfileDto,
-+    @Req() request: UserRequest,
-+  ) {
-+    const user = request.user;
-+
-+    if (!user?.id) {
-+      throw new BadRequestException('Invalid user context');
-+    }
-+
-+    const roleTitle = body.roleTitle?.trim();
-+    const intendedUse = body.intendedUse?.trim();
-+
-+    if (!roleTitle || !intendedUse) {
-+      throw new BadRequestException('roleTitle and intendedUse are required');
-+    }
-+
-+    const updated = await this.usersService.updateMyProfile(user.id, {
-+      roleTitle,
-+      company: body.company,
-+      linkedinUrl: body.linkedinUrl,
-+      intendedUse,
-+    });
-+
-+    const { passwordHash, ...sanitized } = updated;
-+    return sanitized;
-+  }
-+
-   @Patch('me/subscription-tier')
-   async updateSubscriptionTier(
-     @Body() body: UpdateSubscriptionTierDto,
-     @Req() request: UserRequest,
-   ) {
-     const user = request.user;
- 
-     if (!user?.id) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     const isProd = process.env.NODE_ENV === 'production';
-     const isAdmin = user.role === 'admin';
- 
-     if (isProd && !isAdmin) {
-       throw new ForbiddenException(
-         'Subscription tier updates are disabled in production.',
-       );
-     }
- 
-     const requested = (body.tier ?? '').trim().toUpperCase();
- 
-     if (
-       !Object.values(SubscriptionTier).includes(requested as SubscriptionTier)
-     ) {
-diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
-index 06e45e81592c53cc71d58f672c0b8607cdcd44a1..ee3e48b5ffbf271dff625f7bf45214a9582950b7 100644
---- a/apps/api/src/users/users.service.ts
-+++ b/apps/api/src/users/users.service.ts
-@@ -6,58 +6,91 @@ import { User } from './user.entity';
- import { AccountType } from './account-type.enum';
- 
- @Injectable()
- export class UsersService {
-   constructor(
-     @InjectRepository(User)
-     private readonly usersRepository: Repository<User>,
-   ) {}
- 
-   async create(input: {
-     email: string;
-     passwordHash: string;
-     firstName: string;
-     lastName: string;
-     emailConfirmed: boolean;
-   }): Promise<User> {
-     const user = this.usersRepository.create({
-       email: input.email,
-       passwordHash: input.passwordHash,
-       firstName: input.firstName,
-       lastName: input.lastName,
-       emailConfirmed: input.emailConfirmed,
-       // VERIFY: Confirm null calibration defaults are desired on signup.
-       calibrationProfileName: null,
-       calibrationWeights: null,
-+      roleTitle: null,
-+      company: null,
-+      linkedinUrl: null,
-+      intendedUse: null,
-+      profileCompletedAt: null,
-       role: 'user',
-       subscriptionTier: SubscriptionTier.FREE,
-       accountType: AccountType.FREE,
-     });
-     return this.usersRepository.save(user);
-   }
- 
-   findByEmail(email: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { email } });
-   }
- 
-   findById(id: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { id } });
-   }
- 
-   async updateSubscriptionTier(
-     userId: string,
-     tier: SubscriptionTier,
-   ): Promise<User> {
-     const user = await this.findById(userId);
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
-     user.subscriptionTier = tier;
-     return this.usersRepository.save(user);
-   }
- 
-+
-+  async updateMyProfile(
-+    userId: string,
-+    input: {
-+      roleTitle: string;
-+      company?: string | null;
-+      linkedinUrl?: string | null;
-+      intendedUse: string;
-+    },
-+  ): Promise<User> {
-+    const user = await this.findById(userId);
-+
-+    if (!user) {
-+      throw new NotFoundException('User not found');
-+    }
-+
-+    user.roleTitle = input.roleTitle.trim();
-+    user.company = input.company?.trim() || null;
-+    user.linkedinUrl = input.linkedinUrl?.trim() || null;
-+    user.intendedUse = input.intendedUse.trim();
-+
-+    if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
-+      user.profileCompletedAt = new Date();
-+    }
-+
-+    return this.usersRepository.save(user);
-+  }
-+
-   async setEmailConfirmed(userId: string): Promise<void> {
-     await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
-   }
- }
 diff --git a/apps/web/app/(public)/auth/_components/auth-form.tsx b/apps/web/app/(public)/auth/_components/auth-form.tsx
-index 0c5f25dfb7c19220f3390450ecc10f3ba1f4f26f..4de8d5bbda04cff031bbe9d9a716c23ecae7f58c 100644
+index 4de8d5bbda04cff031bbe9d9a716c23ecae7f58c..9af649959f43e10f1103fa5d22bef85fc7a8ce4a 100644
 --- a/apps/web/app/(public)/auth/_components/auth-form.tsx
 +++ b/apps/web/app/(public)/auth/_components/auth-form.tsx
-@@ -8,50 +8,72 @@ import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
- interface AuthFormProps {
+@@ -9,50 +9,72 @@ interface AuthFormProps {
    mode: "login" | "register";
    returnPath?: string | null;
  }
@@ -1313,65 +27,100 @@ index 0c5f25dfb7c19220f3390450ecc10f3ba1f4f26f..4de8d5bbda04cff031bbe9d9a716c23e
    return undefined;
  }
  
+ 
 +
-+function needsProfileCompletion(value: unknown): boolean {
++function hasAccessCodeRequired(value: unknown): boolean {
 +  if (!value || typeof value !== "object") {
++    return false;
++  }
++
++  const payload = value as { code?: unknown; message?: unknown };
++
++  if (payload.code === "ACCESS_CODE_REQUIRED") {
 +    return true;
 +  }
 +
-+  const user = value as {
-+    roleTitle?: unknown;
-+    intendedUse?: unknown;
-+    profileCompletedAt?: unknown;
-+  };
++  if (payload.message && typeof payload.message === "object") {
++    const nestedCode = (payload.message as { code?: unknown }).code;
++    if (nestedCode === "ACCESS_CODE_REQUIRED") {
++      return true;
++    }
++  }
 +
-+  return !(
-+    typeof user.profileCompletedAt === "string" &&
-+    user.profileCompletedAt.length > 0 &&
-+    typeof user.roleTitle === "string" &&
-+    user.roleTitle.trim().length > 0 &&
-+    typeof user.intendedUse === "string" &&
-+    user.intendedUse.trim().length > 0
-+  );
++  return false;
 +}
 +
+ function needsProfileCompletion(value: unknown): boolean {
+   if (!value || typeof value !== "object") {
+     return true;
+   }
+ 
+   const user = value as {
+     roleTitle?: unknown;
+     intendedUse?: unknown;
+     profileCompletedAt?: unknown;
+   };
+ 
+   return !(
+     typeof user.profileCompletedAt === "string" &&
+     user.profileCompletedAt.length > 0 &&
+     typeof user.roleTitle === "string" &&
+     user.roleTitle.trim().length > 0 &&
+     typeof user.intendedUse === "string" &&
+     user.intendedUse.trim().length > 0
+   );
+ }
+ 
  export function AuthForm({ mode, returnPath }: AuthFormProps) {
    const router = useRouter();
    const [firstName, setFirstName] = useState("");
    const [lastName, setLastName] = useState("");
-   const [email, setEmail] = useState("");
-   const [password, setPassword] = useState("");
-   const [confirmPassword, setConfirmPassword] = useState("");
-   const [error, setError] = useState<string | null>(null);
-   const [message, setMessage] = useState<string | null>(null);
-   const [isSubmitting, setIsSubmitting] = useState(false);
+@@ -106,63 +128,58 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
+                 firstName: firstName.trim(),
+                 lastName: lastName.trim(),
+                 email: trimmedEmail,
+                 password,
+                 confirmPassword,
+               },
+         ),
+       });
  
-   const isLogin = mode === "login";
-   const title = isLogin ? "Log in" : "Create an account";
-   const actionLabel = isLogin ? "Log in" : "Register";
-   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
-   const helperHref = isLogin ? "/auth/signup" : "/auth/login";
-   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
-   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+       let data: unknown = null;
  
-   const onSubmit = async (event: FormEvent) => {
-     event.preventDefault();
-     setError(null);
-     setMessage(null);
+       // Try to parse JSON if there is a body; ignore parse errors
+       const text = await response.text();
+       if (text) {
+         try {
+           data = JSON.parse(text);
+         } catch {
+           // non-JSON body (e.g. 404 HTML) – data stays null
+         }
+       }
  
-     const trimmedEmail = email.trim();
-@@ -111,50 +133,64 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
-           const code =
-             typeof accessCodeRequired === "object" && accessCodeRequired
-               ? (accessCodeRequired as { code?: unknown }).code
-               : undefined;
-           if (code === "ACCESS_CODE_REQUIRED") {
-             const params = new URLSearchParams();
-             params.set("email", trimmedEmail);
-             params.set("next", returnPath ?? "/");
-             router.push(`/auth/access-code?${params.toString()}`);
-             return;
+       if (!response.ok) {
+         const messageFromApi =
+           extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
+ 
+-        if (isLogin && response.status === 403 && typeof data === "object" && data) {
+-          const accessCodeRequired = (data as { message?: unknown })?.message;
+-          const code =
+-            typeof accessCodeRequired === "object" && accessCodeRequired
+-              ? (accessCodeRequired as { code?: unknown }).code
+-              : undefined;
+-          if (code === "ACCESS_CODE_REQUIRED") {
+-            const params = new URLSearchParams();
+-            params.set("email", trimmedEmail);
+-            params.set("next", returnPath ?? "/");
+-            router.push(`/auth/access-code?${params.toString()}`);
+-            return;
++        if (isLogin && response.status === 403 && hasAccessCodeRequired(data)) {
++          const params = new URLSearchParams();
++          params.set("email", trimmedEmail);
++          if (returnPath) {
++            params.set("next", returnPath);
            }
++          router.push(`/auth/access-code?${params.toString()}`);
++          return;
          }
  
          setError(messageFromApi);
@@ -1386,92 +135,77 @@ index 0c5f25dfb7c19220f3390450ecc10f3ba1f4f26f..4de8d5bbda04cff031bbe9d9a716c23e
        }
  
        const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
-+      const meResponse = await fetch("/api/users/me", {
-+        method: "GET",
-+        credentials: "include",
-+      });
-+      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
-+
-+      if (needsProfileCompletion(mePayload)) {
-+        const params = new URLSearchParams();
-+        params.set("next", targetPath);
-+        await router.replace(`/onboarding/profile?${params.toString()}`);
-+        await router.refresh();
-+        return;
-+      }
-+
-       await router.replace(targetPath);
-       await router.refresh();
-     } catch (submitError) {
-       console.error("Auth request failed", submitError);
-       setError("Unable to reach authentication service");
-     } finally {
-       setIsSubmitting(false);
-     }
-   };
+       const meResponse = await fetch("/api/users/me", {
+         method: "GET",
+         credentials: "include",
+       });
+       const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
  
-   return (
-     <div className="mx-auto w-full max-w-md space-y-6">
-       <div className="space-y-2 text-center">
-         <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
-         <p className="text-sm text-gray-600">
-           Use your Target This Role credentials to continue.
-         </p>
-       </div>
- 
-       <form
-         onSubmit={onSubmit}
-         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
-       >
-         <div className="space-y-2">
-           {!isLogin && (
+       if (needsProfileCompletion(mePayload)) {
+         const params = new URLSearchParams();
+         params.set("next", targetPath);
+         await router.replace(`/onboarding/profile?${params.toString()}`);
+         await router.refresh();
 diff --git a/apps/web/app/(public)/auth/access-code/access-code-form.tsx b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
-index 6931ff27416efbd7bd84587cdd1c77b1416d8a7f..b07bfa78a67a8d206a7ad5200225ab59abc88f53 100644
+index b07bfa78a67a8d206a7ad5200225ab59abc88f53..37817eb58a579ef66f8c1e2d9dd1e7c1c4a35e07 100644
 --- a/apps/web/app/(public)/auth/access-code/access-code-form.tsx
 +++ b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
-@@ -1,63 +1,125 @@
+@@ -1,125 +1,200 @@
  "use client";
  
- import { FormEvent, useState } from "react";
+-import { FormEvent, useState } from "react";
++import { FormEvent, useMemo, useState } from "react";
  import { useRouter } from "next/navigation";
-+import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+ import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+ 
+ function extractMessage(value: unknown): string {
+   if (!value || typeof value !== "object") {
+     return "Unable to redeem access code.";
+   }
+ 
+   const payload = value as { message?: unknown; error?: unknown };
 +
-+function extractMessage(value: unknown): string {
-+  if (!value || typeof value !== "object") {
-+    return "Unable to redeem access code.";
+   if (typeof payload.message === "string" && payload.message.length) {
+     return payload.message;
+   }
++
++  if (Array.isArray(payload.message)) {
++    const messages = payload.message.filter(
++      (item): item is string => typeof item === "string" && item.length > 0,
++    );
++
++    if (messages.length) {
++      return messages.join(", ");
++    }
 +  }
 +
-+  const payload = value as { message?: unknown; error?: unknown };
-+  if (typeof payload.message === "string" && payload.message.length) {
-+    return payload.message;
-+  }
-+  if (typeof payload.error === "string" && payload.error.length) {
-+    return payload.error;
-+  }
-+
-+  return "Unable to redeem access code.";
-+}
-+
-+function needsProfileCompletion(value: unknown): boolean {
-+  if (!value || typeof value !== "object") {
-+    return true;
-+  }
-+
-+  const user = value as {
-+    roleTitle?: unknown;
-+    intendedUse?: unknown;
-+    profileCompletedAt?: unknown;
-+  };
-+
-+  return !(
-+    typeof user.profileCompletedAt === "string" &&
-+    user.profileCompletedAt.length > 0 &&
-+    typeof user.roleTitle === "string" &&
-+    user.roleTitle.trim().length > 0 &&
-+    typeof user.intendedUse === "string" &&
-+    user.intendedUse.trim().length > 0
-+  );
-+}
+   if (typeof payload.error === "string" && payload.error.length) {
+     return payload.error;
+   }
+ 
+   return "Unable to redeem access code.";
+ }
+ 
+ function needsProfileCompletion(value: unknown): boolean {
+   if (!value || typeof value !== "object") {
+     return true;
+   }
+ 
+   const user = value as {
+     roleTitle?: unknown;
+     intendedUse?: unknown;
+     profileCompletedAt?: unknown;
+   };
+ 
+   return !(
+     typeof user.profileCompletedAt === "string" &&
+     user.profileCompletedAt.length > 0 &&
+     typeof user.roleTitle === "string" &&
+     user.roleTitle.trim().length > 0 &&
+     typeof user.intendedUse === "string" &&
+     user.intendedUse.trim().length > 0
+   );
+ }
  
  export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: string; returnPath: string }) {
    const router = useRouter();
@@ -1481,58 +215,70 @@ index 6931ff27416efbd7bd84587cdd1c77b1416d8a7f..b07bfa78a67a8d206a7ad5200225ab59
    const [error, setError] = useState<string | null>(null);
    const [isSubmitting, setIsSubmitting] = useState(false);
  
++  const hasAllRequiredFields = useMemo(
++    () => Boolean(email.trim() && password && code.trim()),
++    [email, password, code],
++  );
++
    const onSubmit = async (event: FormEvent) => {
      event.preventDefault();
      setError(null);
  
-     if (!email.trim() || !password || !code.trim()) {
+-    if (!email.trim() || !password || !code.trim()) {
++    if (!hasAllRequiredFields) {
        setError("Email, password, and access code are required.");
        return;
      }
  
++    const trimmedEmail = email.trim();
++    const trimmedCode = code.trim();
++
      setIsSubmitting(true);
      try {
        const response = await fetch("/api/auth/redeem-access-code-and-login", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          credentials: "include",
-         body: JSON.stringify({ email: email.trim(), password, code: code.trim() }),
+-        body: JSON.stringify({ email: email.trim(), password, code: code.trim() }),
++        body: JSON.stringify({ email: trimmedEmail, password, code: trimmedCode }),
        });
  
--      const body = await response.text();
-+      const raw = await response.text();
-+      let body: unknown = null;
-+      if (raw) {
-+        try {
-+          body = JSON.parse(raw);
-+        } catch {
-+          body = null;
-+        }
-+      }
+       const raw = await response.text();
+       let body: unknown = null;
+       if (raw) {
+         try {
+           body = JSON.parse(raw);
+         } catch {
+           body = null;
+         }
+       }
++
        if (!response.ok) {
--        setError(body || "Unable to redeem access code.");
-+        setError(extractMessage(body));
-+        return;
-+      }
-+
-+      const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
-+      const meResponse = await fetch("/api/users/me", {
-+        method: "GET",
-+        credentials: "include",
-+      });
-+      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
-+
-+      if (needsProfileCompletion(mePayload)) {
-+        const params = new URLSearchParams();
-+        params.set("next", targetPath);
-+        router.replace(`/onboarding/profile?${params.toString()}`);
-+        router.refresh();
+         setError(extractMessage(body));
          return;
        }
  
--      router.push(returnPath || "/");
-+      router.replace(targetPath);
-+      router.refresh();
+       const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
+       const meResponse = await fetch("/api/users/me", {
+         method: "GET",
+         credentials: "include",
+       });
+       const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
+ 
+       if (needsProfileCompletion(mePayload)) {
+         const params = new URLSearchParams();
+         params.set("next", targetPath);
+-        router.replace(`/onboarding/profile?${params.toString()}`);
+-        router.refresh();
++        await router.replace(`/onboarding/profile?${params.toString()}`);
++        await router.refresh();
+         return;
+       }
+ 
+-      router.replace(targetPath);
+-      router.refresh();
++      await router.replace(targetPath);
++      await router.refresh();
      } catch {
        setError("Unable to reach authentication service");
      } finally {
@@ -1544,151 +290,112 @@ index 6931ff27416efbd7bd84587cdd1c77b1416d8a7f..b07bfa78a67a8d206a7ad5200225ab59
      <div className="mx-auto w-full max-w-md space-y-6">
        <div className="space-y-2 text-center">
          <h1 className="text-3xl font-bold text-gray-900">Enter Access Code</h1>
--        <p className="text-sm text-gray-600">Your account needs a beta access code before login.</p>
-+        <p className="text-sm text-gray-600">Your account needs an access code before login.</p>
+         <p className="text-sm text-gray-600">Your account needs an access code before login.</p>
        </div>
-       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase" type="text" placeholder="TTR-XXXX-XXXX-XXXX" value={code} onChange={(e)=>setCode(e.target.value.toUpperCase())} required />
+-      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+-        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
+-        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
+-        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase" type="text" placeholder="TTR-XXXX-XXXX-XXXX" value={code} onChange={(e)=>setCode(e.target.value.toUpperCase())} required />
++
++      <form
++        onSubmit={onSubmit}
++        className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
++      >
++        <div className="space-y-2">
++          <label className="block text-sm font-semibold text-gray-700" htmlFor="email">
++            Email
++          </label>
++          <input
++            id="email"
++            type="email"
++            required
++            autoComplete="email"
++            value={email}
++            onChange={(event) => setEmail(event.target.value)}
++            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++            placeholder="you@example.com"
++          />
++        </div>
++
++        <div className="space-y-2">
++          <label className="block text-sm font-semibold text-gray-700" htmlFor="password">
++            Password
++          </label>
++          <input
++            id="password"
++            type="password"
++            required
++            autoComplete="current-password"
++            value={password}
++            onChange={(event) => setPassword(event.target.value)}
++            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++            placeholder="••••••••"
++          />
++        </div>
++
++        <div className="space-y-2">
++          <label className="block text-sm font-semibold text-gray-700" htmlFor="accessCode">
++            Access Code
++          </label>
++          <input
++            id="accessCode"
++            type="text"
++            required
++            autoComplete="off"
++            value={code}
++            onChange={(event) => setCode(event.target.value.toUpperCase())}
++            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
++            placeholder="TTR-XXXX-XXXX-XXXX"
++          />
++        </div>
++
          {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-         <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+-        <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
++
++        <button
++          type="submit"
++          disabled={isSubmitting || !hasAllRequiredFields}
++          className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
++        >
            {isSubmitting ? "Working..." : "Redeem code and log in"}
          </button>
        </form>
      </div>
    );
  }
-diff --git a/apps/web/app/(public)/onboarding/profile/page.tsx b/apps/web/app/(public)/onboarding/profile/page.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..0f62f5e748ed174f662678055a30385059f97105
---- /dev/null
-+++ b/apps/web/app/(public)/onboarding/profile/page.tsx
-@@ -0,0 +1,9 @@
-+import { ProfileCompletionForm } from './profile-completion-form';
-+
-+export default function OnboardingProfilePage({
-+  searchParams,
-+}: {
-+  searchParams?: { next?: string };
-+}) {
-+  return <ProfileCompletionForm returnPath={searchParams?.next ?? '/baseline'} />;
-+}
-diff --git a/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
-new file mode 100644
-index 0000000000000000000000000000000000000000..1855c202dc23e1ca6275d5eaa54d39fed7462620
---- /dev/null
-+++ b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
-@@ -0,0 +1,73 @@
-+"use client";
-+
-+import { FormEvent, useState } from "react";
-+import { useRouter } from "next/navigation";
+diff --git a/apps/web/app/(public)/auth/access-code/page.tsx b/apps/web/app/(public)/auth/access-code/page.tsx
+index 3ca8ddc079d4df33adb3ab37536d334ad8c3d7bd..b7724ec909ee97b1378b929b9b64f47eb40c1861 100644
+--- a/apps/web/app/(public)/auth/access-code/page.tsx
++++ b/apps/web/app/(public)/auth/access-code/page.tsx
+@@ -1,9 +1,25 @@
 +import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+ import { AccessCodeForm } from "./access-code-form";
+ 
+-export default function AccessCodePage({
+-  searchParams,
+-}: {
+-  searchParams?: { email?: string; next?: string };
+-}) {
+-  return <AccessCodeForm initialEmail={searchParams?.email ?? ""} returnPath={searchParams?.next ?? "/"} />;
++type SearchParams = {
++  email?: string | string[];
++  next?: string | string[];
++};
 +
-+export function ProfileCompletionForm({ returnPath }: { returnPath: string }) {
-+  const router = useRouter();
-+  const [roleTitle, setRoleTitle] = useState("");
-+  const [company, setCompany] = useState("");
-+  const [linkedinUrl, setLinkedinUrl] = useState("");
-+  const [intendedUse, setIntendedUse] = useState("");
-+  const [error, setError] = useState<string | null>(null);
-+  const [isSubmitting, setIsSubmitting] = useState(false);
++type AccessCodePageProps = {
++  searchParams?: Promise<SearchParams> | SearchParams;
++};
 +
-+  const onSubmit = async (event: FormEvent) => {
-+    event.preventDefault();
-+    setError(null);
++export default async function AccessCodePage({ searchParams }: AccessCodePageProps) {
++  const sp = (await Promise.resolve(searchParams)) ?? {};
 +
-+    if (!roleTitle.trim() || !intendedUse.trim()) {
-+      setError("Role title and intended use are required.");
-+      return;
-+    }
-+
-+    setIsSubmitting(true);
-+    try {
-+      const response = await fetch("/api/users/me/profile", {
-+        method: "PATCH",
-+        headers: { "Content-Type": "application/json" },
-+        credentials: "include",
-+        body: JSON.stringify({
-+          roleTitle: roleTitle.trim(),
-+          company: company.trim() || undefined,
-+          linkedinUrl: linkedinUrl.trim() || undefined,
-+          intendedUse: intendedUse.trim(),
-+        }),
-+      });
-+
-+      if (!response.ok) {
-+        const raw = await response.text();
-+        setError(raw || "Unable to save profile");
-+        return;
-+      }
-+
-+      const target = sanitizeReturnPath(returnPath) ?? "/baseline";
-+      router.replace(target);
-+      router.refresh();
-+    } catch {
-+      setError("Unable to save profile");
-+    } finally {
-+      setIsSubmitting(false);
-+    }
-+  };
++  const emailParam = Array.isArray(sp.email) ? sp.email[0] : sp.email;
++  const nextParam = Array.isArray(sp.next) ? sp.next[0] : sp.next;
++  const safeNext = sanitizeReturnPath(nextParam) ?? "/baseline";
 +
 +  return (
-+    <div className="mx-auto w-full max-w-md space-y-6">
-+      <div className="space-y-2 text-center">
-+        <h1 className="text-3xl font-bold text-gray-900">Complete your profile</h1>
-+        <p className="text-sm text-gray-600">Tell us how you plan to use Target This Role.</p>
-+      </div>
-+      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Role title" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} required />
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Company (optional)" value={company} onChange={(e) => setCompany(e.target.value)} />
-+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="LinkedIn URL (optional)" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
-+        <textarea className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="How do you intend to use the app?" value={intendedUse} onChange={(e) => setIntendedUse(e.target.value)} required rows={4} />
-+        {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-+        <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-+          {isSubmitting ? "Saving..." : "Continue"}
-+        </button>
-+      </form>
-+    </div>
++    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++      <AccessCodeForm initialEmail={emailParam ?? ""} returnPath={safeNext} />
++    </main>
 +  );
-+}
-diff --git a/apps/web/app/api/users/me/profile/route.ts b/apps/web/app/api/users/me/profile/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..6e372e1faa8b9f57b6a442de330ac4101f554094
---- /dev/null
-+++ b/apps/web/app/api/users/me/profile/route.ts
-@@ -0,0 +1,33 @@
-+import { NextRequest } from "next/server";
-+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
-+
-+export const runtime = "nodejs";
-+
-+export async function PATCH(req: NextRequest) {
-+  const baseUrl = getApiBaseUrl();
-+  const auth = requireAuthToken(req);
-+
-+  if (!baseUrl) {
-+    return new Response(JSON.stringify({ error: "API base URL is not configured" }), {
-+      status: 500,
-+      headers: { "content-type": "application/json" },
-+    });
-+  }
-+
-+  if (!auth.token) {
-+    return auth.error;
-+  }
-+
-+  const body = await req.text();
-+
-+  const response = await fetch(`${baseUrl}/users/me/profile`, {
-+    method: "PATCH",
-+    headers: {
-+      Authorization: `Bearer ${auth.token}`,
-+      "content-type": req.headers.get("content-type") ?? "application/json",
-+    },
-+    body: body || undefined,
-+  });
-+
-+  return relayApiResponse(response);
-+}
+ }

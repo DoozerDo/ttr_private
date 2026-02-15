@@ -31,6 +31,28 @@ function extractAuthApiMessage(value: unknown): string | undefined {
 }
 
 
+
+function hasAccessCodeRequired(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as { code?: unknown; message?: unknown };
+
+  if (payload.code === "ACCESS_CODE_REQUIRED") {
+    return true;
+  }
+
+  if (payload.message && typeof payload.message === "object") {
+    const nestedCode = (payload.message as { code?: unknown }).code;
+    if (nestedCode === "ACCESS_CODE_REQUIRED") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function needsProfileCompletion(value: unknown): boolean {
   if (!value || typeof value !== "object") {
     return true;
@@ -128,19 +150,14 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
         const messageFromApi =
           extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
 
-        if (isLogin && response.status === 403 && typeof data === "object" && data) {
-          const accessCodeRequired = (data as { message?: unknown })?.message;
-          const code =
-            typeof accessCodeRequired === "object" && accessCodeRequired
-              ? (accessCodeRequired as { code?: unknown }).code
-              : undefined;
-          if (code === "ACCESS_CODE_REQUIRED") {
-            const params = new URLSearchParams();
-            params.set("email", trimmedEmail);
-            params.set("next", returnPath ?? "/");
-            router.push(`/auth/access-code?${params.toString()}`);
-            return;
+        if (isLogin && response.status === 403 && hasAccessCodeRequired(data)) {
+          const params = new URLSearchParams();
+          params.set("email", trimmedEmail);
+          if (returnPath) {
+            params.set("next", returnPath);
           }
+          router.push(`/auth/access-code?${params.toString()}`);
+          return;
         }
 
         setError(messageFromApi);
