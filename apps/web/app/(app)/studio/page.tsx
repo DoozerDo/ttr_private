@@ -59,6 +59,96 @@ type CoverLetterPayload = {
   [key: string]: unknown;
 };
 
+type CoverLetterComplianceFlag = {
+  code?: string;
+  message?: string;
+  severity?: string;
+  confidence?: number;
+};
+
+type CoverLetterComplianceBlocked = {
+  title: string;
+  body: string;
+  flags: { label: string; message?: string }[];
+  auditId?: string;
+};
+
+const complianceFlagLabelMap: Record<string, string> = {
+  invented_company: "Unsupported company reference",
+  invented_role: "Unsupported role or title reference",
+  invented_metric: "Unsupported metric or result",
+  invented_scope: "Unsupported scope or ownership",
+  missing_baseline_support: "Not supported by baseline",
+};
+
+function mapComplianceFlagLabel(code?: string): string {
+  if (!code) return "Unsupported content";
+  const normalized = code.trim().toLowerCase();
+  if (!normalized) return "Unsupported content";
+  return complianceFlagLabelMap[normalized] ?? "Unsupported content";
+}
+
+function normalizeComplianceFlagEntry(value: unknown): CoverLetterComplianceFlag | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const code = typeof record.code === "string" ? record.code.trim() : undefined;
+  const message = typeof record.message === "string" ? record.message.trim() : undefined;
+  const severity =
+    typeof record.severity === "string" ? record.severity.trim().toLowerCase() : undefined;
+  const confidence =
+    typeof record.confidence === "number"
+      ? record.confidence
+      : typeof record.confidence === "string"
+      ? Number(record.confidence)
+      : undefined;
+  return { code, message, severity, confidence };
+}
+
+function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplianceBlocked | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const error = record.error;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const errorRecord = error as Record<string, unknown>;
+  if (trimToString(errorRecord.code) !== "COMPLIANCE_VIOLATION") {
+    return null;
+  }
+  const details = errorRecord.details;
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+  const detailRecord = details as Record<string, unknown>;
+  const rawFlags = Array.isArray(detailRecord.compliance_flags)
+    ? detailRecord.compliance_flags
+    : Array.isArray(detailRecord.complianceFlags)
+    ? detailRecord.complianceFlags
+    : [];
+  const flags = rawFlags
+    .map(normalizeComplianceFlagEntry)
+    .filter((flag): flag is CoverLetterComplianceFlag => Boolean(flag))
+    .filter((flag) => !flag.severity || flag.severity === "block")
+    .map((flag) => ({
+      label: mapComplianceFlagLabel(flag.code),
+      message: flag.message,
+    }));
+  if (!flags.length) {
+    return null;
+  }
+  const auditId = trimToString(detailRecord.audit_id ?? detailRecord.auditId);
+  return {
+    title: "Cover letter blocked by compliance",
+    body: "We found content that is not supported by your verified baseline.",
+    flags,
+    auditId,
+  };
+}
+
 type ResumeSection = {
   id?: string;
   type?: string;
@@ -108,6 +198,28 @@ function normalizeAuditId(value: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+function readDuplicateCoverLetterId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const rawError = record.error;
+  if (!rawError || typeof rawError !== "object") {
+    return undefined;
+  }
+  const errorRecord = rawError as Record<string, unknown>;
+  const code = typeof errorRecord.code === "string" ? errorRecord.code.trim() : undefined;
+  if (code !== "COVER_LETTER_DUPLICATE") {
+    return undefined;
+  }
+  const existingId = errorRecord.existingCoverLetterId;
+  if (typeof existingId !== "string") {
+    return undefined;
+  }
+  const trimmed = existingId.trim();
+  return trimmed || undefined;
 }
 
 function readTrackerField(payload: unknown, key: string): string | undefined {
@@ -464,6 +576,17 @@ export default function StudioPage() {
   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
   const [coverWarningFlags, setCoverWarningFlags] = useState<ComplianceFlag[]>([]);
   const [coverAuditId, setCoverAuditId] = useState<string | undefined>();
+  const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
+    useState<CoverLetterComplianceBlocked | null>(null);
+  const [showComplianceDetails, setShowComplianceDetails] = useState(false);
+
+  function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
+    setCoverLetterComplianceBlocked(blocked);
+    setCoverState(createDocumentState());
+    setCoverWarningFlags([]);
+    setCoverAuditId(undefined);
+    setShowComplianceDetails(false);
+  }
 
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
 
@@ -489,6 +612,11 @@ export default function StudioPage() {
   const selectedVersionLabel = selectedVersion?.versionNumber
     ? `Version ${selectedVersion.versionNumber}`
     : "";
+
+  useEffect(() => {
+    setCoverLetterComplianceBlocked(null);
+    setShowComplianceDetails(false);
+  }, [selectedJobId, selectedBaselineId, selectedBaselineVersionId]);
 
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
@@ -574,6 +702,12 @@ export default function StudioPage() {
   const coverLetterParagraphs = useMemo(
     () => buildCoverLetterParagraphs(coverState.response),
     [coverState.response],
+  );
+  const hasCoverLetterArtifact = Boolean(coverState.response);
+  const hasComplianceBlockedDetails = Boolean(
+    coverLetterComplianceBlocked &&
+      (coverLetterComplianceBlocked.flags.some((flag) => Boolean(flag.message)) ||
+        coverLetterComplianceBlocked.auditId),
   );
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
@@ -880,6 +1014,37 @@ export default function StudioPage() {
     }
   };
 
+  async function loadCoverLetterById(coverLetterId: string) {
+    setCoverLetterComplianceBlocked(null);
+    setShowComplianceDetails(false);
+    try {
+      const response = await fetch(
+        `/api/cover-letters/${encodeURIComponent(coverLetterId)}`,
+        { method: "GET" },
+      );
+      const responsePayload = await readResponsePayload(response);
+      if (!response.ok) {
+        const tierGate = parseTierGateError({
+          status: response.status,
+          payload: responsePayload,
+        });
+        if (tierGate) {
+          setCoverState((current) => ({ ...current, tierGateError: tierGate }));
+          return;
+        }
+        throw new Error(formatErrorMessage(responsePayload, "Cover letter unavailable."));
+      }
+      setCoverState((current) => ({ ...current, response: responsePayload }));
+      setCoverWarningFlags(extractComplianceWarnings(responsePayload));
+      setCoverAuditId(normalizeAuditId(responsePayload));
+      setCoverLetterComplianceBlocked(null);
+      setShowComplianceDetails(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Cover letter unavailable.";
+      setCoverState((current) => ({ ...current, error: message }));
+    }
+  }
+
   const handleCoverDraft = async () => {
     if (!readyForDocuments) {
       setCoverState((current) => ({
@@ -892,6 +1057,8 @@ export default function StudioPage() {
     setCoverState(createDocumentState());
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
+    setCoverLetterComplianceBlocked(null);
+    setShowComplianceDetails(false);
     const payload = buildCoverLetterPayload(false);
     try {
       const response = await fetch("/api/cover-letters", {
@@ -901,6 +1068,20 @@ export default function StudioPage() {
       });
       const responsePayload = await readResponsePayload(response);
       if (!response.ok) {
+        if (response.status === 409) {
+          const existingId = readDuplicateCoverLetterId(responsePayload);
+          if (existingId) {
+            await loadCoverLetterById(existingId);
+            return;
+          }
+        }
+        if (response.status === 422) {
+          const blockedState = parseComplianceBlockedFromPayload(responsePayload);
+          if (blockedState) {
+            applyCoverLetterComplianceBlocked(blockedState);
+            return;
+          }
+        }
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
@@ -951,6 +1132,13 @@ export default function StudioPage() {
 
       if (!response.ok) {
         const responsePayload = await readResponsePayload(response);
+        if (response.status === 422) {
+          const blockedState = parseComplianceBlockedFromPayload(responsePayload);
+          if (blockedState) {
+            applyCoverLetterComplianceBlocked(blockedState);
+            return;
+          }
+        }
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setCoverState((current) => ({ ...current, tierGateError: tierGate }));
@@ -1179,11 +1367,11 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        <p className="text-sm text-slate-300">
-          {isPro
-            ? "Downloads are available."
-            : "Upgrade to Pro to download documents."}
-        </p>
+        {isPro && coverState.response && !coverLetterComplianceBlocked ? (
+          <p className="text-sm text-slate-300">Downloads are available.</p>
+        ) : !isPro ? (
+          <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
+        ) : null}
 
         {resumeState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
@@ -1240,14 +1428,18 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("docx")}
-              disabled={!canExportDocuments || coverExportFormat === "docx"}
+              disabled={
+                !canExportDocuments || coverExportFormat === "docx" || !!coverLetterComplianceBlocked
+              }
             >
               {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("pdf")}
-              disabled={!canExportDocuments || coverExportFormat === "pdf"}
+              disabled={
+                !canExportDocuments || coverExportFormat === "pdf" || !!coverLetterComplianceBlocked
+              }
             >
               {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1279,6 +1471,63 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
+        {coverLetterComplianceBlocked ? (
+          <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4 text-sm text-slate-200">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.3em] text-amber-200">
+                {coverLetterComplianceBlocked.title}
+              </p>
+              <p className="mt-1 text-sm text-slate-100">{coverLetterComplianceBlocked.body}</p>
+            </div>
+            {coverLetterComplianceBlocked.flags.length ? (
+              <ul className="space-y-2 pl-4 text-slate-100">
+                {(() => {
+                  const seen = new Set<string>();
+                  const uniqueFlags: typeof coverLetterComplianceBlocked.flags = [];
+                  for (const flag of coverLetterComplianceBlocked.flags) {
+                    if (seen.has(flag.label)) continue;
+                    seen.add(flag.label);
+                    uniqueFlags.push(flag);
+                  }
+                  return uniqueFlags.map((flag, index) => (
+                    <li key={`blocked-flag-${index}`}>{flag.label}</li>
+                  ));
+                })()}
+              </ul>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
+                Regenerate safely
+              </FormButton>
+              {hasComplianceBlockedDetails ? (
+                <button
+                  type="button"
+                  className="text-sm font-medium text-slate-300 underline-offset-4 transition hover:text-white"
+                  onClick={() => setShowComplianceDetails((prev) => !prev)}
+                >
+                  {showComplianceDetails ? "Hide details" : "View details"}
+                </button>
+              ) : null}
+            </div>
+            {showComplianceDetails && hasComplianceBlockedDetails ? (
+              <div className="space-y-1 text-xs text-slate-400">
+                {coverLetterComplianceBlocked.flags.map(
+                  (flag, index) =>
+                    flag.message ? (
+                      <p key={`blocked-detail-${index}`}>
+                        <span className="font-semibold text-slate-100">{flag.label}:</span>{" "}
+                        {flag.message}
+                      </p>
+                    ) : null,
+                )}
+                {coverLetterComplianceBlocked.auditId ? (
+                  <p>Audit ID: {coverLetterComplianceBlocked.auditId}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {coverState.tierGateError ? (
           <Alert intent="warning">
             {coverState.tierGateError.message ??
@@ -1290,54 +1539,56 @@ export default function StudioPage() {
             Verification signals detected. Personalization may be limited. See Results for details.
           </p>
         ) : null}
-        {coverState.error ? (
+        {coverState.error && !coverLetterComplianceBlocked ? (
           <Alert intent="error" title="Cover letter unavailable">
             {coverState.error}
           </Alert>
         ) : null}
 
-        <p className="text-sm text-slate-300">
-          {isPro
-            ? "Downloads are available."
-            : "Upgrade to Pro to download documents."}
-        </p>
+        {isPro && hasCoverLetterArtifact && !coverLetterComplianceBlocked ? (
+          <p className="text-sm text-slate-300">Downloads are available.</p>
+        ) : !isPro ? (
+          <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
+        ) : null}
 
-        {coverState.response ? (
-          <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-            <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              {coverLetterParagraphs.length ? (
-                <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
-                  {coverLetterParagraphs.map((paragraph, index) => {
-                    const lines = paragraph.split(/\r?\n/);
-                    const isGreeting = index === 0 && /^dear\b/i.test(lines[0] ?? "");
-                    return (
-                      <p
-                        key={`cover-letter-paragraph-${index}`}
-                        className={`m-0 text-sm leading-[1.7] tracking-normal text-slate-100 ${
-                          isGreeting ? "font-semibold text-slate-50" : "text-slate-200"
-                        }`}
-                      >
-                        {lines.map((line, lineIndex) => (
-                          <Fragment key={`line-${index}-${lineIndex}`}>
-                            {line}
-                            {lineIndex < lines.length - 1 ? <br /> : null}
-                          </Fragment>
-                        ))}
-                      </p>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400">Preview unavailable.</p>
-              )}
+        {!coverLetterComplianceBlocked ? (
+          coverState.response ? (
+            <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                {coverLetterParagraphs.length ? (
+                  <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">
+                    {coverLetterParagraphs.map((paragraph, index) => {
+                      const lines = paragraph.split(/\r?\n/);
+                      const isGreeting = index === 0 && /^dear\b/i.test(lines[0] ?? "");
+                      return (
+                        <p
+                          key={`cover-letter-paragraph-${index}`}
+                          className={`m-0 text-sm leading-[1.7] tracking-normal text-slate-100 ${
+                            isGreeting ? "font-semibold text-slate-50" : "text-slate-200"
+                          }`}
+                        >
+                          {lines.map((line, lineIndex) => (
+                            <Fragment key={`line-${index}-${lineIndex}`}>
+                              {line}
+                              {lineIndex < lines.length - 1 ? <br /> : null}
+                            </Fragment>
+                          ))}
+                        </p>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400">Preview unavailable.</p>
+                )}
+              </div>
             </div>
-          </div>
-        ) : (
-          <EmptyState
-            title="No cover letter generated yet"
-            body="Generate a draft to preview it."
-          />
-        )}
+          ) : (
+            <EmptyState
+              title="No cover letter generated yet"
+              body="Generate a draft to preview it."
+            />
+          )
+        ) : null}
       </section>
     </PageShell>
   );
