@@ -11,6 +11,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { UpdateSubscriptionTierDto } from './dto/update-subscription-tier.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { UserRole } from './user.entity';
@@ -40,6 +41,36 @@ export class UsersController {
     }
 
     return user;
+  }
+
+
+  @Patch('me/profile')
+  async updateMyProfile(
+    @Body() body: UpdateProfileDto,
+    @Req() request: UserRequest,
+  ) {
+    const user = request.user;
+
+    if (!user?.id) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const roleTitle = body.roleTitle?.trim();
+    const intendedUse = body.intendedUse?.trim();
+
+    if (!roleTitle || !intendedUse) {
+      throw new BadRequestException('roleTitle and intendedUse are required');
+    }
+
+    const updated = await this.usersService.updateMyProfile(user.id, {
+      roleTitle,
+      company: body.company,
+      linkedinUrl: body.linkedinUrl,
+      intendedUse,
+    });
+
+    const { passwordHash, ...sanitized } = updated;
+    return sanitized;
   }
 
   @Patch('me/subscription-tier')

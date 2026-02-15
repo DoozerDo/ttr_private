@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { IsNull, Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
-import { BetaAccessCode } from './beta-access-code.entity';
+import { AccessCode } from './access-code.entity';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -33,14 +33,12 @@ function normalizeCode(input: string): string {
 @Injectable()
 export class AccessCodesService {
   constructor(
-    @InjectRepository(BetaAccessCode)
-    private readonly accessCodesRepository: Repository<BetaAccessCode>,
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
+    @InjectRepository(AccessCode)
+    private readonly accessCodesRepository: Repository<AccessCode>,
     private readonly usersService: UsersService,
   ) {}
 
-  async listCodes(): Promise<BetaAccessCode[]> {
+  async listCodes(): Promise<AccessCode[]> {
     return this.accessCodesRepository.find({
       order: { createdAt: 'DESC' },
       relations: ['createdBy', 'assignedUser', 'redeemedBy', 'revokedBy'],
@@ -87,7 +85,7 @@ export class AccessCodesService {
   async updateCode(
     id: string,
     input: { assignedUserId?: string | null; notes?: string | null },
-  ): Promise<BetaAccessCode> {
+  ): Promise<AccessCode> {
     const code = await this.accessCodesRepository.findOne({ where: { id } });
     if (!code) {
       throw new NotFoundException('Access code not found');
@@ -116,7 +114,7 @@ export class AccessCodesService {
     return this.accessCodesRepository.save(code);
   }
 
-  async revokeCode(id: string, revokedByUserId?: string): Promise<BetaAccessCode> {
+  async revokeCode(id: string, revokedByUserId?: string): Promise<AccessCode> {
     const code = await this.accessCodesRepository.findOne({ where: { id } });
     if (!code) {
       throw new NotFoundException('Access code not found');
@@ -128,6 +126,17 @@ export class AccessCodesService {
     }
 
     return this.accessCodesRepository.save(code);
+  }
+
+  async userHasActiveAccess(userId: string): Promise<boolean> {
+    const count = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .where('accessCode.redeemedByUserId = :userId', { userId })
+      .andWhere('accessCode.redeemedAt IS NOT NULL')
+      .andWhere('accessCode.revokedAt IS NULL')
+      .getCount();
+
+    return count > 0;
   }
 
   async redeemCodeForUser(user: User, rawCode: string): Promise<void> {
@@ -154,10 +163,6 @@ export class AccessCodesService {
     code.redeemedAt = new Date();
     await this.accessCodesRepository.save(code);
 
-    if (!user.betaAccessApproved) {
-      user.betaAccessApproved = true;
-      await this.usersRepository.save(user);
-    }
   }
 
   async redeemAssignedCodeForUser(user: User): Promise<boolean> {
@@ -178,15 +183,11 @@ export class AccessCodesService {
     code.redeemedAt = new Date();
     await this.accessCodesRepository.save(code);
 
-    if (!user.betaAccessApproved) {
-      user.betaAccessApproved = true;
-      await this.usersRepository.save(user);
-    }
 
     return true;
   }
 
-  toAdminListRow(code: BetaAccessCode) {
+  toAdminListRow(code: AccessCode) {
     const status = code.revokedAt
       ? 'revoked'
       : code.redeemedAt

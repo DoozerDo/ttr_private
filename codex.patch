@@ -1,8 +1,139 @@
+diff --git a/apps/api/src/access-codes/beta-access-code.entity.ts b/apps/api/src/access-codes/access-code.entity.ts
+similarity index 58%
+rename from apps/api/src/access-codes/beta-access-code.entity.ts
+rename to apps/api/src/access-codes/access-code.entity.ts
+index 43c671ececc7ed9901855253cd1859ab02d128e8..b9988b3416f5da0599ed5f1d405574b480248bc8 100644
+--- a/apps/api/src/access-codes/beta-access-code.entity.ts
++++ b/apps/api/src/access-codes/access-code.entity.ts
+@@ -1,67 +1,71 @@
+ import {
+   Column,
+   CreateDateColumn,
+   Entity,
+   Index,
+   JoinColumn,
+   ManyToOne,
+   PrimaryGeneratedColumn,
++  UpdateDateColumn,
+ } from 'typeorm';
+ import { User } from '../users/user.entity';
+ 
+-@Entity({ name: 'beta_access_codes' })
+-export class BetaAccessCode {
++@Entity({ name: 'access_codes' })
++export class AccessCode {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+-  @Index({ unique: true })
+-  @Column({ type: 'character varying', length: 128, unique: true })
++  @Column({ type: 'character varying', length: 64, unique: true })
+   codeHash!: string;
+ 
+-  @Column({ type: 'character varying', length: 16, nullable: true })
+-  codePrefix!: string | null;
++  @Column({ type: 'character varying', length: 12 })
++  codePrefix!: string;
+ 
+-  @CreateDateColumn({ type: 'timestamptz' })
+   @Index()
+-  createdAt!: Date;
+-
+   @Column({ type: 'uuid', nullable: true })
+   createdByUserId!: string | null;
+ 
+-  @Column({ type: 'uuid', nullable: true })
++  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
++  @JoinColumn({ name: 'createdByUserId' })
++  createdBy!: User | null;
++
+   @Index()
++  @Column({ type: 'uuid', nullable: true })
+   assignedUserId!: string | null;
+ 
++  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
++  @JoinColumn({ name: 'assignedUserId' })
++  assignedUser!: User | null;
++
+   @Column({ type: 'uuid', nullable: true })
+   redeemedByUserId!: string | null;
+ 
+-  @Column({ type: 'timestamptz', nullable: true })
+-  @Index()
+-  redeemedAt!: Date | null;
++  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
++  @JoinColumn({ name: 'redeemedByUserId' })
++  redeemedBy!: User | null;
+ 
+-  @Column({ type: 'timestamptz', nullable: true })
+   @Index()
+-  revokedAt!: Date | null;
++  @Column({ type: 'timestamptz', nullable: true })
++  redeemedAt!: Date | null;
+ 
+   @Column({ type: 'uuid', nullable: true })
+   revokedByUserId!: string | null;
+ 
+-  @Column({ type: 'character varying', length: 255, nullable: true })
+-  notes!: string | null;
++  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
++  @JoinColumn({ name: 'revokedByUserId' })
++  revokedBy!: User | null;
+ 
+-  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+-  @JoinColumn({ name: 'createdByUserId' })
+-  createdBy?: User | null;
++  @Index()
++  @Column({ type: 'timestamptz', nullable: true })
++  revokedAt!: Date | null;
+ 
+-  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+-  @JoinColumn({ name: 'assignedUserId' })
+-  assignedUser?: User | null;
++  @Column({ type: 'text', nullable: true })
++  notes!: string | null;
+ 
+-  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+-  @JoinColumn({ name: 'redeemedByUserId' })
+-  redeemedBy?: User | null;
++  @CreateDateColumn({ type: 'timestamptz' })
++  @Index()
++  createdAt!: Date;
+ 
+-  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+-  @JoinColumn({ name: 'revokedByUserId' })
+-  revokedBy?: User | null;
++  @UpdateDateColumn({ type: 'timestamptz' })
++  updatedAt!: Date;
+ }
+diff --git a/apps/api/src/access-codes/access-codes.module.ts b/apps/api/src/access-codes/access-codes.module.ts
+index 020507eb34d6e16378392fb8341f774cb2c5afdb..3ae1ce308be4169a8916b0326f01bb0773de3c86 100644
+--- a/apps/api/src/access-codes/access-codes.module.ts
++++ b/apps/api/src/access-codes/access-codes.module.ts
+@@ -1,16 +1,15 @@
+ import { Module } from '@nestjs/common';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { UsersModule } from '../users/users.module';
+ import { AdminUsersModule } from '../admin-users/admin-users.module';
+-import { User } from '../users/user.entity';
+ import { AccessCodesController } from './access-codes.controller';
+ import { AccessCodesService } from './access-codes.service';
+-import { BetaAccessCode } from './beta-access-code.entity';
++import { AccessCode } from './access-code.entity';
+ 
+ @Module({
+-  imports: [TypeOrmModule.forFeature([BetaAccessCode, User]), UsersModule, AdminUsersModule],
++  imports: [TypeOrmModule.forFeature([AccessCode]), UsersModule, AdminUsersModule],
+   controllers: [AccessCodesController],
+   providers: [AccessCodesService],
+   exports: [AccessCodesService],
+ })
+ export class AccessCodesModule {}
 diff --git a/apps/api/src/access-codes/access-codes.service.ts b/apps/api/src/access-codes/access-codes.service.ts
-index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc7840215981581714 100644
+index 1398efb887eabd8271abfcdc7840215981581714..8e2ba1712d50c796413d10425f514ec4f9e69da2 100644
 --- a/apps/api/src/access-codes/access-codes.service.ts
 +++ b/apps/api/src/access-codes/access-codes.service.ts
-@@ -1,34 +1,34 @@
+@@ -1,214 +1,215 @@
  import {
    BadRequestException,
    ForbiddenException,
@@ -11,11 +142,11 @@ index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc78402159
  } from '@nestjs/common';
  import { InjectRepository } from '@nestjs/typeorm';
  import { createHash, randomBytes } from 'node:crypto';
--import { Repository } from 'typeorm';
-+import { IsNull, Repository } from 'typeorm';
+ import { IsNull, Repository } from 'typeorm';
  import { User } from '../users/user.entity';
  import { UsersService } from '../users/users.service';
- import { BetaAccessCode } from './beta-access-code.entity';
+-import { BetaAccessCode } from './beta-access-code.entity';
++import { AccessCode } from './access-code.entity';
  
  const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
  
@@ -38,7 +169,125 @@ index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc78402159
  
  @Injectable()
  export class AccessCodesService {
-@@ -138,50 +138,76 @@ export class AccessCodesService {
+   constructor(
+-    @InjectRepository(BetaAccessCode)
+-    private readonly accessCodesRepository: Repository<BetaAccessCode>,
+-    @InjectRepository(User)
+-    private readonly usersRepository: Repository<User>,
++    @InjectRepository(AccessCode)
++    private readonly accessCodesRepository: Repository<AccessCode>,
+     private readonly usersService: UsersService,
+   ) {}
+ 
+-  async listCodes(): Promise<BetaAccessCode[]> {
++  async listCodes(): Promise<AccessCode[]> {
+     return this.accessCodesRepository.find({
+       order: { createdAt: 'DESC' },
+       relations: ['createdBy', 'assignedUser', 'redeemedBy', 'revokedBy'],
+     });
+   }
+ 
+   async generateCode(input: {
+     assignedUserId?: string;
+     notes?: string;
+     createdByUserId?: string;
+   }) {
+     const rawCode = `TTR-${randomSegment(4)}-${randomSegment(4)}-${randomSegment(4)}`;
+     const normalized = normalizeCode(rawCode);
+     const codeHash = hashCode(normalized);
+     const codePrefix = normalized.replaceAll('-', '').slice(0, 8);
+ 
+     if (input.assignedUserId) {
+       const assignedUser = await this.usersService.findById(input.assignedUserId);
+       if (!assignedUser) {
+         throw new BadRequestException('Assigned user not found');
+       }
+     }
+ 
+     const entity = this.accessCodesRepository.create({
+       codeHash,
+       codePrefix,
+       assignedUserId: input.assignedUserId?.trim() || null,
+       notes: input.notes?.trim() || null,
+       createdByUserId: input.createdByUserId?.trim() || null,
+     });
+ 
+     const saved = await this.accessCodesRepository.save(entity);
+ 
+     return {
+       id: saved.id,
+       createdAt: saved.createdAt,
+       assignedUserId: saved.assignedUserId,
+       notes: saved.notes,
+       code: normalized,
+       codePrefix,
+     };
+   }
+ 
+   async updateCode(
+     id: string,
+     input: { assignedUserId?: string | null; notes?: string | null },
+-  ): Promise<BetaAccessCode> {
++  ): Promise<AccessCode> {
+     const code = await this.accessCodesRepository.findOne({ where: { id } });
+     if (!code) {
+       throw new NotFoundException('Access code not found');
+     }
+     if (code.redeemedAt || code.revokedAt) {
+       throw new BadRequestException(
+         'Cannot update assignment for redeemed or revoked code',
+       );
+     }
+ 
+     if (input.assignedUserId !== undefined) {
+       const nextAssigned = input.assignedUserId?.trim() || null;
+       if (nextAssigned) {
+         const assignedUser = await this.usersService.findById(nextAssigned);
+         if (!assignedUser) {
+           throw new BadRequestException('Assigned user not found');
+         }
+       }
+       code.assignedUserId = nextAssigned;
+     }
+ 
+     if (input.notes !== undefined) {
+       code.notes = input.notes?.trim() || null;
+     }
+ 
+     return this.accessCodesRepository.save(code);
+   }
+ 
+-  async revokeCode(id: string, revokedByUserId?: string): Promise<BetaAccessCode> {
++  async revokeCode(id: string, revokedByUserId?: string): Promise<AccessCode> {
+     const code = await this.accessCodesRepository.findOne({ where: { id } });
+     if (!code) {
+       throw new NotFoundException('Access code not found');
+     }
+ 
+     if (!code.revokedAt) {
+       code.revokedAt = new Date();
+       code.revokedByUserId = revokedByUserId?.trim() || null;
+     }
+ 
+     return this.accessCodesRepository.save(code);
+   }
+ 
++  async userHasActiveAccess(userId: string): Promise<boolean> {
++    const count = await this.accessCodesRepository
++      .createQueryBuilder('accessCode')
++      .where('accessCode.redeemedByUserId = :userId', { userId })
++      .andWhere('accessCode.redeemedAt IS NOT NULL')
++      .andWhere('accessCode.revokedAt IS NULL')
++      .getCount();
++
++    return count > 0;
++  }
++
+   async redeemCodeForUser(user: User, rawCode: string): Promise<void> {
+     const codeHash = hashCode(normalizeCode(rawCode));
+     const code = await this.accessCodesRepository.findOne({ where: { codeHash } });
+ 
+     if (!code) {
        throw new BadRequestException('Invalid access code');
      }
  
@@ -58,39 +307,40 @@ index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc78402159
      code.redeemedAt = new Date();
      await this.accessCodesRepository.save(code);
  
-     if (!user.betaAccessApproved) {
-       user.betaAccessApproved = true;
-       await this.usersRepository.save(user);
-     }
+-    if (!user.betaAccessApproved) {
+-      user.betaAccessApproved = true;
+-      await this.usersRepository.save(user);
+-    }
    }
  
-+  async redeemAssignedCodeForUser(user: User): Promise<boolean> {
-+    const code = await this.accessCodesRepository.findOne({
-+      where: {
-+        assignedUserId: user.id,
-+        revokedAt: IsNull(),
-+        redeemedAt: IsNull(),
-+      },
-+      order: { createdAt: 'ASC' },
-+    });
-+
-+    if (!code) {
-+      return false;
-+    }
-+
-+    code.redeemedByUserId = user.id;
-+    code.redeemedAt = new Date();
-+    await this.accessCodesRepository.save(code);
-+
-+    if (!user.betaAccessApproved) {
-+      user.betaAccessApproved = true;
-+      await this.usersRepository.save(user);
-+    }
-+
-+    return true;
-+  }
-+
-   toAdminListRow(code: BetaAccessCode) {
+   async redeemAssignedCodeForUser(user: User): Promise<boolean> {
+     const code = await this.accessCodesRepository.findOne({
+       where: {
+         assignedUserId: user.id,
+         revokedAt: IsNull(),
+         redeemedAt: IsNull(),
+       },
+       order: { createdAt: 'ASC' },
+     });
+ 
+     if (!code) {
+       return false;
+     }
+ 
+     code.redeemedByUserId = user.id;
+     code.redeemedAt = new Date();
+     await this.accessCodesRepository.save(code);
+ 
+-    if (!user.betaAccessApproved) {
+-      user.betaAccessApproved = true;
+-      await this.usersRepository.save(user);
+-    }
+ 
+     return true;
+   }
+ 
+-  toAdminListRow(code: BetaAccessCode) {
++  toAdminListRow(code: AccessCode) {
      const status = code.revokedAt
        ? 'revoked'
        : code.redeemedAt
@@ -115,11 +365,12 @@ index a0a463ebb46e7a03bc413b702c985d1358e405c9..1398efb887eabd8271abfcdc78402159
        redeemedAt: code.redeemedAt,
        revokedAt: code.revokedAt,
        revokedByUserId: code.revokedByUserId,
+       revokedByUserEmail: code.revokedBy?.email ?? null,
 diff --git a/apps/api/src/auth/auth.service.spec.ts b/apps/api/src/auth/auth.service.spec.ts
-index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77ed3343c72 100644
+index 40accd0e0b3b1c4176dd15419c88f77ed3343c72..f06cc77f56acc70064a197bbd6937d633c1dac37 100644
 --- a/apps/api/src/auth/auth.service.spec.ts
 +++ b/apps/api/src/auth/auth.service.spec.ts
-@@ -1,112 +1,115 @@
+@@ -1,75 +1,80 @@
  import { JwtService } from '@nestjs/jwt';
  import { Test, TestingModule } from '@nestjs/testing';
  import * as bcrypt from 'bcryptjs';
@@ -143,7 +394,12 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
    let jwtService: JwtService;
    let configService: { get: jest.Mock };
    let adminUsersService: { isAdmin: jest.Mock };
-+  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
+-  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
++  let accessCodesService: {
++    redeemCodeForUser: jest.Mock;
++    redeemAssignedCodeForUser: jest.Mock;
++    userHasActiveAccess: jest.Mock;
++  };
  
    beforeEach(async () => {
      const module: TestingModule = await Test.createTestingModule({
@@ -169,7 +425,8 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
            provide: AccessCodesService,
            useValue: {
              redeemCodeForUser: jest.fn(),
-+            redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
+             redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
++            userHasActiveAccess: jest.fn().mockResolvedValue(false),
            },
          },
          {
@@ -195,13 +452,7 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
          {
            provide: getRepositoryToken(UserToken),
            useValue: {
-             save: jest.fn(),
-             create: jest.fn((value) => value),
-             findOne: jest.fn(),
-             delete: jest.fn(),
-           },
-         },
-       ],
+@@ -83,240 +88,309 @@ describe('AuthService', () => {
      }).compile();
  
      service = module.get<AuthService>(AuthService);
@@ -209,7 +460,7 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
      jwtService = module.get(JwtService);
      configService = module.get(ConfigService);
      adminUsersService = module.get(AdminUsersService);
-+    accessCodesService = module.get(AccessCodesService);
+     accessCodesService = module.get(AccessCodesService);
      jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
    });
  
@@ -227,15 +478,106 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
        firstName: payload.firstName,
        lastName: payload.lastName,
        emailConfirmed: true,
-       betaAccessApproved: false,
+-      betaAccessApproved: false,
        passwordHash: '',
        calibrationProfileName: null,
        calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
        role: 'user',
        subscriptionTier: SubscriptionTier.FREE,
        accountType: AccountType.FREE,
        createdAt: new Date(),
-@@ -189,26 +192,131 @@ describe('AuthService', () => {
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(null);
+     usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
+       ...savedUser,
+       email,
+       passwordHash,
+     }));
+ 
+     const result = await service.register(payload);
+     const hashedPasswordArg = usersService.create.mock.calls[0][0].passwordHash;
+ 
+     expect(hashedPasswordArg).not.toEqual(payload.password);
+     expect(result.success).toEqual(true);
+   });
+ 
+   it('logs in a user with valid credentials', async () => {
+     const payload: LoginDto = {
+       email: 'user@example.com',
+       password: 'Password123',
+     };
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const savedUser: User = {
+       id: 'user-id',
+       email: payload.email,
+       firstName: 'Test',
+       lastName: 'User',
+       emailConfirmed: true,
+-      betaAccessApproved: false,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     const result = await service.login(payload);
+ 
+     expect(result.accessToken).toEqual('signed-token');
+     expect(result.user).toMatchObject({
+       id: savedUser.id,
+       email: savedUser.email,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+     });
+   });
+ 
+-  it('allows admin users to log in without beta access approval when access code is required', async () => {
++  it('allows admin users to log in when access code is required', async () => {
+     const payload: LoginDto = {
+       email: 'admin@example.com',
+       password: 'Password123',
+     };
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const savedUser: User = {
+       id: 'admin-user-id',
+       email: payload.email,
+       firstName: 'Admin',
+       lastName: 'User',
+       emailConfirmed: true,
+-      betaAccessApproved: false,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
      usersService.findByEmail.mockResolvedValue(savedUser);
  
      configService.get.mockImplementation((key: string) => {
@@ -261,23 +603,146 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
        email: savedUser.email,
      });
    });
-+
-+  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
+ 
+-  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
++  it('auto-redeems an assigned access code during login when no active access code exists', async () => {
+     const payload: LoginDto = {
+       email: 'member@example.com',
+       password: 'Password123',
+     };
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const savedUser: User = {
+       id: 'member-user-id',
+       email: payload.email,
+       firstName: 'Member',
+       lastName: 'User',
+       emailConfirmed: true,
+-      betaAccessApproved: false,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     configService.get.mockImplementation((key: string) => {
+       if (key === 'REQUIRE_ACCESS_CODE') {
+         return 'true';
+       }
+       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+         return 'false';
+       }
+       if (key === 'NODE_ENV') {
+         return 'test';
+       }
+       return undefined;
+     });
+ 
+     adminUsersService.isAdmin.mockResolvedValue(false);
+ 
++    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
+ 
+     const result = await service.login(payload);
+ 
++    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
+     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+     expect(result.accessToken).toEqual('signed-token');
+     expect(result.user).toMatchObject({
+       id: savedUser.id,
+       email: savedUser.email,
+     });
+   });
+ 
+   it('returns access code required when no assigned code can be auto-redeemed', async () => {
+     const payload: LoginDto = {
+       email: 'member2@example.com',
+       password: 'Password123',
+     };
+     const passwordHash = await bcrypt.hash(payload.password, 10);
+     const savedUser: User = {
+       id: 'member2-user-id',
+       email: payload.email,
+       firstName: 'Member',
+       lastName: 'User',
+       emailConfirmed: true,
+-      betaAccessApproved: false,
+       passwordHash,
+       calibrationProfileName: null,
+       calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     };
+ 
+     usersService.findByEmail.mockResolvedValue(savedUser);
+ 
+     configService.get.mockImplementation((key: string) => {
+       if (key === 'REQUIRE_ACCESS_CODE') {
+         return 'true';
+       }
+       if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
+         return 'false';
+       }
+       if (key === 'NODE_ENV') {
+         return 'test';
+       }
+       return undefined;
+     });
+ 
+     adminUsersService.isAdmin.mockResolvedValue(false);
+ 
++    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
+ 
+     await expect(service.login(payload)).rejects.toMatchObject({
+       response: {
+         code: 'ACCESS_CODE_REQUIRED',
+         message: 'Access code required.',
+       },
+     });
+ 
++    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
+     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+   });
+ 
++  it('allows login with an existing active access code when required', async () => {
 +    const payload: LoginDto = {
-+      email: 'member@example.com',
++      email: 'active@example.com',
 +      password: 'Password123',
 +    };
 +    const passwordHash = await bcrypt.hash(payload.password, 10);
 +    const savedUser: User = {
-+      id: 'member-user-id',
++      id: 'active-user-id',
 +      email: payload.email,
-+      firstName: 'Member',
++      firstName: 'Active',
 +      lastName: 'User',
 +      emailConfirmed: true,
-+      betaAccessApproved: false,
 +      passwordHash,
 +      calibrationProfileName: null,
 +      calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
 +      role: 'user',
 +      subscriptionTier: SubscriptionTier.FREE,
 +      accountType: AccountType.FREE,
@@ -288,90 +753,28 @@ index a7c2976a8a26d7b950cd7b13a1c2188e7ed2e7c5..40accd0e0b3b1c4176dd15419c88f77e
 +    usersService.findByEmail.mockResolvedValue(savedUser);
 +
 +    configService.get.mockImplementation((key: string) => {
-+      if (key === 'REQUIRE_ACCESS_CODE') {
-+        return 'true';
-+      }
-+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-+        return 'false';
-+      }
-+      if (key === 'NODE_ENV') {
-+        return 'test';
-+      }
++      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
++      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
++      if (key === 'NODE_ENV') return 'test';
 +      return undefined;
 +    });
 +
-+    adminUsersService.isAdmin.mockResolvedValue(false);
-+
-+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
++    accessCodesService.userHasActiveAccess.mockResolvedValue(true);
 +
 +    const result = await service.login(payload);
 +
-+    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
++    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
++    expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
 +    expect(result.accessToken).toEqual('signed-token');
-+    expect(result.user).toMatchObject({
-+      id: savedUser.id,
-+      email: savedUser.email,
-+    });
-+  });
-+
-+  it('returns access code required when no assigned code can be auto-redeemed', async () => {
-+    const payload: LoginDto = {
-+      email: 'member2@example.com',
-+      password: 'Password123',
-+    };
-+    const passwordHash = await bcrypt.hash(payload.password, 10);
-+    const savedUser: User = {
-+      id: 'member2-user-id',
-+      email: payload.email,
-+      firstName: 'Member',
-+      lastName: 'User',
-+      emailConfirmed: true,
-+      betaAccessApproved: false,
-+      passwordHash,
-+      calibrationProfileName: null,
-+      calibrationWeights: null,
-+      role: 'user',
-+      subscriptionTier: SubscriptionTier.FREE,
-+      accountType: AccountType.FREE,
-+      createdAt: new Date(),
-+      updatedAt: new Date(),
-+    };
-+
-+    usersService.findByEmail.mockResolvedValue(savedUser);
-+
-+    configService.get.mockImplementation((key: string) => {
-+      if (key === 'REQUIRE_ACCESS_CODE') {
-+        return 'true';
-+      }
-+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') {
-+        return 'false';
-+      }
-+      if (key === 'NODE_ENV') {
-+        return 'test';
-+      }
-+      return undefined;
-+    });
-+
-+    adminUsersService.isAdmin.mockResolvedValue(false);
-+
-+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
-+
-+    await expect(service.login(payload)).rejects.toMatchObject({
-+      response: {
-+        code: 'ACCESS_CODE_REQUIRED',
-+        message: 'Access code required.',
-+      },
-+    });
-+
-+    expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
 +  });
 +
  });
 diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
-index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a14eb1e86 100644
+index 684d770e65b7155eaad249ffa9ff181a14eb1e86..4fd67b7bc8814ec1915b860ef2fbd6e63d68c44b 100644
 --- a/apps/api/src/auth/auth.service.ts
 +++ b/apps/api/src/auth/auth.service.ts
-@@ -88,54 +88,59 @@ export class AuthService {
+@@ -87,74 +87,79 @@ export class AuthService {
+     const supportEmail =
        this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
        'support@targetthisrole.ai';
      const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
@@ -396,20 +799,31 @@ index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a
  
      const isAdmin = await this.adminUsersService.isAdmin(user.id);
  
-     if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
--      throw new ForbiddenException({
--        code: 'ACCESS_CODE_REQUIRED',
--        message: 'Access code required.',
--      });
-+      const redeemedAssignedCode =
-+        await this.accessCodesService.redeemAssignedCodeForUser(user);
+-    if (this.requireAccessCode && !user.betaAccessApproved && !isAdmin) {
+-      const redeemedAssignedCode =
+-        await this.accessCodesService.redeemAssignedCodeForUser(user);
+-
+-      if (!redeemedAssignedCode) {
+-        throw new ForbiddenException({
+-          code: 'ACCESS_CODE_REQUIRED',
+-          message: 'Access code required.',
+-        });
++    if (this.requireAccessCode && !isAdmin) {
++      const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
++        user.id,
++      );
 +
-+      if (!redeemedAssignedCode) {
-+        throw new ForbiddenException({
-+          code: 'ACCESS_CODE_REQUIRED',
-+          message: 'Access code required.',
-+        });
-+      }
++      if (!hasActiveAccess) {
++        const redeemedAssignedCode =
++          await this.accessCodesService.redeemAssignedCodeForUser(user);
++
++        if (!redeemedAssignedCode) {
++          throw new ForbiddenException({
++            code: 'ACCESS_CODE_REQUIRED',
++            message: 'Access code required.',
++          });
++        }
+       }
      }
  
      return this.buildAuthResponse(user);
@@ -423,7 +837,7 @@ index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a
  
      await this.accessCodesService.redeemCodeForUser(user, payload.code);
  
-     user.betaAccessApproved = true;
+-    user.betaAccessApproved = true;
      return this.buildAuthResponse(user);
    }
  
@@ -435,3 +849,846 @@ index e36351aaa22ee810b6c1230d45f8d3d6a061719b..684d770e65b7155eaad249ffa9ff181a
        where: { token, type: 'confirm' },
      });
  
+     if (!match || match.expiresAt.getTime() <= Date.now()) {
+       throw new BadRequestException('Invalid or expired confirmation token');
+     }
+ 
+     const user = await this.usersService.findById(match.userId);
+     if (!user) {
+       throw new BadRequestException('Invalid confirmation token');
+     }
+ 
+     await this.usersService.setEmailConfirmed(user.id);
+     await this.userTokensRepository.delete({ id: match.id });
+ 
+     return { success: true, message: 'Email confirmed. You can now log in.' };
+   }
+diff --git a/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts b/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ec876e35421f12cafdffe8bcde08a2518a4a70df
+--- /dev/null
++++ b/apps/api/src/migrations/2110000000000-AccessCodesAndUserProfile.ts
+@@ -0,0 +1,107 @@
++import { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class AccessCodesAndUserProfile2110000000000
++  implements MigrationInterface
++{
++  name = 'AccessCodesAndUserProfile2110000000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "betaAccessApproved"`);
++
++    await queryRunner.query(`ALTER TABLE "beta_access_codes" RENAME TO "access_codes"`);
++
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_beta_access_codes_id" TO "PK_access_codes_id"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_beta_access_codes_codeHash" TO "UQ_access_codes_codeHash"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_createdBy" TO "FK_access_codes_createdBy"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_assigned" TO "FK_access_codes_assigned"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_redeemedBy" TO "FK_access_codes_redeemedBy"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_revokedBy" TO "FK_access_codes_revokedBy"`,
++    );
++
++    await queryRunner.query(
++      `ALTER INDEX "IDX_beta_access_codes_assignedUserId" RENAME TO "IDX_access_codes_assignedUserId"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_beta_access_codes_redeemedAt" RENAME TO "IDX_access_codes_redeemedAt"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_beta_access_codes_revokedAt" RENAME TO "IDX_access_codes_revokedAt"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_beta_access_codes_createdAt" RENAME TO "IDX_access_codes_createdAt"`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "roleTitle" character varying(150)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "company" character varying(150)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "linkedinUrl" character varying(255)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "intendedUse" character varying(255)`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "profileCompletedAt" TIMESTAMP WITH TIME ZONE`,
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "profileCompletedAt"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "intendedUse"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "linkedinUrl"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "company"`);
++    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "roleTitle"`);
++
++    await queryRunner.query(
++      `ALTER INDEX "IDX_access_codes_createdAt" RENAME TO "IDX_beta_access_codes_createdAt"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_access_codes_revokedAt" RENAME TO "IDX_beta_access_codes_revokedAt"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_access_codes_redeemedAt" RENAME TO "IDX_beta_access_codes_redeemedAt"`,
++    );
++    await queryRunner.query(
++      `ALTER INDEX "IDX_access_codes_assignedUserId" RENAME TO "IDX_beta_access_codes_assignedUserId"`,
++    );
++
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_revokedBy" TO "FK_beta_access_codes_revokedBy"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_redeemedBy" TO "FK_beta_access_codes_redeemedBy"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_assigned" TO "FK_beta_access_codes_assigned"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_access_codes_createdBy" TO "FK_beta_access_codes_createdBy"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_access_codes_codeHash" TO "UQ_beta_access_codes_codeHash"`,
++    );
++    await queryRunner.query(
++      `ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_access_codes_id" TO "PK_beta_access_codes_id"`,
++    );
++
++    await queryRunner.query(`ALTER TABLE "access_codes" RENAME TO "beta_access_codes"`);
++
++    await queryRunner.query(
++      `ALTER TABLE "users" ADD "betaAccessApproved" boolean NOT NULL DEFAULT false`,
++    );
++  }
++}
+diff --git a/apps/api/src/users/dto/update-profile.dto.ts b/apps/api/src/users/dto/update-profile.dto.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a748a7419e0242a9065da26c241b6e0fceaaf44e
+--- /dev/null
++++ b/apps/api/src/users/dto/update-profile.dto.ts
+@@ -0,0 +1,22 @@
++import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
++
++export class UpdateProfileDto {
++  @IsString()
++  @MaxLength(150)
++  roleTitle!: string;
++
++  @IsOptional()
++  @IsString()
++  @MaxLength(150)
++  company?: string;
++
++  @IsOptional()
++  @IsString()
++  @IsUrl({ require_protocol: true })
++  @MaxLength(255)
++  linkedinUrl?: string;
++
++  @IsString()
++  @MaxLength(255)
++  intendedUse!: string;
++}
+diff --git a/apps/api/src/users/user.entity.ts b/apps/api/src/users/user.entity.ts
+index 65b614cf507690a001a818bfb6c5acfaaa960f43..4497e50b4f8fcebca9c8e7985266b8d19fc9ac9c 100644
+--- a/apps/api/src/users/user.entity.ts
++++ b/apps/api/src/users/user.entity.ts
+@@ -21,58 +21,70 @@ export type CalibrationWeights = {
+ export type UserRole = 'user' | 'coach' | 'admin';
+ 
+ // VERIFY: Confirm calibration dimension labels and structure.
+ 
+ @Entity({ name: 'users' })
+ export class User {
+   @PrimaryGeneratedColumn('uuid')
+   id!: string;
+ 
+   @Index({ unique: true })
+   @Column({ unique: true })
+   email!: string;
+ 
+   @Column({ type: 'character varying', length: 100, default: '' })
+   firstName!: string;
+ 
+   @Column({ type: 'character varying', length: 100, default: '' })
+   lastName!: string;
+ 
+   @Column()
+   passwordHash!: string;
+ 
+   @Column({ type: 'boolean', default: false })
+   emailConfirmed!: boolean;
+ 
+-  @Column({ type: 'boolean', default: false })
+-  betaAccessApproved!: boolean;
+-
+   @Column({ type: 'character varying', length: 255, nullable: true })
+   calibrationProfileName!: string | null;
+ 
+   // VERIFY: Ensure null defaults are acceptable for calibration weights.
+   @Column({ type: 'jsonb', nullable: true })
+   calibrationWeights!: CalibrationWeights | null;
+ 
++  @Column({ type: 'character varying', length: 150, nullable: true })
++  roleTitle?: string | null;
++
++  @Column({ type: 'character varying', length: 150, nullable: true })
++  company?: string | null;
++
++  @Column({ type: 'character varying', length: 255, nullable: true })
++  linkedinUrl?: string | null;
++
++  @Column({ type: 'character varying', length: 255, nullable: true })
++  intendedUse?: string | null;
++
++  @Column({ type: 'timestamptz', nullable: true })
++  profileCompletedAt?: Date | null;
++
+   @Column({ type: 'character varying', length: 50, default: 'user' })
+   role!: UserRole;
+ 
+   @Column({
+     type: 'enum',
+     enum: SubscriptionTier,
+     default: SubscriptionTier.FREE,
+   })
+   subscriptionTier!: SubscriptionTier;
+ 
+   @Column({
+     type: 'enum',
+     enum: AccountType,
+     default: AccountType.FREE,
+   })
+   accountType!: AccountType;
+ 
+   @CreateDateColumn({ type: 'timestamptz' })
+   createdAt!: Date;
+ 
+   @UpdateDateColumn({ type: 'timestamptz' })
+   updatedAt!: Date;
+ }
+diff --git a/apps/api/src/users/users.controller.ts b/apps/api/src/users/users.controller.ts
+index 5815227f586f1373728258a447d1a78f3ab5cdfd..ce6056ad0ff8313c7a48b871e062e80646a429cd 100644
+--- a/apps/api/src/users/users.controller.ts
++++ b/apps/api/src/users/users.controller.ts
+@@ -1,69 +1,100 @@
+ import {
+   BadRequestException,
+   Body,
+   Controller,
+   ForbiddenException,
+   Get,
+   Patch,
+   Req,
+   UseGuards,
+ } from '@nestjs/common';
+ import { AuthGuard } from '@nestjs/passport';
+ import type { Request } from 'express';
+ import { UpdateSubscriptionTierDto } from './dto/update-subscription-tier.dto';
++import { UpdateProfileDto } from './dto/update-profile.dto';
+ import { UsersService } from './users.service';
+ import { SubscriptionTier } from '../subscription/subscription-tier.enum';
+ import { UserRole } from './user.entity';
+ import { Entitlements } from '../features/feature-gates';
+ 
+ type UserRequest = Request & {
+   user?: {
+     id?: string;
+     email?: string;
+     role?: UserRole;
+     subscriptionTier?: SubscriptionTier;
+     entitlements?: Entitlements;
+   };
+ };
+ 
+ @Controller('users')
+ @UseGuards(AuthGuard('jwt'))
+ export class UsersController {
+   constructor(private readonly usersService: UsersService) {}
+ 
+   @Get('me')
+   me(@Req() request: UserRequest) {
+     const user = request.user;
+ 
+     if (!user) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     return user;
+   }
+ 
++
++  @Patch('me/profile')
++  async updateMyProfile(
++    @Body() body: UpdateProfileDto,
++    @Req() request: UserRequest,
++  ) {
++    const user = request.user;
++
++    if (!user?.id) {
++      throw new BadRequestException('Invalid user context');
++    }
++
++    const roleTitle = body.roleTitle?.trim();
++    const intendedUse = body.intendedUse?.trim();
++
++    if (!roleTitle || !intendedUse) {
++      throw new BadRequestException('roleTitle and intendedUse are required');
++    }
++
++    const updated = await this.usersService.updateMyProfile(user.id, {
++      roleTitle,
++      company: body.company,
++      linkedinUrl: body.linkedinUrl,
++      intendedUse,
++    });
++
++    const { passwordHash, ...sanitized } = updated;
++    return sanitized;
++  }
++
+   @Patch('me/subscription-tier')
+   async updateSubscriptionTier(
+     @Body() body: UpdateSubscriptionTierDto,
+     @Req() request: UserRequest,
+   ) {
+     const user = request.user;
+ 
+     if (!user?.id) {
+       throw new BadRequestException('Invalid user context');
+     }
+ 
+     const isProd = process.env.NODE_ENV === 'production';
+     const isAdmin = user.role === 'admin';
+ 
+     if (isProd && !isAdmin) {
+       throw new ForbiddenException(
+         'Subscription tier updates are disabled in production.',
+       );
+     }
+ 
+     const requested = (body.tier ?? '').trim().toUpperCase();
+ 
+     if (
+       !Object.values(SubscriptionTier).includes(requested as SubscriptionTier)
+     ) {
+diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
+index 06e45e81592c53cc71d58f672c0b8607cdcd44a1..ee3e48b5ffbf271dff625f7bf45214a9582950b7 100644
+--- a/apps/api/src/users/users.service.ts
++++ b/apps/api/src/users/users.service.ts
+@@ -6,58 +6,91 @@ import { User } from './user.entity';
+ import { AccountType } from './account-type.enum';
+ 
+ @Injectable()
+ export class UsersService {
+   constructor(
+     @InjectRepository(User)
+     private readonly usersRepository: Repository<User>,
+   ) {}
+ 
+   async create(input: {
+     email: string;
+     passwordHash: string;
+     firstName: string;
+     lastName: string;
+     emailConfirmed: boolean;
+   }): Promise<User> {
+     const user = this.usersRepository.create({
+       email: input.email,
+       passwordHash: input.passwordHash,
+       firstName: input.firstName,
+       lastName: input.lastName,
+       emailConfirmed: input.emailConfirmed,
+       // VERIFY: Confirm null calibration defaults are desired on signup.
+       calibrationProfileName: null,
+       calibrationWeights: null,
++      roleTitle: null,
++      company: null,
++      linkedinUrl: null,
++      intendedUse: null,
++      profileCompletedAt: null,
+       role: 'user',
+       subscriptionTier: SubscriptionTier.FREE,
+       accountType: AccountType.FREE,
+     });
+     return this.usersRepository.save(user);
+   }
+ 
+   findByEmail(email: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { email } });
+   }
+ 
+   findById(id: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { id } });
+   }
+ 
+   async updateSubscriptionTier(
+     userId: string,
+     tier: SubscriptionTier,
+   ): Promise<User> {
+     const user = await this.findById(userId);
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+     user.subscriptionTier = tier;
+     return this.usersRepository.save(user);
+   }
+ 
++
++  async updateMyProfile(
++    userId: string,
++    input: {
++      roleTitle: string;
++      company?: string | null;
++      linkedinUrl?: string | null;
++      intendedUse: string;
++    },
++  ): Promise<User> {
++    const user = await this.findById(userId);
++
++    if (!user) {
++      throw new NotFoundException('User not found');
++    }
++
++    user.roleTitle = input.roleTitle.trim();
++    user.company = input.company?.trim() || null;
++    user.linkedinUrl = input.linkedinUrl?.trim() || null;
++    user.intendedUse = input.intendedUse.trim();
++
++    if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
++      user.profileCompletedAt = new Date();
++    }
++
++    return this.usersRepository.save(user);
++  }
++
+   async setEmailConfirmed(userId: string): Promise<void> {
+     await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
+   }
+ }
+diff --git a/apps/web/app/(public)/auth/_components/auth-form.tsx b/apps/web/app/(public)/auth/_components/auth-form.tsx
+index 0c5f25dfb7c19220f3390450ecc10f3ba1f4f26f..4de8d5bbda04cff031bbe9d9a716c23ecae7f58c 100644
+--- a/apps/web/app/(public)/auth/_components/auth-form.tsx
++++ b/apps/web/app/(public)/auth/_components/auth-form.tsx
+@@ -8,50 +8,72 @@ import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+ interface AuthFormProps {
+   mode: "login" | "register";
+   returnPath?: string | null;
+ }
+ 
+ function extractAuthApiMessage(value: unknown): string | undefined {
+   if (!value || typeof value !== "object") {
+     return undefined;
+   }
+   const candidate = value as { message?: unknown; error?: unknown };
+   if (typeof candidate.message === "string" && candidate.message.length) {
+     return candidate.message;
+   }
+   if (Array.isArray(candidate.message)) {
+     const filtered = candidate.message.filter((item): item is string => typeof item === "string");
+     if (filtered.length) {
+       return filtered.join(", ");
+     }
+   }
+   if (typeof candidate.error === "string" && candidate.error.length) {
+     return candidate.error;
+   }
+   return undefined;
+ }
+ 
++
++function needsProfileCompletion(value: unknown): boolean {
++  if (!value || typeof value !== "object") {
++    return true;
++  }
++
++  const user = value as {
++    roleTitle?: unknown;
++    intendedUse?: unknown;
++    profileCompletedAt?: unknown;
++  };
++
++  return !(
++    typeof user.profileCompletedAt === "string" &&
++    user.profileCompletedAt.length > 0 &&
++    typeof user.roleTitle === "string" &&
++    user.roleTitle.trim().length > 0 &&
++    typeof user.intendedUse === "string" &&
++    user.intendedUse.trim().length > 0
++  );
++}
++
+ export function AuthForm({ mode, returnPath }: AuthFormProps) {
+   const router = useRouter();
+   const [firstName, setFirstName] = useState("");
+   const [lastName, setLastName] = useState("");
+   const [email, setEmail] = useState("");
+   const [password, setPassword] = useState("");
+   const [confirmPassword, setConfirmPassword] = useState("");
+   const [error, setError] = useState<string | null>(null);
+   const [message, setMessage] = useState<string | null>(null);
+   const [isSubmitting, setIsSubmitting] = useState(false);
+ 
+   const isLogin = mode === "login";
+   const title = isLogin ? "Log in" : "Create an account";
+   const actionLabel = isLogin ? "Log in" : "Register";
+   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
+   const helperHref = isLogin ? "/auth/signup" : "/auth/login";
+   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
+   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+ 
+   const onSubmit = async (event: FormEvent) => {
+     event.preventDefault();
+     setError(null);
+     setMessage(null);
+ 
+     const trimmedEmail = email.trim();
+@@ -111,50 +133,64 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
+           const code =
+             typeof accessCodeRequired === "object" && accessCodeRequired
+               ? (accessCodeRequired as { code?: unknown }).code
+               : undefined;
+           if (code === "ACCESS_CODE_REQUIRED") {
+             const params = new URLSearchParams();
+             params.set("email", trimmedEmail);
+             params.set("next", returnPath ?? "/");
+             router.push(`/auth/access-code?${params.toString()}`);
+             return;
+           }
+         }
+ 
+         setError(messageFromApi);
+         return;
+       }
+ 
+       if (!isLogin) {
+         const successMessage =
+           extractAuthApiMessage(data) ?? "Check your email to confirm your account.";
+         setMessage(successMessage);
+         return;
+       }
+ 
+       const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
++      const meResponse = await fetch("/api/users/me", {
++        method: "GET",
++        credentials: "include",
++      });
++      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
++
++      if (needsProfileCompletion(mePayload)) {
++        const params = new URLSearchParams();
++        params.set("next", targetPath);
++        await router.replace(`/onboarding/profile?${params.toString()}`);
++        await router.refresh();
++        return;
++      }
++
+       await router.replace(targetPath);
+       await router.refresh();
+     } catch (submitError) {
+       console.error("Auth request failed", submitError);
+       setError("Unable to reach authentication service");
+     } finally {
+       setIsSubmitting(false);
+     }
+   };
+ 
+   return (
+     <div className="mx-auto w-full max-w-md space-y-6">
+       <div className="space-y-2 text-center">
+         <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
+         <p className="text-sm text-gray-600">
+           Use your Target This Role credentials to continue.
+         </p>
+       </div>
+ 
+       <form
+         onSubmit={onSubmit}
+         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+       >
+         <div className="space-y-2">
+           {!isLogin && (
+diff --git a/apps/web/app/(public)/auth/access-code/access-code-form.tsx b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
+index 6931ff27416efbd7bd84587cdd1c77b1416d8a7f..b07bfa78a67a8d206a7ad5200225ab59abc88f53 100644
+--- a/apps/web/app/(public)/auth/access-code/access-code-form.tsx
++++ b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
+@@ -1,63 +1,125 @@
+ "use client";
+ 
+ import { FormEvent, useState } from "react";
+ import { useRouter } from "next/navigation";
++import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
++
++function extractMessage(value: unknown): string {
++  if (!value || typeof value !== "object") {
++    return "Unable to redeem access code.";
++  }
++
++  const payload = value as { message?: unknown; error?: unknown };
++  if (typeof payload.message === "string" && payload.message.length) {
++    return payload.message;
++  }
++  if (typeof payload.error === "string" && payload.error.length) {
++    return payload.error;
++  }
++
++  return "Unable to redeem access code.";
++}
++
++function needsProfileCompletion(value: unknown): boolean {
++  if (!value || typeof value !== "object") {
++    return true;
++  }
++
++  const user = value as {
++    roleTitle?: unknown;
++    intendedUse?: unknown;
++    profileCompletedAt?: unknown;
++  };
++
++  return !(
++    typeof user.profileCompletedAt === "string" &&
++    user.profileCompletedAt.length > 0 &&
++    typeof user.roleTitle === "string" &&
++    user.roleTitle.trim().length > 0 &&
++    typeof user.intendedUse === "string" &&
++    user.intendedUse.trim().length > 0
++  );
++}
+ 
+ export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: string; returnPath: string }) {
+   const router = useRouter();
+   const [email, setEmail] = useState(initialEmail);
+   const [password, setPassword] = useState("");
+   const [code, setCode] = useState("");
+   const [error, setError] = useState<string | null>(null);
+   const [isSubmitting, setIsSubmitting] = useState(false);
+ 
+   const onSubmit = async (event: FormEvent) => {
+     event.preventDefault();
+     setError(null);
+ 
+     if (!email.trim() || !password || !code.trim()) {
+       setError("Email, password, and access code are required.");
+       return;
+     }
+ 
+     setIsSubmitting(true);
+     try {
+       const response = await fetch("/api/auth/redeem-access-code-and-login", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         credentials: "include",
+         body: JSON.stringify({ email: email.trim(), password, code: code.trim() }),
+       });
+ 
+-      const body = await response.text();
++      const raw = await response.text();
++      let body: unknown = null;
++      if (raw) {
++        try {
++          body = JSON.parse(raw);
++        } catch {
++          body = null;
++        }
++      }
+       if (!response.ok) {
+-        setError(body || "Unable to redeem access code.");
++        setError(extractMessage(body));
++        return;
++      }
++
++      const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
++      const meResponse = await fetch("/api/users/me", {
++        method: "GET",
++        credentials: "include",
++      });
++      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
++
++      if (needsProfileCompletion(mePayload)) {
++        const params = new URLSearchParams();
++        params.set("next", targetPath);
++        router.replace(`/onboarding/profile?${params.toString()}`);
++        router.refresh();
+         return;
+       }
+ 
+-      router.push(returnPath || "/");
++      router.replace(targetPath);
++      router.refresh();
+     } catch {
+       setError("Unable to reach authentication service");
+     } finally {
+       setIsSubmitting(false);
+     }
+   };
+ 
+   return (
+     <div className="mx-auto w-full max-w-md space-y-6">
+       <div className="space-y-2 text-center">
+         <h1 className="text-3xl font-bold text-gray-900">Enter Access Code</h1>
+-        <p className="text-sm text-gray-600">Your account needs a beta access code before login.</p>
++        <p className="text-sm text-gray-600">Your account needs an access code before login.</p>
+       </div>
+       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
+         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
+         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase" type="text" placeholder="TTR-XXXX-XXXX-XXXX" value={code} onChange={(e)=>setCode(e.target.value.toUpperCase())} required />
+         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+         <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+           {isSubmitting ? "Working..." : "Redeem code and log in"}
+         </button>
+       </form>
+     </div>
+   );
+ }
+diff --git a/apps/web/app/(public)/onboarding/profile/page.tsx b/apps/web/app/(public)/onboarding/profile/page.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f62f5e748ed174f662678055a30385059f97105
+--- /dev/null
++++ b/apps/web/app/(public)/onboarding/profile/page.tsx
+@@ -0,0 +1,9 @@
++import { ProfileCompletionForm } from './profile-completion-form';
++
++export default function OnboardingProfilePage({
++  searchParams,
++}: {
++  searchParams?: { next?: string };
++}) {
++  return <ProfileCompletionForm returnPath={searchParams?.next ?? '/baseline'} />;
++}
+diff --git a/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..1855c202dc23e1ca6275d5eaa54d39fed7462620
+--- /dev/null
++++ b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
+@@ -0,0 +1,73 @@
++"use client";
++
++import { FormEvent, useState } from "react";
++import { useRouter } from "next/navigation";
++import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
++
++export function ProfileCompletionForm({ returnPath }: { returnPath: string }) {
++  const router = useRouter();
++  const [roleTitle, setRoleTitle] = useState("");
++  const [company, setCompany] = useState("");
++  const [linkedinUrl, setLinkedinUrl] = useState("");
++  const [intendedUse, setIntendedUse] = useState("");
++  const [error, setError] = useState<string | null>(null);
++  const [isSubmitting, setIsSubmitting] = useState(false);
++
++  const onSubmit = async (event: FormEvent) => {
++    event.preventDefault();
++    setError(null);
++
++    if (!roleTitle.trim() || !intendedUse.trim()) {
++      setError("Role title and intended use are required.");
++      return;
++    }
++
++    setIsSubmitting(true);
++    try {
++      const response = await fetch("/api/users/me/profile", {
++        method: "PATCH",
++        headers: { "Content-Type": "application/json" },
++        credentials: "include",
++        body: JSON.stringify({
++          roleTitle: roleTitle.trim(),
++          company: company.trim() || undefined,
++          linkedinUrl: linkedinUrl.trim() || undefined,
++          intendedUse: intendedUse.trim(),
++        }),
++      });
++
++      if (!response.ok) {
++        const raw = await response.text();
++        setError(raw || "Unable to save profile");
++        return;
++      }
++
++      const target = sanitizeReturnPath(returnPath) ?? "/baseline";
++      router.replace(target);
++      router.refresh();
++    } catch {
++      setError("Unable to save profile");
++    } finally {
++      setIsSubmitting(false);
++    }
++  };
++
++  return (
++    <div className="mx-auto w-full max-w-md space-y-6">
++      <div className="space-y-2 text-center">
++        <h1 className="text-3xl font-bold text-gray-900">Complete your profile</h1>
++        <p className="text-sm text-gray-600">Tell us how you plan to use Target This Role.</p>
++      </div>
++      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
++        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Role title" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} required />
++        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Company (optional)" value={company} onChange={(e) => setCompany(e.target.value)} />
++        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="LinkedIn URL (optional)" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
++        <textarea className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="How do you intend to use the app?" value={intendedUse} onChange={(e) => setIntendedUse(e.target.value)} required rows={4} />
++        {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
++        <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
++          {isSubmitting ? "Saving..." : "Continue"}
++        </button>
++      </form>
++    </div>
++  );
++}
+diff --git a/apps/web/app/api/users/me/profile/route.ts b/apps/web/app/api/users/me/profile/route.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e372e1faa8b9f57b6a442de330ac4101f554094
+--- /dev/null
++++ b/apps/web/app/api/users/me/profile/route.ts
+@@ -0,0 +1,33 @@
++import { NextRequest } from "next/server";
++import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
++
++export const runtime = "nodejs";
++
++export async function PATCH(req: NextRequest) {
++  const baseUrl = getApiBaseUrl();
++  const auth = requireAuthToken(req);
++
++  if (!baseUrl) {
++    return new Response(JSON.stringify({ error: "API base URL is not configured" }), {
++      status: 500,
++      headers: { "content-type": "application/json" },
++    });
++  }
++
++  if (!auth.token) {
++    return auth.error;
++  }
++
++  const body = await req.text();
++
++  const response = await fetch(`${baseUrl}/users/me/profile`, {
++    method: "PATCH",
++    headers: {
++      Authorization: `Bearer ${auth.token}`,
++      "content-type": req.headers.get("content-type") ?? "application/json",
++    },
++    body: body || undefined,
++  });
++
++  return relayApiResponse(response);
++}

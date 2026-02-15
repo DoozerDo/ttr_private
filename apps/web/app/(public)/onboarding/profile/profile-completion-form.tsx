@@ -1,0 +1,73 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+
+export function ProfileCompletionForm({ returnPath }: { returnPath: string }) {
+  const router = useRouter();
+  const [roleTitle, setRoleTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [intendedUse, setIntendedUse] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+
+    if (!roleTitle.trim() || !intendedUse.trim()) {
+      setError("Role title and intended use are required.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch("/api/users/me/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          roleTitle: roleTitle.trim(),
+          company: company.trim() || undefined,
+          linkedinUrl: linkedinUrl.trim() || undefined,
+          intendedUse: intendedUse.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        const raw = await response.text();
+        setError(raw || "Unable to save profile");
+        return;
+      }
+
+      const target = sanitizeReturnPath(returnPath) ?? "/baseline";
+      router.replace(target);
+      router.refresh();
+    } catch {
+      setError("Unable to save profile");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-md space-y-6">
+      <div className="space-y-2 text-center">
+        <h1 className="text-3xl font-bold text-gray-900">Complete your profile</h1>
+        <p className="text-sm text-gray-600">Tell us how you plan to use Target This Role.</p>
+      </div>
+      <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Role title" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} required />
+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Company (optional)" value={company} onChange={(e) => setCompany(e.target.value)} />
+        <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="LinkedIn URL (optional)" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
+        <textarea className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="How do you intend to use the app?" value={intendedUse} onChange={(e) => setIntendedUse(e.target.value)} required rows={4} />
+        {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+        <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+          {isSubmitting ? "Saving..." : "Continue"}
+        </button>
+      </form>
+    </div>
+  );
+}

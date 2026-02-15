@@ -21,7 +21,11 @@ describe('AuthService', () => {
   let jwtService: JwtService;
   let configService: { get: jest.Mock };
   let adminUsersService: { isAdmin: jest.Mock };
-  let accessCodesService: { redeemCodeForUser: jest.Mock; redeemAssignedCodeForUser: jest.Mock };
+  let accessCodesService: {
+    redeemCodeForUser: jest.Mock;
+    redeemAssignedCodeForUser: jest.Mock;
+    userHasActiveAccess: jest.Mock;
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -48,6 +52,7 @@ describe('AuthService', () => {
           useValue: {
             redeemCodeForUser: jest.fn(),
             redeemAssignedCodeForUser: jest.fn().mockResolvedValue(false),
+            userHasActiveAccess: jest.fn().mockResolvedValue(false),
           },
         },
         {
@@ -105,10 +110,14 @@ describe('AuthService', () => {
       firstName: payload.firstName,
       lastName: payload.lastName,
       emailConfirmed: true,
-      betaAccessApproved: false,
       passwordHash: '',
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -142,10 +151,14 @@ describe('AuthService', () => {
       firstName: 'Test',
       lastName: 'User',
       emailConfirmed: true,
-      betaAccessApproved: false,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -166,7 +179,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('allows admin users to log in without beta access approval when access code is required', async () => {
+  it('allows admin users to log in when access code is required', async () => {
     const payload: LoginDto = {
       email: 'admin@example.com',
       password: 'Password123',
@@ -178,10 +191,14 @@ describe('AuthService', () => {
       firstName: 'Admin',
       lastName: 'User',
       emailConfirmed: true,
-      betaAccessApproved: false,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -215,7 +232,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('auto-redeems an assigned access code during login when beta approval is missing', async () => {
+  it('auto-redeems an assigned access code during login when no active access code exists', async () => {
     const payload: LoginDto = {
       email: 'member@example.com',
       password: 'Password123',
@@ -227,10 +244,14 @@ describe('AuthService', () => {
       firstName: 'Member',
       lastName: 'User',
       emailConfirmed: true,
-      betaAccessApproved: false,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -255,10 +276,12 @@ describe('AuthService', () => {
 
     adminUsersService.isAdmin.mockResolvedValue(false);
 
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
 
     const result = await service.login(payload);
 
+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
     expect(result.accessToken).toEqual('signed-token');
     expect(result.user).toMatchObject({
@@ -279,10 +302,14 @@ describe('AuthService', () => {
       firstName: 'Member',
       lastName: 'User',
       emailConfirmed: true,
-      betaAccessApproved: false,
       passwordHash,
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -307,6 +334,7 @@ describe('AuthService', () => {
 
     adminUsersService.isAdmin.mockResolvedValue(false);
 
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
 
     await expect(service.login(payload)).rejects.toMatchObject({
@@ -316,7 +344,53 @@ describe('AuthService', () => {
       },
     });
 
+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+  });
+
+  it('allows login with an existing active access code when required', async () => {
+    const payload: LoginDto = {
+      email: 'active@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'active-user-id',
+      email: payload.email,
+      firstName: 'Active',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      return undefined;
+    });
+
+    accessCodesService.userHasActiveAccess.mockResolvedValue(true);
+
+    const result = await service.login(payload);
+
+    expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
+    expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
+    expect(result.accessToken).toEqual('signed-token');
   });
 
 });

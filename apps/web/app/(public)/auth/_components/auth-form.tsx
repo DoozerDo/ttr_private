@@ -30,6 +30,28 @@ function extractAuthApiMessage(value: unknown): string | undefined {
   return undefined;
 }
 
+
+function needsProfileCompletion(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return true;
+  }
+
+  const user = value as {
+    roleTitle?: unknown;
+    intendedUse?: unknown;
+    profileCompletedAt?: unknown;
+  };
+
+  return !(
+    typeof user.profileCompletedAt === "string" &&
+    user.profileCompletedAt.length > 0 &&
+    typeof user.roleTitle === "string" &&
+    user.roleTitle.trim().length > 0 &&
+    typeof user.intendedUse === "string" &&
+    user.intendedUse.trim().length > 0
+  );
+}
+
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
@@ -133,6 +155,20 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       }
 
       const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
+      const meResponse = await fetch("/api/users/me", {
+        method: "GET",
+        credentials: "include",
+      });
+      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
+
+      if (needsProfileCompletion(mePayload)) {
+        const params = new URLSearchParams();
+        params.set("next", targetPath);
+        await router.replace(`/onboarding/profile?${params.toString()}`);
+        await router.refresh();
+        return;
+      }
+
       await router.replace(targetPath);
       await router.refresh();
     } catch (submitError) {

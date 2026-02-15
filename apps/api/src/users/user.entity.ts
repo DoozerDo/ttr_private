@@ -43,15 +43,27 @@ export class User {
   @Column({ type: 'boolean', default: false })
   emailConfirmed!: boolean;
 
-  @Column({ type: 'boolean', default: false })
-  betaAccessApproved!: boolean;
-
   @Column({ type: 'character varying', length: 255, nullable: true })
   calibrationProfileName!: string | null;
 
   // VERIFY: Ensure null defaults are acceptable for calibration weights.
   @Column({ type: 'jsonb', nullable: true })
   calibrationWeights!: CalibrationWeights | null;
+
+  @Column({ type: 'character varying', length: 150, nullable: true })
+  roleTitle?: string | null;
+
+  @Column({ type: 'character varying', length: 150, nullable: true })
+  company?: string | null;
+
+  @Column({ type: 'character varying', length: 255, nullable: true })
+  linkedinUrl?: string | null;
+
+  @Column({ type: 'character varying', length: 255, nullable: true })
+  intendedUse?: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  profileCompletedAt?: Date | null;
 
   @Column({ type: 'character varying', length: 50, default: 'user' })
   role!: UserRole;

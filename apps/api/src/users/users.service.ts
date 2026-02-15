@@ -28,6 +28,11 @@ export class UsersService {
       // VERIFY: Confirm null calibration defaults are desired on signup.
       calibrationProfileName: null,
       calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
       role: 'user',
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
@@ -54,6 +59,34 @@ export class UsersService {
     }
 
     user.subscriptionTier = tier;
+    return this.usersRepository.save(user);
+  }
+
+
+  async updateMyProfile(
+    userId: string,
+    input: {
+      roleTitle: string;
+      company?: string | null;
+      linkedinUrl?: string | null;
+      intendedUse: string;
+    },
+  ): Promise<User> {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.roleTitle = input.roleTitle.trim();
+    user.company = input.company?.trim() || null;
+    user.linkedinUrl = input.linkedinUrl?.trim() || null;
+    user.intendedUse = input.intendedUse.trim();
+
+    if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
+      user.profileCompletedAt = new Date();
+    }
+
     return this.usersRepository.save(user);
   }
 
