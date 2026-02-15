@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import { getServerApiBaseUrl } from "@/lib/apiBase";
+import { backendFetch, isBackendUnavailableResponse } from "../_lib/backendFetch";
 
 const AUTH_API_BASE_URL = getServerApiBaseUrl();
 
@@ -58,7 +59,7 @@ export async function forwardAuthRequest(
   let apiResponse: Response;
 
   try {
-    apiResponse = await fetch(apiUrl, {
+    apiResponse = await backendFetch(apiUrl, {
       method: req.method,
       headers: {
         "content-type": req.headers.get("content-type") ?? "application/json",
@@ -68,6 +69,10 @@ export async function forwardAuthRequest(
   } catch (error) {
     console.error("Auth request failed", error);
     return NextResponse.json({ error: "Unable to reach API" }, { status: 500 });
+  }
+
+  if (await isBackendUnavailableResponse(apiResponse)) {
+    return apiResponse;
   }
 
   const rawBody = await apiResponse.text();

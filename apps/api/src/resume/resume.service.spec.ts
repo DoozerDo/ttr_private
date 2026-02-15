@@ -23,6 +23,7 @@ import {
 } from '../compliance/compliance.types';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import { ApplicationsService } from '../applications/applications.service';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
 
 const baselineSection: BaselineSection = {
@@ -233,6 +234,13 @@ const buildService = (
     complianceOverride,
   );
 
+  const applicationsService = {
+    upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+      id: 'tracker-entry',
+      status: 'Prepared',
+    }),
+  } as Partial<ApplicationsService>;
+
   const service = new ResumeService(
     baselineRepository,
     baselineVersionRepository,
@@ -240,11 +248,13 @@ const buildService = (
     jobsRepository,
     fitAssessmentRepository,
     complianceService,
+    applicationsService as ApplicationsService,
   );
 
   return {
     service,
     complianceService,
+    applicationsService: applicationsService as jest.Mocked<ApplicationsService>,
   };
 };
 
@@ -337,6 +347,16 @@ describe('ResumeService', () => {
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(true);
     expect(result.sections).toHaveLength(4);
+  });
+
+  it('records tracker entry info from resume generation', async () => {
+    const { service, applicationsService } = buildService(AUTO_GENERATE_THRESHOLD);
+
+    const result = await service.generateResume('user-1', baseRequest);
+
+    expect(applicationsService.upsertPreparedFromResumeGeneration).toHaveBeenCalled();
+    expect(result.trackerEntryId).toBe('tracker-entry');
+    expect(result.trackerStatus).toBe('Prepared');
   });
 
   it('returns draft quality when fit score is below threshold', async () => {

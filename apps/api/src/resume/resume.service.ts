@@ -19,6 +19,8 @@ import { ComplianceService } from '../compliance/compliance.service';
 import { validateComplianceWithFallback } from '../compliance/compliance-error.utils';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
+import { ApplicationsService } from '../applications/applications.service';
+import type { CxFitScoreSnapshot } from '../applications/applications.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import '../docx-templates/templates';
 import {
@@ -60,6 +62,7 @@ export class ResumeService {
     @InjectRepository(FitAssessment)
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly complianceService: ComplianceService,
+    private readonly applicationsService: ApplicationsService,
   ) {}
 
   private async findLatestAssessment(userId: string, jobId: string) {
@@ -349,6 +352,7 @@ export class ResumeService {
     const latestAssessment = jobId
       ? await this.findLatestAssessment(userId, jobId)
       : null;
+    const cxFitScoreSnapshot = this.buildCxFitScoreSnapshot(latestAssessment);
 
     const shouldEnforceOneTap = options?.enforceOneTap ?? true;
 
@@ -392,11 +396,24 @@ export class ResumeService {
 
     const complianceBlocked = blocked;
 
+    const trackerEntry = await this.applicationsService.upsertPreparedFromResumeGeneration({
+      userId,
+      jobId: job?.id ?? null,
+      companyName: job?.company ?? null,
+      roleTitle: job?.title ?? null,
+      jobUrl: job?.canonicalUrl ?? job?.sourceUrl ?? null,
+      jobText: job?.rawDescription ?? null,
+      baselineVersionId: baselineVersion.id,
+      cxFitScoreSnapshot,
+      resumeArtifactId: audit.id,
+      resumeArtifactType: 'resume',
+    });
+
     const quality =
-      latestAssessment &&
-      latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
-        ? 'optimized'
-        : 'draft';
+        latestAssessment &&
+        latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
+          ? 'optimized'
+          : 'draft';
 
     return {
       ok: true,
@@ -410,6 +427,25 @@ export class ResumeService {
       auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
       quality,
+      trackerEntryId: trackerEntry.id,
+      trackerStatus: trackerEntry.status,
+    };
+  }
+
+  private buildCxFitScoreSnapshot(
+    assessment?: FitAssessment | null,
+  ): CxFitScoreSnapshot | undefined {
+    if (!assessment) {
+      return undefined;
+    }
+
+    return {
+      overallScore: assessment.overallScore,
+      verdict: assessment.verdict,
+      dimensionScores: assessment.dimensionScores,
+      weights: assessment.scoringV2?.rubric?.weights,
+      scoringContractVersion: assessment.scoringV2?.rubric?.id,
+      createdAt: assessment.createdAt.toISOString(),
     };
   }
 

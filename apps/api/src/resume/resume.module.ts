@@ -7,6 +7,7 @@ import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { Job } from '../jobs/job.entity';
+import { ApplicationsModule } from '../applications/applications.module';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -21,6 +22,7 @@ import { ResumeService } from './resume.service';
       Job,
     ]),
     ComplianceModule,
+    ApplicationsModule,
   ],
   controllers: [ResumeController],
   providers: [ResumeService],

@@ -1,21 +1,37 @@
-import { ApplicationsService } from './applications.service';
 import { ComplianceAction } from '../compliance/compliance.types';
-import { Application, ApplicationStage } from './application.entity';
+import { ApplicationsService, CxFitScoreSnapshot } from './applications.service';
+import {
+  Application,
+  ApplicationStage,
+  ApplicationTrackerStatus,
+} from './application.entity';
 
 describe('ApplicationsService', () => {
+  const baseDate = new Date('2025-01-01T00:00:00.000Z');
+  const laterDate = new Date('2025-01-02T00:00:00.000Z');
+
   const mockApplication: Application = {
     id: 'app-1',
     userId: 'user-1',
     jobId: null,
     company: 'Acme Corp',
     title: 'Software Engineer',
+    jobUrl: null,
+    fingerprint: 'manual:existing',
+    status: ApplicationTrackerStatus.PREPARED,
+    preparedAt: baseDate,
+    appliedAt: null,
+    lastTouchedAt: laterDate,
+    baselineVersionId: null,
     appliedDate: null,
     fitScore: null,
     stage: ApplicationStage.SAVED,
     notes: null,
     sourceUrl: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    cxFitScoreSnapshot: {},
+    resumeArtifacts: [],
+    createdAt: baseDate,
+    updatedAt: laterDate,
   };
 
   const createMockRepository = () => ({
@@ -73,17 +89,27 @@ describe('ApplicationsService', () => {
         title: 'Software Engineer',
       });
 
-      expect(repository.create).toHaveBeenCalledWith({
-        userId: 'user-1',
-        jobId: null,
-        company: 'Acme Corp',
-        title: 'Software Engineer',
-        appliedDate: null,
-        fitScore: null,
-        stage: ApplicationStage.SAVED,
-        notes: null,
-        sourceUrl: null,
-      });
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          jobId: null,
+          company: 'Acme Corp',
+          title: 'Software Engineer',
+          jobUrl: null,
+          fingerprint: expect.stringMatching(/^manual:/),
+          status: ApplicationTrackerStatus.PREPARED,
+          preparedAt: expect.any(Date),
+          appliedAt: null,
+          lastTouchedAt: expect.any(Date),
+          baselineVersionId: null,
+          fitScore: null,
+          stage: ApplicationStage.SAVED,
+          notes: null,
+          sourceUrl: null,
+          cxFitScoreSnapshot: {},
+          resumeArtifacts: [],
+        }),
+      );
       expect(repository.save).toHaveBeenCalled();
       expect(result.company).toBe('Acme Corp');
     });
@@ -142,6 +168,19 @@ describe('ApplicationsService', () => {
       expect(queryBuilder.andWhere).toHaveBeenCalledWith(
         'LOWER(application.company) LIKE LOWER(:company)',
         { company: '%Acme%' },
+      );
+    });
+
+    it('orders by lastTouchedAt', async () => {
+      const repository = createMockRepository();
+      const queryBuilder = repository.createQueryBuilder();
+      const service = createService(repository);
+
+      await service.listApplicationsForUser('user-1');
+
+      expect(queryBuilder.orderBy).toHaveBeenCalledWith(
+        'application.lastTouchedAt',
+        'DESC',
       );
     });
   });
@@ -252,7 +291,7 @@ describe('ApplicationsService', () => {
 
       expect(repository.find).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
-        order: { createdAt: 'DESC' },
+        order: { lastTouchedAt: 'DESC' },
       });
       expect(result.csv).toContain(
         'company,title,appliedDate,fitScore,stage,notes,sourceUrl',
@@ -267,6 +306,144 @@ describe('ApplicationsService', () => {
           action: ComplianceAction.APPLICATION_EXPORT,
           actorId: 'user-1',
           outputHash: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  describe('upsertPreparedFromResumeGeneration', () => {
+    it('creates a prepared entry when none exists', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(null);
+      const service = createService(repository);
+      const snapshot: CxFitScoreSnapshot = {
+        overallScore: 92,
+        verdict: 'APPLY',
+        dimensionScores: { key: 1 },
+        createdAt: new Date().toISOString(),
+      };
+
+      await service.upsertPreparedFromResumeGeneration({
+        userId: 'user-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        baselineVersionId: 'baseline-v1',
+        cxFitScoreSnapshot: snapshot,
+        resumeArtifactId: 'artifact-1',
+      });
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          jobId: 'job-1',
+          company: 'Acme Corp',
+          title: 'Engineer',
+          fingerprint: expect.stringContaining('job:'),
+          status: ApplicationTrackerStatus.PREPARED,
+          baselineVersionId: 'baseline-v1',
+          fitScore: snapshot.overallScore,
+          sourceUrl: null,
+        }),
+      );
+      expect(repository.save).toHaveBeenCalled();
+    });
+
+    it('dedupes and appends artifacts for prepared entries', async () => {
+      const repository = createMockRepository();
+      const existing = {
+        ...mockApplication,
+        fingerprint: 'job:job-1',
+        resumeArtifacts: [
+          {
+            resumeArtifactId: 'artifact-1',
+            type: 'resume',
+            createdAt: baseDate.toISOString(),
+          },
+        ],
+      };
+      repository.findOne.mockResolvedValue(existing);
+      const service = createService(repository);
+
+      await service.upsertPreparedFromResumeGeneration({
+        userId: 'user-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        baselineVersionId: 'baseline-v1',
+        resumeArtifactId: 'artifact-2',
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resumeArtifacts: expect.arrayContaining([
+            expect.objectContaining({ resumeArtifactId: 'artifact-1' }),
+            expect.objectContaining({ resumeArtifactId: 'artifact-2' }),
+          ]),
+        }),
+      );
+    });
+
+    it('keeps applied entries applied and retains snapshot', async () => {
+      const repository = createMockRepository();
+      const existing = {
+        ...mockApplication,
+        fingerprint: 'job:job-1',
+        status: ApplicationTrackerStatus.APPLIED,
+        cxFitScoreSnapshot: { overallScore: 50, verdict: 'CONSIDER', dimensionScores: {}, createdAt: baseDate.toISOString() },
+      };
+      repository.findOne.mockResolvedValue(existing);
+      const service = createService(repository);
+      const snapshot: CxFitScoreSnapshot = {
+        overallScore: 91,
+        verdict: 'APPLY',
+        dimensionScores: {},
+        createdAt: new Date().toISOString(),
+      };
+
+      await service.upsertPreparedFromResumeGeneration({
+        userId: 'user-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        baselineVersionId: 'baseline-v1',
+        cxFitScoreSnapshot: snapshot,
+        resumeArtifactId: 'artifact-3',
+      });
+
+      expect(repository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: ApplicationTrackerStatus.APPLIED,
+          cxFitScoreSnapshot: existing.cxFitScoreSnapshot,
+        }),
+      );
+    });
+
+    it('falls back to fingerprint hash when jobId is missing', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(null);
+      const service = createService(repository);
+      const computed = (service as any).computeFingerprint({
+        userId: 'user-1',
+        companyName: 'Acme',
+        roleTitle: 'Engineer',
+        jobUrl: 'https://example.com',
+        baselineVersionId: 'baseline-v1',
+        resumeArtifactId: 'artifact-4',
+      });
+
+      await service.upsertPreparedFromResumeGeneration({
+        userId: 'user-1',
+        companyName: 'Acme',
+        roleTitle: 'Engineer',
+        jobUrl: 'https://example.com',
+        baselineVersionId: 'baseline-v1',
+        resumeArtifactId: 'artifact-4',
+      });
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fingerprint: computed,
         }),
       );
     });

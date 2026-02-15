@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
@@ -106,6 +106,18 @@ function normalizeAuditId(value: unknown): string | undefined {
     if (typeof candidate === "string" && candidate.trim()) {
       return candidate.trim();
     }
+  }
+  return undefined;
+}
+
+function readTrackerField(payload: unknown, key: string): string | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const value = record[key];
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
   }
   return undefined;
 }
@@ -454,6 +466,14 @@ export default function StudioPage() {
   const [coverAuditId, setCoverAuditId] = useState<string | undefined>();
 
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
+
+  const router = useRouter();
+  const trackerEntryId = readTrackerField(resumeState.response, "trackerEntryId");
+  const trackerStatus = readTrackerField(resumeState.response, "trackerStatus");
+  const handleOpenTracker = useCallback(() => {
+    if (!trackerEntryId) return;
+    void router.push(`/applications?focus=${encodeURIComponent(trackerEntryId)}`);
+  }, [router, trackerEntryId]);
 
   const { isPro } = useEntitlements();
 
@@ -1180,6 +1200,25 @@ export default function StudioPage() {
                 </pre>
               )}
             </div>
+            {trackerEntryId ? (
+              <div className="rounded-2xl border border-amber-400/40 bg-amber-500/5 p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-amber-200">
+                  Next move
+                </p>
+                <p className="text-sm text-slate-100">
+                  Added to Application Tracker as{' '}
+                  <span className="font-semibold text-white">
+                    {trackerStatus ?? 'Prepared'}
+                  </span>
+                  .
+                </p>
+                <div className="mt-3 flex justify-end">
+                  <FormButton onClick={handleOpenTracker}>
+                    Open Application Tracker
+                  </FormButton>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <EmptyState title="No resume generated yet" body="Generate a draft to preview it." />

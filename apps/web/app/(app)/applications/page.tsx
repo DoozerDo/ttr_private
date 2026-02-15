@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { apiFetchJson, downloadBlob } from '../lib/api';
 import { Alert } from '@/components/Alert';
 import { EmptyState } from '@/components/EmptyState';
@@ -119,6 +120,9 @@ export default function ApplicationsPage() {
 
   const [detail, setDetail] = useState<Application | null>(null);
   const [stageUpdatingId, setStageUpdatingId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get('focus');
+  const [focusedEntryId, setFocusedEntryId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = (search || '').trim().toLowerCase();
@@ -196,7 +200,7 @@ export default function ApplicationsPage() {
     setNotice('');
   }
 
-  async function loadDetail(id: string) {
+  const loadDetail = useCallback(async (id: string) => {
     setBusy(true);
     setError('');
     setNotice('');
@@ -227,7 +231,36 @@ export default function ApplicationsPage() {
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!focusId) {
+      setFocusedEntryId(null);
+      return;
+    }
+    if (!items.length) {
+      return;
+    }
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const target = document.querySelector(`[data-entry-id="${focusId}"]`);
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFocusedEntryId(focusId);
+    const timer =
+      typeof window !== 'undefined'
+        ? window.setTimeout(() => setFocusedEntryId(null), 3000)
+        : null;
+    void loadDetail(focusId);
+    return () => {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [focusId, items, loadDetail]);
 
   async function createApplication() {
     setBusy(true);
@@ -454,7 +487,15 @@ export default function ApplicationsPage() {
                       bucket.applications.map((app) => {
                         const appStage = stageFromApplication(app);
                         return (
-                          <div key={app.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm shadow">
+                          <div
+                            key={app.id}
+                            data-entry-id={app.id}
+                            className={`rounded-2xl border border-white/10 bg-white/5 p-3 text-sm shadow transition ${
+                              focusedEntryId === app.id
+                                ? 'ring-2 ring-amber-400/80 shadow-lg'
+                                : ''
+                            }`}
+                          >
                             <div className="font-semibold text-slate-900">
                               {safeString(app.title || app.roleTitle) || 'Untitled role'}
                             </div>
@@ -567,7 +608,15 @@ export default function ApplicationsPage() {
                     </thead>
                     <tbody>
                       {filtered.map((application) => (
-                        <tr key={application.id} className="border-t border-white/10">
+                        <tr
+                          key={application.id}
+                          data-entry-id={application.id}
+                          className={`border-t border-white/10 transition ${
+                            focusedEntryId === application.id
+                              ? 'ring-1 ring-amber-400/70 bg-white/5 shadow-lg'
+                              : ''
+                          }`}
+                        >
                           <td className="max-w-[240px] truncate px-3 py-2 font-mono text-xs text-slate-400">
                             {application.id}
                           </td>

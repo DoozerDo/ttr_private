@@ -1,4 +1,5 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { backendFetch, isBackendUnavailableResponse } from "../_lib/backendFetch";
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "./helpers";
 
 export const runtime = "nodejs";
@@ -15,11 +16,15 @@ export async function GET(req: NextRequest) {
   }
   if (!auth.token) return auth.error;
 
-  const response = await fetch(`${baseUrl}/baselines`, {
+  const response = await backendFetch(`${baseUrl}/baselines`, {
     method: "GET",
     cache: "no-store",
     headers: { Authorization: `Bearer ${auth.token}` },
   });
+
+  if (await isBackendUnavailableResponse(response)) {
+    return response;
+  }
 
   return relayApiResponse(response);
 }
@@ -42,7 +47,7 @@ export async function POST(req: NextRequest) {
   if (contentType.toLowerCase().includes("multipart/form-data")) {
     const formData = await req.formData();
 
-    response = await fetch(`${baseUrl}/baselines`, {
+    response = await backendFetch(`${baseUrl}/baselines`, {
       method: "POST",
       headers: { Authorization: `Bearer ${auth.token}` },
       body: formData,
@@ -50,7 +55,7 @@ export async function POST(req: NextRequest) {
   } else {
     const body = await req.json();
 
-    response = await fetch(`${baseUrl}/baselines`, {
+    response = await backendFetch(`${baseUrl}/baselines`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${auth.token}`,
@@ -60,6 +65,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (await isBackendUnavailableResponse(response)) {
+    return response;
+  }
+
   return relayApiResponse(response);
 }
-
