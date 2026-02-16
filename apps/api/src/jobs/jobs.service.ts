@@ -11,6 +11,10 @@ import { Repository } from 'typeorm';
 import { Job, JobIngestionMethod } from './job.entity';
 import { extractTextFromHtml } from './html-utils';
 import { normalizeJobDescription, sanitizeListItems } from './jd-normalization';
+import {
+  sanitizeLinkedInJobText,
+  shouldApplyLinkedInSanitizer,
+} from './linkedin-sanitize';
 import { EmbeddingService } from '../ai/embedding.service';
 
 export type CreateJobInput = {
@@ -106,7 +110,14 @@ export class JobsService {
       const sanitizedUrl = this.validateUrl(url!);
       const html = await this.fetchHtml(sanitizedUrl);
       const extracted = extractTextFromHtml(html);
-      const normalizedText = this.normalizeRawDescription(extracted);
+      const shouldSanitize = shouldApplyLinkedInSanitizer({
+        sourceUrl: sanitizedUrl,
+        rawText: extracted,
+      });
+      const sanitized = shouldSanitize
+        ? sanitizeLinkedInJobText(extracted)
+        : { text: extracted, removed: [] };
+      const normalizedText = this.normalizeRawDescription(sanitized.text);
       this.validateDescriptionLength(normalizedText);
       const normalizedOutcome = this.normalizeSafely(normalizedText, {
         source: 'ingest-url',
@@ -141,9 +152,14 @@ export class JobsService {
     payload: CreateJobInput,
   ): Promise<CreateJobResult> {
     const originalRawDescription = payload.rawDescription;
-    const normalizedInput = this.normalizeRawDescription(
-      originalRawDescription,
-    );
+    const shouldSanitize = shouldApplyLinkedInSanitizer({
+      sourceUrl: payload.sourceUrl,
+      rawText: originalRawDescription,
+    });
+    const sanitized = shouldSanitize
+      ? sanitizeLinkedInJobText(originalRawDescription)
+      : { text: originalRawDescription, removed: [] };
+    const normalizedInput = this.normalizeRawDescription(sanitized.text);
     this.validateDescriptionLength(normalizedInput);
     const embedding = await this.embeddingService.embed(normalizedInput);
 
@@ -200,7 +216,7 @@ export class JobsService {
       userId,
       title: payload.title?.trim() || null,
       company: payload.company?.trim() || null,
-      rawDescription: originalRawDescription,
+      rawDescription: shouldSanitize ? sanitized.text : originalRawDescription,
       sourceUrl,
       sourceProviderId,
       sourceExternalId,

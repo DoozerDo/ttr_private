@@ -295,6 +295,7 @@ export function WorkspaceRunner({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [showComplianceModal, setShowComplianceModal] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
   const [latestAssessmentId, setLatestAssessmentId] = useState<string | null>(null);
@@ -405,7 +406,10 @@ export function WorkspaceRunner({
   };
 
   const complianceFlagList = useMemo(() => {
-    const rawFlags = displayResult?.complianceFlags ?? displayResult?.compliance_flags;
+    const rawFlags =
+      displayResult?.complianceFlags ??
+      displayResult?.compliance_flags ??
+      (displayResult as { compliance?: { flags?: unknown[] } } | null)?.compliance?.flags;
     const normalizedFlags =
       Array.isArray(rawFlags) ? rawFlags : rawFlags ? [rawFlags] : [];
     return normalizedFlags.map((flag) => {
@@ -456,6 +460,16 @@ export function WorkspaceRunner({
   }, [displayResult, debugUiEnabled]);
 
   const hasComplianceFlags = complianceFlagList.length > 0;
+  const promptLikeFlag = complianceFlagList.find((flag) =>
+    flag.message.toLowerCase().includes("prompt-like"),
+  );
+  const jobSourceUrl =
+    (displayResult as { job?: { sourceUrl?: string | null } } | null)?.job?.sourceUrl ??
+    (displayResult as { jobSourceUrl?: string | null } | null)?.jobSourceUrl ??
+    null;
+  const isLinkedInSource =
+    typeof jobSourceUrl === "string" && jobSourceUrl.toLowerCase().includes("linkedin.com");
+  const showLinkedInHint = Boolean(promptLikeFlag && isLinkedInSource);
 
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(latestCompletedScore);
@@ -503,15 +517,14 @@ export function WorkspaceRunner({
   });
 
   const handleResolveComplianceIssues = () => {
-    if (!baselineId) return;
-    const params = new URLSearchParams();
-    params.set("baselineId", baselineId);
-    if (jobId) {
-      params.set("jobId", jobId);
-    }
-    const query = params.toString();
-    router.push(query ? `/reality-check?${query}` : "/reality-check");
+    if (!isComplianceBlocked) return;
+    setShowComplianceModal(true);
   };
+
+  const requestJobEdit = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("jobIngestionRequest"));
+  }, []);
 
   const statusLine = useMemo(() => {
     if (!baselineId && !jobId && latestCompletedScore) return "Latest compatibility score is ready.";
@@ -987,7 +1000,7 @@ export function WorkspaceRunner({
               ) : null}
 
               <div className="flex flex-col gap-2">
-                <FormButton onClick={handleResolveComplianceIssues} disabled={!baselineId}>
+                <FormButton onClick={handleResolveComplianceIssues} disabled={!isComplianceBlocked}>
                   Resolve compliance issues
                 </FormButton>
               </div>
@@ -1107,6 +1120,73 @@ export function WorkspaceRunner({
           Run a fit assessment to see your compatibility score.
         </p>
       )}
+      {showComplianceModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-950 p-5 text-sm text-slate-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-100">
+                  Compliance issues to resolve
+                </p>
+                <p className="text-xs text-slate-400">
+                  Resolve the issues below to continue scoring.
+                </p>
+              </div>
+              <FormButton variant="secondary" onClick={() => setShowComplianceModal(false)}>
+                Close
+              </FormButton>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {hasComplianceFlags ? (
+                <ul className="space-y-2">
+                  {complianceFlagList.map((flag, index) => (
+                    <li
+                      key={`modal-flag-${index}`}
+                      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-amber-300">
+                            {flag.severity?.toUpperCase() ?? "BLOCK"}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-slate-100">
+                            {flag.title}
+                          </p>
+                          <p className="text-xs text-slate-300">{flag.message}</p>
+                        </div>
+                        {flag.code ? (
+                          <span className="text-[11px] text-slate-400">Code: {flag.code}</span>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-400">No compliance flag details were provided.</p>
+              )}
+
+              {showLinkedInHint ? (
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                  This can happen when a LinkedIn page injects non-job content into the description.
+                  Re-ingest the job or paste the job description text directly.
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <FormButton
+                  onClick={() => {
+                    requestJobEdit();
+                    setShowComplianceModal(false);
+                  }}
+                >
+                  Edit job description
+                </FormButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <style jsx>{`
         .score-summary-card {
           transform-origin: center;

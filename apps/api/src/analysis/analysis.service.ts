@@ -28,6 +28,10 @@ import {
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
+import {
+  sanitizeLinkedInJobText,
+  shouldApplyLinkedInSanitizer,
+} from '../jobs/linkedin-sanitize';
 import { CalibrationWeights, User } from '../users/user.entity';
 import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import {
@@ -213,6 +217,10 @@ type CompatibilityRunDebugPayload = {
     headingsDetected: string[];
     bulletsDetected: number;
     fallbackSentenceSplitUsed: boolean;
+  };
+  jobSanitization?: {
+    applied: boolean;
+    removedMarkers: string[];
   };
 };
 
@@ -837,6 +845,7 @@ export class AnalysisService {
     jobRawTextWarning,
     jobTextSource,
     jobNormalization,
+    jobSanitization,
   }: {
     baselineId: string;
     baselineVersionHash: string | null;
@@ -856,6 +865,7 @@ export class AnalysisService {
     jobRawTextWarning?: string | null;
     jobTextSource: JobTextSource;
     jobNormalization?: CompatibilityRunDebugPayload['jobNormalization'];
+    jobSanitization?: CompatibilityRunDebugPayload['jobSanitization'];
   }): CompatibilityRunDebugPayload {
     return {
       baselineId,
@@ -876,6 +886,26 @@ export class AnalysisService {
       jobRawTextWarning,
       jobTextSource,
       jobNormalization,
+      jobSanitization,
+    };
+  }
+
+  private buildJobSanitizationDebug(job?: {
+    rawDescription?: string | null;
+    sourceUrl?: string | null;
+  }) {
+    if (!job) return undefined;
+    const shouldSanitize = shouldApplyLinkedInSanitizer({
+      sourceUrl: job.sourceUrl,
+      rawText: job.rawDescription ?? '',
+    });
+    if (!shouldSanitize) {
+      return undefined;
+    }
+    const sanitized = sanitizeLinkedInJobText(job.rawDescription ?? '');
+    return {
+      applied: true,
+      removedMarkers: sanitized.removed,
     };
   }
 
@@ -1518,14 +1548,20 @@ export class AnalysisService {
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
     }
 
-    const jobNormalizationPayload = {
-      headingsDetected: jobNormDebug.headingsDetected.slice(0, 10),
-      bulletsDetected: jobNormDebug.bulletsDetected,
-      fallbackSentenceSplitUsed: jobNormDebug.fallbackSentenceSplitUsed,
-    };
+      const jobNormalizationPayload = {
+        headingsDetected: jobNormDebug.headingsDetected.slice(0, 10),
+        bulletsDetected: jobNormDebug.bulletsDetected,
+        fallbackSentenceSplitUsed: jobNormDebug.fallbackSentenceSplitUsed,
+      };
+      const jobSanitizationDebug = allowDebug
+        ? this.buildJobSanitizationDebug({
+            rawDescription: canonicalJobForHash.rawDescription,
+            sourceUrl: job?.sourceUrl ?? canonicalJobForScoring.sourceUrl ?? null,
+          })
+        : undefined;
 
-    const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
-      ? this.buildCompatibilityDebugPayload({
+      const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
+        ? this.buildCompatibilityDebugPayload({
           baselineId: baseline.id,
           baselineVersionHash,
           baselineSelectedSectionCount: includedSections.length,
@@ -1541,11 +1577,12 @@ export class AnalysisService {
           jobRawTextCharCount: jobTextForScoring.jobRawTextCharCount,
           jobRawTextSha256: jobTextForScoring.jobRawTextSha256,
           jobRawTextTooShort: jobTextForScoring.jobRawTextTooShort,
-          jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
-          jobTextSource,
-          jobNormalization: jobNormalizationPayload,
-        })
-      : undefined;
+            jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
+            jobTextSource,
+            jobNormalization: jobNormalizationPayload,
+            jobSanitization: jobSanitizationDebug,
+          })
+        : undefined;
 
     const fitScoreDebug: FitScoreDebugBundle | undefined = allowDebug
       ? scoringV2.debug?.bundle
@@ -1971,6 +2008,12 @@ export class AnalysisService {
         bulletsDetected: jobNormDebug.bulletsDetected,
         fallbackSentenceSplitUsed: jobNormDebug.fallbackSentenceSplitUsed,
       };
+      const jobSanitizationDebug = allowDebug
+        ? this.buildJobSanitizationDebug({
+            rawDescription: canonicalJobForHash.rawDescription,
+            sourceUrl: job?.sourceUrl ?? canonicalJobForScoring.sourceUrl ?? null,
+          })
+        : undefined;
 
       const debugInfo: CompatibilityRunDebugPayload | undefined = allowDebug
         ? this.buildCompatibilityDebugPayload({
@@ -1992,6 +2035,7 @@ export class AnalysisService {
             jobRawTextWarning: jobTextForScoring.jobRawTextWarning,
             jobTextSource,
             jobNormalization: jobNormalizationPayload,
+            jobSanitization: jobSanitizationDebug,
           })
         : undefined;
 

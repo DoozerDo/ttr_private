@@ -12,6 +12,10 @@ import type {
 } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 import { canonicalizeJobText, sha256Text } from './job-text.canonical';
+import {
+  sanitizeLinkedInJobText,
+  shouldApplyLinkedInSanitizer,
+} from '../jobs/linkedin-sanitize';
 
 export type FitScoringInput = FitScoreInput;
 export type DimensionWeightOverrides = FitScoreDimensionWeightOverrides;
@@ -156,14 +160,47 @@ export class FitScoringService {
       flags.push('Job description too short for reliable scoring');
     }
 
-    const normalizedJob = normalizeText(jobText);
-    const promptSignals = [
+    const shouldSanitize = shouldApplyLinkedInSanitizer({
+      sourceUrl,
+      rawText: jobText,
+    });
+    const sanitizedJob = shouldSanitize
+      ? sanitizeLinkedInJobText(jobText).text
+      : jobText;
+    const normalizedJob = normalizeText(sanitizedJob);
+    const rawJobLower = sanitizedJob.toLowerCase();
+
+    const strongSignals = [
       'ignore previous instructions',
+      'you are chatgpt',
+      'act as',
       'system prompt',
-      'assistant',
       'developer message',
     ];
-    if (promptSignals.some((signal) => normalizedJob.includes(signal))) {
+    const strongMatch = strongSignals.some((signal) =>
+      normalizedJob.includes(signal),
+    );
+    const labelSignal =
+      /(^|\s)prompt\s*:/i.test(rawJobLower) ||
+      /(^|\s)instruction\s*:/i.test(rawJobLower);
+    const weakSignals = [
+      {
+        pattern: /\bwrite (a|an)\b/i,
+        context:
+          /\b(resume|cover letter|response|answer|summary|analysis|prompt|instruction|email|output)\b/i,
+      },
+      {
+        pattern: /\bgenerate (a|an)\b/i,
+        context:
+          /\b(resume|cover letter|response|answer|summary|analysis|prompt|instruction|email|output)\b/i,
+      },
+    ];
+    const weakMatch = weakSignals.some(
+      ({ pattern, context }) =>
+        pattern.test(normalizedJob) && context.test(normalizedJob),
+    );
+
+    if (strongMatch || labelSignal || weakMatch) {
       flags.push('Job description contains prompt-like content');
     }
 

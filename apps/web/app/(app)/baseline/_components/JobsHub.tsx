@@ -65,6 +65,17 @@ export function JobsHub({ selectedJobId, onJobMissing }: JobsHubProps) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      setIsIngestOpen(true);
+    };
+    window.addEventListener("jobIngestionRequest", handler as EventListener);
+    return () => {
+      window.removeEventListener("jobIngestionRequest", handler as EventListener);
+    };
+  }, []);
+
   const jobMissingNotified = useRef(false);
 
   useEffect(() => {
