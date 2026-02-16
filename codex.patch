@@ -1,1116 +1,510 @@
-diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
-index f2f8764f0a571a217f3613eeaa8d55411f70b912..b20535a5c9dcc9935e806b333ca48b97f09fdcdf 100644
---- a/apps/api/src/auth/auth.controller.ts
-+++ b/apps/api/src/auth/auth.controller.ts
-@@ -1,73 +1,80 @@
- import {
-   Body,
-   Controller,
-   Get,
-   Query,
-   Post,
-   Req,
-   Res,
-   UseGuards,
-   UsePipes,
-   ValidationPipe,
- } from '@nestjs/common';
- import { AuthGuard } from '@nestjs/passport';
- import type { Response } from 'express';
- import { AuthService } from './auth.service';
- import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
-+import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
- import type { AuthUserDto } from './dto/auth-response.dto';
+diff --git a/apps/api/src/users/dto/update-profile.dto.ts b/apps/api/src/users/dto/update-profile.dto.ts
+index a748a7419e0242a9065da26c241b6e0fceaaf44e..c59d377206acb841de03db4c27cbaeb1ec6451c2 100644
+--- a/apps/api/src/users/dto/update-profile.dto.ts
++++ b/apps/api/src/users/dto/update-profile.dto.ts
+@@ -1,22 +1,34 @@
+ import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
  
- const AUTH_COOKIE_NAME = 'access_token';
- const AUTH_COOKIE_MAX_AGE_MS = 60 * 60 * 1000;
- const NODE_ENV = process.env.NODE_ENV ?? 'development';
- const COOKIE_IS_SECURE = NODE_ENV === 'production';
- 
- @Controller('auth')
- @UsePipes(
-   new ValidationPipe({
-     whitelist: true,
-     transform: true,
-   }),
- )
- export class AuthController {
-   constructor(private readonly authService: AuthService) {}
- 
-   @Post('register')
-   async register(
-     @Body() payload: RegisterDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.register(payload);
-     return response;
-   }
- 
-   @Get('confirm')
-   async confirmEmail(@Query('token') token: string) {
-     return this.authService.confirmEmail(token);
-   }
- 
+ export class UpdateProfileDto {
++  @IsOptional()
++  @IsString()
++  @MaxLength(100)
++  firstName?: string;
 +
-+  @Post('resend-confirmation')
-+  async resendConfirmation(@Body() payload: ResendConfirmationDto) {
-+    return this.authService.resendConfirmation(payload.email);
-+  }
++  @IsOptional()
++  @IsString()
++  @MaxLength(100)
++  lastName?: string;
 +
-   @Post('login')
-   async login(
-     @Body() payload: LoginDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.login(payload);
-     this.setAuthCookie(res, response.accessToken);
-     return response;
-   }
++  @IsOptional()
+   @IsString()
+   @MaxLength(150)
+-  roleTitle!: string;
++  roleTitle?: string;
  
+   @IsOptional()
+   @IsString()
+   @MaxLength(150)
+   company?: string;
  
-   @Post('redeem-access-code-and-login')
-   async redeemAccessCodeAndLogin(
-     @Body() payload: RedeemAccessCodeAndLoginDto,
-     @Res({ passthrough: true }) res: Response,
-   ) {
-     const response = await this.authService.redeemAccessCodeAndLogin(payload);
-     this.setAuthCookie(res, response.accessToken);
-     return response;
-   }
+   @IsOptional()
+   @IsString()
+   @IsUrl({ require_protocol: true })
+   @MaxLength(255)
+   linkedinUrl?: string;
  
-   @Post('logout')
-   logout(@Res({ passthrough: true }) res: Response) {
-     res.cookie(AUTH_COOKIE_NAME, '', {
-       httpOnly: true,
-diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
-index 4fd67b7bc8814ec1915b860ef2fbd6e63d68c44b..d37c59286e84c3842c0568292993d7b71244a4ed 100644
---- a/apps/api/src/auth/auth.service.ts
-+++ b/apps/api/src/auth/auth.service.ts
-@@ -5,124 +5,136 @@ import {
-   UnauthorizedException,
- } from '@nestjs/common';
- import { ConfigService } from '@nestjs/config';
- import { JwtService } from '@nestjs/jwt';
- import * as bcrypt from 'bcryptjs';
- import { randomBytes } from 'node:crypto';
- import { existsSync } from 'node:fs';
- import { readFileSync } from 'node:fs';
- import { join } from 'node:path';
- import { Repository } from 'typeorm';
- import { InjectRepository } from '@nestjs/typeorm';
- import { RelayEmailService } from '../email/relay-email.service';
- import { UsersService } from '../users/users.service';
- import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
- import { RegisterDto } from './dto/register.dto';
- import { User } from '../users/user.entity';
- import { getEntitlementsForTier } from '../features/feature-gates';
- import type { AuthResponseDto } from './dto/auth-response.dto';
- import { UserToken } from './user-token.entity';
- import { AccessCodesService } from '../access-codes/access-codes.service';
- import { AdminUsersService } from '../admin-users/admin-users.service';
++  @IsOptional()
+   @IsString()
+   @MaxLength(255)
+-  intendedUse!: string;
++  intendedUse?: string;
+ }
+diff --git a/apps/api/src/users/users.controller.ts b/apps/api/src/users/users.controller.ts
+index ce6056ad0ff8313c7a48b871e062e80646a429cd..ef8158ba8debcdc5d25d101dc9c182ec567b694b 100644
+--- a/apps/api/src/users/users.controller.ts
++++ b/apps/api/src/users/users.controller.ts
+@@ -33,58 +33,58 @@ export class UsersController {
+   constructor(private readonly usersService: UsersService) {}
  
- type RegisterResponseDto = {
-   success: true;
-   message: string;
-+  emailConfirmationRequired: boolean;
-+};
-+
-+type ResendConfirmationResponseDto = {
-+  success: true;
-+  message: string;
- };
- 
- @Injectable()
- export class AuthService {
-   constructor(
-     private readonly usersService: UsersService,
-     private readonly jwtService: JwtService,
-     private readonly relayEmailService: RelayEmailService,
-     private readonly configService: ConfigService,
-     @InjectRepository(UserToken)
-     private readonly userTokensRepository: Repository<UserToken>,
-     private readonly accessCodesService: AccessCodesService,
-     private readonly adminUsersService: AdminUsersService,
-   ) {}
- 
-   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
-     if (payload.password !== payload.confirmPassword) {
-       throw new BadRequestException('Passwords do not match');
-     }
- 
-     const existing = await this.usersService.findByEmail(payload.email);
- 
-     if (existing) {
-       return {
-         success: true,
-         message: this.requireEmailConfirmation
-           ? 'Check your email to confirm your account.'
-           : 'Account created.',
-+        emailConfirmationRequired: this.requireEmailConfirmation,
-       };
-     }
- 
-     const passwordHash = await bcrypt.hash(payload.password, 10);
-     const user = await this.usersService.create({
-       email: payload.email,
-       passwordHash,
-       firstName: payload.firstName.trim(),
-       lastName: payload.lastName.trim(),
-       emailConfirmed: !this.requireEmailConfirmation,
-     });
- 
-     if (!this.requireEmailConfirmation) {
--      return { success: true, message: 'Account created.' };
-+      return {
-+        success: true,
-+        message: 'Account created.',
-+        emailConfirmationRequired: false,
-+      };
-     }
- 
-     const token = randomBytes(32).toString('hex');
-     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
- 
-     await this.userTokensRepository.save(
-       this.userTokensRepository.create({
-         userId: user.id,
-         token,
-         type: 'confirm',
-         expiresAt,
-       }),
-     );
- 
-     const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-     const supportEmail =
-       this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-       'support@targetthisrole.ai';
-     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
- 
-     await this.relayEmailService.sendRawRelayEmail({
-       to: user.email,
-       subject: 'Confirm your account',
-       body: html,
-       replyTo: supportEmail,
-       type: 'signup_confirm',
-     });
- 
-     return {
-       success: true,
-       message: 'Check your email to confirm your account.',
-+      emailConfirmationRequired: true,
-     };
-   }
- 
-   async login(payload: LoginDto): Promise<AuthResponseDto> {
-     const user = await this.validateCredentials(payload);
- 
-     const isAdmin = await this.adminUsersService.isAdmin(user.id);
- 
-     if (this.requireAccessCode && !isAdmin) {
-       const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
-         user.id,
-       );
- 
-       if (!hasActiveAccess) {
-         const redeemedAssignedCode =
-           await this.accessCodesService.redeemAssignedCodeForUser(user);
- 
-         if (!redeemedAssignedCode) {
-           throw new ForbiddenException({
-             code: 'ACCESS_CODE_REQUIRED',
-             message: 'Access code required.',
-           });
-         }
-       }
-     }
-@@ -142,50 +154,99 @@ export class AuthService {
-   }
- 
-   async confirmEmail(token: string): Promise<{ success: true; message: string }> {
-     if (!token) {
-       throw new BadRequestException('Missing confirmation token');
-     }
-     const match = await this.userTokensRepository.findOne({
-       where: { token, type: 'confirm' },
-     });
- 
-     if (!match || match.expiresAt.getTime() <= Date.now()) {
-       throw new BadRequestException('Invalid or expired confirmation token');
-     }
- 
-     const user = await this.usersService.findById(match.userId);
-     if (!user) {
-       throw new BadRequestException('Invalid confirmation token');
-     }
- 
-     await this.usersService.setEmailConfirmed(user.id);
-     await this.userTokensRepository.delete({ id: match.id });
- 
-     return { success: true, message: 'Email confirmed. You can now log in.' };
-   }
- 
-+  async resendConfirmation(
-+    email: string,
-+  ): Promise<ResendConfirmationResponseDto> {
-+    const successMessage = {
-+      success: true,
-+      message: 'If this email exists, a new confirmation email has been sent.',
-+    } as const;
-+
-+    if (!this.requireEmailConfirmation) {
-+      return successMessage;
-+    }
-+
-+    const user = await this.usersService.findByEmail(email);
-+    if (!user || user.emailConfirmed) {
-+      return successMessage;
-+    }
-+
-+    await this.userTokensRepository.delete({ userId: user.id, type: 'confirm' });
-+
-+    const token = randomBytes(32).toString('hex');
-+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-+
-+    await this.userTokensRepository.save(
-+      this.userTokensRepository.create({
-+        userId: user.id,
-+        token,
-+        type: 'confirm',
-+        expiresAt,
-+      }),
-+    );
-+
-+    const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-+    const supportEmail =
-+      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-+      'support@targetthisrole.ai';
-+    const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-+    const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
-+
-+    await this.relayEmailService.sendRawRelayEmail({
-+      to: user.email,
-+      subject: 'Confirm your account',
-+      body: html,
-+      replyTo: supportEmail,
-+      type: 'signup_confirm',
-+    });
-+
-+    return successMessage;
-+  }
-+
- 
-   private async validateCredentials(payload: LoginDto): Promise<User> {
-     const user = await this.usersService.findByEmail(payload.email);
+   @Get('me')
+   me(@Req() request: UserRequest) {
+     const user = request.user;
  
      if (!user) {
-       throw new UnauthorizedException('Invalid credentials');
-     }
- 
-     const isValidPassword = await bcrypt.compare(
-       payload.password,
-       user.passwordHash,
-     );
- 
-     if (!isValidPassword) {
-       throw new UnauthorizedException('Invalid credentials');
-     }
- 
-     if (this.requireEmailConfirmation && !user.emailConfirmed) {
-       throw new ForbiddenException(
-         'Please confirm your email before logging in.',
-       );
+       throw new BadRequestException('Invalid user context');
      }
  
      return user;
    }
-diff --git a/apps/api/src/auth/dto/resend-confirmation.dto.ts b/apps/api/src/auth/dto/resend-confirmation.dto.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..141ef9397380fb3c5dea0bc4cc57cc6663665f23
---- /dev/null
-+++ b/apps/api/src/auth/dto/resend-confirmation.dto.ts
-@@ -0,0 +1,6 @@
-+import { IsEmail } from 'class-validator';
-+
-+export class ResendConfirmationDto {
-+  @IsEmail()
-+  email!: string;
-+}
-diff --git a/apps/web/app/(public)/auth/_components/auth-form.tsx b/apps/web/app/(public)/auth/_components/auth-form.tsx
-index 9af649959f43e10f1103fa5d22bef85fc7a8ce4a..a739ce44188f60c02ffb4e84740565068daf48c9 100644
---- a/apps/web/app/(public)/auth/_components/auth-form.tsx
-+++ b/apps/web/app/(public)/auth/_components/auth-form.tsx
-@@ -8,330 +8,488 @@ import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
- interface AuthFormProps {
-   mode: "login" | "register";
-   returnPath?: string | null;
- }
  
- function extractAuthApiMessage(value: unknown): string | undefined {
-   if (!value || typeof value !== "object") {
-     return undefined;
-   }
-   const candidate = value as { message?: unknown; error?: unknown };
-   if (typeof candidate.message === "string" && candidate.message.length) {
-     return candidate.message;
-   }
-   if (Array.isArray(candidate.message)) {
-     const filtered = candidate.message.filter((item): item is string => typeof item === "string");
-     if (filtered.length) {
-       return filtered.join(", ");
+ 
+   @Patch('me/profile')
+   async updateMyProfile(
+     @Body() body: UpdateProfileDto,
+     @Req() request: UserRequest,
+   ) {
+     const user = request.user;
+ 
+     if (!user?.id) {
+       throw new BadRequestException('Invalid user context');
      }
-   }
-   if (typeof candidate.error === "string" && candidate.error.length) {
-     return candidate.error;
-   }
-   return undefined;
- }
  
++    const firstName = body.firstName?.trim();
++    const lastName = body.lastName?.trim();
+     const roleTitle = body.roleTitle?.trim();
+     const intendedUse = body.intendedUse?.trim();
+ 
+-    if (!roleTitle || !intendedUse) {
+-      throw new BadRequestException('roleTitle and intendedUse are required');
+-    }
 -
--
- function hasAccessCodeRequired(value: unknown): boolean {
-   if (!value || typeof value !== "object") {
-     return false;
+     const updated = await this.usersService.updateMyProfile(user.id, {
++      firstName,
++      lastName,
+       roleTitle,
+       company: body.company,
+       linkedinUrl: body.linkedinUrl,
+       intendedUse,
+     });
+ 
+     const { passwordHash, ...sanitized } = updated;
+     return sanitized;
    }
  
-   const payload = value as { code?: unknown; message?: unknown };
+   @Patch('me/subscription-tier')
+   async updateSubscriptionTier(
+     @Body() body: UpdateSubscriptionTierDto,
+     @Req() request: UserRequest,
+   ) {
+     const user = request.user;
  
-   if (payload.code === "ACCESS_CODE_REQUIRED") {
-     return true;
-   }
- 
-   if (payload.message && typeof payload.message === "object") {
-     const nestedCode = (payload.message as { code?: unknown }).code;
-     if (nestedCode === "ACCESS_CODE_REQUIRED") {
-       return true;
+     if (!user?.id) {
+       throw new BadRequestException('Invalid user context');
      }
+ 
+     const isProd = process.env.NODE_ENV === 'production';
+     const isAdmin = user.role === 'admin';
+ 
+     if (isProd && !isAdmin) {
+diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
+index ee3e48b5ffbf271dff625f7bf45214a9582950b7..e1408adc8730487639dec32edfb5373a85cf2631 100644
+--- a/apps/api/src/users/users.service.ts
++++ b/apps/api/src/users/users.service.ts
+@@ -44,53 +44,74 @@ export class UsersService {
+     return this.usersRepository.findOne({ where: { email } });
    }
  
-   return false;
- }
- 
- function needsProfileCompletion(value: unknown): boolean {
-   if (!value || typeof value !== "object") {
-     return true;
+   findById(id: string): Promise<User | null> {
+     return this.usersRepository.findOne({ where: { id } });
    }
  
-   const user = value as {
-     roleTitle?: unknown;
-     intendedUse?: unknown;
-     profileCompletedAt?: unknown;
-   };
+   async updateSubscriptionTier(
+     userId: string,
+     tier: SubscriptionTier,
+   ): Promise<User> {
+     const user = await this.findById(userId);
  
-   return !(
-     typeof user.profileCompletedAt === "string" &&
-     user.profileCompletedAt.length > 0 &&
-     typeof user.roleTitle === "string" &&
-     user.roleTitle.trim().length > 0 &&
-     typeof user.intendedUse === "string" &&
-     user.intendedUse.trim().length > 0
-   );
- }
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
  
-+
-+function shouldRequireEmailVerification(value: unknown): boolean {
-+  if (!value || typeof value !== "object") {
-+    return false;
-+  }
-+
-+  const payload = value as {
-+    emailConfirmationRequired?: unknown;
-+    message?: unknown;
-+  };
-+
-+  if (typeof payload.emailConfirmationRequired === "boolean") {
-+    return payload.emailConfirmationRequired;
-+  }
-+
-+  return (
-+    typeof payload.message === "string" &&
-+    payload.message.toLowerCase().includes("check your email")
-+  );
-+}
-+
-+function isEmailNotConfirmedError(message: string | undefined, status: number): boolean {
-+  return (
-+    status === 403 &&
-+    typeof message === "string" &&
-+    message.toLowerCase().includes("confirm your email")
-+  );
-+}
-+
- export function AuthForm({ mode, returnPath }: AuthFormProps) {
-   const router = useRouter();
-   const [firstName, setFirstName] = useState("");
-   const [lastName, setLastName] = useState("");
-   const [email, setEmail] = useState("");
-   const [password, setPassword] = useState("");
-   const [confirmPassword, setConfirmPassword] = useState("");
-   const [error, setError] = useState<string | null>(null);
-   const [message, setMessage] = useState<string | null>(null);
-   const [isSubmitting, setIsSubmitting] = useState(false);
-+  const [awaitingVerification, setAwaitingVerification] = useState(false);
-+  const [isResendingConfirmation, setIsResendingConfirmation] = useState(false);
-+  const [verificationCheck, setVerificationCheck] = useState(false);
+     user.subscriptionTier = tier;
+     return this.usersRepository.save(user);
+   }
  
-   const isLogin = mode === "login";
-   const title = isLogin ? "Log in" : "Create an account";
-   const actionLabel = isLogin ? "Log in" : "Register";
-   const helperText = isLogin ? "Don't have an account?" : "Already registered?";
-   const helperHref = isLogin ? "/auth/signup" : "/auth/login";
-   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
-   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
  
-+  const handleLoginSuccess = async () => {
-+    const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
-+    const meResponse = await fetch("/api/users/me", {
-+      method: "GET",
-+      credentials: "include",
-+    });
-+    const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
-+
-+    if (needsProfileCompletion(mePayload)) {
-+      const params = new URLSearchParams();
-+      params.set("next", targetPath);
-+      await router.replace(`/onboarding/profile?${params.toString()}`);
-+      await router.refresh();
-+      return;
+   async updateMyProfile(
+     userId: string,
+     input: {
+-      roleTitle: string;
++      firstName?: string | null;
++      lastName?: string | null;
++      roleTitle?: string | null;
+       company?: string | null;
+       linkedinUrl?: string | null;
+-      intendedUse: string;
++      intendedUse?: string | null;
+     },
+   ): Promise<User> {
+     const user = await this.findById(userId);
+ 
+     if (!user) {
+       throw new NotFoundException('User not found');
+     }
+ 
+-    user.roleTitle = input.roleTitle.trim();
+-    user.company = input.company?.trim() || null;
+-    user.linkedinUrl = input.linkedinUrl?.trim() || null;
+-    user.intendedUse = input.intendedUse.trim();
++    if (input.firstName !== undefined) {
++      user.firstName = input.firstName?.trim() || '';
 +    }
 +
-+    await router.replace(targetPath);
-+    await router.refresh();
-+  };
++    if (input.lastName !== undefined) {
++      user.lastName = input.lastName?.trim() || '';
++    }
 +
-+  const attemptLogin = async (trimmedEmail: string, allowConfirmError = false) => {
-+    const response = await fetch("/api/auth/login", {
-+      method: "POST",
-+      headers: { "Content-Type": "application/json" },
-+      credentials: "include",
-+      body: JSON.stringify({ email: trimmedEmail, password }),
-+    });
++    if (input.roleTitle !== undefined) {
++      user.roleTitle = input.roleTitle?.trim() || null;
++    }
 +
-+    let data: unknown = null;
-+    const text = await response.text();
-+    if (text) {
++    if (input.company !== undefined) {
++      user.company = input.company?.trim() || null;
++    }
++
++    if (input.linkedinUrl !== undefined) {
++      user.linkedinUrl = input.linkedinUrl?.trim() || null;
++    }
++
++    if (input.intendedUse !== undefined) {
++      user.intendedUse = input.intendedUse?.trim() || null;
++    }
+ 
+     if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
+       user.profileCompletedAt = new Date();
+     }
+ 
+     return this.usersRepository.save(user);
+   }
+ 
+   async setEmailConfirmed(userId: string): Promise<void> {
+     await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
+   }
+ }
+diff --git a/apps/web/app/(app)/settings/page.tsx b/apps/web/app/(app)/settings/page.tsx
+index cf8d51a8457f7b7755d3298c5442ede9b38e4ea5..15a6b58aa71d1845174de905c967e374e2821d11 100644
+--- a/apps/web/app/(app)/settings/page.tsx
++++ b/apps/web/app/(app)/settings/page.tsx
+@@ -1,52 +1,238 @@
+ "use client";
+ 
++import { FormEvent, useEffect, useMemo, useState } from "react";
++
+ import { useAutoGenerateThreshold } from "../lib/settings";
+ import { AUTO_GENERATE_THRESHOLD } from "../lib/autoGenerateThreshold";
+ import { ttrComponents } from "../ui/ttrStyles";
+ import { useEntitlements } from "@/src/lib/entitlements";
+ 
++type SettingsProfile = {
++  firstName: string;
++  lastName: string;
++  company: string;
++  linkedinUrl: string;
++};
++
++const EMPTY_PROFILE: SettingsProfile = {
++  firstName: "",
++  lastName: "",
++  company: "",
++  linkedinUrl: "",
++};
++
+ export default function SettingsPage() {
+   const [autoGenerateThreshold] = useAutoGenerateThreshold();
+   const { tier, source } = useEntitlements();
++  const [profile, setProfile] = useState<SettingsProfile>(EMPTY_PROFILE);
++  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
++  const [isSaving, setIsSaving] = useState(false);
++  const [statusMessage, setStatusMessage] = useState<string | null>(null);
++  const [statusError, setStatusError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++
++    const loadProfile = async () => {
 +      try {
-+        data = JSON.parse(text);
-+      } catch {
-+        data = null;
-+      }
-+    }
++        setIsLoadingProfile(true);
++        setStatusError(null);
++        const response = await fetch("/api/users/me", {
++          method: "GET",
++          cache: "no-store",
++          credentials: "include",
++        });
 +
-+    if (!response.ok) {
-+      const messageFromApi = extractAuthApiMessage(data) ?? "Login failed";
-+
-+      if (response.status === 403 && hasAccessCodeRequired(data)) {
-+        const params = new URLSearchParams();
-+        params.set("email", trimmedEmail);
-+        if (returnPath) {
-+          params.set("next", returnPath);
++        if (!response.ok) {
++          throw new Error("Unable to load your profile.");
 +        }
-+        router.push(`/auth/access-code?${params.toString()}`);
-+        return;
++
++        const data = (await response.json()) as {
++          firstName?: string | null;
++          lastName?: string | null;
++          company?: string | null;
++          linkedinUrl?: string | null;
++        };
++
++        if (cancelled) {
++          return;
++        }
++
++        setProfile({
++          firstName: data.firstName ?? "",
++          lastName: data.lastName ?? "",
++          company: data.company ?? "",
++          linkedinUrl: data.linkedinUrl ?? "",
++        });
++      } catch (error) {
++        if (!cancelled) {
++          setStatusError(error instanceof Error ? error.message : "Unable to load your profile.");
++        }
++      } finally {
++        if (!cancelled) {
++          setIsLoadingProfile(false);
++        }
 +      }
++    };
 +
-+      if (allowConfirmError && isEmailNotConfirmedError(messageFromApi, response.status)) {
-+        setError(
-+          "We still do not see a verified email address. Please check your inbox and click the verification link.",
-+        );
-+        return;
-+      }
++    void loadProfile();
 +
-+      setError(messageFromApi);
-+      return;
-+    }
++    return () => {
++      cancelled = true;
++    };
++  }, []);
+ 
+   const thresholdValue =
+     typeof autoGenerateThreshold === "number"
+       ? autoGenerateThreshold
+       : AUTO_GENERATE_THRESHOLD;
+   const isBetaOverride = source === "beta" || source === "beta_override";
+   const planLabel = isBetaOverride ? `${tier} (Beta)` : tier;
+ 
++  const canSubmit = useMemo(() => !isSaving && !isLoadingProfile, [isLoadingProfile, isSaving]);
 +
-+    await handleLoginSuccess();
++  const handleProfileChange = (field: keyof SettingsProfile, value: string) => {
++    setStatusMessage(null);
++    setStatusError(null);
++    setProfile((prev) => ({ ...prev, [field]: value }));
 +  };
 +
-+  const resendConfirmation = async () => {
-+    const trimmedEmail = email.trim();
-+    if (!trimmedEmail) {
-+      setError("Email is required to resend confirmation.");
++  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
++    event.preventDefault();
++
++    if (!canSubmit) {
 +      return;
 +    }
 +
-+    setError(null);
-+    setMessage(null);
-+    setIsResendingConfirmation(true);
++    setIsSaving(true);
++    setStatusMessage(null);
++    setStatusError(null);
 +
 +    try {
-+      const response = await fetch("/api/auth/resend-confirmation", {
-+        method: "POST",
-+        headers: { "Content-Type": "application/json" },
++      const response = await fetch("/api/users/me/profile", {
++        method: "PATCH",
 +        credentials: "include",
-+        body: JSON.stringify({ email: trimmedEmail }),
++        headers: {
++          "Content-Type": "application/json",
++        },
++        body: JSON.stringify({
++          firstName: profile.firstName.trim(),
++          lastName: profile.lastName.trim(),
++          company: profile.company.trim() || undefined,
++          linkedinUrl: profile.linkedinUrl.trim() || undefined,
++        }),
 +      });
 +
-+      const text = await response.text();
-+      let payload: unknown = null;
-+      if (text) {
-+        try {
-+          payload = JSON.parse(text) as unknown;
-+        } catch {
-+          payload = null;
-+        }
-+      }
-+
 +      if (!response.ok) {
-+        setError(extractAuthApiMessage(payload) ?? "Unable to send another confirmation email.");
-+        return;
++        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
++        throw new Error(payload?.error ?? "Unable to save profile settings.");
 +      }
 +
-+      setMessage(
-+        extractAuthApiMessage(payload) ??
-+          "If this email exists, a new confirmation email has been sent.",
-+      );
-+    } catch (submitError) {
-+      console.error("Resend confirmation failed", submitError);
-+      setError("Unable to reach authentication service");
++      setStatusMessage("Profile updated.");
++    } catch (error) {
++      setStatusError(error instanceof Error ? error.message : "Unable to save profile settings.");
 +    } finally {
-+      setIsResendingConfirmation(false);
++      setIsSaving(false);
 +    }
 +  };
 +
-   const onSubmit = async (event: FormEvent) => {
-     event.preventDefault();
-     setError(null);
-     setMessage(null);
- 
-     const trimmedEmail = email.trim();
-     if (!trimmedEmail || !password) {
-       setError("Email and password are required.");
-       return;
-     }
- 
-     if (!isLogin && (!firstName.trim() || !lastName.trim())) {
-       setError("First name and last name are required.");
-       return;
-     }
- 
-     if (!isLogin && password !== confirmPassword) {
-       setError("Passwords do not match.");
-       return;
-     }
- 
-     setIsSubmitting(true);
- 
-     try {
-+      if (isLogin) {
-+        await attemptLogin(trimmedEmail);
-+        return;
-+      }
-+
-       const response = await fetch(endpoint, {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         credentials: "include",
--        body: JSON.stringify(
--          isLogin
--            ? { email: trimmedEmail, password }
--            : {
--                firstName: firstName.trim(),
--                lastName: lastName.trim(),
--                email: trimmedEmail,
--                password,
--                confirmPassword,
--              },
--        ),
-+        body: JSON.stringify({
-+          firstName: firstName.trim(),
-+          lastName: lastName.trim(),
-+          email: trimmedEmail,
-+          password,
-+          confirmPassword,
-+        }),
-       });
- 
-       let data: unknown = null;
- 
--      // Try to parse JSON if there is a body; ignore parse errors
-       const text = await response.text();
-       if (text) {
-         try {
-           data = JSON.parse(text);
-         } catch {
--          // non-JSON body (e.g. 404 HTML) – data stays null
-+          data = null;
-         }
-       }
- 
-       if (!response.ok) {
--        const messageFromApi =
--          extractAuthApiMessage(data) ?? (isLogin ? "Login failed" : "Registration failed");
--
--        if (isLogin && response.status === 403 && hasAccessCodeRequired(data)) {
--          const params = new URLSearchParams();
--          params.set("email", trimmedEmail);
--          if (returnPath) {
--            params.set("next", returnPath);
--          }
--          router.push(`/auth/access-code?${params.toString()}`);
--          return;
--        }
--
-+        const messageFromApi = extractAuthApiMessage(data) ?? "Registration failed";
-         setError(messageFromApi);
-         return;
-       }
- 
--      if (!isLogin) {
--        const successMessage =
--          extractAuthApiMessage(data) ?? "Check your email to confirm your account.";
--        setMessage(successMessage);
--        return;
--      }
-+      const requiresVerification = shouldRequireEmailVerification(data);
-+      setAwaitingVerification(requiresVerification);
-+      setVerificationCheck(false);
- 
--      const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
--      const meResponse = await fetch("/api/users/me", {
--        method: "GET",
--        credentials: "include",
--      });
--      const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
-+      const successMessage =
-+        extractAuthApiMessage(data) ??
-+        (requiresVerification
-+          ? "Check your inbox for a verification email from Target This Role."
-+          : "Account created.");
-+      setMessage(successMessage);
-+    } catch (submitError) {
-+      console.error("Auth request failed", submitError);
-+      setError("Unable to reach authentication service");
-+    } finally {
-+      setIsSubmitting(false);
-+    }
-+  };
- 
--      if (needsProfileCompletion(mePayload)) {
--        const params = new URLSearchParams();
--        params.set("next", targetPath);
--        await router.replace(`/onboarding/profile?${params.toString()}`);
--        await router.refresh();
--        return;
--      }
-+  const onVerifiedClick = async () => {
-+    setError(null);
-+    setMessage(null);
-+    const trimmedEmail = email.trim();
- 
--      await router.replace(targetPath);
--      await router.refresh();
-+    if (!trimmedEmail || !password) {
-+      setError("Email and password are required.");
-+      return;
-+    }
-+
-+    setIsSubmitting(true);
-+    try {
-+      await attemptLogin(trimmedEmail, true);
-     } catch (submitError) {
--      console.error("Auth request failed", submitError);
-+      console.error("Verification login failed", submitError);
-       setError("Unable to reach authentication service");
-     } finally {
-       setIsSubmitting(false);
-     }
-   };
- 
    return (
-     <div className="mx-auto w-full max-w-md space-y-6">
-       <div className="space-y-2 text-center">
--        <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
--        <p className="text-sm text-gray-600">
--          Use your Target This Role credentials to continue.
--        </p>
-+        <h1 className="text-3xl font-bold text-white">{title}</h1>
-+        <p className="text-sm text-slate-300">Use your Target This Role credentials to continue.</p>
+     <div
+       style={{
+         ...ttrComponents.basePanel,
+         padding: 24,
+         display: "flex",
+         flexDirection: "column",
+         gap: 20,
+         maxWidth: 720,
+       }}
+     >
+       <div>
+         <h1 className="text-2xl font-semibold text-white">Settings</h1>
+         <p className="mt-1 text-sm text-slate-400">
+-          Account capabilities and system defaults.
++          Account capabilities, profile settings, and system defaults.
+         </p>
        </div>
  
--      <form
--        onSubmit={onSubmit}
--        className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
--      >
--        <div className="space-y-2">
--          {!isLogin && (
--            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
--              <div className="space-y-2">
--                <label className="block text-sm font-semibold text-gray-700" htmlFor="firstName">
--                  First Name
--                </label>
--                <input
--                  id="firstName"
--                  type="text"
--                  required={!isLogin}
--                  value={firstName}
--                  onChange={(event) => setFirstName(event.target.value)}
--                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
--                  placeholder="First name"
--                />
-+      <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-white/10 bg-white p-6 shadow-lg">
-+        {!awaitingVerification && (
-+          <>
-+            {!isLogin && (
-+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-+                <div className="space-y-2">
-+                  <label className="block text-sm font-semibold text-gray-700" htmlFor="firstName">
-+                    First Name
-+                  </label>
-+                  <input
-+                    id="firstName"
-+                    type="text"
-+                    required={!isLogin}
-+                    value={firstName}
-+                    onChange={(event) => setFirstName(event.target.value)}
-+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+                    placeholder="First name"
-+                  />
-+                </div>
++      <form className="space-y-4" onSubmit={onSubmit}>
++        <div className="grid gap-4 md:grid-cols-2">
++          <label className="space-y-1 text-sm text-slate-200">
++            <span>First name</span>
++            <input
++              value={profile.firstName}
++              onChange={(event) => handleProfileChange("firstName", event.target.value)}
++              className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
++              placeholder="First name"
++              autoComplete="given-name"
++            />
++          </label>
 +
-+                <div className="space-y-2">
-+                  <label className="block text-sm font-semibold text-gray-700" htmlFor="lastName">
-+                    Last Name
-+                  </label>
-+                  <input
-+                    id="lastName"
-+                    type="text"
-+                    required={!isLogin}
-+                    value={lastName}
-+                    onChange={(event) => setLastName(event.target.value)}
-+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+                    placeholder="Last name"
-+                  />
-+                </div>
-               </div>
-+            )}
++          <label className="space-y-1 text-sm text-slate-200">
++            <span>Last name</span>
++            <input
++              value={profile.lastName}
++              onChange={(event) => handleProfileChange("lastName", event.target.value)}
++              className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
++              placeholder="Last name"
++              autoComplete="family-name"
++            />
++          </label>
++        </div>
 +
-+            <div className="space-y-2">
-+              <label className="block text-sm font-semibold text-gray-700" htmlFor="email">
-+                Email
-+              </label>
-+              <input
-+                id="email"
-+                type="email"
-+                required
-+                autoComplete="email"
-+                value={email}
-+                onChange={(event) => setEmail(event.target.value)}
-+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+                placeholder="you@example.com"
-+              />
-+            </div>
++        <label className="space-y-1 text-sm text-slate-200">
++          <span>LinkedIn URL</span>
++          <input
++            type="url"
++            value={profile.linkedinUrl}
++            onChange={(event) => handleProfileChange("linkedinUrl", event.target.value)}
++            className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
++            placeholder="https://www.linkedin.com/in/your-profile"
++            autoComplete="url"
++          />
++        </label>
 +
-+            <div className="space-y-2">
-+              <label className="block text-sm font-semibold text-gray-700" htmlFor="password">
-+                Password
-+              </label>
-+              <input
-+                id="password"
-+                type="password"
-+                required
-+                autoComplete={isLogin ? "current-password" : "new-password"}
-+                value={password}
-+                onChange={(event) => setPassword(event.target.value)}
-+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-+                placeholder="••••••••"
-+              />
-+            </div>
- 
-+            {!isLogin && (
-               <div className="space-y-2">
--                <label className="block text-sm font-semibold text-gray-700" htmlFor="lastName">
--                  Last Name
-+                <label className="block text-sm font-semibold text-gray-700" htmlFor="confirmPassword">
-+                  Confirm Password
-                 </label>
-                 <input
--                  id="lastName"
--                  type="text"
--                  required={!isLogin}
--                  value={lastName}
--                  onChange={(event) => setLastName(event.target.value)}
-+                  id="confirmPassword"
-+                  type="password"
-+                  required
-+                  autoComplete="new-password"
-+                  value={confirmPassword}
-+                  onChange={(event) => setConfirmPassword(event.target.value)}
-                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
--                  placeholder="Last name"
-+                  placeholder="••••••••"
-                 />
-               </div>
--            </div>
--          )}
-+            )}
-+          </>
-+        )}
- 
--          <div className="space-y-2">
--          <label
--            className="block text-sm font-semibold text-gray-700"
--            htmlFor="email"
--          >
--            Email
--          </label>
--          <input
--            id="email"
--            type="email"
--            required
--            autoComplete="email"
--            value={email}
--            onChange={(event) => setEmail(event.target.value)}
--            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
--            placeholder="you@example.com"
--          />
--        </div>
--        </div>
--
--        <div className="space-y-2">
--          <label
--            className="block text-sm font-semibold text-gray-700"
--            htmlFor="password"
--          >
--            Password
--          </label>
--          <input
--            id="password"
--            type="password"
--            required
--            autoComplete={isLogin ? "current-password" : "new-password"}
--            value={password}
--            onChange={(event) => setPassword(event.target.value)}
--            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
--            placeholder="••••••••"
--          />
--        </div>
--
--        {!isLogin && (
--          <div className="space-y-2">
--            <label
--              className="block text-sm font-semibold text-gray-700"
--              htmlFor="confirmPassword"
--            >
--              Confirm Password
-+        {!isLogin && awaitingVerification && (
-+          <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Email verification</p>
-+            <h2 className="text-3xl font-bold text-slate-900">Verify your email</h2>
-+            <p className="text-sm text-slate-700">
-+              Check your inbox for a verification email from Target This Role. Once verified, return here and click the button to continue.
-+            </p>
++        <label className="space-y-1 text-sm text-slate-200">
++          <span>Company</span>
++          <input
++            value={profile.company}
++            onChange={(event) => handleProfileChange("company", event.target.value)}
++            className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
++            placeholder="Current company"
++            autoComplete="organization"
++          />
++        </label>
 +
-+            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">
-+              <input
-+                type="checkbox"
-+                checked={verificationCheck}
-+                onChange={(event) => setVerificationCheck(event.target.checked)}
-+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-+              />
-+              <span>I have clicked the verification link in my email.</span>
-             </label>
--            <input
--              id="confirmPassword"
--              type="password"
--              required
--              autoComplete="new-password"
--              value={confirmPassword}
--              onChange={(event) => setConfirmPassword(event.target.value)}
--              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
--              placeholder="••••••••"
--            />
-+
-+            <button
-+              type="button"
-+              onClick={onVerifiedClick}
-+              disabled={isSubmitting || !verificationCheck}
-+              className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
-+            >
-+              {isSubmitting ? "Checking..." : "I have verified my email"}
-+            </button>
-+
-+            <p className="text-sm text-slate-700">
-+              Don&apos;t see the email?{" "}
-+              <button
-+                type="button"
-+                onClick={resendConfirmation}
-+                disabled={isResendingConfirmation}
-+                className="font-semibold text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-+              >
-+                {isResendingConfirmation ? "Sending..." : "Send another confirmation."}
-+              </button>
-+            </p>
-           </div>
-         )}
- 
--        {message && (
--          <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>
--        )}
-+        {message && <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
- 
--        {error && (
--          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
--            {error}
--          </p>
--        )}
-+        {error && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>}
- 
--        <button
--          type="submit"
--          disabled={isSubmitting}
--          className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
--        >
--          {isSubmitting ? "Working..." : actionLabel}
--        </button>
-+        {!awaitingVerification && (
++        <div className="flex items-center gap-3">
 +          <button
 +            type="submit"
-+            disabled={isSubmitting}
-+            className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
++            disabled={!canSubmit}
++            className="rounded-xl border border-amber-300/50 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-300/80 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
 +          >
-+            {isSubmitting ? "Working..." : actionLabel}
++            {isSaving ? "Saving..." : "Save profile"}
 +          </button>
-+        )}
-       </form>
- 
--      <p className="text-center text-sm text-gray-700">
-+      <p className="text-center text-sm text-slate-200">
-         {helperText}{" "}
--        <Link
--          href={helperHref}
--          className="font-semibold text-blue-600 hover:underline"
--        >
-+        <Link href={helperHref} className="font-semibold text-blue-300 hover:underline">
-           {helperLinkLabel}
-         </Link>
-       </p>
-     </div>
-   );
- }
-diff --git a/apps/web/app/(public)/auth/login/page.tsx b/apps/web/app/(public)/auth/login/page.tsx
-index 8a4fe9e62303ac3a7950e9fab3167160a2921e5c..6507b4ac705070b8de4308e5889e5c7d055b1607 100644
---- a/apps/web/app/(public)/auth/login/page.tsx
-+++ b/apps/web/app/(public)/auth/login/page.tsx
-@@ -1,23 +1,23 @@
- import { AuthForm } from "../_components/auth-form";
- import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
- 
- type SearchParams = {
-   next?: string | string[];
- };
- 
- type LoginPageProps = {
-   searchParams?: Promise<SearchParams> | SearchParams;
- };
- 
- export default async function LoginPage({ searchParams }: LoginPageProps) {
-   const sp = (await Promise.resolve(searchParams)) ?? {};
- 
-   const param = Array.isArray(sp.next) ? sp.next[0] : sp.next;
-   const safeNext = sanitizeReturnPath(param);
- 
-   return (
--    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
-       <AuthForm mode="login" returnPath={safeNext} />
-     </main>
-   );
- }
-diff --git a/apps/web/app/(public)/auth/signup/page.tsx b/apps/web/app/(public)/auth/signup/page.tsx
-index 1c7413ea11bf88471bf59fe1a820b623b595b9e4..856bc6404ddb83f9c8214f92e42189573d5c0f28 100644
---- a/apps/web/app/(public)/auth/signup/page.tsx
-+++ b/apps/web/app/(public)/auth/signup/page.tsx
-@@ -1,9 +1,9 @@
- import { AuthForm } from "../_components/auth-form";
- 
- export default function SignupPage() {
-   return (
--    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
-       <AuthForm mode="register" />
-     </main>
-   );
- }
-diff --git a/apps/web/app/(public)/onboarding/profile/page.tsx b/apps/web/app/(public)/onboarding/profile/page.tsx
-index 0f62f5e748ed174f662678055a30385059f97105..4dfa85498d841f3734b99f25e05970d32ddefe91 100644
---- a/apps/web/app/(public)/onboarding/profile/page.tsx
-+++ b/apps/web/app/(public)/onboarding/profile/page.tsx
-@@ -1,9 +1,13 @@
- import { ProfileCompletionForm } from './profile-completion-form';
- 
- export default function OnboardingProfilePage({
-   searchParams,
- }: {
-   searchParams?: { next?: string };
- }) {
--  return <ProfileCompletionForm returnPath={searchParams?.next ?? '/baseline'} />;
-+  return (
-+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
-+      <ProfileCompletionForm returnPath={searchParams?.next ?? '/baseline'} />
-+    </main>
-+  );
- }
-diff --git a/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
-index 1855c202dc23e1ca6275d5eaa54d39fed7462620..c492b0b457a3d81f40dda731dee67bf19afeecd2 100644
---- a/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
-+++ b/apps/web/app/(public)/onboarding/profile/profile-completion-form.tsx
-@@ -33,41 +33,41 @@ export function ProfileCompletionForm({ returnPath }: { returnPath: string }) {
-           company: company.trim() || undefined,
-           linkedinUrl: linkedinUrl.trim() || undefined,
-           intendedUse: intendedUse.trim(),
-         }),
-       });
- 
-       if (!response.ok) {
-         const raw = await response.text();
-         setError(raw || "Unable to save profile");
-         return;
-       }
- 
-       const target = sanitizeReturnPath(returnPath) ?? "/baseline";
-       router.replace(target);
-       router.refresh();
-     } catch {
-       setError("Unable to save profile");
-     } finally {
-       setIsSubmitting(false);
-     }
-   };
- 
-   return (
-     <div className="mx-auto w-full max-w-md space-y-6">
-       <div className="space-y-2 text-center">
--        <h1 className="text-3xl font-bold text-gray-900">Complete your profile</h1>
--        <p className="text-sm text-gray-600">Tell us how you plan to use Target This Role.</p>
-+        <h1 className="text-3xl font-bold text-white">Complete your profile</h1>
-+        <p className="text-sm text-slate-300">Tell us how you plan to use Target This Role.</p>
++          {isLoadingProfile ? <span className="text-xs text-slate-400">Loading profile…</span> : null}
++          {statusMessage ? <span className="text-xs text-emerald-300">{statusMessage}</span> : null}
++          {statusError ? <span className="text-xs text-red-300">{statusError}</span> : null}
++        </div>
++
++        <p className="text-xs text-slate-500">
++          Password reset controls will be added here soon.
++        </p>
++      </form>
++
+       <div className="space-y-3 text-sm text-slate-200">
+         <div className="flex justify-between">
+           <span>Auto generate threshold</span>
+           <span className="font-semibold">{thresholdValue}</span>
+         </div>
        </div>
-       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Role title" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} required />
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Company (optional)" value={company} onChange={(e) => setCompany(e.target.value)} />
-         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="LinkedIn URL (optional)" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} />
-         <textarea className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="How do you intend to use the app?" value={intendedUse} onChange={(e) => setIntendedUse(e.target.value)} required rows={4} />
-         {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-         <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-           {isSubmitting ? "Saving..." : "Continue"}
-         </button>
-       </form>
+ 
+       <div className="space-y-3 text-sm text-slate-200">
+         <div className="flex justify-between">
+           <span>Plan</span>
+           <span className="font-semibold">{planLabel}</span>
+         </div>
+       </div>
      </div>
    );
  }
-diff --git a/apps/web/app/api/auth/resend-confirmation/route.ts b/apps/web/app/api/auth/resend-confirmation/route.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..9e25b8508e7d2e2630be9ba29b83fc27328bf282
---- /dev/null
-+++ b/apps/web/app/api/auth/resend-confirmation/route.ts
-@@ -0,0 +1,7 @@
-+import { NextRequest } from "next/server";
-+
-+import { forwardAuthRequest } from "../helpers";
-+
-+export async function POST(request: NextRequest) {
-+  return forwardAuthRequest(request, "/auth/resend-confirmation");
-+}
+diff --git a/apps/web/src/components/layout/TopNavAccountArea.tsx b/apps/web/src/components/layout/TopNavAccountArea.tsx
+index 34a6c08713b027fbfea014079417771b05ac0430..79f45057324aedbf0bcfa6aed430450e87d6606a 100644
+--- a/apps/web/src/components/layout/TopNavAccountArea.tsx
++++ b/apps/web/src/components/layout/TopNavAccountArea.tsx
+@@ -120,66 +120,66 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
+         setMenuOpen(false);
+       }
+     };
+ 
+     document.addEventListener("mousedown", handleClick);
+     return () => document.removeEventListener("mousedown", handleClick);
+   }, []);
+ 
+   const label =
+     authState === "authenticated"
+       ? "Log out"
+       : authState === "unauthenticated"
+         ? "Sign in"
+         : "Checking...";
+ 
+   const onClick = authState === "authenticated" ? handleLogout : handleSignIn;
+ 
+   return (
+     <div className="flex items-center gap-3">
+       {authState === "authenticated" && email ? (
+         <span className="max-w-[160px] truncate text-sm font-semibold text-slate-100">
+           {email}
+         </span>
+       ) : null}
+       {authState === "authenticated" ? (
+-        <div className="relative" ref={menuRef}>
++        <div className="relative z-50" ref={menuRef}>
+           <button
+             type="button"
+             className="flex items-center gap-2 rounded-full border border-white/20 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100 shadow-sm transition hover:border-white/40"
+             aria-label="Account menu"
+             aria-haspopup="menu"
+             aria-expanded={menuOpen}
+             onClick={() => setMenuOpen((open) => !open)}
+           >
+             <span aria-hidden="true" className="text-xs">
+               ˅
+             </span>
+           </button>
+ 
+           {menuOpen ? (
+-            <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-xl">
++            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/95 p-3 shadow-xl">
+               <Link
+                 href={settingsRoute.href}
+                 className="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800/60"
+                 onClick={() => setMenuOpen(false)}
+               >
+                 {settingsRoute.label}
+               </Link>
+               <button
+                 type="button"
+                 onClick={handleLogout}
+                 disabled={isProcessing}
+                 className="mt-1 w-full rounded-lg border border-transparent bg-amber-400/20 px-3 py-2 text-left text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+               >
+                 {isProcessing ? "Logging out" : "Logout"}
+               </button>
+               {logoutError ? <p className="mt-2 text-xs text-red-400">{logoutError}</p> : null}
+             </div>
+           ) : null}
+         </div>
+       ) : null}
+       <button
+         type="button"
+         onClick={onClick}
+         disabled={authState === "loading" || isProcessing}
+         className="rounded-full border border-white/20 px-4 py-1 text-sm font-semibold text-slate-100 transition hover:bg-slate-900/40 disabled:cursor-not-allowed disabled:opacity-60"

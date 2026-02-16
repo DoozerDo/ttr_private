@@ -142,7 +142,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
         </span>
       ) : null}
       {authState === "authenticated" ? (
-        <div className="relative" ref={menuRef}>
+        <div className="relative z-50" ref={menuRef}>
           <button
             type="button"
             className="flex items-center gap-2 rounded-full border border-white/20 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100 shadow-sm transition hover:border-white/40"
@@ -157,7 +157,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
           </button>
 
           {menuOpen ? (
-            <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-xl">
+            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/95 p-3 shadow-xl">
               <Link
                 href={settingsRoute.href}
                 className="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800/60"

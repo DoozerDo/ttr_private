@@ -66,10 +66,12 @@ export class UsersService {
   async updateMyProfile(
     userId: string,
     input: {
-      roleTitle: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      roleTitle?: string | null;
       company?: string | null;
       linkedinUrl?: string | null;
-      intendedUse: string;
+      intendedUse?: string | null;
     },
   ): Promise<User> {
     const user = await this.findById(userId);
@@ -78,10 +80,29 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    user.roleTitle = input.roleTitle.trim();
-    user.company = input.company?.trim() || null;
-    user.linkedinUrl = input.linkedinUrl?.trim() || null;
-    user.intendedUse = input.intendedUse.trim();
+    if (input.firstName !== undefined) {
+      user.firstName = input.firstName?.trim() || '';
+    }
+
+    if (input.lastName !== undefined) {
+      user.lastName = input.lastName?.trim() || '';
+    }
+
+    if (input.roleTitle !== undefined) {
+      user.roleTitle = input.roleTitle?.trim() || null;
+    }
+
+    if (input.company !== undefined) {
+      user.company = input.company?.trim() || null;
+    }
+
+    if (input.linkedinUrl !== undefined) {
+      user.linkedinUrl = input.linkedinUrl?.trim() || null;
+    }
+
+    if (input.intendedUse !== undefined) {
+      user.intendedUse = input.intendedUse?.trim() || null;
+    }
 
     if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
       user.profileCompletedAt = new Date();

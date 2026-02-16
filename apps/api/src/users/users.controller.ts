@@ -55,14 +55,14 @@ export class UsersController {
       throw new BadRequestException('Invalid user context');
     }
 
+    const firstName = body.firstName?.trim();
+    const lastName = body.lastName?.trim();
     const roleTitle = body.roleTitle?.trim();
     const intendedUse = body.intendedUse?.trim();
 
-    if (!roleTitle || !intendedUse) {
-      throw new BadRequestException('roleTitle and intendedUse are required');
-    }
-
     const updated = await this.usersService.updateMyProfile(user.id, {
+      firstName,
+      lastName,
       roleTitle,
       company: body.company,
       linkedinUrl: body.linkedinUrl,
