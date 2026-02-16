@@ -27,6 +27,12 @@ import { AdminUsersService } from '../admin-users/admin-users.service';
 type RegisterResponseDto = {
   success: true;
   message: string;
+  emailConfirmationRequired: boolean;
+};
+
+type ResendConfirmationResponseDto = {
+  success: true;
+  message: string;
 };
 
 @Injectable()
@@ -55,6 +61,7 @@ export class AuthService {
         message: this.requireEmailConfirmation
           ? 'Check your email to confirm your account.'
           : 'Account created.',
+        emailConfirmationRequired: this.requireEmailConfirmation,
       };
     }
 
@@ -68,7 +75,11 @@ export class AuthService {
     });
 
     if (!this.requireEmailConfirmation) {
-      return { success: true, message: 'Account created.' };
+      return {
+        success: true,
+        message: 'Account created.',
+        emailConfirmationRequired: false,
+      };
     }
 
     const token = randomBytes(32).toString('hex');
@@ -101,6 +112,7 @@ export class AuthService {
     return {
       success: true,
       message: 'Check your email to confirm your account.',
+      emailConfirmationRequired: true,
     };
   }
 
@@ -162,6 +174,55 @@ export class AuthService {
     await this.userTokensRepository.delete({ id: match.id });
 
     return { success: true, message: 'Email confirmed. You can now log in.' };
+  }
+
+  async resendConfirmation(
+    email: string,
+  ): Promise<ResendConfirmationResponseDto> {
+    const successMessage = {
+      success: true,
+      message: 'If this email exists, a new confirmation email has been sent.',
+    } as const;
+
+    if (!this.requireEmailConfirmation) {
+      return successMessage;
+    }
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user || user.emailConfirmed) {
+      return successMessage;
+    }
+
+    await this.userTokensRepository.delete({ userId: user.id, type: 'confirm' });
+
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.userTokensRepository.save(
+      this.userTokensRepository.create({
+        userId: user.id,
+        token,
+        type: 'confirm',
+        expiresAt,
+      }),
+    );
+
+    const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
+    const supportEmail =
+      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
+      'support@targetthisrole.ai';
+    const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
+    const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
+
+    await this.relayEmailService.sendRawRelayEmail({
+      to: user.email,
+      subject: 'Confirm your account',
+      body: html,
+      replyTo: supportEmail,
+      type: 'signup_confirm',
+    });
+
+    return successMessage;
   }
 
 

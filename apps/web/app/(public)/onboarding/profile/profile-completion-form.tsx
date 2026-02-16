@@ -55,8 +55,8 @@ export function ProfileCompletionForm({ returnPath }: { returnPath: string }) {
   return (
     <div className="mx-auto w-full max-w-md space-y-6">
       <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold text-gray-900">Complete your profile</h1>
-        <p className="text-sm text-gray-600">Tell us how you plan to use Target This Role.</p>
+        <h1 className="text-3xl font-bold text-white">Complete your profile</h1>
+        <p className="text-sm text-slate-300">Tell us how you plan to use Target This Role.</p>
       </div>
       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Role title" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} required />

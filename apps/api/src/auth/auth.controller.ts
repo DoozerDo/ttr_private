@@ -15,6 +15,7 @@ import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
 import type { AuthUserDto } from './dto/auth-response.dto';
 
 const AUTH_COOKIE_NAME = 'access_token';
@@ -44,6 +45,12 @@ export class AuthController {
   @Get('confirm')
   async confirmEmail(@Query('token') token: string) {
     return this.authService.confirmEmail(token);
+  }
+
+
+  @Post('resend-confirmation')
+  async resendConfirmation(@Body() payload: ResendConfirmationDto) {
+    return this.authService.resendConfirmation(payload.email);
   }
 
   @Post('login')
