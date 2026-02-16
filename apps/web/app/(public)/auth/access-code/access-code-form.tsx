@@ -129,8 +129,8 @@ export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: str
   return (
     <div className="mx-auto w-full max-w-md space-y-6">
       <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold text-gray-900">Enter Access Code</h1>
-        <p className="text-sm text-gray-600">Your account needs an access code before login.</p>
+        <h1 className="text-3xl font-bold text-white">Enter Access Code</h1>
+        <p className="text-sm text-slate-300">Your account needs an access code before login.</p>
       </div>
 
       <form

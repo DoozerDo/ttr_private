@@ -42,7 +42,7 @@ export default function ConfirmClient() {
   }, [token]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
       <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
         <p

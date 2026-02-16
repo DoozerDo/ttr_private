@@ -1,510 +1,166 @@
-diff --git a/apps/api/src/users/dto/update-profile.dto.ts b/apps/api/src/users/dto/update-profile.dto.ts
-index a748a7419e0242a9065da26c241b6e0fceaaf44e..c59d377206acb841de03db4c27cbaeb1ec6451c2 100644
---- a/apps/api/src/users/dto/update-profile.dto.ts
-+++ b/apps/api/src/users/dto/update-profile.dto.ts
-@@ -1,22 +1,34 @@
- import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+diff --git a/apps/web/app/(public)/auth/access-code/access-code-form.tsx b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
+index 37817eb58a579ef66f8c1e2d9dd1e7c1c4a35e07..f27b1ff5f5635229785cf60302af9a6b074ec8a3 100644
+--- a/apps/web/app/(public)/auth/access-code/access-code-form.tsx
++++ b/apps/web/app/(public)/auth/access-code/access-code-form.tsx
+@@ -107,52 +107,52 @@ export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: str
+         method: "GET",
+         credentials: "include",
+       });
+       const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
  
- export class UpdateProfileDto {
-+  @IsOptional()
-+  @IsString()
-+  @MaxLength(100)
-+  firstName?: string;
-+
-+  @IsOptional()
-+  @IsString()
-+  @MaxLength(100)
-+  lastName?: string;
-+
-+  @IsOptional()
-   @IsString()
-   @MaxLength(150)
--  roleTitle!: string;
-+  roleTitle?: string;
+       if (needsProfileCompletion(mePayload)) {
+         const params = new URLSearchParams();
+         params.set("next", targetPath);
+         await router.replace(`/onboarding/profile?${params.toString()}`);
+         await router.refresh();
+         return;
+       }
  
-   @IsOptional()
-   @IsString()
-   @MaxLength(150)
-   company?: string;
- 
-   @IsOptional()
-   @IsString()
-   @IsUrl({ require_protocol: true })
-   @MaxLength(255)
-   linkedinUrl?: string;
- 
-+  @IsOptional()
-   @IsString()
-   @MaxLength(255)
--  intendedUse!: string;
-+  intendedUse?: string;
- }
-diff --git a/apps/api/src/users/users.controller.ts b/apps/api/src/users/users.controller.ts
-index ce6056ad0ff8313c7a48b871e062e80646a429cd..ef8158ba8debcdc5d25d101dc9c182ec567b694b 100644
---- a/apps/api/src/users/users.controller.ts
-+++ b/apps/api/src/users/users.controller.ts
-@@ -33,58 +33,58 @@ export class UsersController {
-   constructor(private readonly usersService: UsersService) {}
- 
-   @Get('me')
-   me(@Req() request: UserRequest) {
-     const user = request.user;
- 
-     if (!user) {
-       throw new BadRequestException('Invalid user context');
+       await router.replace(targetPath);
+       await router.refresh();
+     } catch {
+       setError("Unable to reach authentication service");
+     } finally {
+       setIsSubmitting(false);
      }
+   };
  
-     return user;
-   }
- 
- 
-   @Patch('me/profile')
-   async updateMyProfile(
-     @Body() body: UpdateProfileDto,
-     @Req() request: UserRequest,
-   ) {
-     const user = request.user;
- 
-     if (!user?.id) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-+    const firstName = body.firstName?.trim();
-+    const lastName = body.lastName?.trim();
-     const roleTitle = body.roleTitle?.trim();
-     const intendedUse = body.intendedUse?.trim();
- 
--    if (!roleTitle || !intendedUse) {
--      throw new BadRequestException('roleTitle and intendedUse are required');
--    }
--
-     const updated = await this.usersService.updateMyProfile(user.id, {
-+      firstName,
-+      lastName,
-       roleTitle,
-       company: body.company,
-       linkedinUrl: body.linkedinUrl,
-       intendedUse,
-     });
- 
-     const { passwordHash, ...sanitized } = updated;
-     return sanitized;
-   }
- 
-   @Patch('me/subscription-tier')
-   async updateSubscriptionTier(
-     @Body() body: UpdateSubscriptionTierDto,
-     @Req() request: UserRequest,
-   ) {
-     const user = request.user;
- 
-     if (!user?.id) {
-       throw new BadRequestException('Invalid user context');
-     }
- 
-     const isProd = process.env.NODE_ENV === 'production';
-     const isAdmin = user.role === 'admin';
- 
-     if (isProd && !isAdmin) {
-diff --git a/apps/api/src/users/users.service.ts b/apps/api/src/users/users.service.ts
-index ee3e48b5ffbf271dff625f7bf45214a9582950b7..e1408adc8730487639dec32edfb5373a85cf2631 100644
---- a/apps/api/src/users/users.service.ts
-+++ b/apps/api/src/users/users.service.ts
-@@ -44,53 +44,74 @@ export class UsersService {
-     return this.usersRepository.findOne({ where: { email } });
-   }
- 
-   findById(id: string): Promise<User | null> {
-     return this.usersRepository.findOne({ where: { id } });
-   }
- 
-   async updateSubscriptionTier(
-     userId: string,
-     tier: SubscriptionTier,
-   ): Promise<User> {
-     const user = await this.findById(userId);
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
-     user.subscriptionTier = tier;
-     return this.usersRepository.save(user);
-   }
- 
- 
-   async updateMyProfile(
-     userId: string,
-     input: {
--      roleTitle: string;
-+      firstName?: string | null;
-+      lastName?: string | null;
-+      roleTitle?: string | null;
-       company?: string | null;
-       linkedinUrl?: string | null;
--      intendedUse: string;
-+      intendedUse?: string | null;
-     },
-   ): Promise<User> {
-     const user = await this.findById(userId);
- 
-     if (!user) {
-       throw new NotFoundException('User not found');
-     }
- 
--    user.roleTitle = input.roleTitle.trim();
--    user.company = input.company?.trim() || null;
--    user.linkedinUrl = input.linkedinUrl?.trim() || null;
--    user.intendedUse = input.intendedUse.trim();
-+    if (input.firstName !== undefined) {
-+      user.firstName = input.firstName?.trim() || '';
-+    }
-+
-+    if (input.lastName !== undefined) {
-+      user.lastName = input.lastName?.trim() || '';
-+    }
-+
-+    if (input.roleTitle !== undefined) {
-+      user.roleTitle = input.roleTitle?.trim() || null;
-+    }
-+
-+    if (input.company !== undefined) {
-+      user.company = input.company?.trim() || null;
-+    }
-+
-+    if (input.linkedinUrl !== undefined) {
-+      user.linkedinUrl = input.linkedinUrl?.trim() || null;
-+    }
-+
-+    if (input.intendedUse !== undefined) {
-+      user.intendedUse = input.intendedUse?.trim() || null;
-+    }
- 
-     if (!user.profileCompletedAt && user.roleTitle && user.intendedUse) {
-       user.profileCompletedAt = new Date();
-     }
- 
-     return this.usersRepository.save(user);
-   }
- 
-   async setEmailConfirmed(userId: string): Promise<void> {
-     await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
-   }
- }
-diff --git a/apps/web/app/(app)/settings/page.tsx b/apps/web/app/(app)/settings/page.tsx
-index cf8d51a8457f7b7755d3298c5442ede9b38e4ea5..15a6b58aa71d1845174de905c967e374e2821d11 100644
---- a/apps/web/app/(app)/settings/page.tsx
-+++ b/apps/web/app/(app)/settings/page.tsx
-@@ -1,52 +1,238 @@
- "use client";
- 
-+import { FormEvent, useEffect, useMemo, useState } from "react";
-+
- import { useAutoGenerateThreshold } from "../lib/settings";
- import { AUTO_GENERATE_THRESHOLD } from "../lib/autoGenerateThreshold";
- import { ttrComponents } from "../ui/ttrStyles";
- import { useEntitlements } from "@/src/lib/entitlements";
- 
-+type SettingsProfile = {
-+  firstName: string;
-+  lastName: string;
-+  company: string;
-+  linkedinUrl: string;
-+};
-+
-+const EMPTY_PROFILE: SettingsProfile = {
-+  firstName: "",
-+  lastName: "",
-+  company: "",
-+  linkedinUrl: "",
-+};
-+
- export default function SettingsPage() {
-   const [autoGenerateThreshold] = useAutoGenerateThreshold();
-   const { tier, source } = useEntitlements();
-+  const [profile, setProfile] = useState<SettingsProfile>(EMPTY_PROFILE);
-+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-+  const [isSaving, setIsSaving] = useState(false);
-+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-+  const [statusError, setStatusError] = useState<string | null>(null);
-+
-+  useEffect(() => {
-+    let cancelled = false;
-+
-+    const loadProfile = async () => {
-+      try {
-+        setIsLoadingProfile(true);
-+        setStatusError(null);
-+        const response = await fetch("/api/users/me", {
-+          method: "GET",
-+          cache: "no-store",
-+          credentials: "include",
-+        });
-+
-+        if (!response.ok) {
-+          throw new Error("Unable to load your profile.");
-+        }
-+
-+        const data = (await response.json()) as {
-+          firstName?: string | null;
-+          lastName?: string | null;
-+          company?: string | null;
-+          linkedinUrl?: string | null;
-+        };
-+
-+        if (cancelled) {
-+          return;
-+        }
-+
-+        setProfile({
-+          firstName: data.firstName ?? "",
-+          lastName: data.lastName ?? "",
-+          company: data.company ?? "",
-+          linkedinUrl: data.linkedinUrl ?? "",
-+        });
-+      } catch (error) {
-+        if (!cancelled) {
-+          setStatusError(error instanceof Error ? error.message : "Unable to load your profile.");
-+        }
-+      } finally {
-+        if (!cancelled) {
-+          setIsLoadingProfile(false);
-+        }
-+      }
-+    };
-+
-+    void loadProfile();
-+
-+    return () => {
-+      cancelled = true;
-+    };
-+  }, []);
- 
-   const thresholdValue =
-     typeof autoGenerateThreshold === "number"
-       ? autoGenerateThreshold
-       : AUTO_GENERATE_THRESHOLD;
-   const isBetaOverride = source === "beta" || source === "beta_override";
-   const planLabel = isBetaOverride ? `${tier} (Beta)` : tier;
- 
-+  const canSubmit = useMemo(() => !isSaving && !isLoadingProfile, [isLoadingProfile, isSaving]);
-+
-+  const handleProfileChange = (field: keyof SettingsProfile, value: string) => {
-+    setStatusMessage(null);
-+    setStatusError(null);
-+    setProfile((prev) => ({ ...prev, [field]: value }));
-+  };
-+
-+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-+    event.preventDefault();
-+
-+    if (!canSubmit) {
-+      return;
-+    }
-+
-+    setIsSaving(true);
-+    setStatusMessage(null);
-+    setStatusError(null);
-+
-+    try {
-+      const response = await fetch("/api/users/me/profile", {
-+        method: "PATCH",
-+        credentials: "include",
-+        headers: {
-+          "Content-Type": "application/json",
-+        },
-+        body: JSON.stringify({
-+          firstName: profile.firstName.trim(),
-+          lastName: profile.lastName.trim(),
-+          company: profile.company.trim() || undefined,
-+          linkedinUrl: profile.linkedinUrl.trim() || undefined,
-+        }),
-+      });
-+
-+      if (!response.ok) {
-+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-+        throw new Error(payload?.error ?? "Unable to save profile settings.");
-+      }
-+
-+      setStatusMessage("Profile updated.");
-+    } catch (error) {
-+      setStatusError(error instanceof Error ? error.message : "Unable to save profile settings.");
-+    } finally {
-+      setIsSaving(false);
-+    }
-+  };
-+
    return (
-     <div
-       style={{
-         ...ttrComponents.basePanel,
-         padding: 24,
-         display: "flex",
-         flexDirection: "column",
-         gap: 20,
-         maxWidth: 720,
-       }}
-     >
-       <div>
-         <h1 className="text-2xl font-semibold text-white">Settings</h1>
-         <p className="mt-1 text-sm text-slate-400">
--          Account capabilities and system defaults.
-+          Account capabilities, profile settings, and system defaults.
-         </p>
+     <div className="mx-auto w-full max-w-md space-y-6">
+       <div className="space-y-2 text-center">
+-        <h1 className="text-3xl font-bold text-gray-900">Enter Access Code</h1>
+-        <p className="text-sm text-gray-600">Your account needs an access code before login.</p>
++        <h1 className="text-3xl font-bold text-white">Enter Access Code</h1>
++        <p className="text-sm text-slate-300">Your account needs an access code before login.</p>
        </div>
  
-+      <form className="space-y-4" onSubmit={onSubmit}>
-+        <div className="grid gap-4 md:grid-cols-2">
-+          <label className="space-y-1 text-sm text-slate-200">
-+            <span>First name</span>
-+            <input
-+              value={profile.firstName}
-+              onChange={(event) => handleProfileChange("firstName", event.target.value)}
-+              className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
-+              placeholder="First name"
-+              autoComplete="given-name"
-+            />
-+          </label>
-+
-+          <label className="space-y-1 text-sm text-slate-200">
-+            <span>Last name</span>
-+            <input
-+              value={profile.lastName}
-+              onChange={(event) => handleProfileChange("lastName", event.target.value)}
-+              className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
-+              placeholder="Last name"
-+              autoComplete="family-name"
-+            />
-+          </label>
-+        </div>
-+
-+        <label className="space-y-1 text-sm text-slate-200">
-+          <span>LinkedIn URL</span>
-+          <input
-+            type="url"
-+            value={profile.linkedinUrl}
-+            onChange={(event) => handleProfileChange("linkedinUrl", event.target.value)}
-+            className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
-+            placeholder="https://www.linkedin.com/in/your-profile"
-+            autoComplete="url"
-+          />
-+        </label>
-+
-+        <label className="space-y-1 text-sm text-slate-200">
-+          <span>Company</span>
-+          <input
-+            value={profile.company}
-+            onChange={(event) => handleProfileChange("company", event.target.value)}
-+            className="w-full rounded-xl border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-amber-300/70"
-+            placeholder="Current company"
-+            autoComplete="organization"
-+          />
-+        </label>
-+
-+        <div className="flex items-center gap-3">
-+          <button
-+            type="submit"
-+            disabled={!canSubmit}
-+            className="rounded-xl border border-amber-300/50 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-300/80 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
-+          >
-+            {isSaving ? "Saving..." : "Save profile"}
-+          </button>
-+          {isLoadingProfile ? <span className="text-xs text-slate-400">Loading profile…</span> : null}
-+          {statusMessage ? <span className="text-xs text-emerald-300">{statusMessage}</span> : null}
-+          {statusError ? <span className="text-xs text-red-300">{statusError}</span> : null}
-+        </div>
-+
-+        <p className="text-xs text-slate-500">
-+          Password reset controls will be added here soon.
-+        </p>
-+      </form>
-+
-       <div className="space-y-3 text-sm text-slate-200">
-         <div className="flex justify-between">
-           <span>Auto generate threshold</span>
-           <span className="font-semibold">{thresholdValue}</span>
+       <form
+         onSubmit={onSubmit}
+         className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+       >
+         <div className="space-y-2">
+           <label className="block text-sm font-semibold text-gray-700" htmlFor="email">
+             Email
+           </label>
+           <input
+             id="email"
+             type="email"
+             required
+             autoComplete="email"
+             value={email}
+             onChange={(event) => setEmail(event.target.value)}
+             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+             placeholder="you@example.com"
+           />
          </div>
-       </div>
  
-       <div className="space-y-3 text-sm text-slate-200">
-         <div className="flex justify-between">
-           <span>Plan</span>
-           <span className="font-semibold">{planLabel}</span>
-         </div>
-       </div>
-     </div>
+         <div className="space-y-2">
+           <label className="block text-sm font-semibold text-gray-700" htmlFor="password">
+             Password
+diff --git a/apps/web/app/(public)/auth/access-code/page.tsx b/apps/web/app/(public)/auth/access-code/page.tsx
+index b7724ec909ee97b1378b929b9b64f47eb40c1861..45e5c7f295faf721bfff9ea546d1344590d02ab0 100644
+--- a/apps/web/app/(public)/auth/access-code/page.tsx
++++ b/apps/web/app/(public)/auth/access-code/page.tsx
+@@ -1,25 +1,25 @@
+ import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
+ import { AccessCodeForm } from "./access-code-form";
+ 
+ type SearchParams = {
+   email?: string | string[];
+   next?: string | string[];
+ };
+ 
+ type AccessCodePageProps = {
+   searchParams?: Promise<SearchParams> | SearchParams;
+ };
+ 
+ export default async function AccessCodePage({ searchParams }: AccessCodePageProps) {
+   const sp = (await Promise.resolve(searchParams)) ?? {};
+ 
+   const emailParam = Array.isArray(sp.email) ? sp.email[0] : sp.email;
+   const nextParam = Array.isArray(sp.next) ? sp.next[0] : sp.next;
+   const safeNext = sanitizeReturnPath(nextParam) ?? "/baseline";
+ 
+   return (
+-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
+       <AccessCodeForm initialEmail={emailParam ?? ""} returnPath={safeNext} />
+     </main>
    );
  }
-diff --git a/apps/web/src/components/layout/TopNavAccountArea.tsx b/apps/web/src/components/layout/TopNavAccountArea.tsx
-index 34a6c08713b027fbfea014079417771b05ac0430..79f45057324aedbf0bcfa6aed430450e87d6606a 100644
---- a/apps/web/src/components/layout/TopNavAccountArea.tsx
-+++ b/apps/web/src/components/layout/TopNavAccountArea.tsx
-@@ -120,66 +120,66 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
-         setMenuOpen(false);
+diff --git a/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
+index d9c86288e3c008d103b364850a67427cfcbb13ea..f7ccf07191562c0cd8f4daaef3c59c8014fe32ae 100644
+--- a/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
++++ b/apps/web/app/(public)/auth/confirm/ConfirmClient.tsx
+@@ -20,44 +20,44 @@ export default function ConfirmClient() {
+ 
+       try {
+         const response = await fetch(`/api/auth/confirm?token=${encodeURIComponent(token)}`, {
+           method: "GET",
+         });
+         const data = await response.json().catch(() => ({}));
+         if (!response.ok) {
+           setStatus("error");
+           setMessage(data?.message ?? "Unable to confirm email.");
+           return;
+         }
+ 
+         setStatus("success");
+         setMessage(data?.message ?? "Email confirmed. You can now log in.");
+       } catch (error) {
+         console.error("Failed to confirm email", error);
+         setStatus("error");
+         setMessage("Unable to confirm email.");
        }
-     };
+     }
  
-     document.addEventListener("mousedown", handleClick);
-     return () => document.removeEventListener("mousedown", handleClick);
-   }, []);
- 
-   const label =
-     authState === "authenticated"
-       ? "Log out"
-       : authState === "unauthenticated"
-         ? "Sign in"
-         : "Checking...";
- 
-   const onClick = authState === "authenticated" ? handleLogout : handleSignIn;
+     void runConfirmation();
+   }, [token]);
  
    return (
-     <div className="flex items-center gap-3">
-       {authState === "authenticated" && email ? (
-         <span className="max-w-[160px] truncate text-sm font-semibold text-slate-100">
-           {email}
-         </span>
-       ) : null}
-       {authState === "authenticated" ? (
--        <div className="relative" ref={menuRef}>
-+        <div className="relative z-50" ref={menuRef}>
-           <button
-             type="button"
-             className="flex items-center gap-2 rounded-full border border-white/20 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100 shadow-sm transition hover:border-white/40"
-             aria-label="Account menu"
-             aria-haspopup="menu"
-             aria-expanded={menuOpen}
-             onClick={() => setMenuOpen((open) => !open)}
-           >
-             <span aria-hidden="true" className="text-xs">
-               ˅
-             </span>
-           </button>
+-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
+       <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+         <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
+         <p
+           className={
+             status === "error"
+               ? "rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+               : "rounded-md bg-green-50 px-3 py-2 text-sm text-green-700"
+           }
+         >
+           {message}
+         </p>
+         <Link href="/auth/login" className="inline-block text-sm font-semibold text-blue-600 hover:underline">
+           Go to login
+         </Link>
+       </div>
+     </main>
+   );
+ }
+diff --git a/apps/web/app/(public)/auth/confirm/page.tsx b/apps/web/app/(public)/auth/confirm/page.tsx
+index fb6eef613d4fdbdce02b9ef38408dae4541f1a42..1ec3378b23b65c1d64e1f65e3f8e162d12d841ed 100644
+--- a/apps/web/app/(public)/auth/confirm/page.tsx
++++ b/apps/web/app/(public)/auth/confirm/page.tsx
+@@ -1,20 +1,20 @@
+ import { Suspense } from "react";
  
-           {menuOpen ? (
--            <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/80 p-3 shadow-xl">
-+            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/95 p-3 shadow-xl">
-               <Link
-                 href={settingsRoute.href}
-                 className="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800/60"
-                 onClick={() => setMenuOpen(false)}
-               >
-                 {settingsRoute.label}
-               </Link>
-               <button
-                 type="button"
-                 onClick={handleLogout}
-                 disabled={isProcessing}
-                 className="mt-1 w-full rounded-lg border border-transparent bg-amber-400/20 px-3 py-2 text-left text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-60"
-               >
-                 {isProcessing ? "Logging out" : "Logout"}
-               </button>
-               {logoutError ? <p className="mt-2 text-xs text-red-400">{logoutError}</p> : null}
-             </div>
-           ) : null}
-         </div>
-       ) : null}
-       <button
-         type="button"
-         onClick={onClick}
-         disabled={authState === "loading" || isProcessing}
-         className="rounded-full border border-white/20 px-4 py-1 text-sm font-semibold text-slate-100 transition hover:bg-slate-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+ import ConfirmClient from "./ConfirmClient";
+ 
+ const ConfirmFallback = () => (
+-  <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
++  <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
+     <div className="mx-auto w-full max-w-md space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+       <h1 className="text-2xl font-bold text-gray-900">Email Confirmation</h1>
+       <p className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">Confirming your email...</p>
+     </div>
+   </main>
+ );
+ 
+ export default function ConfirmPage() {
+   return (
+     <Suspense fallback={<ConfirmFallback />}>
+       <ConfirmClient />
+     </Suspense>
+   );
+ }

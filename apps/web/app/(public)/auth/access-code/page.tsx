@@ -18,7 +18,7 @@ export default async function AccessCodePage({ searchParams }: AccessCodePagePro
   const safeNext = sanitizeReturnPath(nextParam) ?? "/baseline";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
       <AccessCodeForm initialEmail={emailParam ?? ""} returnPath={safeNext} />
     </main>
   );
