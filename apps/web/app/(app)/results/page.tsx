@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
+import { AchievementBanner } from "@/components/AchievementBanner";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
@@ -12,6 +13,7 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
+import type { Achievement } from "@/types/achievement";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -116,6 +118,22 @@ type LatestAnalysis = {
 };
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
+
+const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
+
+function readLastAssessmentFromStorage(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_ASSESSMENT_STORAGE_KEY);
+}
+
+function writeLastAssessmentToStorage(value: string | null) {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(LAST_ASSESSMENT_STORAGE_KEY, value);
+    return;
+  }
+  window.localStorage.removeItem(LAST_ASSESSMENT_STORAGE_KEY);
+}
 
 const debugUiEnabled =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEBUG_UI === "true";
@@ -591,6 +609,7 @@ export default function ResultsPage() {
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
+  const lastAssessmentHydrationAttempted = useRef(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -601,6 +620,23 @@ export default function ResultsPage() {
       searchParams?.get("fitScoreId");
     return candidate?.trim() ?? null;
   }, [searchParams]);
+
+  const persistLastAssessmentId = useCallback(async (assessmentId: string | null) => {
+    writeLastAssessmentToStorage(assessmentId);
+    try {
+      await fetch("/api/users/me/last-assessment", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assessmentId }),
+      });
+    } catch {
+      // best effort; silence failures
+    }
+  }, []);
+
+  const clearLastAssessmentId = useCallback(async () => {
+    await persistLastAssessmentId(null);
+  }, [persistLastAssessmentId]);
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
@@ -647,6 +683,24 @@ export default function ResultsPage() {
   const heroSupportText = executionMode
     ? "This role aligns with your verified baseline."
     : "Review gaps and strengthen alignment before applying.";
+  const dimensionCardBaseClass = "rounded-2xl border bg-slate-900/30 p-3";
+  const dimensionCardSuccessExtras = "border-[#22c55e] shadow-[0_0_40px_rgba(34,197,94,0.25)]";
+  const dimensionCardDefaultClass = "border-white/10";
+  const dimensionCardClassName = `${dimensionCardBaseClass} ${
+    executionMode ? dimensionCardSuccessExtras : dimensionCardDefaultClass
+  }`;
+  const achievementForScore = useMemo<Achievement | null>(() => {
+    if (!executionMode) return null;
+    return {
+      id: "clear_to_apply",
+      title: "Achievement Unlocked",
+      description:
+        "You are clear to apply. You have unlocked personalized document creation.",
+      tier: "gold",
+      tone: "success",
+      iconKey: "✓",
+    };
+  }, [executionMode]);
 
   const jobTrackerHref = "/job-tracker";
   const interviewToolkitHref = useMemo(() => {
@@ -939,6 +993,25 @@ export default function ResultsPage() {
             return;
           }
 
+          if (res.status === 404) {
+            await clearLastAssessmentId();
+            setLatest(null);
+            setAnalysisSource("manual");
+            setLastLoadedRunIdentifier(null);
+
+            if (typeof window !== "undefined") {
+              const params = new URLSearchParams(window.location.search);
+              params.delete("assessmentId");
+              params.delete("analysisId");
+              params.delete("fitScoreId");
+              const query = params.toString();
+              const destination = query ? `/results?${query}` : "/results";
+              await router.replace(destination);
+            }
+
+            return;
+          }
+
           const message = formatErrorMessage(payload, "Unable to load the requested analysis.");
           throw new Error(message);
         }
@@ -948,13 +1021,19 @@ export default function ResultsPage() {
         setBaselineId(data.baselineId ?? "");
         setJobId(data.jobId ?? "");
         setAnalysisSource("latest");
+        await persistLastAssessmentId(data.assessmentId ?? assessmentId);
       } catch (error: unknown) {
         setError(resolveUnknownMessage(error) ?? "Failed to load analysis");
       } finally {
         setLoadingLatest(false);
       }
     },
-    [loadingLatest],
+    [
+      loadingLatest,
+      persistLastAssessmentId,
+      clearLastAssessmentId,
+      router,
+    ],
   );
 
   async function loadLatest() {
@@ -1042,12 +1121,52 @@ export default function ResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (runIdentifier || lastAssessmentHydrationAttempted.current) return;
+    if (typeof window === "undefined") return;
+
+    lastAssessmentHydrationAttempted.current = true;
+
+    const hydrateLastAssessment = async () => {
+      let serverId: string | null = null;
+      let serverLoaded = false;
+      try {
+        const res = await fetch("/api/users/me/last-assessment", { cache: "no-store" });
+        if (res.ok) {
+          const payload = await res.json();
+          serverId = payload?.lastAssessmentId ?? null;
+          serverLoaded = true;
+          writeLastAssessmentToStorage(serverId);
+        }
+      } catch {
+        // best effort; we rely on local storage fallback next
+      }
+
+      let candidateId = serverId;
+      if (candidateId === null && !serverLoaded) {
+        candidateId = readLastAssessmentFromStorage();
+      }
+
+      if (!candidateId) return;
+
+      const params = new URLSearchParams(window.location.search);
+      params.delete("analysisId");
+      params.delete("fitScoreId");
+      params.set("assessmentId", candidateId);
+      const query = params.toString();
+      const destination = query ? `/results?${query}` : "/results";
+      await router.replace(destination);
+    };
+
+    void hydrateLastAssessment();
+  }, [runIdentifier, router]);
+
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHeader
           title="Results"
-          description="Review your score and the reasons behind it, then choose your next move."
+          description="Review your score and the reasons behind it and then advance to your personalized document creation."
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
@@ -1077,6 +1196,9 @@ export default function ResultsPage() {
                     <p className="text-3xl font-semibold text-white">{heroHeading}</p>
                     <p className="text-xl font-semibold text-white">{heroScoreText}</p>
                     <p className="text-sm text-slate-300">{heroSupportText}</p>
+                    {achievementForScore ? (
+                      <AchievementBanner achievements={[achievementForScore]} />
+                    ) : null}
                     <div className="flex flex-wrap justify-center gap-3 lg:justify-start">
                       {executionMode ? (
                         <FormButton
@@ -1107,10 +1229,7 @@ export default function ResultsPage() {
                 <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     {rubricDimensionEntries.map((dimension) => (
-                      <div
-                        key={dimension.key}
-                        className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
-                      >
+                    <div key={dimension.key} className={dimensionCardClassName}>
                         <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
                           {dimension.label}
                         </p>
@@ -1207,10 +1326,7 @@ export default function ResultsPage() {
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {dimensionEntries.map((dimension) => (
-              <div
-                key={dimension.key}
-                className="rounded-2xl border border-white/10 bg-slate-900/30 p-3"
-              >
+              <div key={dimension.key} className={dimensionCardClassName}>
                 <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
                   {dimension.label}
                 </p>
@@ -1276,16 +1392,17 @@ export default function ResultsPage() {
           </section>
         ) : null}
 
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Next move</p>
-            <h2 className="text-lg font-semibold text-slate-100">Next Move</h2>
-            <p className="mt-1 text-sm text-slate-300">
-              Follow these five steps to translate the score into execution.
-            </p>
-          </div>
-          <div className="grid gap-4">
-            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+        {!executionMode ? (
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Next move</p>
+              <h2 className="text-lg font-semibold text-slate-100">Next Move</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                Follow these five steps to translate the score into execution.
+              </p>
+            </div>
+            <div className="grid gap-4">
+              <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
               <p className="text-sm font-semibold text-slate-100">1. Understand the Score</p>
               <p className="text-sm text-slate-300">
                 {hasAnalysis
@@ -1332,9 +1449,10 @@ export default function ResultsPage() {
                   Open Interview Toolkit
                 </FormButton>
               </div>
-            </article>
-          </div>
-        </section>
+              </article>
+            </div>
+          </section>
+        ) : null}
 
         {error ? (
           <Alert intent="error" title="Uh oh">

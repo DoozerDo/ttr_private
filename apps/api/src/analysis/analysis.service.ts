@@ -2143,6 +2143,18 @@ export class AnalysisService {
         assessmentId: savedAssessment.id,
       };
 
+      try {
+        await this.usersRepository.update(
+          { id: userId },
+          { lastAssessmentId: savedAssessment.id },
+        );
+      } catch (updateError) {
+        this.logger.warn(
+          'Unable to persist last assessment reference',
+          updateError,
+        );
+      }
+
       const successResponse: RunFitAssessmentOkResponse = {
         status: 'ok',
         fit_score: finalScore,

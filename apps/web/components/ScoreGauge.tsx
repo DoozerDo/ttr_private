@@ -8,7 +8,7 @@ export type ScoreGaugeProps = {
   label?: string;
 };
 
-export function ScoreGauge({ score = 0, loading = false, label = "CX Fit Score" }: ScoreGaugeProps) {
+export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProps) {
   const radius = 72;
   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
   const clampedScore = Math.min(Math.max(score ?? 0, 0), 100);
@@ -80,18 +80,20 @@ export function ScoreGauge({ score = 0, loading = false, label = "CX Fit Score" 
         >
           {Math.round(clampedScore)}
         </div>
-        <span
-          style={{
-            marginTop: 8,
-            fontSize: 16,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-            fontWeight: 600,
-            color: "#fefce8",
-          }}
-        >
-          {label}
-        </span>
+        {label ? (
+          <span
+            style={{
+              marginTop: 8,
+              fontSize: 16,
+              letterSpacing: 1,
+              textTransform: "uppercase",
+              fontWeight: 600,
+              color: "#fefce8",
+            }}
+          >
+            {label}
+          </span>
+        ) : null}
       </div>
     </div>
   );

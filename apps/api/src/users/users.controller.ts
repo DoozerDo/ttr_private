@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  NotFoundException,
   Patch,
   Req,
   UseGuards,
@@ -11,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { UpdateSubscriptionTierDto } from './dto/update-subscription-tier.dto';
+import { UpdateLastAssessmentDto } from './dto/update-last-assessment.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
@@ -41,6 +43,42 @@ export class UsersController {
     }
 
     return user;
+  }
+
+  @Get('me/last-assessment')
+  async getLastAssessment(@Req() request: UserRequest) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const user = await this.usersService.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return { lastAssessmentId: user.lastAssessmentId ?? null };
+  }
+
+  @Patch('me/last-assessment')
+  async updateLastAssessment(
+    @Body() body: UpdateLastAssessmentDto,
+    @Req() request: UserRequest,
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const updated = await this.usersService.updateLastAssessmentId(
+      userId,
+      body.assessmentId ?? null,
+    );
+
+    return { lastAssessmentId: updated.lastAssessmentId ?? null };
   }
 
 

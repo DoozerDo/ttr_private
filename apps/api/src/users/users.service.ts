@@ -114,4 +114,18 @@ export class UsersService {
   async setEmailConfirmed(userId: string): Promise<void> {
     await this.usersRepository.update({ id: userId }, { emailConfirmed: true });
   }
+
+  async updateLastAssessmentId(
+    userId: string,
+    assessmentId: string | null,
+  ): Promise<User> {
+    const user = await this.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.lastAssessmentId = assessmentId;
+    return this.usersRepository.save(user);
+  }
 }
