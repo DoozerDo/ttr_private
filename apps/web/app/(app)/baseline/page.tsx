@@ -115,7 +115,7 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
   return (
     <InstrumentPanelShell
       title="Target this role with clarity."
-      subtitle="Target This Role compares your resume against a job description to generate a Compatibility/Fit Score. If your score is strong enough, your personalized resume and cover letter will be generated for you to use in the application process."
+      subtitle="Target This Role compares your resume against a job description to generate a score. If your score is strong enough, your personalized resume and cover letter will be generated for you to use in the application process."
       contentWidth="wide"
     >
       <BaselineWorkspace

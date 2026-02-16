@@ -230,8 +230,7 @@ export function BaselineDashboard({
   return (
     <SetupModuleCard
       label="RESUME"
-      title="Resume"
-      titleClassName="text-xl font-semibold tracking-tight text-slate-100"
+      title=""
       description="Upload the resume you trust and keep it ready as your scoring anchor."
       primaryAction={
       <FormButton onClick={triggerUploadClick} disabled={isUploading}>

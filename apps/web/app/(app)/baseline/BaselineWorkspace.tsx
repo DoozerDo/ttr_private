@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Alert } from "@/components/Alert";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineDashboard } from "./baseline-dashboard";
-import { ProgressRail, type ProgressRailStepSchema } from "./_components/ProgressRail";
 import { JobsHub } from "./_components/JobsHub";
 import { WorkspaceRunner } from "./_components/WorkspaceRunner";
 
@@ -36,16 +35,6 @@ const buildTargetUrl = (params: URLSearchParams, pathname?: string | null) => {
   return query ? `${basePath}?${query}` : basePath;
 };
 
-const TARGET_RAIL_STEP_KEYS = ["baseline", "job", "match", "results"] as const;
-type TargetRailStepKey = (typeof TARGET_RAIL_STEP_KEYS)[number];
-
-const TARGET_RAIL_STEPS: ProgressRailStepSchema<TargetRailStepKey>[] = [
-  { key: "baseline", label: "Resume" },
-  { key: "job", label: "Job" },
-  { key: "match", label: "Match", processingLabel: "Scoring" },
-  { key: "results", label: "Results" },
-];
-
 export function BaselineWorkspace({
   initialBaselines,
   initialFetchError,
@@ -58,17 +47,6 @@ export function BaselineWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const baselineClearedRef = useRef(false);
   const [hasHydrated, setHasHydrated] = useState(false);
-  const [railState, setRailState] = useState<{
-    isScoring: boolean;
-    isCompletionMoment: boolean;
-    isComplianceBlocked: boolean;
-    isPreparingMatch: boolean;
-  }>({
-    isScoring: false,
-    isCompletionMoment: false,
-    isComplianceBlocked: false,
-    isPreparingMatch: false,
-  });
 
   useEffect(() => {
     setHasHydrated(true);
@@ -129,29 +107,6 @@ export function BaselineWorkspace({
     }
   }, [baselineId, jobId, notice]);
 
-  const currentStepKey: TargetRailStepKey = !baselineId
-    ? "baseline"
-    : !jobId
-      ? "job"
-      : "match";
-
-  const completedStepKeys: TargetRailStepKey[] = [];
-  if (baselineId) {
-    completedStepKeys.push("baseline");
-  }
-  if (jobId) {
-    completedStepKeys.push("job");
-  }
-
-  const blockedStepKey: TargetRailStepKey | undefined = railState.isComplianceBlocked
-    ? "match"
-    : undefined;
-  const highlightStepKey: TargetRailStepKey | undefined = railState.isCompletionMoment
-    ? "results"
-    : undefined;
-  const processingStepKeys: TargetRailStepKey[] =
-    railState.isPreparingMatch || railState.isScoring ? ["match"] : [];
-
   return (
     <div className="space-y-6">
       {notice ? (
@@ -161,38 +116,22 @@ export function BaselineWorkspace({
       ) : null}
 
       <div className="w-full grid grid-cols-1 gap-6">
-        <div className="w-full lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
-            <div className="lg:sticky lg:top-10">
-              <ProgressRail
-                heading="Targeting steps"
-                steps={TARGET_RAIL_STEPS}
-                currentStepKey={currentStepKey}
-                completedStepKeys={completedStepKeys}
-                blockedStepKey={blockedStepKey}
-                isProcessing={railState.isScoring}
-                processingStepKeys={processingStepKeys}
-                highlightStepKey={highlightStepKey}
-              />
-            </div>
+        <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
+          <BaselineDashboard
+            initialBaselines={initialBaselines}
+            initialFetchError={initialFetchError}
+            selectedBaselineId={baselineId}
+          />
 
-          <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
-            <BaselineDashboard
-              initialBaselines={initialBaselines}
-              initialFetchError={initialFetchError}
-              selectedBaselineId={baselineId}
-            />
-
-            <div className="flex h-full flex-col">
-              <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
-            </div>
-
-            <WorkspaceRunner
-              baselineId={baselineId}
-              jobId={jobId}
-              onAutoRunComplete={clearSelections}
-              onProgressStateChange={setRailState}
-            />
+          <div className="flex h-full flex-col">
+            <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
           </div>
+
+          <WorkspaceRunner
+            baselineId={baselineId}
+            jobId={jobId}
+            onAutoRunComplete={clearSelections}
+          />
         </div>
       </div>
     </div>
