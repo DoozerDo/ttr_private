@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
-import { AchievementBanner } from "@/components/AchievementBanner";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
@@ -161,12 +160,12 @@ const SCORING_DIMENSION_ORDER: ScoringContractV1DimensionKey[] = [
   "change_leadership_and_customer_advocacy",
 ];
 
-const SCORING_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
-  role_scope_and_seniority: "Role scope and seniority",
-  support_operations_and_process_rigor: "Support operations and process rigor",
-  tooling_and_platform_experience: "Tooling and platform experience",
-  domain_and_business_context: "Domain and business context",
-  change_leadership_and_customer_advocacy: "Change leadership and customer advocacy",
+const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
+  role_scope_and_seniority: "Leadership Level",
+  support_operations_and_process_rigor: "Support Operations",
+  tooling_and_platform_experience: "Tools and Systems",
+  domain_and_business_context: "Industry Experience",
+  change_leadership_and_customer_advocacy: "Change and Customer Impact",
 };
 
 const LOW_EXPERIENCE_THRESHOLD = 70;
@@ -203,71 +202,71 @@ const DRIVER_COPY: Record<
 > = {
   role_scope_and_seniority: {
     strong: {
-      why: "Role scope and seniority sits at {percent} and matches the leadership level the role demands.",
+      why: `${PUBLIC_DIMENSION_LABELS.role_scope_and_seniority} sits at {percent} and matches the leadership level the role demands.`,
       action: "Document a recent enterprise initiative in Resume Studio so the leadership story stays current.",
     },
     watch: {
-      why: "Role scope and seniority sits at {percent}, leaving the verdict on the fence until large scale ownership stands out.",
+      why: `${PUBLIC_DIMENSION_LABELS.role_scope_and_seniority} sits at {percent}, leaving the verdict on the fence until large scale ownership stands out.`,
       action: "Add a leadership narrative in Fit Review that spells out your ownership of critical outcomes.",
     },
     fix: {
-      why: "Role scope and seniority sits at {percent} and is the biggest limiter before apply.",
+      why: `${PUBLIC_DIMENSION_LABELS.role_scope_and_seniority} sits at {percent} and is the biggest limiter before apply.`,
       action: "Clarify the senior scope and outcome in Fit Review to unlock this dimension.",
     },
   },
   support_operations_and_process_rigor: {
     strong: {
-      why: "Support operations and process rigor sits at {percent}, showing you sustain the reliability the role expects.",
+      why: `${PUBLIC_DIMENSION_LABELS.support_operations_and_process_rigor} sits at {percent}, showing you sustain the reliability the role expects.`,
       action: "Review the process stories in Resume Studio to keep these examples tied to current work.",
     },
     watch: {
-      why: "Support operations and process rigor sits at {percent}, so deeper process detail would raise confidence.",
+      why: `${PUBLIC_DIMENSION_LABELS.support_operations_and_process_rigor} sits at {percent}, so deeper process detail would raise confidence.`,
       action: "Add a process example in Resume Studio and connect the steps in Fit Review.",
     },
     fix: {
-      why: "Support operations and process rigor sits at {percent} and is the main gap slowing readiness.",
+      why: `${PUBLIC_DIMENSION_LABELS.support_operations_and_process_rigor} sits at {percent} and is the main gap slowing readiness.`,
       action: "Map the process leadership evidence inside Fit Review before moving toward apply.",
     },
   },
   tooling_and_platform_experience: {
     strong: {
-      why: "Tooling and platform experience sits at {percent}, aligning with the technical checklist.",
+      why: `${PUBLIC_DIMENSION_LABELS.tooling_and_platform_experience} sits at {percent}, aligning with the technical checklist.`,
       action: "Keep tooling ownership language current in Resume Studio so the story stays sharp.",
     },
     watch: {
-      why: "Tooling and platform experience sits at {percent} which means depth on key systems would tip it upward.",
+      why: `${PUBLIC_DIMENSION_LABELS.tooling_and_platform_experience} sits at {percent} which means depth on key systems would tip it upward.`,
       action: "Outline how you led platform migrations in Fit Review to raise this signal.",
     },
     fix: {
-      why: "Tooling and platform experience sits at {percent} and keeps the score from rising.",
+      why: `${PUBLIC_DIMENSION_LABELS.tooling_and_platform_experience} sits at {percent} and keeps the score from rising.`,
       action: "Detail the missing platform coverage in Fit Review before reapplying.",
     },
   },
   domain_and_business_context: {
     strong: {
-      why: "Domain and business context sits at {percent} and mirrors the employer language.",
+      why: `${PUBLIC_DIMENSION_LABELS.domain_and_business_context} sits at {percent} and mirrors the employer language.`,
       action: "Refresh domain language in Resume Studio to keep this alignment visible.",
     },
     watch: {
-      why: "Domain and business context sits at {percent}, so clarifying industry stories would lift the score.",
+      why: `${PUBLIC_DIMENSION_LABELS.domain_and_business_context} sits at {percent}, so clarifying industry stories would lift the score.`,
       action: "Highlight the immediate business impact of past work inside Fit Review.",
     },
     fix: {
-      why: "Domain and business context sits at {percent} and is suppressing the verdict.",
+      why: `${PUBLIC_DIMENSION_LABELS.domain_and_business_context} sits at {percent} and is suppressing the verdict.`,
       action: "Add domain context and customer outcomes inside Fit Review before moving forward.",
     },
   },
   change_leadership_and_customer_advocacy: {
     strong: {
-      why: "Change leadership and customer advocacy sits at {percent} and shows strategic momentum.",
+      why: `${PUBLIC_DIMENSION_LABELS.change_leadership_and_customer_advocacy} sits at {percent} and shows strategic momentum.`,
       action: "Summarize the latest change leadership wins in Resume Studio for ongoing polish.",
     },
     watch: {
-      why: "Change leadership and customer advocacy sits at {percent} and would move up with fresher impact stories.",
+      why: `${PUBLIC_DIMENSION_LABELS.change_leadership_and_customer_advocacy} sits at {percent} and would move up with fresher impact stories.`,
       action: "Highlight those wins in Fit Review so this signal stops slipping.",
     },
     fix: {
-      why: "Change leadership and customer advocacy sits at {percent} and is the readiness limiter.",
+      why: `${PUBLIC_DIMENSION_LABELS.change_leadership_and_customer_advocacy} sits at {percent} and is the readiness limiter.`,
       action: "Build targeted Interview Toolkit practice around these change leadership moments.",
     },
   },
@@ -767,7 +766,7 @@ export default function ResultsPage() {
     if (!scoringRubric) return [];
     return SCORING_DIMENSION_ORDER.map((key) => ({
       key,
-      label: SCORING_DIMENSION_LABELS[key],
+      label: PUBLIC_DIMENSION_LABELS[key],
       percent:
         typeof scoringRubric.dimensionPercents[key] === "number"
           ? scoringRubric.dimensionPercents[key]
@@ -1214,7 +1213,14 @@ export default function ResultsPage() {
                       <p className="text-sm text-slate-300">{heroSupportText}</p>
                     ) : null}
                     {achievementForScore ? (
-                      <AchievementBanner achievements={[achievementForScore]} />
+                      <div className="rounded-3xl border border-emerald-500/40 bg-emerald-900/60 p-4 text-sm text-slate-200">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl text-emerald-200">✓</span>
+                          <p className="text-sm text-slate-200">
+                            You are clear to apply. You have unlocked personalized document creation.
+                          </p>
+                        </div>
+                      </div>
                     ) : null}
                     <div className="flex flex-wrap justify-center gap-3 lg:justify-start">
                       {executionMode ? (
