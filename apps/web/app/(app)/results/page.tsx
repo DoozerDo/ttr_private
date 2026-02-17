@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +20,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { buildApiUrl } from "@/lib/api/buildApiUrl";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 
 type FitDimensionScores = {
@@ -115,6 +116,12 @@ type LatestAnalysis = {
   systemConstraints?: string[] | null;
   createdAt?: string | null;
   scoring_v2?: ScoringV2Result | null;
+  narrative?: {
+    headline: string;
+    summary: string;
+    strengths: string[];
+    gaps: string[];
+  } | null;
 };
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
@@ -566,7 +573,7 @@ function extractSectionText(section: ResumeSectionLike): string {
   if (lines.length) return lines.join("\n");
 
   const bullets = stringsOnly(section.bullets);
-  if (bullets.length) return bullets.map((b) => `• ${b}`).join("\n");
+  if (bullets.length) return bullets.map((b) => `â€¢ ${b}`).join("\n");
 
   return "";
 }
@@ -623,11 +630,14 @@ export default function ResultsPage() {
 
   const persistLastAssessmentId = useCallback(async (assessmentId: string | null) => {
     writeLastAssessmentToStorage(assessmentId);
+    const url = buildApiUrl("/users/me/last-assessment");
+    if (!url) return;
     try {
-      await fetch("/api/users/me/last-assessment", {
+      await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assessmentId }),
+        credentials: "include",
       });
     } catch {
       // best effort; silence failures
@@ -679,10 +689,15 @@ export default function ResultsPage() {
 
   const executionMode = typeof activeScore === "number" && activeScore >= 70;
   const heroScoreText = `Score: ${activeScore?.toFixed(1) ?? "Pending"}`;
-  const heroHeading = executionMode ? "You’re Clear to Apply" : "Alignment Needs Attention";
-  const heroSupportText = executionMode
+  const narrativeHeadline = latest?.narrative?.headline ?? null;
+  const narrativeSummary = latest?.narrative?.summary ?? null;
+  const heroHeadingFallback = executionMode ? "Youâ€™re Clear to Apply" : "Alignment Needs Attention";
+  const heroHeading = narrativeHeadline ?? heroHeadingFallback;
+  const heroSupportTextFallback = executionMode
     ? "This role aligns with your verified baseline."
     : "Review gaps and strengthen alignment before applying.";
+  const heroSupportText = narrativeSummary ? null : heroSupportTextFallback;
+  const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
   const dimensionCardBaseClass = "rounded-2xl border bg-slate-900/30 p-3";
   const dimensionCardSuccessExtras = "border-[#22c55e] shadow-[0_0_40px_rgba(34,197,94,0.25)]";
   const dimensionCardDefaultClass = "border-white/10";
@@ -696,7 +711,7 @@ export default function ResultsPage() {
       title: "Achievement Unlocked",
       description:
         "You are clear to apply. You have unlocked personalized document creation.",
-      tier: "gold",
+      tier: "",
       tone: "success",
       iconKey: "✓",
     };
@@ -1195,7 +1210,9 @@ export default function ResultsPage() {
                   <div className="space-y-4 text-center lg:text-left">
                     <p className="text-3xl font-semibold text-white">{heroHeading}</p>
                     <p className="text-xl font-semibold text-white">{heroScoreText}</p>
-                    <p className="text-sm text-slate-300">{heroSupportText}</p>
+                    {heroSupportText ? (
+                      <p className="text-sm text-slate-300">{heroSupportText}</p>
+                    ) : null}
                     {achievementForScore ? (
                       <AchievementBanner achievements={[achievementForScore]} />
                     ) : null}
@@ -1223,8 +1240,16 @@ export default function ResultsPage() {
                       )}
                     </div>
                   </div>
-                </div>
               </div>
+            </div>
+              {narrativeSummary ? (
+                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5 text-sm text-slate-300">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Why this score
+                  </p>
+                  <p className="mt-2 text-sm text-slate-300">{narrativeSummary}</p>
+                </div>
+              ) : null}
               {scoringRubric ? (
                 <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -1237,8 +1262,8 @@ export default function ResultsPage() {
                           {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
                         </p>
                         <p className="text-xs text-slate-400">
-                          {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
-                          {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} points
+                          {dimension.points !== null ? dimension.points.toFixed(1) : "â€”"} /{" "}
+                          {dimension.weight !== null ? dimension.weight.toFixed(1) : "â€”"} points
                         </p>
                       </div>
                     ))}
@@ -1267,7 +1292,7 @@ export default function ResultsPage() {
           )}
         </section>
 
-        {scoringRubric && scoreDrivers.length ? (
+        {!isExceptionalScore && scoringRubric && scoreDrivers.length ? (
           executionMode ? (
             <details className="group rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
               <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
@@ -1354,7 +1379,7 @@ export default function ResultsPage() {
                   <ul className="mt-2 space-y-1 text-sm text-slate-100">
                     {keyTermDetails.matchedKeyTerms.slice(0, 6).map((term) => (
                       <li key={`matched-${term}`} className="flex items-center gap-2">
-                        <span className="text-emerald-300">•</span>
+                        <span className="text-emerald-300">â€¢</span>
                         <span>{term}</span>
                       </li>
                     ))}
@@ -1368,7 +1393,7 @@ export default function ResultsPage() {
                   <ul className="mt-2 space-y-1 text-sm text-slate-100">
                     {keyTermDetails.missingKeyTerms.slice(0, 6).map((term) => (
                       <li key={`missing-${term}`} className="flex items-center gap-2">
-                        <span className="text-amber-300">•</span>
+                        <span className="text-amber-300">â€¢</span>
                         <span>{term}</span>
                       </li>
                     ))}
@@ -1588,7 +1613,7 @@ export default function ResultsPage() {
               <div className="sm:col-span-2">
                 <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
                 <p className="text-sm text-white">
-                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
+                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} â€¢ Preferred{" "}
                   {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
                 </p>
               </div>

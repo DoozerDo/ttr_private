@@ -47,6 +47,7 @@ import {
   FitScoringService,
 } from './fit-scoring.service';
 import { scoreCxFitV2 } from './cx-fit-scoring-v2';
+import { buildResultsNarrative } from './results-narrative.builder';
 import type {
   BaselineCoverageDetails,
   CxFitV2Result,
@@ -2449,9 +2450,24 @@ export class AnalysisService {
             baselineId: assessment.baselineId,
             versionNumber: assessment.baselineVersion,
           },
-          order: { createdAt: 'DESC' },
-        })
+      order: { createdAt: 'DESC' },
+    })
       : null;
+
+    const scoringV2DimensionScores =
+      assessment.scoringV2?.rubric?.dimensionPercents ?? null;
+    const fallbackDimensionScores = {
+      role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
+      support_operations_and_process_rigor: assessment.dimensionScores?.leadershipLevel ?? 0,
+      tooling_and_platform_experience: assessment.dimensionScores?.technicalPlatformFit ?? 0,
+      domain_and_business_context: assessment.dimensionScores?.industryContext ?? 0,
+      change_leadership_and_customer_advocacy:
+        assessment.dimensionScores?.strategicTacticalFit ?? 0,
+    };
+    const narrative = buildResultsNarrative({
+      overallScore: assessment.scoringV2?.score ?? assessment.overallScore,
+      dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
+    });
 
     return {
       ok: true,
@@ -2470,6 +2486,7 @@ export class AnalysisService {
       summary,
       createdAt: assessment.createdAt,
       scoring_v2: assessment.scoringV2 ?? null,
+      narrative,
     };
   }
 
