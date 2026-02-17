@@ -7,12 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { ScoreGauge } from "@/components/ScoreGauge";
-import {
-  fetchStudyPacket,
-  StudyPacket,
-  StudyPacketError,
-} from "@/lib/interviewToolkit";
-import type { InterviewQuestion } from "@/lib/interviews";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 import {
   LAST_ANALYSIS_STORAGE_KEY,
@@ -52,6 +46,27 @@ type FitAssessment = {
   gaps?: string[];
   complianceFlags?: string[] | Array<{ code?: string; message?: string }>;
   compliance_flags?: Array<{ code?: string; message?: string }>;
+  scoring_v2?: ScoringV2Result | null;
+};
+
+type ScoringContractV1DimensionKey =
+  | "role_scope_and_seniority"
+  | "support_operations_and_process_rigor"
+  | "tooling_and_platform_experience"
+  | "domain_and_business_context"
+  | "change_leadership_and_customer_advocacy";
+
+type ScoringV2Rubric = {
+  id?: string;
+  weights?: Record<ScoringContractV1DimensionKey, number>;
+  dimensionPercents?: Record<ScoringContractV1DimensionKey, number>;
+  dimensionPoints?: Record<ScoringContractV1DimensionKey, number>;
+  subtotal?: number;
+};
+
+type ScoringV2Result = {
+  score: number;
+  rubric: ScoringV2Rubric;
 };
 
 function parseTimestamp(value?: string | null) {
@@ -88,34 +103,146 @@ function getAssessmentScore(assessment?: FitAssessment | AnalysisResult | null):
 }
 
 const MAX_GAPS_TO_SHOW = 3;
-const MAX_QUESTIONS_PER_GAP = 5;
+const LAST_ASSESSMENT_ID_KEY = "ttr-last-assessment-id";
+const PRIMARY_GAP_FALLBACKS = [
+  "Add Industry Experience and business outcomes in Fit Review.",
+  "Add stronger process leadership and operational impact in Fit Review.",
+];
 
-const normalizeGapText = (value: string): string => value.trim().toLowerCase();
+type DriverBucket = "strong" | "watch" | "fix" | "pending";
 
-const matchesGapReference = (reference: string, normalizedGap: string): boolean => {
-  if (!reference || !normalizedGap) return false;
+const SCORING_DIMENSION_ORDER: ScoringContractV1DimensionKey[] = [
+  "role_scope_and_seniority",
+  "support_operations_and_process_rigor",
+  "tooling_and_platform_experience",
+  "domain_and_business_context",
+  "change_leadership_and_customer_advocacy",
+];
 
-  if (reference.includes(normalizedGap) || normalizedGap.includes(reference)) {
-    return true;
+const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
+  role_scope_and_seniority: "Leadership level",
+  support_operations_and_process_rigor: "Support operations",
+  tooling_and_platform_experience: "Tools and systems",
+  domain_and_business_context: "Industry experience",
+  change_leadership_and_customer_advocacy: "Change and customer impact",
+};
+
+type ScoreDetailCopy = {
+  why: string;
+  action: string;
+};
+
+const SCORE_DETAIL_COPY: Record<
+  ScoringContractV1DimensionKey,
+  Record<Exclude<DriverBucket, "pending">, ScoreDetailCopy>
+> = {
+  role_scope_and_seniority: {
+    strong: {
+      why: "Leadership level sits at {percent}, confirming your senior scope aligns to the role.",
+      action: "Keep your leadership impact stories polished in Fit Review.",
+    },
+    watch: {
+      why: "Leadership level sits at {percent}, so spelling out ownership would raise confidence.",
+      action: "Add a clear leadership outcome with results in Fit Review.",
+    },
+    fix: {
+      why: "Leadership level sits at {percent} and is limiting your readiness.",
+      action: "Clarify senior scope and measurable impact in Fit Review before recomputing.",
+    },
+  },
+  support_operations_and_process_rigor: {
+    strong: {
+      why: "Support operations sits at {percent}, showing you sustain the reliability the role needs.",
+      action: "Refresh your process leadership examples in Fit Review.",
+    },
+    watch: {
+      why: "Support operations sits at {percent}, so deeper process detail would help this signal.",
+      action: "Add a process improvement story in Fit Review with concrete steps.",
+    },
+    fix: {
+      why: "Support operations sits at {percent} and is holding the score back.",
+      action: "Map your operational ownership inside Fit Review before running another evaluation.",
+    },
+  },
+  tooling_and_platform_experience: {
+    strong: {
+      why: "Tools and systems sits at {percent}, aligning with the technical checklist.",
+      action: "Keep the tooling ownership language current in Fit Review.",
+    },
+    watch: {
+      why: "Tools and systems sits at {percent}, which means extra platform depth would raise confidence.",
+      action: "Outline how you owned key platforms directly in Fit Review.",
+    },
+    fix: {
+      why: "Tools and systems sits at {percent} and constrains the overall score.",
+      action: "Document the missing platform coverage in Fit Review before rerunning.",
+    },
+  },
+  domain_and_business_context: {
+    strong: {
+      why: "Industry experience sits at {percent}, mirroring the employer context.",
+      action: "Highlight measurable domain impact inside Fit Review.",
+    },
+    watch: {
+      why: "Industry experience sits at {percent}, so clearer business stories would lift this signal.",
+      action: "Spell out the business context you drove inside Fit Review.",
+    },
+    fix: {
+      why: "Industry experience sits at {percent} and suppresses the verdict.",
+      action: "Add measurable domain outcomes in Fit Review before recomputing.",
+    },
+  },
+  change_leadership_and_customer_advocacy: {
+    strong: {
+      why: "Change and customer impact sits at {percent}, showing strategic momentum.",
+      action: "Keep recent change leadership wins recorded in Fit Review.",
+    },
+    watch: {
+      why: "Change and customer impact sits at {percent}, so fresh win stories would help.",
+      action: "Point to a customer advocacy win in Fit Review so this signal lifts.",
+    },
+    fix: {
+      why: "Change and customer impact sits at {percent} and slows readiness.",
+      action: "Add a change leadership story with outcomes in Fit Review.",
+    },
+  },
+};
+
+const PENDING_DETAIL_COPY = {
+  why: "This dimension is pending, so wait for the percent before updating the story.",
+  action: "Let the percent appear and then strengthen this dimension inside Fit Review.",
+};
+
+function getBucketFromPercent(percent?: number | null): DriverBucket {
+  if (typeof percent !== "number") return "pending";
+  if (percent >= 90) return "strong";
+  if (percent >= 80) return "watch";
+  return "fix";
+}
+
+function buildScoreDetailWhy(
+  key: ScoringContractV1DimensionKey,
+  bucket: DriverBucket,
+  percentLabel: string,
+): string {
+  if (bucket === "pending") {
+    return PENDING_DETAIL_COPY.why;
   }
+  const copy = SCORE_DETAIL_COPY[key]?.[bucket];
+  if (!copy) return "This dimension requires a closer look.";
+  return copy.why.replace("{percent}", percentLabel);
+}
 
-  const gapWords = normalizedGap.split(/\W+/).filter(Boolean);
-  if (!gapWords.length) return false;
-
-  const matchCount = gapWords.filter((word) => reference.includes(word)).length;
-  return matchCount >= Math.min(2, gapWords.length);
-};
-
-type QuestionGroup = {
-  gap: string;
-  questions: InterviewQuestion[];
-};
+function buildScoreDetailAction(key: ScoringContractV1DimensionKey, bucket: DriverBucket): string {
+  if (bucket === "pending") return PENDING_DETAIL_COPY.action;
+  return SCORE_DETAIL_COPY[key]?.[bucket]?.action ?? "Review this dimension inside Fit Review.";
+}
 
 const DIMENSION_LABELS: Record<keyof Required<FitDimensionScores>, string> = {
   experienceAlignment: "Experience alignment",
   leadershipLevel: "Leadership level",
   technicalPlatformFit: "Technical platform fit",
-  industryContext: "Industry & context",
+  industryContext: "Industry and context",
   strategicTacticalFit: "Strategic vs tactical",
 };
 
@@ -202,16 +329,12 @@ export default function FitReviewClient() {
   const router = useRouter();
   const jobId = searchParams.get("jobId") ?? "";
   const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
-  const [studyPacket, setStudyPacket] = useState<StudyPacket | null>(null);
-  const [packetState, setPacketState] = useState<"idle" | "loading" | "error">("idle");
-  const [packetError, setPacketError] = useState<string | null>(null);
 
   const [assessment, setAssessment] = useState<FitAssessment | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
-  const [startedInterviewId, setStartedInterviewId] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckError, setRecheckError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -277,19 +400,11 @@ export default function FitReviewClient() {
     getComplianceFlagsInput(rawComplianceFlags),
   );
   const displayFitScore = getAssessmentScore(displayAssessment);
-  const displayBaselineId =
-    displayAssessment?.baselineId ?? assessment?.baselineId ?? storedAnalysis?.baselineId;
   const summaryText = displayAssessment?.summary ?? null;
-  const interviewAssessment = useMemo(
-    () =>
-      assessment &&
-      assessment.jobId &&
-      assessment.baselineId &&
-      assessment.baselineVersionId
-        ? assessment
-        : displayAssessment,
-    [assessment, displayAssessment],
-  );
+  const heroStatusText =
+    typeof displayFitScore === "number" && displayFitScore < 70
+      ? "Your score is below the apply threshold. Focus on the primary gaps to raise it."
+      : summaryText ?? "View the latest compatibility score and signals for this role.";
   useEffect(() => {
     if (
       process.env.NODE_ENV === "development" &&
@@ -345,130 +460,97 @@ export default function FitReviewClient() {
     };
   }, [resolvedJobId]);
 
-  useEffect(() => {
-    if (!resolvedJobId) {
-      setStudyPacket(null);
-      setPacketState("idle");
-      setPacketError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setPacketState("loading");
-    setPacketError(null);
-
-    fetchStudyPacket(resolvedJobId)
-      .then((packet) => {
-        if (!cancelled) {
-          setStudyPacket(packet);
-        }
-      })
-      .catch((fetchError) => {
-        if (!cancelled) {
-          const message =
-            fetchError instanceof StudyPacketError
-              ? fetchError.message
-              : fetchError instanceof Error
-                ? fetchError.message
-                : "Unable to load study packet.";
-          setPacketError(message);
-          setStudyPacket(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPacketState("idle");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [resolvedJobId]);
-
-  const handleStartInterview = async () => {
-    const source = interviewAssessment;
-    if (!source?.jobId || !source?.baselineId) {
-      setStartError("Missing job or baseline context for this assessment.");
-      return;
-    }
-
-    if (!source?.baselineVersionId) {
-      setStartError("Missing baseline version for this assessment.");
-      return;
-    }
-
-    setStarting(true);
-    setStartError(null);
+  const handleCheckLatestScore = async () => {
+    if (rechecking) return;
+    setRechecking(true);
+    setRecheckError(null);
 
     try {
-      const response = await fetch("/api/interview-records", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId: source.jobId,
-          baselineId: source.baselineId,
-          baselineVersionId: source.baselineVersionId,
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const message = payload?.error || payload?.message || "Unable to start an interview.";
-        throw new Error(typeof message === "string" ? message : "Unable to start an interview.");
+      let assessmentId: string | null = null;
+      if (typeof window !== "undefined") {
+        const stored = window.localStorage.getItem(LAST_ASSESSMENT_ID_KEY);
+        if (stored?.trim()) {
+          assessmentId = stored.trim();
+        }
       }
 
-      const data = (await response.json()) as { id?: string };
-      const interviewId = data?.id;
-
-      if (interviewId) {
-        setStartedInterviewId(interviewId);
-        router.push(`/interviews/${interviewId}`);
-      } else {
-        setStartedInterviewId(null);
+      if (!assessmentId) {
+        const response = await fetch("/api/users/me/last-assessment", {
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { lastAssessmentId?: string | null }
+            | null;
+          if (payload?.lastAssessmentId?.trim()) {
+            assessmentId = payload.lastAssessmentId.trim();
+          }
+        }
       }
-    } catch (startIssue) {
+
+      const params = new URLSearchParams();
+      if (assessmentId) {
+        params.set("assessmentId", assessmentId);
+      }
+      const destination = params.toString() ? `/results?${params.toString()}` : "/results";
+      await router.push(destination);
+    } catch (checkError) {
       const message =
-        startIssue instanceof Error ? startIssue.message : "Unable to start an interview.";
-      setStartError(message);
+        checkError instanceof Error
+          ? checkError.message
+          : "Unable to recheck the score. Please try again.";
+      setRecheckError(message);
     } finally {
-      setStarting(false);
+      setRechecking(false);
     }
   };
 
-  const gapLabels = useMemo(() => {
+  const primaryGapGuidance = useMemo(() => {
     const candidateGaps =
-      displayAssessment?.gaps ?? studyPacket?.fitSnapshot?.gaps ?? storedAnalysis?.analysis?.gaps ?? [];
-    if (!Array.isArray(candidateGaps)) return [];
-    return candidateGaps
-      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      .slice(0, MAX_GAPS_TO_SHOW);
-  }, [displayAssessment?.gaps, studyPacket?.fitSnapshot?.gaps, storedAnalysis?.analysis?.gaps]);
+      (displayAssessment?.gaps ?? storedAnalysis?.analysis?.gaps ?? [])
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    if (candidateGaps.length) {
+      return candidateGaps.slice(0, MAX_GAPS_TO_SHOW);
+    }
+    return PRIMARY_GAP_FALLBACKS.slice(0, MAX_GAPS_TO_SHOW);
+  }, [displayAssessment?.gaps, storedAnalysis?.analysis?.gaps]);
 
-  const questionGroups = useMemo((): QuestionGroup[] => {
-    if (!studyPacket?.questions || gapLabels.length === 0) return [];
-
-    return gapLabels
-      .map((gap) => {
-        const normalized = normalizeGapText(gap);
-        const matches = studyPacket.questions
-          .filter((question) => {
-            const reference = (question.jdReference ?? "").trim().toLowerCase();
-            return matchesGapReference(reference, normalized);
-          })
-          .slice(0, MAX_QUESTIONS_PER_GAP);
-        return { gap, questions: matches };
-      })
-      .filter((group) => group.questions.length > 0);
-  }, [gapLabels, studyPacket?.questions]);
-
-  const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis || studyPacket?.fitSnapshot);
-  const displayJobId = displayAssessment?.jobId ?? resolvedJobId;
+  const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis);
+  const fitReviewPath = useMemo(() => {
+    if (!normalizedResolvedJobId) return "/fit-review";
+    return `/fit-review?jobId=${encodeURIComponent(normalizedResolvedJobId)}`;
+  }, [normalizedResolvedJobId]);
 
   const dimensionEntries = Object.entries(DIMENSION_LABELS).map(([key, label]) => {
     const value = dimensionScores[key as keyof FitDimensionScores] ?? null;
     return { key, label, value };
   });
+
+  const scoringRubric = useMemo(() => {
+    if (!isFitAssessment(displayAssessment)) return null;
+    return displayAssessment.scoring_v2?.rubric ?? null;
+  }, [displayAssessment]);
+
+  const scoreDetails = useMemo(() => {
+    if (!scoringRubric) return [];
+    return SCORING_DIMENSION_ORDER.map((key) => {
+      const percentValue = scoringRubric.dimensionPercents?.[key] ?? null;
+      const pointsValue = scoringRubric.dimensionPoints?.[key] ?? null;
+      const bucket = getBucketFromPercent(percentValue);
+      const percentLabel =
+        typeof percentValue === "number" ? `${percentValue.toFixed(1)}%` : "Pending";
+      return {
+        key,
+        label: PUBLIC_DIMENSION_LABELS[key],
+        percentLabel,
+        percentValue,
+        pointsValue,
+        bucket,
+        reason: buildScoreDetailWhy(key, bucket, percentLabel),
+        improvement: buildScoreDetailAction(key, bucket),
+      };
+    });
+  }, [scoringRubric]);
 
   const verdictInfo = useMemo(
     () => getVerdictDisplayOrDefault(displayAssessment?.verdict ?? null),
@@ -528,12 +610,7 @@ export default function FitReviewClient() {
     <InstrumentShell
       kicker="Fit Review"
       title="Role alignment review"
-      subtitle="See how your baseline maps to the role and kick off an interview session."
-      rightSlot={
-        displayJobId ? (
-          <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)" }}>Job: {displayJobId}</span>
-        ) : null
-      }
+      subtitle="Close the primary gaps so this score rises before you apply."
     >
       {!hasAnalysis ? (
         <div className="px-6 py-10">
@@ -582,27 +659,9 @@ export default function FitReviewClient() {
                     <h2 style={ttrTypography.h2}>Fit summary</h2>
                   </div>
 
-                  {summaryText ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          letterSpacing: 2.5,
-                          textTransform: "uppercase",
-                          color: "rgba(226,232,240,0.55)",
-                        }}
-                      >
-                        Signal coverage
-                      </span>
-                      <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
-                        {summaryText}
-                      </p>
-                    </div>
-                  ) : (
-                    <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
-                      View the latest compatibility score and signals for this role.
-                    </p>
-                  )}
+                  <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
+                    {heroStatusText}
+                  </p>
 
                   <div
                     style={{
@@ -627,12 +686,6 @@ export default function FitReviewClient() {
                     </p>
                   </div>
 
-                  {displayBaselineId ? (
-                    <div style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                      Baseline: {displayBaselineId}
-                    </div>
-                  ) : null}
-
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
                   {!error && !loading && !displayAssessment ? (
                     <div style={ttrComponents.warningBox}>Run an analysis first to view Fit Review.</div>
@@ -649,40 +702,26 @@ export default function FitReviewClient() {
 
               <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
                 <p style={{ margin: 0, color: "rgba(226,232,240,0.8)", fontSize: 14 }}>
-                  Ready to move forward? Start a structured interview session tied to this role.
+                  Recheck the latest results for this role to confirm the score.
                 </p>
 
                 <button
                   type="button"
-                  onClick={handleStartInterview}
-                  disabled={
-                    starting ||
-                    !interviewAssessment?.jobId ||
-                    !interviewAssessment?.baselineId ||
-                    !interviewAssessment?.baselineVersionId
-                  }
+                  onClick={handleCheckLatestScore}
+                  disabled={rechecking}
                   style={{
                     ...ttrComponents.primaryButton,
-                    cursor: starting ? "not-allowed" : "pointer",
-                    opacity: starting ? 0.7 : 1,
+                    cursor: rechecking ? "not-allowed" : "pointer",
+                    opacity: rechecking ? 0.7 : 1,
                   }}
                 >
-                  {starting ? "Starting..." : "I think I'm qualified"}
+                  {rechecking ? "Rechecking..." : "I think I'm qualified"}
                 </button>
+                <p style={{ margin: 0, color: "rgba(226,232,240,0.75)", fontSize: 13 }}>
+                  Recheck your latest score on Results.
+                </p>
 
-                {startError ? <div style={ttrComponents.dangerBox}>{startError}</div> : null}
-
-                {startedInterviewId ? (
-                  <div style={ttrComponents.successBox}>
-                    Interview created.{" "}
-                    <Link
-                      href={`/interviews/${startedInterviewId}`}
-                      style={{ color: "#c084fc", textDecoration: "underline" }}
-                    >
-                      Open interview
-                    </Link>
-                  </div>
-                ) : null}
+                {recheckError ? <div style={ttrComponents.dangerBox}>{recheckError}</div> : null}
               </div>
             </section>
           </div>
@@ -723,128 +762,110 @@ export default function FitReviewClient() {
                 ))}
               </div>
             </section>
-
-            <section style={{ ...ttrComponents.basePanel, flex: 0.95 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={ttrTypography.subtleLabel}>Signals</span>
-                <h2 style={ttrTypography.h2}>Strengths & gaps</h2>
-              </div>
-
-              <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
-                <div>
-                  <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#bbf7d0" }}>
-                    Strengths
-                  </p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {displayAssessment?.strengths?.length ? (
-                      displayAssessment.strengths.map((item, index) => (
-                        <span key={`${item}-${index}`} style={ttrComponents.chip}>
-                          {item}
-                        </span>
-                      ))
-                    ) : (
-                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                        No strengths captured yet.
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
-                    Gaps
-                  </p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {displayAssessment?.gaps?.length ? (
-                      displayAssessment.gaps.map((item, index) => (
-                        <span
-                          key={`${item}-${index}`}
-                          style={{
-                            ...ttrComponents.chip,
-                            background: "rgba(248,113,113,0.12)",
-                            border: "1px solid rgba(248,113,113,0.4)",
-                            color: "#fecdd3",
-                          }}
-                        >
-                          {item}
-                        </span>
-                      ))
-                    ) : (
-                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                        No gaps identified.
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                    Compliance flags
-                  </p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {complianceFlags.length ? (
-                      complianceFlags.map((flag, index) => (
-                        <span
-                          key={`${flag}-${index}`}
-                          style={{
-                            ...ttrComponents.chip,
-                            background: "rgba(251,191,36,0.12)",
-                            border: "1px solid rgba(251,191,36,0.4)",
-                            color: "#fef9c3",
-                          }}
-                        >
-                          {flag}
-                        </span>
-                      ))
-                    ) : (
-                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.65)" }}>No compliance flags.</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
           </div>
 
-          <section style={{ ...ttrComponents.basePanel }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Gap-focused prep</span>
-              <h2 style={ttrTypography.h2}>Interview questions</h2>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              {packetState === "loading" ? (
-                <div className="rounded-2xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200">
-                  Loading filtered questions...
-                </div>
-              ) : packetError ? (
-                <div style={ttrComponents.dangerBox}>{packetError}</div>
-              ) : questionGroups.length ? (
-                <div className="space-y-6">
-                  {questionGroups.map((group) => (
-                    <div key={group.gap} className="space-y-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Gap</p>
-                        <p className="text-lg font-semibold text-white">{group.gap}</p>
-                      </div>
-                      <ul className="space-y-2 text-sm text-slate-200 pl-4 list-disc">
-                        {group.questions.map((question, index) => (
-                          <li key={`${question.gapId}-${index}`} className="space-y-1">
-                            <p className="font-semibold text-white">{question.prompt}</p>
-                            <p className="text-xs text-slate-400">{question.jdReference}</p>
-                          </li>
-                        ))}
-                      </ul>
+          {scoreDetails.length ? (
+            <section style={{ ...ttrComponents.basePanel }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={ttrTypography.subtleLabel}>Score details</span>
+                <h2 style={ttrTypography.h2}>Score details</h2>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 16,
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                }}
+              >
+                {scoreDetails.map((detail) => (
+                  <div
+                    key={detail.key}
+                    style={{
+                      padding: "14px",
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.02)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <span style={{ color: "rgba(226,232,240,0.75)", fontSize: 12 }}>
+                      {detail.label}
+                    </span>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, color: "#e2e8f0" }}>
+                        {detail.percentValue !== null ? detail.percentLabel : "Percent pending"}
+                      </span>
+                      <span style={{ color: "rgba(226,232,240,0.7)", fontSize: 12 }}>
+                        {detail.pointsValue !== null
+                          ? `${detail.pointsValue.toFixed(1)} points`
+                          : "Points pending"}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400">
-                  {gapLabels.length
-                    ? "No questions currently map to the identified gaps. Run Analyze again to refresh."
-                    : "Run Analyze to generate gaps for Fit Review."}
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          letterSpacing: 1.5,
+                          textTransform: "uppercase",
+                          color: "#94a3b8",
+                        }}
+                      >
+                        Why this mattered
+                      </span>
+                      <p style={{ margin: 0, color: "rgba(241,245,249,0.9)", fontSize: 13 }}>
+                        {detail.reason}
+                      </p>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          letterSpacing: 1.5,
+                          textTransform: "uppercase",
+                          color: "#fcd34d",
+                        }}
+                      >
+                        What to improve
+                      </span>
+                      <p style={{ margin: 0, color: "rgba(241,245,249,0.9)", fontSize: 13 }}>
+                        {detail.improvement}
+                      </p>
+                    </div>
+
+                    <div>
+                      <FormButton onClick={() => void router.push(fitReviewPath)}>
+                        Strengthen in Fit Review
+                      </FormButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {primaryGapGuidance.length ? (
+            <section style={{ ...ttrComponents.basePanel }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={ttrTypography.subtleLabel}>Primary gaps</span>
+                <h2 style={ttrTypography.h2}>Primary gaps</h2>
+                <p style={{ margin: 0, color: "rgba(226,232,240,0.75)", fontSize: 14 }}>
+                  Close these gaps in Fit Review to raise your score.
                 </p>
-              )}
-            </div>
-          </section>
+              </div>
+              <ul className="mt-4 space-y-3 text-sm text-slate-200 pl-4 list-disc">
+                {primaryGapGuidance.map((gap, index) => (
+                  <li key={`primary-gap-${index}`}>{gap}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </>
       )}
     </InstrumentShell>
