@@ -148,7 +148,7 @@ const DIMENSION_LABELS: Record<keyof FitDimensionScores, string> = {
   experienceAlignment: "Experience alignment",
   leadershipLevel: "Leadership level",
   technicalPlatformFit: "Technical platform fit",
-  industryContext: "Industry & context",
+  industryContext: "Industry and context",
   strategicTacticalFit: "Strategic vs tactical",
 };
 
@@ -572,7 +572,7 @@ function extractSectionText(section: ResumeSectionLike): string {
   if (lines.length) return lines.join("\n");
 
   const bullets = stringsOnly(section.bullets);
-  if (bullets.length) return bullets.map((b) => `â€¢ ${b}`).join("\n");
+  if (bullets.length) return bullets.map((b) => `• ${b}`).join("\n");
 
   return "";
 }
@@ -687,16 +687,23 @@ export default function ResultsPage() {
   );
 
   const executionMode = typeof activeScore === "number" && activeScore >= 70;
+  const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
   const heroScoreText = `Score: ${activeScore?.toFixed(1) ?? "Pending"}`;
   const narrativeHeadline = latest?.narrative?.headline ?? null;
   const narrativeSummary = latest?.narrative?.summary ?? null;
-  const heroHeadingFallback = executionMode ? "Youâ€™re Clear to Apply" : "Alignment Needs Attention";
+  const heroHeadingFallback = executionMode ? "You're Clear to Apply" : "Alignment Needs Attention";
   const heroHeading = narrativeHeadline ?? heroHeadingFallback;
   const heroSupportTextFallback = executionMode
     ? "This role aligns with your verified baseline."
     : "Review gaps and strengthen alignment before applying.";
-  const heroSupportText = narrativeSummary ? null : heroSupportTextFallback;
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
+  const lowScoreHeroText =
+    "Review your score and go to Fit Review to raise it before applying.";
+  const heroSupportText = narrativeSummary
+    ? null
+    : isLowScore
+      ? lowScoreHeroText
+      : heroSupportTextFallback;
   const dimensionCardBaseClass = "rounded-2xl border bg-slate-900/30 p-3";
   const dimensionCardSuccessExtras = "border-[#22c55e] shadow-[0_0_40px_rgba(34,197,94,0.25)]";
   const dimensionCardDefaultClass = "border-white/10";
@@ -827,6 +834,9 @@ export default function ResultsPage() {
     summarySnippet,
     canOpenStudio,
   ]);
+
+  const showScoreDrivers =
+    Boolean(scoringRubric && scoreDrivers.length) && !isExceptionalScore && !isLowScore;
 
   const renderDriverGrid = (showExtraLine: boolean) => (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -1223,7 +1233,11 @@ export default function ResultsPage() {
                       </div>
                     ) : null}
                     <div className="flex flex-wrap justify-center gap-3 lg:justify-start">
-                      {executionMode ? (
+                      {isLowScore ? (
+                        <FormButton onClick={() => void router.push(fitReviewPath)}>
+                          Open Fit Review
+                        </FormButton>
+                      ) : executionMode ? (
                         <FormButton
                           onClick={() => void router.push(studioHref)}
                           disabled={!canOpenStudio}
@@ -1245,6 +1259,11 @@ export default function ResultsPage() {
                         </>
                       )}
                     </div>
+                    {isLowScore ? (
+                      <p className="text-xs text-slate-300">
+                        Your next step is Fit Review. Close the primary gaps and recheck your score here.
+                      </p>
+                    ) : null}
                   </div>
               </div>
             </div>
@@ -1268,8 +1287,8 @@ export default function ResultsPage() {
                           {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
                         </p>
                         <p className="text-xs text-slate-400">
-                          {dimension.points !== null ? dimension.points.toFixed(1) : "â€”"} /{" "}
-                          {dimension.weight !== null ? dimension.weight.toFixed(1) : "â€”"} points
+                        {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
+                        {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} points
                         </p>
                       </div>
                     ))}
@@ -1298,7 +1317,7 @@ export default function ResultsPage() {
           )}
         </section>
 
-        {!isExceptionalScore && scoringRubric && scoreDrivers.length ? (
+        {showScoreDrivers ? (
           executionMode ? (
             <details className="group rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
               <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
@@ -1385,7 +1404,7 @@ export default function ResultsPage() {
                   <ul className="mt-2 space-y-1 text-sm text-slate-100">
                     {keyTermDetails.matchedKeyTerms.slice(0, 6).map((term) => (
                       <li key={`matched-${term}`} className="flex items-center gap-2">
-                        <span className="text-emerald-300">â€¢</span>
+                        <span className="text-emerald-300">•</span>
                         <span>{term}</span>
                       </li>
                     ))}
@@ -1399,7 +1418,7 @@ export default function ResultsPage() {
                   <ul className="mt-2 space-y-1 text-sm text-slate-100">
                     {keyTermDetails.missingKeyTerms.slice(0, 6).map((term) => (
                       <li key={`missing-${term}`} className="flex items-center gap-2">
-                        <span className="text-amber-300">â€¢</span>
+                        <span className="text-amber-300">•</span>
                         <span>{term}</span>
                       </li>
                     ))}
@@ -1423,7 +1442,7 @@ export default function ResultsPage() {
           </section>
         ) : null}
 
-        {!executionMode ? (
+        {executionMode ? (
           <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Next move</p>
@@ -1619,7 +1638,7 @@ export default function ResultsPage() {
               <div className="sm:col-span-2">
                 <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
                 <p className="text-sm text-white">
-                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} â€¢ Preferred{" "}
+                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
                   {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
                 </p>
               </div>
