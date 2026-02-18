@@ -4,6 +4,7 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type { BaselineDto } from "@/lib/baselines";
 import { BaselineWorkspace } from "./BaselineWorkspace";
 import { InstrumentPanelShell } from "../ui/InstrumentPanelShell";
+import { Alert } from "@/components/Alert";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -100,6 +101,8 @@ async function fetchBaselines(): Promise<BaselineFetchResult> {
 export default async function BaselinePage({ searchParams }: BaselinePageProps) {
   const params = (await Promise.resolve(searchParams ?? {})) as SearchParamsShape;
 
+  const showNewBaselineToast = resolveParam(params.toast) === "new_baseline";
+
   const selectedBaselineId = resolveParam(params.baselineId);
   const selectedJobId = resolveParam(params.jobId);
 
@@ -118,6 +121,11 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
       subtitle="Target This Role compares your resume against a job description to generate a score. If your score is strong enough, your personalized resume and cover letter will be generated for you to use in the application process."
       contentWidth="wide"
     >
+      {showNewBaselineToast ? (
+        <Alert intent="success" title="New version available">
+          <p className="text-sm">New version available. Re-run compatibility score.</p>
+        </Alert>
+      ) : null}
       <BaselineWorkspace
         initialBaselines={baselines}
         initialFetchError={baselineFetchError}

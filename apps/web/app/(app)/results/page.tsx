@@ -1018,6 +1018,7 @@ export default function ResultsPage() {
           }
 
           if (res.status === 404) {
+            setError("Assessment not found.");
             await clearLastAssessmentId();
             setLatest(null);
             setAnalysisSource("manual");

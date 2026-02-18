@@ -10,9 +10,9 @@ export const runtime = "nodejs";
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ): Promise<Response> {
-  const { id } = await context.params;
+  const { baselineId } = await context.params;
   const searchParams = req.nextUrl.searchParams.toString();
 
   const baseUrl = getApiBaseUrl();
@@ -31,7 +31,7 @@ export async function GET(
 
   const query = searchParams ? `?${searchParams}` : "";
 
-  const response = await fetch(`${baseUrl}/baselines/${id}/blocks${query}`, {
+  const response = await fetch(`${baseUrl}/baselines/${baselineId}/blocks${query}`, {
     method: "GET",
     cache: "no-store",
     headers: {
@@ -44,9 +44,9 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ): Promise<Response> {
-  const { id } = await context.params;
+  const { baselineId } = await context.params;
 
   const baseUrl = getApiBaseUrl();
   const auth = requireAuthToken(req);
@@ -64,7 +64,7 @@ export async function POST(
 
   const body = await req.json();
 
-  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+  const response = await fetch(`${baseUrl}/baselines/${baselineId}/blocks`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${auth.token}`,
@@ -78,9 +78,9 @@ export async function POST(
 
 export async function PATCH(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ): Promise<Response> {
-  const { id } = await context.params;
+  const { baselineId } = await context.params;
 
   const baseUrl = getApiBaseUrl();
   const auth = requireAuthToken(req);
@@ -98,7 +98,7 @@ export async function PATCH(
 
   const body = await req.json();
 
-  const response = await fetch(`${baseUrl}/baselines/${id}/blocks`, {
+  const response = await fetch(`${baseUrl}/baselines/${baselineId}/blocks`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${auth.token}`,

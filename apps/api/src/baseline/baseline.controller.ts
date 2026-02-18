@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Express } from 'express';
 import { BaselineService } from './baseline.service';
 import { BaselineVersionService } from './baseline-version.service';
+import { CloneFitReviewBaselineDto } from './dto/fit-review-clone.dto';
 
 type UploadBaselineResponse = {
   baseline: any;
@@ -222,5 +223,31 @@ export class BaselineController {
       interviewId: body.interviewId,
       additions: body.additions,
     });
+  }
+
+  @Post(':baselineId/fit-review/clone')
+  async cloneBaselineForFitReview(
+    @Param('baselineId') baselineId: string,
+    @Body() body: CloneFitReviewBaselineDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const trimmedBaselineId = baselineId?.trim();
+
+    if (!trimmedBaselineId) {
+      throw new BadRequestException('Baseline ID is required');
+    }
+
+    return this.baselineService.cloneBaselineForFitReview(
+      userId,
+      trimmedBaselineId,
+      body.jobId,
+      body.additions,
+    );
   }
 }

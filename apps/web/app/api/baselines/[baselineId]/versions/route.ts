@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
+import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../helpers";
 
-export async function POST(
+export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ) {
+  const { baselineId } = await context.params;
+
   const baseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
 
@@ -20,17 +22,13 @@ export async function POST(
     return error;
   }
 
-  const { id } = await context.params;
-
-  const body = await req.json().catch(() => null);
-
-  const response = await fetch(`${baseUrl}/baselines/${id}/reparse`, {
-    method: "POST",
+  // VERIFY: Proxy path and method for baseline versions.
+  const response = await fetch(`${baseUrl}/baselines/${baselineId}/versions`, {
+    method: "GET",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
   return relayApiResponse(response);

@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import type { Express } from 'express';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   BaselineSection,
@@ -31,7 +31,12 @@ import {
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
+import type { ComplianceTextSection } from '../compliance/compliance.types';
 import { EmbeddingService } from '../ai/embedding.service';
+import {
+  FIT_REVIEW_DIMENSION_LABELS,
+  type FitReviewDimensionKey,
+} from './fit-review-dimensions';
 
 const BASELINE_LIMIT = 5;
 
@@ -394,6 +399,146 @@ export class BaselineService {
         fileHash,
         parseResult,
       );
+    });
+  }
+
+  async cloneBaselineForFitReview(
+    userId: string,
+    baselineId: string,
+    jobId: string,
+    additions: Array<{ dimensionId: FitReviewDimensionKey; approvedText: string }>,
+  ) {
+    const trimmedBaselineId = baselineId?.trim();
+    if (!trimmedBaselineId) {
+      throw new BadRequestException("Baseline is required");
+    }
+
+    const trimmedJobId = jobId?.trim();
+    if (!trimmedJobId) {
+      throw new BadRequestException("Job ID is required");
+    }
+
+    const normalizedAdditions = (additions ?? [])
+      .map((addition) => ({
+        dimensionId: addition.dimensionId,
+        approvedText: addition.approvedText.trim(),
+      }))
+      .filter((addition) => addition.approvedText.length > 0);
+
+    if (!normalizedAdditions.length) {
+      throw new BadRequestException("At least one approved addition is required");
+    }
+
+    const baseline = await this.getBaselineWithSections(trimmedBaselineId, userId);
+
+    return this.baselineRepository.manager.transaction(async (manager) => {
+      await this.enforceBaselineLimit(manager, userId);
+
+      const baselineSectionPartials: Array<
+        Pick<BaselineSection, 'sectionType' | 'title' | 'content' | 'includePolicy' | 'order'>
+      > = baseline.sections.map((section) => ({
+        sectionType: section.sectionType,
+        title: section.title,
+        content: section.content,
+        includePolicy: section.includePolicy,
+        order: section.order,
+      }));
+
+      const additionLines = normalizedAdditions.map((addition) => {
+        const label = FIT_REVIEW_DIMENSION_LABELS[addition.dimensionId];
+        return `• ${label} (${addition.dimensionId}): ${addition.approvedText}`;
+      });
+
+      baselineSectionPartials.push({
+        sectionType: BaselineSectionType.OTHER,
+        title: "Fit Review Additions",
+        content: additionLines.join("\n"),
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: baselineSectionPartials.length,
+      });
+
+      await this.attachEmbeddingsToSections(baselineSectionPartials);
+
+      const cloneBaseline = manager.create(Baseline, {
+        userId,
+        originalFilename: `${baseline.originalFilename} (Fit Review)`,
+        mimeType: baseline.mimeType,
+        storagePath: baseline.storagePath,
+        hash: baseline.hash,
+        status: BaselineStatus.ACTIVE,
+        archivedAt: null,
+        sections: baselineSectionPartials,
+      });
+
+      const savedBaseline = await manager.save(cloneBaseline);
+
+      const nextVersionNumber = (savedBaseline.version ?? 0) + 1;
+
+      const persistedSections = await manager.find(BaselineSection, {
+        where: { baselineId: savedBaseline.id },
+        order: { order: "ASC" },
+      });
+
+      const policySectionInputs: PolicySectionInput[] = persistedSections.map((section) => ({
+        id: section.id ?? randomUUID(),
+        includePolicy: section.includePolicy,
+        order: section.order,
+      }));
+
+      const policyState = this.normalizePoliciesFromSections(policySectionInputs);
+
+      const versionHash = this.buildVersionHash(
+        baseline.hash,
+        policyState,
+        additionLines,
+      );
+
+      const complianceTextSections: ComplianceTextSection[] = baselineSectionPartials.map(
+        (section) => ({
+          title: section.title,
+          content: section.content,
+          sectionType: section.sectionType ?? null,
+        }),
+      );
+
+      const allowlistSnapshot = buildBaselineAllowlistSnapshot(complianceTextSections);
+
+      const versionRecord = manager.create(BaselineVersion, {
+        baselineId: savedBaseline.id,
+        versionNumber: nextVersionNumber,
+        fileHash: versionHash,
+        storagePath: savedBaseline.storagePath,
+        verifiedAdditions: additionLines,
+        additionDiff: {
+          jobId: trimmedJobId,
+          additions: normalizedAdditions,
+        },
+        promotedFromInterviewId: null,
+        allowedCompanies: allowlistSnapshot.allowedCompanies,
+        allowedRoles: allowlistSnapshot.allowedRoles,
+        allowedTechnologies: allowlistSnapshot.allowedTechnologies,
+        allowedMetricTokens: allowlistSnapshot.allowedMetricTokens,
+      });
+
+      const savedVersion = await manager.save(versionRecord);
+
+      const policyEntities = policyState.map((policy) =>
+        manager.create(BaselineBlockPolicy, {
+          baselineVersionId: savedVersion.id,
+          baselineSectionId: policy.baselineSectionId,
+          includePolicy: policy.includePolicy,
+          order: policy.order,
+        }),
+      );
+
+      if (policyEntities.length) {
+        await manager.save(policyEntities);
+      }
+
+      savedBaseline.version = nextVersionNumber;
+      await manager.save(savedBaseline);
+
+      return savedBaseline.id;
     });
   }
 

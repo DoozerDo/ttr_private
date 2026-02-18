@@ -4,9 +4,9 @@ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../helpers";
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ) {
-  const { id } = await context.params;
+  const { baselineId } = await context.params;
 
   const baseUrl = getApiBaseUrl();
   const { token, error } = requireAuthToken(req);
@@ -22,7 +22,7 @@ export async function GET(
     return error;
   }
 
-  const response = await fetch(`${baseUrl}/baselines/${id}`, {
+    const response = await fetch(`${baseUrl}/baselines/${baselineId}`, {
     method: "GET",
     cache: "no-store",
     headers: {

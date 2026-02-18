@@ -11,10 +11,10 @@ export const runtime = "nodejs";
 
 async function proxyBaselineAction(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
   action: "archive" | "restore",
 ) {
-  const { id } = await context.params;
+  const { baselineId } = await context.params;
   const baseUrl = getApiBaseUrl();
 
   if (!baseUrl) {
@@ -63,7 +63,7 @@ async function proxyBaselineAction(
   }
 
   const response = await fetch(
-    `${baseUrl}/baselines/${encodeURIComponent(id)}/${action}`,
+    `${baseUrl}/baselines/${encodeURIComponent(baselineId)}/${action}`,
     {
       method: "PATCH",
       headers: proxiedHeaders,
@@ -75,7 +75,7 @@ async function proxyBaselineAction(
 
 export async function PATCH(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  context: { params: Promise<{ baselineId: string }> },
 ) {
   return proxyBaselineAction(req, context, "archive");
 }
