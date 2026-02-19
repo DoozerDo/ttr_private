@@ -30,7 +30,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
           cx="100"
           cy="100"
           r={radius}
-          stroke="var(--score-ring-base, rgba(255,255,255,0.08))"
+          stroke="var(--score-ring-base)"
           strokeWidth={14}
           fill="none"
         />
@@ -38,7 +38,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
           cx="100"
           cy="100"
           r={radius}
-          stroke="var(--score-ring-progress, #f97316)"
+          stroke="var(--score-ring-progress)"
           strokeWidth={14}
           fill="none"
           strokeDasharray={circumference}
@@ -66,7 +66,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
           style={{
             fontSize: 42,
             fontWeight: 800,
-            color: "var(--text-primary, #f8fafc)",
+            color: "var(--text-primary)",
             textShadow: "0 2px 12px rgba(2,6,23,0.5)",
           }}
         >
@@ -74,15 +74,15 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
         </div>
         {label ? (
           <span
-            style={{
-              marginTop: 8,
-              fontSize: 16,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-              fontWeight: 600,
-              color: "var(--text-secondary, #fefce8)",
-            }}
-          >
+          style={{
+            marginTop: 8,
+            fontSize: 16,
+            letterSpacing: 1,
+            textTransform: "uppercase",
+            fontWeight: 600,
+            color: "var(--text-secondary)",
+          }}
+        >
             {label}
           </span>
         ) : null}

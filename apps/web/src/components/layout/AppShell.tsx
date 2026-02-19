@@ -221,13 +221,13 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-50">
+    <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
       <div className="flex min-h-screen flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+        <header className="flex items-center justify-between border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-6 py-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-slate-400">Session console</span>
+            <span className="text-sm text-[var(--text-secondary)]">Session console</span>
             {isDev ? (
-              <span className="text-[11px] uppercase tracking-[0.4em] text-amber-300">
+              <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
                 Dev route: {pathname}
               </span>
             ) : null}
@@ -235,7 +235,7 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
           <div className="flex items-center gap-4">
             {isDev ? (
-              <span className="text-[11px] uppercase tracking-[0.4em] text-slate-400">
+              <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
                 Dev health
               </span>
             ) : null}
@@ -243,9 +243,9 @@ export function AppShell({ children, userEmail }: AppShellProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-slate-950/50 px-6 py-8">
+        <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 py-8">
           {JOURNEY_NAV_V1_ENABLED ? (
-            <div className="mb-6 border-b border-white/10 bg-slate-950/60 px-0 py-3">
+            <div className="mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-0 py-3">
               <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
             </div>
           ) : null}

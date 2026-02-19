@@ -137,7 +137,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
   return (
     <div className="flex items-center gap-3">
       {authState === "authenticated" && email ? (
-        <span className="max-w-[160px] truncate text-sm font-semibold text-slate-100">
+        <span className="max-w-[160px] truncate text-sm font-semibold text-[var(--text-primary)]">
           {email}
         </span>
       ) : null}
@@ -145,7 +145,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
         <div className="relative z-50" ref={menuRef}>
           <button
             type="button"
-            className="flex items-center gap-2 rounded-full border border-white/20 bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-100 shadow-sm transition hover:border-white/40"
+            className="flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] shadow-sm transition-colors duration-150 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
             aria-label="Account menu"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -157,10 +157,10 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
           </button>
 
           {menuOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-white/10 bg-slate-900/95 p-3 shadow-xl">
+            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 shadow-xl">
               <Link
                 href={settingsRoute.href}
-                className="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800/60"
+                className="block rounded-lg px-3 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
                 onClick={() => setMenuOpen(false)}
               >
                 {settingsRoute.label}
@@ -169,11 +169,13 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
                 type="button"
                 onClick={handleLogout}
                 disabled={isProcessing}
-                className="mt-1 w-full rounded-lg border border-transparent bg-amber-400/20 px-3 py-2 text-left text-sm font-semibold text-amber-200 transition hover:border-amber-400/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-1 w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--verdict-apply-text)] hover:bg-[var(--accent-primary-hover)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
               >
                 {isProcessing ? "Logging out" : "Logout"}
               </button>
-              {logoutError ? <p className="mt-2 text-xs text-red-400">{logoutError}</p> : null}
+              {logoutError ? (
+                <p className="mt-2 text-xs text-[var(--status-danger)]">{logoutError}</p>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -182,7 +184,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
         type="button"
         onClick={onClick}
         disabled={authState === "loading" || isProcessing}
-        className="rounded-full border border-white/20 px-4 py-1 text-sm font-semibold text-slate-100 transition hover:bg-slate-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-full border border-[var(--border-subtle)] px-4 py-1 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 bg-[var(--bg-elevated)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {label}
       </button>

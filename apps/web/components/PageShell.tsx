@@ -17,23 +17,23 @@ type PageShellProps = {
 export function PageShell({ children, className, navItems }: PageShellProps) {
   return (
     <div className="metal-frame">
-      <div className="min-h-screen bg-slate-950 text-slate-50">
+      <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
         <div className={`mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 ${className ?? ""}`}>
           {navItems && navItems.length ? (
-            <nav className="flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200">
+            <nav className="flex flex-wrap gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-sm text-[var(--text-secondary)]">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`rounded-full px-3 py-1 transition ${
+                  className={`rounded-full border px-3 py-1 font-semibold transition-colors duration-150 ${
                     item.active
-                      ? "border border-amber-300 bg-amber-400/10 text-amber-200"
-                      : "border border-transparent text-slate-300 hover:border-white/30"
+                      ? "border-[var(--accent-primary)] bg-[var(--bg-surface)] text-[var(--accent-primary)]"
+                      : "border-transparent bg-transparent text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
                   }`}
                 >
                   {item.label}
                   {item.description ? (
-                    <span className="block text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                    <span className="block text-[11px] font-semibold uppercase tracking-[0.25em] text-[var(--text-secondary)]">
                       {item.description}
                     </span>
                   ) : null}

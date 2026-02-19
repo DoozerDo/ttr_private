@@ -8,13 +8,6 @@ type AlertProps = {
   intent?: AlertIntent;
 } & HTMLAttributes<HTMLDivElement>;
 
-const INTENT_CLASSES: Record<AlertIntent, string> = {
-  info: "border border-slate-600 bg-slate-900 text-slate-100",
-  success: "border border-emerald-500/70 bg-emerald-500/10 text-emerald-100",
-  warning: "border border-amber-500/70 bg-amber-500/10 text-amber-100",
-  error: "border border-rose-500/70 bg-rose-500/10 text-rose-100",
-};
-
 const INTENT_LABELS: Record<AlertIntent, string> = {
   info: "Info",
   success: "Success",
@@ -22,11 +15,44 @@ const INTENT_LABELS: Record<AlertIntent, string> = {
   error: "Error",
 };
 
+const INTENT_STYLES: Record<
+  AlertIntent,
+  { borderColor: string; backgroundColor: string; textColor: string }
+> = {
+  info: {
+    borderColor: "var(--border-subtle)",
+    backgroundColor: "var(--bg-elevated)",
+    textColor: "var(--text-primary)",
+  },
+  success: {
+    borderColor: "var(--accent-progress)",
+    backgroundColor: "var(--bg-elevated)",
+    textColor: "var(--text-primary)",
+  },
+  warning: {
+    borderColor: "var(--accent-primary)",
+    backgroundColor: "var(--bg-elevated)",
+    textColor: "var(--text-primary)",
+  },
+  error: {
+    borderColor: "var(--status-danger)",
+    backgroundColor: "var(--status-danger-bg)",
+    textColor: "var(--text-primary)",
+  },
+};
+
 export function Alert({ title, children, intent = "info", className, ...rest }: AlertProps) {
+  const style = INTENT_STYLES[intent];
+
   return (
     <div
       role="status"
-      className={`rounded-2xl px-4 py-3 text-sm ${INTENT_CLASSES[intent]} ${className ?? ""}`}
+      className={`rounded-2xl border px-4 py-3 text-sm ${className ?? ""}`}
+      style={{
+        borderColor: style.borderColor,
+        backgroundColor: style.backgroundColor,
+        color: style.textColor,
+      }}
       {...rest}
     >
       <div className="flex items-start gap-3">

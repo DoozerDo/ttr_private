@@ -1,8 +1,6 @@
 @import "tailwindcss";
 
 :root {
-  --background: #808080;
-  --foreground: #171717;
   --surface-primary: #06080e;
   --surface-secondary: #0b1018;
   --text-muted-primary: #f4f6fa;
@@ -51,6 +49,8 @@
   --text-score-size: 36px;
   --text-section-title: 18px;
   --text-body: 14px;
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
 }
 
 @theme inline {
@@ -73,8 +73,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #808080;
-    --foreground: #ededed;
+    --background: var(--bg-app);
+    --foreground: var(--text-primary);
     --bg-app: #0B0E13;
     --bg-surface: #11151C;
     --bg-elevated: #161B24;
@@ -87,8 +87,8 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg-app);
+  color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
 }
 

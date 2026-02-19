@@ -10,14 +10,17 @@ type FormButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const VARIANT_CLASSES: Record<FormButtonVariant, string> = {
   primary:
-    "border-0 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-900 shadow-lg shadow-amber-500/40",
-  secondary: "border border-white/20 bg-white/5 text-slate-100 shadow",
-  ghost: "border border-white/10 bg-transparent text-slate-100",
-  danger: "border border-rose-500 bg-rose-500/10 text-rose-100",
+    "border-0 bg-[var(--accent-primary)] text-[var(--verdict-apply-text)] hover:bg-[var(--accent-primary-hover)]",
+  secondary:
+    "border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--border-strong)]",
+  ghost:
+    "border border-[var(--border-subtle)] bg-transparent text-[var(--text-secondary)] hover:border-[var(--border-strong)]",
+  danger:
+    "border border-[var(--status-danger)] bg-[var(--status-danger-bg)] text-[var(--status-danger)] hover:bg-[var(--status-danger)]",
 };
 
 const BASE_CLASSES =
-  "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-semibold transition-colors duration-150";
+  "inline-flex items-center justify-center rounded-[var(--button-radius)] px-4 py-2 text-sm font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]";
 
 export const SECONDARY_ACTION_BUTTON_CLASSES = `${BASE_CLASSES} ${VARIANT_CLASSES.secondary}`;
 
@@ -50,7 +53,7 @@ export function FormButton({
   ...rest
 }: FormButtonProps) {
   const intentClass = VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary;
-  const disabledClass = disabled ? "cursor-not-allowed opacity-60" : "hover:opacity-90";
+  const disabledClass = disabled ? "cursor-not-allowed opacity-60" : "";
 
   return (
     <button
