@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  getApiBaseUrl,
+  relayApiResponse,
+  requireAuthToken,
+} from "../../../baselines/helpers";
 
-const DEFAULT_API_BASE = "http://api:3001";
-
-function resolveApiBase() {
-  const rawBase = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (rawBase && rawBase.trim().length) {
-    return rawBase.trim().replace(/\/+$/, "");
-  }
-  return DEFAULT_API_BASE;
-}
+export const runtime = "nodejs";
 
 export async function GET(
   req: NextRequest,
@@ -19,38 +16,24 @@ export async function GET(
     return NextResponse.json({ error: "assessmentId is required" }, { status: 400 });
   }
 
-  const apiBase = resolveApiBase();
+  const apiBase = getApiBaseUrl();
+  const auth = requireAuthToken(req);
+  if (!auth.token) return auth.error;
+
   const upstreamUrl = `${apiBase}/analysis/fit-assessments/${encodeURIComponent(
     assessmentId,
   )}`;
 
-  const headers = new Headers();
-  headers.set("accept", "application/json");
-  const authorization = req.headers.get("authorization");
-  if (authorization) {
-    headers.set("authorization", authorization);
-  }
-  const cookie = req.headers.get("cookie");
-  if (cookie) {
-    headers.set("cookie", cookie);
-  }
-
   try {
     const upstreamResponse = await fetch(upstreamUrl, {
       method: "GET",
-      headers,
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
     });
 
-    const payload = await upstreamResponse.text();
-    const response = new NextResponse(payload, {
-      status: upstreamResponse.status,
-    });
-
-    upstreamResponse.headers.forEach((value, key) => {
-      response.headers.set(key, value);
-    });
-
-    return response;
+    return relayApiResponse(upstreamResponse);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to proxy assessment request";

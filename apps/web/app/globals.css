@@ -184,3 +184,14 @@ body {
     box-shadow: 0 0 45px rgba(34, 197, 94, 0.3);
   }
 }
+
+.results-page-theme {
+  --bg-app: #0B0E13;
+  --bg-surface: #11151C;
+  --bg-elevated: #161B24;
+  --text-primary: #F2F5F9;
+  --text-secondary: #9AA4B2;
+  --text-muted: #7C8796;
+  --border-subtle: #1F2632;
+  --border-strong: #2A3342;
+}

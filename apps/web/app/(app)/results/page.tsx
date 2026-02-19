@@ -20,7 +20,6 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import { buildApiUrl } from "@/lib/api/buildApiUrl";
 import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
 
 type FitDimensionScores = {
@@ -630,10 +629,8 @@ export default function ResultsPage() {
 
   const persistLastAssessmentId = useCallback(async (assessmentId: string | null) => {
     writeLastAssessmentToStorage(assessmentId);
-    const url = buildApiUrl("/users/me/last-assessment");
-    if (!url) return;
     try {
-      await fetch(url, {
+      await fetch("/api/users/me/last-assessment", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assessmentId }),
@@ -1188,7 +1185,7 @@ export default function ResultsPage() {
   }, [runIdentifier, router]);
 
   return (
-    <PageShell>
+    <PageShell className="results-page-theme">
       <div className="space-y-6">
         <PageHeader
           title="Results"
