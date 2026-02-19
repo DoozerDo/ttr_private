@@ -4,7 +4,7 @@
     "noEmit": false,
     "outDir": ".tmp/compliance-test",
     "rootDir": ".",
-    "module": "commonjs"
+    "module": "es2015"
   },
   "include": [
     "lib/compliance/parseComplianceError.ts",

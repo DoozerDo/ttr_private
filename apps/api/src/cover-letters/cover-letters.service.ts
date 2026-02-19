@@ -26,6 +26,11 @@ import {
   DocumentType,
   JobApplicationContext,
 } from '../compliance/compliance.types';
+import {
+  getInsufficientExtractedTextDetails,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+} from '../compliance/extracted-text.utils';
 import { Job } from '../jobs/job.entity';
 import {
   COVER_LETTER_CLOSING_TEMPLATES,
@@ -284,6 +289,26 @@ export class CoverLettersService {
         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
         BaselineIncludePolicy.NEVER,
     );
+
+    const baselineText = allowedSections
+      .map((section) => section.content ?? '')
+      .join('\n');
+    const insufficientBaselineDetails =
+      getInsufficientExtractedTextDetails(baselineText);
+    if (insufficientBaselineDetails) {
+      const payload = {
+        errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+        details: insufficientBaselineDetails,
+        error: {
+          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+          details: insufficientBaselineDetails,
+        },
+      };
+      throw new UnprocessableEntityException(payload);
+    }
 
     const allowedBlocks = this.mapToAllowedBlocks(allowedSections);
     const jobContext = {

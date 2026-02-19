@@ -16,6 +16,11 @@ import {
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
 import { ComplianceService } from '../compliance/compliance.service';
+import {
+  getInsufficientExtractedTextDetails,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+} from '../compliance/extracted-text.utils';
 import { validateComplianceWithFallback } from '../compliance/compliance-error.utils';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
@@ -323,6 +328,26 @@ export class ResumeService {
         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
         BaselineIncludePolicy.NEVER,
     );
+
+    const baselineText = allowedSections
+      .map((section) => section.content ?? '')
+      .join('\n');
+    const insufficientBaselineDetails =
+      getInsufficientExtractedTextDetails(baselineText);
+    if (insufficientBaselineDetails) {
+      const payload = {
+        errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+        details: insufficientBaselineDetails,
+        error: {
+          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+          details: insufficientBaselineDetails,
+        },
+      };
+      throw new UnprocessableEntityException(payload);
+    }
 
     const sections = allowedSections.map((section) => ({
       id: section.id,

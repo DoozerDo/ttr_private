@@ -6,6 +6,12 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Alert } from "@/components/Alert";
 import { FormButton, SecondaryActionLink } from "@/components/FormButton";
 import {
+  parseComplianceError,
+  readResponsePayload,
+  type ParsedInsufficientExtractedTextError,
+} from "@/lib/compliance/parseComplianceError";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
+import {
   BaselineDto,
   BaselineUploadResponse,
   BaselineUploadStatus,
@@ -67,6 +73,9 @@ export function BaselineDashboard({
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [insufficientTextError, setInsufficientTextError] = useState<
+    ParsedInsufficientExtractedTextError | null
+  >(null);
   const [duplicateErrorDetail, setDuplicateErrorDetail] = useState<string | null>(
     null,
   );
@@ -141,6 +150,7 @@ export function BaselineDashboard({
     setDuplicateErrorDetail(null);
     setUploadStatus(null);
     setIsUploading(true);
+    setInsufficientTextError(null);
 
     try {
       const formData = new FormData();
@@ -152,7 +162,7 @@ export function BaselineDashboard({
         body: formData,
       });
 
-      const data = await response.json();
+      const payload = await readResponsePayload(response);
 
       if (response.status === 401) {
         window.location.href = "/auth/login";
@@ -160,21 +170,38 @@ export function BaselineDashboard({
       }
 
       if (!response.ok) {
-        const duplicateDetail = getDuplicateUploadMessage(data);
+        const compliance = parseComplianceError({
+          status: response.status,
+          payload,
+        });
+        if (compliance?.type === "insufficient_extracted_text") {
+          setInsufficientTextError(compliance);
+          setError(null);
+          setDuplicateErrorDetail(null);
+          return;
+        }
+
+        const duplicateDetail = getDuplicateUploadMessage(payload);
         if (duplicateDetail) {
           setError("Duplicate resume detected");
           setDuplicateErrorDetail(duplicateDetail);
           return;
         }
 
-        const message = data?.message || data?.error || "Upload failed";
-        setError(typeof message === "string" ? message : "Upload failed");
+        const fallbackMessage =
+          typeof payload === "object" && payload !== null
+            ? (payload as Record<string, unknown>).message ??
+              (payload as Record<string, unknown>).error
+            : undefined;
+        const message =
+          typeof fallbackMessage === "string" ? fallbackMessage : "Upload failed";
+        setError(message);
         return;
       }
 
-      const uploadResponse = isBaselineUploadResponse(data)
-        ? data
-        : { baseline: data as BaselineDto, uploadStatus: null };
+      const uploadResponse = isBaselineUploadResponse(payload)
+        ? payload
+        : { baseline: payload as BaselineDto, uploadStatus: null };
 
       const baselineRecord = uploadResponse.baseline;
       const status =
@@ -271,7 +298,9 @@ export function BaselineDashboard({
         </p>
       ) : null}
 
-      {error ? (
+      {insufficientTextError ? (
+        <InsufficientExtractedText error={insufficientTextError} />
+      ) : error ? (
         <div style={ttrComponents.dangerBox}>
           <p className="m-0 text-[13px]">{error}</p>
           {duplicateErrorDetail ? (

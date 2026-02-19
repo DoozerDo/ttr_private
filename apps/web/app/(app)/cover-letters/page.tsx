@@ -9,6 +9,7 @@ import {
   ComplianceViolationPanel,
   type ComplianceFlag,
 } from "@/components/ComplianceViolationPanel";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -470,7 +471,11 @@ export default function CoverLettersPage() {
             </p>
           ) : null}
 
-          {documentState.complianceError ? <ComplianceViolationPanel error={documentState.complianceError} /> : null}
+          {documentState.complianceError?.type === "insufficient_extracted_text" ? (
+            <InsufficientExtractedText error={documentState.complianceError} />
+          ) : documentState.complianceError ? (
+            <ComplianceViolationPanel error={documentState.complianceError} />
+          ) : null}
 
           {documentState.error ? (
             <Alert intent="error" title={`Unable to process ${DOCUMENT_LABEL}`}>

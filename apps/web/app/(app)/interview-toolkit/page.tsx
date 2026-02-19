@@ -10,6 +10,7 @@ import {
   ComplianceFlagPanel,
   ComplianceViolationPanel,
 } from "@/components/ComplianceViolationPanel";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -39,11 +40,6 @@ interface JobDto {
 }
 
 function describeComplianceSummary(error: ParsedComplianceError) {
-  const violations = error.violations
-    .map((violation) => violation.message || violation.code)
-    .filter(Boolean)
-    .join("; ");
-
   const extras = [
     error.auditId ? `Audit ${error.auditId}` : null,
     error.baselineVersionHash ? `Baseline ${error.baselineVersionHash}` : null,
@@ -51,9 +47,24 @@ function describeComplianceSummary(error: ParsedComplianceError) {
     .filter(Boolean)
     .join(" · ");
 
-  return [violations || "Compliance validation failed.", extras]
-    .filter(Boolean)
-    .join(" · ");
+  if ("violations" in error) {
+    const violations = error.violations
+      .map((violation) => violation.message || violation.code)
+      .filter(Boolean)
+      .join("; ");
+
+    return [violations || "Compliance validation failed.", extras]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  const detailsSummary =
+    typeof error.details?.extractedChars === "number" &&
+    typeof error.details?.minChars === "number"
+      ? `Insufficient extracted resume text. Extracted ${error.details.extractedChars.toLocaleString()} characters. Minimum is ${error.details.minChars.toLocaleString()}.`
+      : "Insufficient extracted resume text.";
+
+  return [detailsSummary, extras].filter(Boolean).join(" · ");
 }
 
 function normalizeComplianceWarnings(
@@ -699,7 +710,9 @@ export default function InterviewToolkitPage() {
           </div>
 
           {followUpTierGate ? <TierGateNotice error={followUpTierGate} /> : null}
-          {followUpComplianceError ? (
+          {followUpComplianceError?.type === "insufficient_extracted_text" ? (
+            <InsufficientExtractedText error={followUpComplianceError} />
+          ) : followUpComplianceError ? (
             <ComplianceViolationPanel error={followUpComplianceError} />
           ) : null}
 

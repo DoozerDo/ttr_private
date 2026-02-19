@@ -32,6 +32,11 @@ import { BaselineVersion } from './baseline-version.entity';
 import { BaselineBlockPolicy } from './baseline-block-policy.entity';
 import { buildBaselineAllowlistSnapshot } from '../compliance/baseline-allowlist';
 import type { ComplianceTextSection } from '../compliance/compliance.types';
+import {
+  getInsufficientExtractedTextDetails,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+} from '../compliance/extracted-text.utils';
 import { EmbeddingService } from '../ai/embedding.service';
 import {
   FIT_REVIEW_DIMENSION_LABELS,
@@ -788,6 +793,21 @@ return {
 
   async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
     const ingestion = await this.baselineIngestionService.ingest(file);
+    const insufficientDetails = getInsufficientExtractedTextDetails(ingestion.rawText);
+    if (insufficientDetails) {
+      const payload = {
+        errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+        message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+        details: insufficientDetails,
+        error: {
+          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+          details: insufficientDetails,
+        },
+      };
+      throw new UnprocessableEntityException(payload);
+    }
     const sections = this.buildSections(
       ingestion.rawText,
       ingestion.parsedSections,

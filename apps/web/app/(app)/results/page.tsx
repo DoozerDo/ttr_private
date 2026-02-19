@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { ScoreGauge } from "@/components/ScoreGauge";
@@ -1361,7 +1362,11 @@ export default function ResultsPage() {
           </section>
         ) : null}
 
-        {complianceError ? <ComplianceViolationPanel error={complianceError} /> : null}
+        {complianceError?.type === "insufficient_extracted_text" ? (
+          <InsufficientExtractedText error={complianceError} />
+        ) : complianceError ? (
+          <ComplianceViolationPanel error={complianceError} />
+        ) : null}
 
         
 

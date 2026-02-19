@@ -1,18 +1,43 @@
 const COMPLIANCE_ERROR_TYPE = "COMPLIANCE_VIOLATION" as const;
+const INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE =
+  "insufficient_extracted_text" as const;
 const DEFAULT_VIOLATION_MESSAGE = "Compliance validation failed.";
 
 export type ComplianceFlagUi = {
   code: string;
   message: string;
-  severity: string; // "warn" | "block" | "info" etc, keep string to avoid backend lock-in
+  severity: string;
 };
 
-export type ParsedComplianceError = {
+export type InsufficientExtractedTextReason =
+  | "likely_extraction_failure"
+  | "resume_too_short";
+
+export type InsufficientExtractedTextDetails = {
+  minChars: number;
+  extractedChars: number;
+  preview: string;
+  reason: InsufficientExtractedTextReason;
+  tips: string[];
+};
+
+export type ParsedComplianceViolationError = {
   type: typeof COMPLIANCE_ERROR_TYPE;
   violations: ComplianceFlagUi[];
   auditId?: string;
   baselineVersionHash?: string | null;
 };
+
+export type ParsedInsufficientExtractedTextError = {
+  type: typeof INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE;
+  details: InsufficientExtractedTextDetails;
+  auditId?: string;
+  baselineVersionHash?: string | null;
+};
+
+export type ParsedComplianceError =
+  | ParsedComplianceViolationError
+  | ParsedInsufficientExtractedTextError;
 
 export function parseComplianceError({
   status,
@@ -24,6 +49,18 @@ export function parseComplianceError({
   if (status < 400 || status >= 500) return null;
 
   const errorCode = getPayloadErrorCode(payload);
+
+  if (errorCode === INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE) {
+    const details = parseInsufficientExtractedTextDetails(payload);
+    if (!details) return null;
+    return {
+      type: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+      details,
+      auditId: getAuditId(payload),
+      baselineVersionHash: getBaselineVersionHash(payload),
+    };
+  }
+
   let violations = extractViolations(payload);
 
   const isComplianceCode = errorCode === COMPLIANCE_ERROR_TYPE;
@@ -159,7 +196,8 @@ function normalizeViolationEntry(entry: unknown): ComplianceFlagUi | null {
     const record = entry as Record<string, unknown>;
 
     const rawCode =
-      readStringFromPaths(record, [["code"], ["flagCode"], ["flag_code"]]) ?? "COMPLIANCE_VIOLATION";
+      readStringFromPaths(record, [["code"], ["flagCode"], ["flag_code"]]) ??
+      "COMPLIANCE_VIOLATION";
 
     const rawMessage =
       readStringFromPaths(record, [["message"], ["msg"], ["description"]]) ??
@@ -184,6 +222,68 @@ function normalizeViolationEntry(entry: unknown): ComplianceFlagUi | null {
   }
 
   return null;
+}
+
+function parseInsufficientExtractedTextDetails(
+  payload: unknown,
+): InsufficientExtractedTextDetails | null {
+  const source =
+    (getValueAtPath(payload, ["details"]) ??
+      getValueAtPath(payload, ["error", "details"])) as
+      | Record<string, unknown>
+      | undefined;
+  if (!source) return null;
+
+  const minChars = readNumberFromPaths(source, [
+    ["minChars"],
+    ["min_chars"],
+    ["minCharThreshold"],
+    ["minimum_chars"],
+  ]);
+  const extractedChars = readNumberFromPaths(source, [
+    ["extractedChars"],
+    ["extracted_char_count"],
+    ["extracted_characters"],
+    ["charCount"],
+  ]);
+  const preview =
+    readStringFromPaths(source, [
+      ["preview"],
+      ["preview_text"],
+      ["extractedTextPreview"],
+      ["extracted_text_preview"],
+      ["text"],
+      ["rawText"],
+    ]) ?? "";
+
+  if (minChars === undefined || extractedChars === undefined) {
+    return null;
+  }
+
+  const rawReason = readStringFromPaths(source, [["reason"]]);
+  const reason =
+    rawReason === "likely_extraction_failure" ||
+    rawReason === "resume_too_short"
+      ? (rawReason as InsufficientExtractedTextReason)
+      : "resume_too_short";
+
+  const tips =
+    (Array.isArray(getValueAtPath(source, ["tips"]))
+      ? (getValueAtPath(source, ["tips"]) as unknown[])
+      : Array.isArray(getValueAtPath(source, ["tip", "items"]))
+        ? (getValueAtPath(source, ["tip", "items"]) as unknown[])
+        : []
+    )
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length);
+
+  return {
+    minChars,
+    extractedChars,
+    preview,
+    reason,
+    tips,
+  };
 }
 
 function getAuditId(payload: unknown): string | undefined {
@@ -211,6 +311,18 @@ function readStringFromPaths(payload: unknown, paths: string[][]): string | unde
   for (const path of paths) {
     const value = getValueAtPath(payload, path);
     if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function readNumberFromPaths(payload: unknown, paths: string[][]): number | undefined {
+  for (const path of paths) {
+    const value = getValueAtPath(payload, path);
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const parsed = Number(value.trim());
+      if (!Number.isNaN(parsed)) return parsed;
+    }
   }
   return undefined;
 }

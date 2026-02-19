@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
-import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
+import type {
+  ParsedComplianceViolationError,
+} from "@/lib/compliance/parseComplianceError";
 import { ttrComponents, ttrTypography } from "@/app/(app)/ui/ttrStyles";
 
 export type ComplianceFlag = {
@@ -97,7 +99,7 @@ export function ComplianceFlagPanel({
 }
 
 type ComplianceViolationPanelProps = {
-  error: ParsedComplianceError;
+  error: ParsedComplianceViolationError;
 };
 
 export function ComplianceViolationPanel({ error }: ComplianceViolationPanelProps) {

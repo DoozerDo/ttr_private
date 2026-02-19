@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
@@ -961,7 +962,11 @@ export default function InterviewSessionPage() {
         ) : null}
 
         {tierGateError ? <TierGateNotice error={tierGateError} /> : null}
-        {loadComplianceError ? <ComplianceViolationPanel error={loadComplianceError} /> : null}
+        {loadComplianceError?.type === "insufficient_extracted_text" ? (
+          <InsufficientExtractedText error={loadComplianceError} />
+        ) : loadComplianceError ? (
+          <ComplianceViolationPanel error={loadComplianceError} />
+        ) : null}
         {loadStatus === "error" && loadMessage ? (
           <Alert intent="error" title="Unable to load interview">
             {loadMessage}

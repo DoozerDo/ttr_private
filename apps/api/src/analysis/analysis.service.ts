@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
@@ -25,6 +26,11 @@ import {
   ComplianceFlag,
   ComplianceFlagSeverity,
 } from '../compliance/compliance.types';
+import {
+  getInsufficientExtractedTextDetails,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+  INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+} from '../compliance/extracted-text.utils';
 import { Interview } from '../interviews/interview.entity';
 import { RecommendedAddition } from '../interviews/interview-types';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
@@ -1716,6 +1722,22 @@ export class AnalysisService {
       }
 
       const baselineText = this.buildBaselineText(includedSections);
+      const insufficientBaselineDetails =
+        getInsufficientExtractedTextDetails(baselineText);
+      if (insufficientBaselineDetails) {
+        const payload = {
+          errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+          details: insufficientBaselineDetails,
+          error: {
+            code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+            message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+            details: insufficientBaselineDetails,
+          },
+        };
+        throw new UnprocessableEntityException(payload);
+      }
       const baselineKeywords = this.normalizeKeywords(baselineText);
       const jobKeywords = this.normalizeKeywords(jobDescription);
 
@@ -1863,6 +1885,23 @@ export class AnalysisService {
       shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
 
       const filteredSections = this.getIncludedSections(baseline.sections);
+      const baselineText = this.buildBaselineText(filteredSections);
+      const insufficientBaselineDetails =
+        getInsufficientExtractedTextDetails(baselineText);
+      if (insufficientBaselineDetails) {
+        const payload = {
+          errorCode: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+          message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+          details: insufficientBaselineDetails,
+          error: {
+            code: INSUFFICIENT_EXTRACTED_TEXT_ERROR_CODE,
+            message: INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
+            details: insufficientBaselineDetails,
+          },
+        };
+        throw new UnprocessableEntityException(payload);
+      }
       const includedSections = filteredSections.map((section) => ({
         type: section.sectionType ?? section.type,
         content: section.content,
