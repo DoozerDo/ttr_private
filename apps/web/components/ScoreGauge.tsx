@@ -13,7 +13,6 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
   const clampedScore = Math.min(Math.max(score ?? 0, 0), 100);
   const offset = circumference * (1 - clampedScore / 100);
-  const gradientId = "scoreGaugeGradient";
 
   return (
     <div
@@ -27,18 +26,11 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
       }}
     >
       <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#22c55e" />
-            <stop offset="50%" stopColor="#f59e0b" />
-            <stop offset="100%" stopColor="#f97316" />
-          </linearGradient>
-        </defs>
         <circle
           cx="100"
           cy="100"
           r={radius}
-          stroke="rgba(255,255,255,0.08)"
+          stroke="var(--score-ring-base, rgba(255,255,255,0.08))"
           strokeWidth={14}
           fill="none"
         />
@@ -46,7 +38,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
           cx="100"
           cy="100"
           r={radius}
-          stroke={`url(#${gradientId})`}
+          stroke="var(--score-ring-progress, #f97316)"
           strokeWidth={14}
           fill="none"
           strokeDasharray={circumference}
@@ -74,7 +66,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
           style={{
             fontSize: 42,
             fontWeight: 800,
-            color: "#f8fafc",
+            color: "var(--text-primary, #f8fafc)",
             textShadow: "0 2px 12px rgba(2,6,23,0.5)",
           }}
         >
@@ -88,7 +80,7 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
               letterSpacing: 1,
               textTransform: "uppercase",
               fontWeight: 600,
-              color: "#fefce8",
+              color: "var(--text-secondary, #fefce8)",
             }}
           >
             {label}
