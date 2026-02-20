@@ -52,8 +52,12 @@ import {
   DimensionWeightOverrides,
   FitScoringService,
 } from './fit-scoring.service';
-import { scoreCxFitV2 } from './cx-fit-scoring-v2';
+import {
+  scoreCxFitV2,
+  computeConfidenceScore,
+} from './cx-fit-scoring-v2';
 import { buildResultsNarrative } from './results-narrative.builder';
+import { selectBaselineTextForScoring } from './baseline-selection';
 import type {
   BaselineCoverageDetails,
   CxFitV2Result,
@@ -136,6 +140,8 @@ export type JobTextForScoring = {
 };
 
 const RAW_TEXT_WARNING_THRESHOLD = 3000;
+const BASELINE_INVALID_MESSAGE =
+  'Baseline content is missing in this environment. Please re upload or select a valid baseline.';
 
 export function buildJobTextForScoring(job: JobTextInput): JobTextForScoring {
   const rawDescription = (job.rawDescription ?? '').trim();
@@ -261,6 +267,8 @@ type FitScoreResponse = {
   debug?: CompatibilityRunDebugPayload;
   scoringProof?: ScoringProofSnapshot;
   baseline_version_hash?: string | null;
+  confidenceScore?: number;
+  confidenceReasons?: string[];
 
   scoring_v2?: CxFitV2Result;
   status?: 'ok' | 'compliance_blocked' | 'error';
@@ -307,6 +315,8 @@ type RunFitAssessmentComplianceBlockedResponse = {
   audit_id?: string | null;
   auditId?: string | null;
   baseline_version_hash?: string | null;
+  confidenceScore?: number;
+  confidenceReasons?: string[];
   assessmentId?: string;
   jobId?: string;
   baselineId?: string;
@@ -442,6 +452,44 @@ export class AnalysisService {
     });
   }
 
+  private normalizeSelectedBlockIds(ids?: string[] | null): string[] | undefined {
+    if (!ids) {
+      return undefined;
+    }
+    const normalized = ids
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0);
+    return normalized.length ? normalized : undefined;
+  }
+
+  private async ensureBaselineHasContent(baselineId: string) {
+    const stats = await this.baselineSectionRepository
+      .createQueryBuilder('section')
+      .select('COUNT(section.id)', 'sectionCount')
+      .addSelect("SUM(LENGTH(COALESCE(section.content, '')))", 'totalChars')
+      .where('section."baselineId" = :baselineId', { baselineId })
+      .getRawOne<{ sectionCount?: string; totalChars?: string | null }>();
+
+    const sectionCount = Number(stats?.sectionCount ?? 0);
+    const totalChars = Number(stats?.totalChars ?? 0);
+
+    if (
+      sectionCount === 0 ||
+      !Number.isFinite(totalChars) ||
+      totalChars < 500
+    ) {
+      throw new BadRequestException({
+        status: 'baseline_invalid',
+        code: 'BASELINE_EMPTY',
+        message: BASELINE_INVALID_MESSAGE,
+        error: {
+          code: 'BASELINE_EMPTY',
+          message: BASELINE_INVALID_MESSAGE,
+        },
+      });
+    }
+  }
+
   private buildBaselineText(sections: BaselineSection[]) {
     return sections
       .filter(
@@ -550,24 +598,34 @@ export class AnalysisService {
     baseline: Baseline,
     sectionPayload: Array<{ type?: string; content: string }>,
     selectedSectionIds?: string[] | null,
+    coverageSource?: string,
+    originalBaselineChars?: number,
   ): BaselineCoverageDetails {
-    const originalBaselineText = (baseline.sections ?? [])
+    const availableBaselineText = (baseline.sections ?? [])
       .map((section) => section.content ?? '')
       .join('\n');
     const includedBaselineText = sectionPayload
       .map((section) => section.content ?? '')
       .join('\n');
-    const normalizedBaselineChars = getCharCount(normalizeText(includedBaselineText));
+    const normalizedBaselineChars = getCharCount(
+      normalizeText(includedBaselineText),
+    );
     const selectedSectionGateActive = Boolean(selectedSectionIds?.length);
     const selectedSectionCount = selectedSectionGateActive
       ? selectedSectionIds!.length
       : 0;
-    const source = selectedSectionGateActive
-      ? 'selectedBaselineSections'
-      : 'baselineVersion.canonicalSections';
+    const source =
+      coverageSource ??
+      (selectedSectionGateActive
+        ? 'selectedBaselineSections'
+        : 'baselineVersion.canonicalSections');
+    const originalChars =
+      typeof originalBaselineChars === 'number'
+        ? originalBaselineChars
+        : getCharCount(availableBaselineText);
 
     return {
-      originalBaselineChars: getCharCount(originalBaselineText),
+      originalBaselineChars: originalChars,
       includedBaselineChars: getCharCount(includedBaselineText),
       coverageFormula: 'includedBaselineChars / originalBaselineChars',
       source,
@@ -582,11 +640,15 @@ export class AnalysisService {
     baseline: Baseline,
     sectionPayload: Array<{ type?: string; content: string }>,
     selectedSectionIds?: string[] | null,
+    coverageSource?: string,
+    originalBaselineChars?: number,
   ) {
     const coverageDetails = this.buildBaselineCoverageDetails(
       baseline,
       sectionPayload,
       selectedSectionIds,
+      coverageSource,
+      originalBaselineChars,
     );
     scoringV2.debug.baselineCoverageDetails = coverageDetails;
     if (scoringV2.debug.bundle) {
@@ -1300,6 +1362,8 @@ export class AnalysisService {
 
     baseline.sections = [...(baseline.sections ?? []), ...additionSections];
 
+    await this.ensureBaselineHasContent(baseline.id);
+
     return { baseline, baselineVersion };
   }
 
@@ -1321,33 +1385,25 @@ export class AnalysisService {
       });
     }
 
-    const selectedBlockIds = payload.selected_block_ids?.filter(Boolean);
-    const filteredSections = this.getIncludedSections(
-      baseline.sections,
-      selectedBlockIds,
+    const normalizedSelectedBlockIds = this.normalizeSelectedBlockIds(
+      payload.selected_block_ids,
     );
-    const includedSections = filteredSections.map((section) => ({
-      type: section.sectionType ?? section.type,
-      content: section.content,
-    }));
-      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+    const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
     const canonicalSections = this.buildCanonicalSectionPayload(
       canonicalBaseline,
     );
-    const sectionPayload = canonicalSections;
+    const baselineSelection = selectBaselineTextForScoring({
+      baseline,
+      normalizedSelectedBlockIds,
+      canonicalSections,
+    });
+    const sectionPayload = baselineSelection.sectionsForScoring;
 
     const complianceBaselineSections =
       this.complianceService.normalizeSectionsForOutput(sectionPayload);
 
-    const baselineProofText = sectionPayload
-      .map((section) => section.content ?? '')
-      .join('\n');
-    const baselineTextCharsScored = getCharCount(baselineProofText);
-
-    const baselineTextForDebug = sectionPayload
-      .map((section) => section.content)
-      .join('\n');
-    const baselineExtractedTextChars = getCharCount(baselineTextForDebug);
+    const baselineTextCharsScored = baselineSelection.includedBaselineChars;
+    const baselineExtractedTextChars = baselineSelection.includedBaselineChars;
 
     const calibration = await this.getCalibration(userId);
     const dimensionWeights = this.mapCalibrationToDimensionWeights(
@@ -1477,8 +1533,12 @@ export class AnalysisService {
         scoringV2,
         baseline,
         sectionPayload,
-        selectedBlockIds,
+        baselineSelection.selectedSectionIds,
+        baselineSelection.source,
+        baselineSelection.originalBaselineChars,
       );
+
+      const confidenceResult = computeConfidenceScore(scoringV2.debug);
 
     const legacyDimensionScores =
       this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
@@ -1550,6 +1610,8 @@ export class AnalysisService {
         gaps,
         complianceFlags,
         inputsHash,
+        confidenceScore: confidenceResult.confidenceScore,
+        confidenceReasons: confidenceResult.confidenceReasons,
       });
 
       savedAssessment = await this.fitAssessmentRepository.save(assessment);
@@ -1571,7 +1633,7 @@ export class AnalysisService {
         ? this.buildCompatibilityDebugPayload({
           baselineId: baseline.id,
           baselineVersionHash,
-          baselineSelectedSectionCount: includedSections.length,
+          baselineSelectedSectionCount: baselineSelection.selectedSectionCount,
           baselineTotalChars: baselineTextCharsScored,
           jobId: job?.id ?? jobId ?? null,
           jobRawChars: jobTextForScoring.jobRawTextCharCount,
@@ -1643,6 +1705,8 @@ export class AnalysisService {
       ...(debugInfo ? { debug: debugInfo } : {}),
       ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
       scoringProof,
+      confidenceScore: confidenceResult.confidenceScore,
+      confidenceReasons: confidenceResult.confidenceReasons,
     };
     } finally {
       this.clearShortTextWarningKey(shortTextWarningKey);
@@ -1871,6 +1935,7 @@ export class AnalysisService {
           order: { order: 'ASC' },
         });
       }
+      await this.ensureBaselineHasContent(baseline.id);
 
       const job = await this.jobRepository.findOne({
         where: { id: resolvedJobId, userId },
@@ -1884,8 +1949,15 @@ export class AnalysisService {
       const requestRunId = this.nextShortTextWarningRequestRunId();
       shortTextWarningKey = this.buildShortTextWarningKey(jobKey, requestRunId);
 
-      const filteredSections = this.getIncludedSections(baseline.sections);
-      const baselineText = this.buildBaselineText(filteredSections);
+      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
+      const canonicalSections = this.buildCanonicalSectionPayload(
+        canonicalBaseline,
+      );
+      const baselineSelection = selectBaselineTextForScoring({
+        baseline,
+        canonicalSections,
+      });
+      const baselineText = baselineSelection.normalizedBaselineText;
       const insufficientBaselineDetails =
         getInsufficientExtractedTextDetails(baselineText);
       if (insufficientBaselineDetails) {
@@ -1902,30 +1974,19 @@ export class AnalysisService {
         };
         throw new UnprocessableEntityException(payload);
       }
-      const includedSections = filteredSections.map((section) => ({
-        type: section.sectionType ?? section.type,
-        content: section.content,
-      }));
-      const canonicalBaseline = this.getCanonicalBaselineForScoring(baseline);
-      const canonicalSections = this.buildCanonicalSectionPayload(
-        canonicalBaseline,
-      );
-      const sectionPayload = canonicalSections;
+      const sectionPayload = baselineSelection.sectionsForScoring;
 
       const baselineVersionValue = baselineVersion ?? baseline.version ?? 0;
       const baselineForHash: Baseline = {
         ...baseline,
-        sections: filteredSections,
+        sections: baselineSelection.selectedSections,
         version: baselineVersionValue,
       };
 
       const complianceBaselineSections =
         this.complianceService.normalizeSectionsForOutput(sectionPayload);
 
-      const baselineProofText = sectionPayload
-        .map((section) => section.content ?? '')
-        .join('\n');
-      const baselineTextCharsScored = getCharCount(baselineProofText);
+      const baselineTextCharsScored = baselineSelection.includedBaselineChars;
 
       const { canonicalJobForScoring, canonicalJobForHash, jobTextForScoring } =
         this.buildCanonicalJobAssets({
@@ -2003,7 +2064,16 @@ export class AnalysisService {
         );
       }
 
-      this.applyBaselineCoverageDetails(scoringV2, baseline, sectionPayload);
+      this.applyBaselineCoverageDetails(
+        scoringV2,
+        baseline,
+        sectionPayload,
+        baselineSelection.selectedSectionIds,
+        baselineSelection.source,
+        baselineSelection.originalBaselineChars,
+      );
+
+      const confidenceResult = computeConfidenceScore(scoringV2.debug);
 
       const legacyDimensionScores =
         this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
@@ -2059,7 +2129,7 @@ export class AnalysisService {
         ? this.buildCompatibilityDebugPayload({
             baselineId: baseline.id,
             baselineVersionHash,
-            baselineSelectedSectionCount: includedSections.length,
+            baselineSelectedSectionCount: baselineSelection.selectedSectionCount,
             baselineTotalChars: baselineTextCharsScored,
             jobId: jobIdentifier,
             jobRawChars: jobTextForScoring.jobRawTextCharCount,
@@ -2126,26 +2196,28 @@ export class AnalysisService {
             : flag,
         );
 
-        const blockedResponse: RunFitAssessmentComplianceBlockedResponse = {
-          status: 'compliance_blocked',
-          fit_score: finalScore,
-          score: finalScore,
-          overall_score: finalScore,
-          overallScore: finalScore,
-          verdict: 'blocked',
-          breakdown,
-          dimensionScores: legacyDimensionScores,
-          strengths,
-          gaps,
-          scoring_v2: scoringV2,
-          ...(debugInfo ? { debug: debugInfo } : {}),
-          ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
-          scoringProof,
-          summary: debugScoring?.summary,
-          compliance: {
-            blocked: true,
-            flags: normalizedFlags,
-            message: 'Compliance validation failed.',
+      const blockedResponse: RunFitAssessmentComplianceBlockedResponse = {
+        status: 'compliance_blocked',
+        fit_score: finalScore,
+        score: finalScore,
+        overall_score: finalScore,
+        overallScore: finalScore,
+        verdict: 'blocked',
+        breakdown,
+        dimensionScores: legacyDimensionScores,
+        strengths,
+        gaps,
+        scoring_v2: scoringV2,
+        ...(debugInfo ? { debug: debugInfo } : {}),
+        ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
+        scoringProof,
+        summary: debugScoring?.summary,
+        confidenceScore: confidenceResult.confidenceScore,
+        confidenceReasons: confidenceResult.confidenceReasons,
+        compliance: {
+          blocked: true,
+          flags: normalizedFlags,
+          message: 'Compliance validation failed.',
           },
           complianceFlags: normalizedFlags,
           compliance_flags: this.coerceComplianceFlags(normalizedFlags),
@@ -2174,6 +2246,8 @@ export class AnalysisService {
       complianceFlags,
       scoringV2: scoringV2,
       inputsHash,
+      confidenceScore: confidenceResult.confidenceScore,
+      confidenceReasons: confidenceResult.confidenceReasons,
     });
 
       const savedAssessment = await this.fitAssessmentRepository.save(assessment);
@@ -2219,6 +2293,8 @@ export class AnalysisService {
         summary: debugScoring?.summary,
         ...(debugInfo ? { debug: debugInfo } : {}),
         scoringProof: successScoringProof,
+        confidenceScore: confidenceResult.confidenceScore,
+        confidenceReasons: confidenceResult.confidenceReasons,
         baseline_version_hash:
           compliance.audit.baselineVersionHash ?? baseline.hash ?? null,
       };
@@ -2523,6 +2599,8 @@ export class AnalysisService {
       gaps: assessment.gaps,
       complianceFlags: assessment.complianceFlags,
       summary,
+      confidenceScore: assessment.confidenceScore ?? null,
+      confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       scoring_v2: assessment.scoringV2 ?? null,
       narrative,

@@ -187,6 +187,12 @@ const buildComplianceBlockedPayload = (flags: unknown[]): FitResultPayload => ({
   ),
 });
 
+const BASELINE_INVALID_MESSAGE =
+  "Baseline content is missing in this environment. Please re upload or select a valid baseline.";
+
+const asString = (value?: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
 const parseAnalysisRunResponse = async (
   response: Response,
 ): Promise<{ payload: FitResultPayload; runState: "ok" | "compliance_blocked" }> => {
@@ -220,12 +226,44 @@ const parseAnalysisRunResponse = async (
       };
     };
 
+    const statusCandidate =
+      typeof parsed === "object"
+        ? ("status" in parsed ? (parsed as { status?: unknown }).status : undefined)
+        : undefined;
+    const statusFromMessage =
+      typeof parsed === "object" && "message" in parsed
+        ? (parsed as { message?: { status?: unknown } }).message?.status
+        : undefined;
+    const normalizedStatus =
+      (typeof statusCandidate === "string"
+        ? statusCandidate.toLowerCase()
+        : typeof statusFromMessage === "string"
+        ? statusFromMessage.toLowerCase()
+        : undefined) ?? "";
+
+    const fallbackCode = asString((parsed as { code?: unknown }).code);
+    const errorCodeRaw =
+      asString(errorPayload.error?.code) ?? fallbackCode;
+    const normalizedErrorCode = errorCodeRaw ? errorCodeRaw.toLowerCase() : "";
+
+    if (
+      normalizedStatus === "baseline_invalid" ||
+      normalizedErrorCode === "baseline_empty"
+    ) {
+      const baselineError = new Error(BASELINE_INVALID_MESSAGE);
+      (baselineError as Error & { code?: string; status?: string }).code =
+        "BASELINE_EMPTY";
+      (baselineError as Error & { status?: string }).status =
+        "baseline_invalid";
+      throw baselineError;
+    }
+
     const normalizedDetailFlags = normalizeComplianceFlagsFromError(
       errorPayload.error?.details?.compliance_flags,
     );
-    const errorCodeRaw =
+    const detailErrorCodeRaw =
       typeof errorPayload.error?.code === "string" ? errorPayload.error.code : undefined;
-    const errorCode = errorCodeRaw?.toLowerCase() ?? "";
+    const errorCode = detailErrorCodeRaw?.toLowerCase() ?? "";
     const hasBlockSeverity =
       Array.isArray(normalizedDetailFlags) &&
       normalizedDetailFlags.some((flag) => {

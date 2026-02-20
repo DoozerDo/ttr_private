@@ -68,6 +68,12 @@ export class FitAssessment {
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   complianceFlags!: string[];
 
+  @Column({ type: 'int', nullable: true })
+  confidenceScore?: number | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  confidenceReasons?: string[] | null;
+
   @Column({ type: 'jsonb', nullable: true })
   scoringV2!: CxFitV2Result | null;
 

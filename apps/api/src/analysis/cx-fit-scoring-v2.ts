@@ -240,6 +240,29 @@ export type CxFitV2Result = {
   debug: CxFitV2DebugInfo;
 };
 
+export type ConfidenceReasonLabel =
+  | 'missing_job_text'
+  | 'missing_baseline_text'
+  | 'low_baseline_coverage'
+  | 'low_job_coverage'
+  | 'low_tooling_coverage'
+  | 'low_domain_overlap'
+  | 'strategy_floor_applied'
+  | 'baseline_text_insufficient'
+  | 'baseline_text_low'
+  | 'baseline_text_moderate'
+  | 'baseline_coverage_very_low'
+  | 'baseline_coverage_low'
+  | 'large_seniority_gap'
+  | 'low_responsibility_overlap'
+  | 'moderate_responsibility_overlap'
+  | 'no_vectors';
+
+export type ConfidenceScoreResult = {
+  confidenceScore: number;
+  confidenceReasons: ConfidenceReasonLabel[];
+};
+
 const BASE_WEIGHTS: ScoringContractV1Weights = {
   role_scope_and_seniority: 25,
   support_operations_and_process_rigor: 25,
@@ -1735,4 +1758,98 @@ function countGroupHits(text: string, terms: string[]): number {
 
 function countBundleHits(text: string, terms: string[]): number {
   return countGroupHits(text, terms);
+}
+
+export function computeConfidenceScore(
+  debug: CxFitV2DebugInfo,
+): ConfidenceScoreResult {
+  const reasons: ConfidenceReasonLabel[] = [];
+  let score = 100;
+
+  const baselineChars =
+    debug.bundle?.inputs?.normalizedBaseline?.totalChars ??
+    debug.baselineCoverageDetails?.normalizedBaselineChars;
+
+  let baselineInsufficient = false;
+  if (typeof baselineChars === 'number') {
+    if (baselineChars < 200) {
+      score -= 70;
+      reasons.push('baseline_text_insufficient');
+      baselineInsufficient = true;
+    } else if (baselineChars < 800) {
+      score -= 45;
+      reasons.push('baseline_text_low');
+    } else if (baselineChars < 1500) {
+      score -= 25;
+      reasons.push('baseline_text_moderate');
+    }
+  }
+
+  const coverageDetails =
+    debug.baselineCoverageDetails ??
+    debug.bundle?.inputs?.normalizedBaseline?.coverageDetails;
+  const originalChars = coverageDetails?.originalBaselineChars;
+  const includedChars = coverageDetails?.includedBaselineChars;
+  if (
+    typeof originalChars === 'number' &&
+    originalChars > 0 &&
+    typeof includedChars === 'number'
+  ) {
+    const coverageRatio = includedChars / originalChars;
+    if (coverageRatio < 0.05) {
+      score -= 35;
+      reasons.push('baseline_coverage_very_low');
+      baselineInsufficient = true;
+    } else if (coverageRatio < 0.15) {
+      score -= 20;
+      reasons.push('baseline_coverage_low');
+    }
+  }
+
+  const baselineTags = debug.domainTagsBaseline ?? [];
+  const roleTags = debug.domainTagsRole ?? [];
+  if (roleTags.length && !baselineTags.length) {
+    score -= 15;
+    reasons.push('low_domain_overlap');
+  } else if (roleTags.length && baselineTags.length) {
+    const overlap = roleTags.some((tag) => baselineTags.includes(tag));
+    if (!overlap) {
+      score -= 10;
+      reasons.push('low_domain_overlap');
+    }
+  }
+
+  if (typeof debug.bandDelta === 'number' && Math.abs(debug.bandDelta) >= 3) {
+    score -= 15;
+    reasons.push('large_seniority_gap');
+  }
+
+  if (!baselineInsufficient && typeof debug.responsibilityOverlapPercent === 'number') {
+    if (debug.responsibilityOverlapPercent < 35) {
+      score -= 15;
+      reasons.push('low_responsibility_overlap');
+    } else if (debug.responsibilityOverlapPercent < 50) {
+      score -= 8;
+      reasons.push('moderate_responsibility_overlap');
+    }
+  }
+
+  const bundleEvidence = debug.bundle?.evidence;
+  if (bundleEvidence) {
+    const hasMissingSharedVectors = Object.values(bundleEvidence).some(
+      (evidence) =>
+        evidence.signals?.some((signal) => signal === 'shared_vectors=none'),
+    );
+    if (hasMissingSharedVectors) {
+      score -= 5;
+      reasons.push('no_vectors');
+    }
+  }
+
+  const uniqueReasons = [...new Set(reasons)];
+  const finalScore = Math.round(clamp(score));
+  return {
+    confidenceScore: finalScore,
+    confidenceReasons: uniqueReasons,
+  };
 }

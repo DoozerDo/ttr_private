@@ -3,6 +3,7 @@
 import type React from "react";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
+import { humanizeConfidenceReason } from "@/lib/confidence";
 import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
 
 type ResultsV2Props = {
@@ -21,6 +22,8 @@ type ResultsV2Props = {
   onPrimaryAction: () => void;
   primaryActionDisabled?: boolean;
   delta?: number | null;
+  confidenceScore?: number | null;
+  confidenceReasons?: string[] | null;
 };
 
 const sectionCardStyle: React.CSSProperties = {
@@ -109,12 +112,20 @@ export function ResultsV2({
   onPrimaryAction,
   primaryActionDisabled,
   delta,
+  confidenceScore,
+  confidenceReasons,
 }: ResultsV2Props) {
   const showDelta = typeof delta === "number";
   const deltaLabel = showDelta
     ? `${delta >= 0 ? "▲" : "▼"} ${delta >= 0 ? `+${delta}` : delta.toString()}`
     : null;
   const deltaColor = delta && delta > 0 ? "var(--delta-positive)" : "var(--delta-negative)";
+
+  const normalizedConfidenceReasons = (confidenceReasons ?? []).filter(Boolean);
+  const humanizedConfidenceReasons = normalizedConfidenceReasons.map((reason) =>
+    humanizeConfidenceReason(reason),
+  );
+  const showConfidence = typeof confidenceScore === "number";
 
   const whatImproved = buildSectionItems(strengths, "Strengths will appear here once the analysis completes.");
   const leverageGaps = buildSectionItems(gaps, "Highest leverage gaps will surface after analysis.");
@@ -179,6 +190,30 @@ export function ResultsV2({
                 <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-body)" }}>
                   {heroSupportText}
                 </p>
+              ) : null}
+              {showConfidence ? (
+                <div style={{ marginTop: 4 }}>
+                  <p style={{ margin: 0, color: "var(--text-slate-400)", fontSize: "12px", letterSpacing: "0.3em", textTransform: "uppercase" }}>
+                    Confidence
+                  </p>
+                  <p style={{ margin: 0, color: "var(--text-slate-200)", fontSize: "14px", fontWeight: 600 }}>
+                    Confidence: {confidenceScore}%
+                  </p>
+                  {humanizedConfidenceReasons.length ? (
+                    <details className="text-xs text-slate-400" style={{ marginTop: 4 }}>
+                      <summary className="cursor-pointer" style={{ letterSpacing: "0.3em", textTransform: "uppercase", fontWeight: 600 }}>
+                        Confidence reasons
+                      </summary>
+                      <ul className="mt-2 space-y-1" style={{ listStyle: "disc", marginLeft: "1rem", paddingLeft: 0 }}>
+                        {humanizedConfidenceReasons.map((reason) => (
+                          <li key={reason} className="text-xs text-slate-300">
+                            {reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
               ) : null}
             </div>
 

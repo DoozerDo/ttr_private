@@ -13,6 +13,7 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
+import { humanizeConfidenceReason } from "@/lib/confidence";
 import type { Achievement } from "@/types/achievement";
 import {
   formatErrorMessage,
@@ -121,6 +122,8 @@ type LatestAnalysis = {
     strengths: string[];
     gaps: string[];
   } | null;
+  confidenceScore?: number | null;
+  confidenceReasons?: string[] | null;
 };
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
@@ -702,6 +705,15 @@ export default function ResultsPage() {
     : isLowScore
       ? lowScoreHeroText
       : heroSupportTextFallback;
+  const confidenceScore =
+    typeof latest?.confidenceScore === "number" ? latest.confidenceScore : null;
+  const confidenceReasons = Array.isArray(latest?.confidenceReasons)
+    ? latest.confidenceReasons.filter(Boolean)
+    : [];
+  const humanizedConfidenceReasons = confidenceReasons.map((reason) =>
+    humanizeConfidenceReason(reason),
+  );
+  const showConfidence = confidenceScore !== null;
   const dimensionCardBaseClass = "rounded-2xl border bg-slate-900/30 p-3";
   const dimensionCardSuccessExtras = "border-[#22c55e] shadow-[0_0_40px_rgba(34,197,94,0.25)]";
   const dimensionCardDefaultClass = "border-white/10";
@@ -1220,6 +1232,28 @@ export default function ResultsPage() {
                     <p className="text-xl font-semibold text-white">{heroScoreText}</p>
                     {heroSupportText ? (
                       <p className="text-sm text-slate-300">{heroSupportText}</p>
+                    ) : null}
+                    {showConfidence ? (
+                      <div className="space-y-1 text-sm text-slate-300">
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+                          Confidence
+                        </p>
+                        <p className="text-sm font-semibold text-slate-200">
+                          Confidence: {confidenceScore}%
+                        </p>
+                        {humanizedConfidenceReasons.length ? (
+                          <details className="text-xs text-slate-400">
+                            <summary className="cursor-pointer text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                              Confidence reasons
+                            </summary>
+                            <ul className="mt-2 space-y-1 text-xs text-slate-300 list-disc pl-5">
+                              {humanizedConfidenceReasons.map((reason) => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        ) : null}
+                      </div>
                     ) : null}
                     {achievementForScore ? (
                       <div className="rounded-3xl border border-emerald-500/40 bg-emerald-900/60 p-4 text-sm text-slate-200">
