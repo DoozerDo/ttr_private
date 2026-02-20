@@ -221,6 +221,7 @@ export function JourneyNavV1({
 
               const nodeClass = [
                 "journey-nav-step-button",
+                "ttr-nav-item",
                 isActive ? "journey-nav-step-active" : "",
                 isCompleted ? "journey-nav-step-completed" : "",
                 isLocked ? "journey-nav-step-locked" : "",
@@ -289,6 +290,7 @@ export function JourneyNavV1({
                   title={isLocked ? LOCKED_TOOLTIP : undefined}
                   role={canNavigate ? "link" : undefined}
                   tabIndex={canNavigate ? 0 : -1}
+                  data-active={isActive ? "true" : undefined}
                 >
                   {stepContent}
                 </button>
@@ -413,7 +415,7 @@ export function JourneyNavV1({
           flex-direction: column;
           align-items: center;
           gap: 0.35rem;
-          color: var(--text-muted-secondary);
+          color: inherit;
           font-size: 0.75rem;
           letter-spacing: 0.05em;
           text-transform: uppercase;
@@ -426,8 +428,7 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-button:focus-visible {
-          outline: 2px solid rgba(194, 77, 12, 0.8);
-          outline-offset: 4px;
+          outline: none;
         }
 
         .journey-nav-step-locked {
@@ -436,11 +437,11 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-active {
-          color: var(--text-muted-primary);
+          color: var(--text-primary);
         }
 
         .journey-nav-step-completed {
-          color: var(--text-muted-secondary);
+          color: var(--text-secondary);
         }
 
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {

@@ -714,12 +714,8 @@ export default function ResultsPage() {
     humanizeConfidenceReason(reason),
   );
   const showConfidence = confidenceScore !== null;
-  const dimensionCardBaseClass = "rounded-2xl border bg-slate-900/30 p-3";
-  const dimensionCardSuccessExtras = "border-[#22c55e] shadow-[0_0_40px_rgba(34,197,94,0.25)]";
-  const dimensionCardDefaultClass = "border-white/10";
-  const dimensionCardClassName = `${dimensionCardBaseClass} ${
-    executionMode ? dimensionCardSuccessExtras : dimensionCardDefaultClass
-  }`;
+  const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
+  const dimensionCardClassName = dimensionCardBaseClass;
   const achievementForScore = useMemo<Achievement | null>(() => {
     if (!executionMode) return null;
     return {
@@ -1256,12 +1252,18 @@ export default function ResultsPage() {
                       </div>
                     ) : null}
                     {achievementForScore ? (
-                      <div className="rounded-3xl border border-emerald-500/40 bg-emerald-900/60 p-4 text-sm text-slate-200">
-                        <div className="flex items-start gap-3">
-                          <span className="text-2xl text-emerald-200">✓</span>
-                          <p className="text-sm text-slate-200">
-                            You are clear to apply. You have unlocked personalized document creation.
-                          </p>
+                      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-200">
+                        <div
+                          className="absolute left-0 top-0 h-full w-[3px]"
+                          style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
+                        />
+                        <div className="pl-4">
+                          <div className="flex items-start gap-3">
+                            <span className="text-2xl text-emerald-200">✓</span>
+                            <p className="text-sm text-slate-200">
+                              You are clear to apply. You have unlocked personalized document creation.
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ) : null}
@@ -1272,6 +1274,7 @@ export default function ResultsPage() {
                         </FormButton>
                       ) : executionMode ? (
                         <FormButton
+                          className="ttr-btn-primary"
                           onClick={() => void router.push(studioHref)}
                           disabled={!canOpenStudio}
                         >
@@ -1284,6 +1287,7 @@ export default function ResultsPage() {
                           </FormButton>
                           <FormButton
                             variant="secondary"
+                            className="ttr-btn-primary"
                             onClick={() => void router.push(studioHref)}
                             disabled={!canOpenStudio}
                           >
@@ -1313,6 +1317,12 @@ export default function ResultsPage() {
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     {rubricDimensionEntries.map((dimension) => (
                     <div key={dimension.key} className={dimensionCardClassName}>
+                        {executionMode ? (
+                          <div
+                            className="mb-3 h-[2px] w-full rounded"
+                            style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
+                          />
+                        ) : null}
                         <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
                           {dimension.label}
                         </p>
@@ -1414,6 +1424,12 @@ export default function ResultsPage() {
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {dimensionEntries.map((dimension) => (
               <div key={dimension.key} className={dimensionCardClassName}>
+                {executionMode ? (
+                  <div
+                    className="mb-3 h-[2px] w-full rounded"
+                    style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
+                  />
+                ) : null}
                 <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
                   {dimension.label}
                 </p>
