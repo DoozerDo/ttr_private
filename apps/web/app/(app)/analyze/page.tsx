@@ -1,15 +1,14 @@
-// apps/web/app/analyze/page.tsx
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { Alert } from "@/components/Alert";
+import { FormButton, SecondaryActionLink } from "@/components/FormButton";
+import { PageShell } from "@/components/PageShell";
+import { ScoreGauge } from "@/components/ScoreGauge";
 import type { BaselineDto } from "@/lib/baselines";
 import type { JobDto } from "@/lib/jobs";
-import { InstrumentShell } from "../ui/InstrumentShell";
-import { ttrComponents, ttrTypography, ttrLayout } from "../ui/ttrStyles";
 import type { AnalysisResult, JobSourceType, StoredAnalysisRecord } from "../lib/session";
 import {
   normalizeAnalysisResult,
@@ -18,110 +17,17 @@ import {
 } from "../lib/session";
 import { markJourneyStepCompleted } from "@/src/lib/journeyNavStore";
 
-type ApiStatus = "unknown" | "online" | "offline";
-
-const ScoreRing = ({ score, loading }: { score: number; loading: boolean }) => {
-  const radius = 72;
-  const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
-  const clampedScore = Math.min(Math.max(score, 0), 100);
-  const offset = circumference * (1 - clampedScore / 100);
-  const gradientId = "scoreRingGradient";
-
-  return (
-    <div
-      style={{
-        position: "relative",
-        display: "flex",
-        height: 176,
-        width: 176,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <svg viewBox="0 0 200 200" style={{ height: "100%", width: "100%" }}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stopColor="#f59e0b" />
-            <stop offset="50%" stopColor="#fbbf24" />
-            <stop offset="100%" stopColor="#f97316" />
-          </linearGradient>
-        </defs>
-        <circle
-          cx="100"
-          cy="100"
-          r={radius}
-          stroke="rgba(255,255,255,0.08)"
-          strokeWidth={14}
-          fill="none"
-        />
-        <circle
-          cx="100"
-          cy="100"
-          r={radius}
-          stroke={`url(#${gradientId})`}
-          strokeWidth={14}
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={loading ? circumference : offset}
-          strokeLinecap="round"
-          style={{
-            transition: "stroke-dashoffset 800ms ease-out",
-            filter: "drop-shadow(0 0 18px rgba(255,165,0,0.18))",
-          }}
-        />
-      </svg>
-
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 36,
-            fontWeight: 800,
-            color: "#fde68a",
-            textShadow: "0 2px 14px rgba(0,0,0,0.35)",
-          }}
-        >
-          {Math.round(clampedScore)}
-        </div>
-        <span
-          style={{
-            marginTop: 6,
-            fontSize: 11,
-            letterSpacing: 2.5,
-            textTransform: "uppercase",
-            color: "rgba(252, 211, 77, 0.8)",
-          }}
-        >
-          Fit score
-        </span>
-      </div>
-    </div>
-  );
-};
-
-function fitLabel(score: number | null) {
-  if (score === null) return "";
-  if (score >= 90) return "Strong fit";
-  if (score >= 75) return "Solid fit";
-  if (score >= 60) return "Mixed fit";
-  return "Weak fit";
-}
-
-function signalQuality(score: number | null) {
-  if (score === null) return { label: "n/a", color: "rgba(255,255,255,0.3)" };
-  if (score >= 90) return { label: "High", color: "#22c55e" };
-  if (score >= 75) return { label: "Medium", color: "#f59e0b" };
-  return { label: "Low", color: "#f97316" };
-}
+const GENERATION_SCORE_THRESHOLD = 70;
+const TIMESTAMP_KEYS = [
+  "evaluatedAt",
+  "evaluated_at",
+  "completedAt",
+  "completed_at",
+  "createdAt",
+  "created_at",
+  "analysisAt",
+  "analysis_at",
+];
 
 function latestVersionId(baseline?: BaselineDto) {
   if (!baseline?.versions?.length) return "";
@@ -129,7 +35,400 @@ function latestVersionId(baseline?: BaselineDto) {
   return sorted[0]?.id ?? "";
 }
 
+function resolveScore(analysis: AnalysisResult | null): number | null {
+  if (!analysis) return null;
+  const candidate =
+    typeof analysis.score === "number"
+      ? analysis.score
+      : typeof analysis.fit_score === "number"
+        ? analysis.fit_score
+        : typeof analysis.overallScore === "number"
+          ? analysis.overallScore
+          : typeof analysis.overall_score === "number"
+            ? analysis.overall_score
+            : null;
+  return typeof candidate === "number" ? candidate : null;
+}
+
+function resolveTimestamp(analysis: AnalysisResult | null, fallback: string | null): string | null {
+  if (analysis) {
+    for (const key of TIMESTAMP_KEYS) {
+      const value = (analysis as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+  }
+  return fallback;
+}
+
+function formatTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString();
+}
+
+function getAlignmentLabel(score: number | null): string {
+  if (score === null) return "Alignment pending";
+  if (score >= 90) return "Strong Alignment";
+  if (score >= 70) return "Moderate Alignment";
+  return "Limited Alignment";
+}
+
+function truncateText(value: string, limit = 180) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit).trim()}…`;
+}
+
+type BaselineInputCardProps = {
+  baselines: BaselineDto[];
+  baselineId: string;
+  loading: boolean;
+  error: string | null;
+  selectedBaseline?: BaselineDto;
+  onBaselineChange: (value: string) => void;
+};
+
+function BaselineInputCard({
+  baselines,
+  baselineId,
+  loading,
+  error,
+  selectedBaseline,
+  onBaselineChange,
+}: BaselineInputCardProps) {
+  return (
+    <div className="flex min-h-[220px] flex-col gap-5 rounded-2xl border border-slate-700 bg-slate-950/60 p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Baseline Resume</p>
+        {selectedBaseline ? (
+          <SecondaryActionLink href="/baseline" className="text-[10px] uppercase tracking-[0.3em]">
+            Manage
+          </SecondaryActionLink>
+        ) : null}
+      </div>
+      <div className="flex flex-1 items-center justify-center">
+        {selectedBaseline ? (
+          <div className="w-full">
+            <p className="text-lg font-semibold text-white">{selectedBaseline.originalFilename}</p>
+            <p className="text-sm text-slate-400">
+              Uploaded {formatTimestamp(selectedBaseline.createdAt) ?? "—"}
+            </p>
+          </div>
+        ) : (
+          <div className="text-center text-sm text-slate-300">
+            <p>Add a baseline resume to power this assessment.</p>
+            <div className="mt-3 flex justify-center">
+              <SecondaryActionLink href="/baseline">Add baseline</SecondaryActionLink>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="space-y-2 text-sm">
+        <label htmlFor="baseline-picker" className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
+          Selected baseline
+        </label>
+        <select
+          id="baseline-picker"
+          className="w-full rounded-xl border border-slate-700 bg-transparent px-3 py-2 text-sm text-white focus:border-slate-500 focus:outline-none"
+          value={baselineId}
+          onChange={(event) => onBaselineChange(event.target.value)}
+          disabled={loading}
+        >
+          <option value="">{loading ? "Loading baselines…" : "Select a baseline"}</option>
+          {baselines.map((baseline) => (
+            <option key={baseline.id} value={baseline.id}>
+              {baseline.originalFilename}
+            </option>
+          ))}
+        </select>
+        {error ? (
+          <p className="text-xs text-rose-400">{error}</p>
+        ) : (
+          <p className="text-xs text-slate-500">Choose the resume you want to compare with a job.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type JobInputCardProps = {
+  jobs: JobDto[];
+  jobsLoading: boolean;
+  jobsError: string | null;
+  jobId: string;
+  jobDescription: string;
+  selectedJob?: JobDto;
+  onJobChange: (value: string) => void;
+  onJobDescriptionChange: (value: string) => void;
+};
+
+function JobInputCard({
+  jobs,
+  jobsLoading,
+  jobsError,
+  jobId,
+  jobDescription,
+  selectedJob,
+  onJobChange,
+  onJobDescriptionChange,
+}: JobInputCardProps) {
+  return (
+    <div className="flex min-h-[220px] flex-col gap-5 rounded-2xl border border-slate-700 bg-slate-950/60 p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Job Description</p>
+      {!selectedJob && jobs.length ? (
+        <div className="space-y-2">
+          <label htmlFor="job-select" className="text-[10px] uppercase tracking-[0.3em] text-slate-500">
+            Saved job
+          </label>
+          <select
+            id="job-select"
+            value={jobId}
+            onChange={(event) => onJobChange(event.target.value)}
+            className="w-full rounded-xl border border-slate-700 bg-transparent px-3 py-2 text-sm text-white focus:border-slate-500 focus:outline-none"
+            disabled={jobsLoading}
+          >
+            <option value="">{jobsLoading ? "Loading jobs…" : "Select a saved job"}</option>
+            {jobs.map((job) => (
+              <option key={job.id} value={job.id}>
+                {job.title || "Untitled role"} {job.company ? `· ${job.company}` : ""}
+              </option>
+            ))}
+          </select>
+          {jobsError ? <p className="text-xs text-rose-400">{jobsError}</p> : null}
+        </div>
+      ) : !selectedJob ? (
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">No saved jobs yet</p>
+      ) : null}
+      {selectedJob ? (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <p className="text-lg font-semibold text-white">{selectedJob.title || "Untitled role"}</p>
+          <p className="text-sm text-slate-400">{selectedJob.company ?? "Company not provided"}</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+            Added {formatTimestamp(selectedJob.createdAt) ?? "—"}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3 text-sm text-slate-300">
+          <textarea
+            value={jobDescription}
+            onChange={(event) => onJobDescriptionChange(event.target.value)}
+            placeholder="Paste the full job description you want to assess."
+            rows={6}
+            className="w-full resize-none rounded-xl border border-slate-700 bg-transparent px-3 py-3 text-sm text-white focus:border-slate-500 focus:outline-none"
+          />
+          <p className="text-xs text-amber-200">
+            The pasted description powers the assessment when no saved job is selected.
+          </p>
+          <p className="text-xs text-slate-500">Characters: {jobDescription.length}</p>
+        </div>
+      )}
+      {!selectedJob ? (
+        <div className="flex justify-end">
+          <SecondaryActionLink href="/jobs/new" className="text-[10px] uppercase tracking-[0.3em]">
+            Add job
+          </SecondaryActionLink>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type InputsSectionProps = {
+  inputsReady: boolean;
+  baselines: BaselineDto[];
+  baselineId: string;
+  baselineLoading: boolean;
+  baselineError: string | null;
+  selectedBaseline?: BaselineDto;
+  onBaselineChange: (value: string) => void;
+  jobs: JobDto[];
+  jobsLoading: boolean;
+  jobsError: string | null;
+  jobId: string;
+  jobDescription: string;
+  selectedJob?: JobDto;
+  onJobChange: (value: string) => void;
+  onJobDescriptionChange: (value: string) => void;
+};
+
+function InputsSection({
+  inputsReady,
+  baselines,
+  baselineId,
+  baselineLoading,
+  baselineError,
+  selectedBaseline,
+  onBaselineChange,
+  jobs,
+  jobsLoading,
+  jobsError,
+  jobId,
+  jobDescription,
+  selectedJob,
+  onJobChange,
+  onJobDescriptionChange,
+}: InputsSectionProps) {
+  return (
+    <section className="rounded-3xl border border-slate-700 bg-slate-900/40 p-6">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inputs</p>
+        <p className="text-xs text-slate-500">Single baseline · Single job</p>
+      </div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <BaselineInputCard
+          baselines={baselines}
+          baselineId={baselineId}
+          loading={baselineLoading}
+          error={baselineError}
+          selectedBaseline={selectedBaseline}
+          onBaselineChange={onBaselineChange}
+        />
+        <JobInputCard
+          jobs={jobs}
+          jobsLoading={jobsLoading}
+          jobsError={jobsError}
+          jobId={jobId}
+          jobDescription={jobDescription}
+          selectedJob={selectedJob}
+          onJobChange={onJobChange}
+          onJobDescriptionChange={onJobDescriptionChange}
+        />
+      </div>
+      {inputsReady ? <div className="mx-auto mt-6 h-px w-full max-w-4xl bg-slate-600/40" /> : null}
+    </section>
+  );
+}
+
+type CompatibilitySectionProps = {
+  inputsReady: boolean;
+  loading: boolean;
+  score: number | null;
+  animatedScore: number;
+  alignmentLabel: string;
+  timestampLabel: string | null;
+  error: string | null;
+  onAssess: () => void;
+};
+
+function CompatibilitySection({
+  inputsReady,
+  loading,
+  score,
+  animatedScore,
+  alignmentLabel,
+  timestampLabel,
+  error,
+  onAssess,
+}: CompatibilitySectionProps) {
+  return (
+    <section
+      className={`rounded-3xl border border-slate-700 bg-slate-900/30 p-6 transition-opacity duration-200 ${
+        inputsReady ? "" : "opacity-70"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+          Compatibility Assessment
+        </p>
+        {loading && <p className="text-xs text-slate-400">Assessing…</p>}
+      </div>
+      {error ? (
+        <div className="mt-4">
+          <Alert intent="error" title="Uh oh">
+            {error}
+          </Alert>
+        </div>
+      ) : null}
+      {!inputsReady ? (
+        <p className="mt-4 text-sm text-amber-200">Add both inputs to run assessment.</p>
+      ) : null}
+      {score !== null ? (
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <ScoreGauge score={animatedScore} loading={loading} />
+          <p className="text-base font-semibold uppercase tracking-[0.3em] text-slate-400">Compatibility Score</p>
+          <p className="text-3xl font-bold text-white">{score.toFixed(1)}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+            {alignmentLabel}
+          </p>
+          <p className="text-xs text-slate-500">Last evaluated: {timestampLabel ?? "—"}</p>
+        </div>
+      ) : inputsReady && !loading ? (
+        <p className="mt-6 text-sm text-slate-400">
+          Run the assessment to reveal your compatibility score based on the inputs above.
+        </p>
+      ) : null}
+      <div className="mt-8 flex justify-center">
+        <FormButton onClick={onAssess} disabled={!inputsReady || loading}>
+          {loading ? "Assessing…" : "Assess compatibility"}
+        </FormButton>
+      </div>
+    </section>
+  );
+}
+
+type OutputsSectionProps = {
+  score: number;
+  threshold: number;
+  onGenerateResume: () => void;
+  onGenerateCoverLetter: () => void;
+  onViewDetails: () => void;
+  canViewDetails: boolean;
+};
+
+function OutputsSection({
+  score,
+  threshold,
+  onGenerateResume,
+  onGenerateCoverLetter,
+  onViewDetails,
+  canViewDetails,
+}: OutputsSectionProps) {
+  const meetsThreshold = score >= threshold;
+  return (
+    <section className="rounded-3xl border border-slate-700 bg-slate-900/30 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+        {meetsThreshold ? "Authorized Outputs" : "Next Steps"}
+      </p>
+      <p className="mt-2 text-sm text-slate-300">
+        {meetsThreshold
+          ? "Compatibility threshold met. You may generate application materials."
+          : "Threshold not met. Review alignment gaps before generating materials."}
+      </p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        {meetsThreshold ? (
+          <>
+            <FormButton onClick={onGenerateResume}>Generate Resume</FormButton>
+            <FormButton variant="secondary" onClick={onGenerateCoverLetter}>
+              Generate Cover Letter
+            </FormButton>
+          </>
+        ) : (
+          <FormButton variant="secondary" onClick={onViewDetails} disabled={!canViewDetails}>
+            View assessment details
+          </FormButton>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AssessmentHeader() {
+  return (
+    <div className="space-y-3 text-center">
+      <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Assessment</p>
+      <h1 className="text-4xl font-semibold text-white">Role Compatibility Assessment</h1>
+      <p className="mx-auto max-w-3xl text-base text-slate-300">
+        Evaluate alignment between your baseline resume and a job description.
+      </p>
+    </div>
+  );
+}
+
 export default function AnalyzePage() {
+  const router = useRouter();
+
   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
   const [baselineId, setBaselineId] = useState("");
   const [baselineVersionId, setBaselineVersionId] = useState("");
@@ -144,21 +443,51 @@ export default function AnalyzePage() {
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [animatedScore, setAnimatedScore] = useState(0);
-  const [showRaw, setShowRaw] = useState(false);
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("unknown");
-  const router = useRouter();
 
-  const hasBaseline = baselineId.trim().length > 0 && baselineVersionId.trim().length > 0;
-  const hasSelectedJob = jobId.trim().length > 0;
+  const selectedBaseline = useMemo(
+    () => baselines.find((baseline) => baseline.id === baselineId) ?? undefined,
+    [baselines, baselineId],
+  );
+  const selectedJob = useMemo(
+    () => jobs.find((job) => job.id === jobId) ?? undefined,
+    [jobs, jobId],
+  );
+
+  const hasBaseline = Boolean(baselineId);
+  const hasSelectedJob = Boolean(jobId);
   const hasJobDescription = jobDescription.trim().length > 0;
-  const canAnalyze = !loading && hasBaseline && (hasSelectedJob || hasJobDescription);
-  const resultsHref = result?.jobId ? `/results?jobId=${result.jobId}` : "/results";
-  const fitReviewHref = result?.jobId ? `/fit-review?jobId=${result.jobId}` : "/fit-review";
+  const inputsReady = hasBaseline && (hasSelectedJob || hasJobDescription);
+
+  const resultScore = useMemo(() => resolveScore(result), [result]);
+  const alignmentLabel = getAlignmentLabel(resultScore);
+  const timestampLabel = useMemo(
+    () => formatTimestamp(resolveTimestamp(result, restoredAt)),
+    [result, restoredAt],
+  );
+
+  const jobContextId = useMemo(() => (result?.jobId || jobId).trim(), [result?.jobId, jobId]);
+  const resultsHref = jobContextId ? `/results?jobId=${encodeURIComponent(jobContextId)}` : "/results";
+  const studioHref = useMemo(() => {
+    if (!jobContextId) return "/studio";
+    const params = new URLSearchParams();
+    params.set("jobId", jobContextId);
+    if (baselineVersionId) {
+      params.set("baselineVersionId", baselineVersionId);
+    }
+    return `/studio?${params.toString()}`;
+  }, [jobContextId, baselineVersionId]);
+  const coverLetterHref = useMemo(() => {
+    if (!jobContextId) return "/cover-letters";
+    const params = new URLSearchParams();
+    params.set("jobId", jobContextId);
+    if (baselineVersionId) {
+      params.set("baselineVersionId", baselineVersionId);
+    }
+    return `/cover-letters?${params.toString()}`;
+  }, [jobContextId, baselineVersionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,24 +507,20 @@ export default function AnalyzePage() {
         if (cancelled) return;
 
         setBaselines(data);
-
         if (data.length > 0) {
           setBaselineId((prev) => {
-            if (prev && data.some((b) => b.id === prev)) return prev;
+            if (prev && data.some((baseline) => baseline.id === prev)) return prev;
             return data[0].id;
           });
-        } else {
-          setBaselineId("");
-          setBaselineVersionId("");
+          return;
         }
+
+        setBaselineId("");
       } catch (loadError) {
         if (cancelled) return;
-        setBaselineError(
-          loadError instanceof Error ? loadError.message : "Unable to load baselines.",
-        );
+        setBaselineError(loadError instanceof Error ? loadError.message : "Unable to load baselines.");
         setBaselines([]);
         setBaselineId("");
-        setBaselineVersionId("");
       } finally {
         if (!cancelled) setBaselineLoading(false);
       }
@@ -206,11 +531,6 @@ export default function AnalyzePage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const selected = baselines.find((b) => b.id === baselineId);
-    setBaselineVersionId(latestVersionId(selected));
-  }, [baselineId, baselines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,7 +550,6 @@ export default function AnalyzePage() {
         if (cancelled) return;
 
         setJobs(data);
-
         if (data.length === 0) {
           setJobId("");
           return;
@@ -257,68 +576,59 @@ export default function AnalyzePage() {
   }, []);
 
   useEffect(() => {
-    if (loading) {
-      setAnimatedScore(0);
-      return;
-    }
-
-    if (result?.score !== undefined && result?.score !== null) {
-      setAnimatedScore(0);
-      const frame = requestAnimationFrame(() => {
-        setAnimatedScore(result.score ?? 0);
-      });
-      return () => cancelAnimationFrame(frame);
-    }
-
-    setAnimatedScore(0);
-  }, [loading, result]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const probe = async (url: string) => {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        return res.ok;
-      } catch {
-        return false;
-      }
-    };
-
-    const check = async () => {
-      setApiStatus((prev) => (prev === "online" ? "online" : "unknown"));
-      const online = (await probe("/api/status")) || (await probe("/api/health"));
-      if (cancelled) return;
-      setApiStatus(online ? "online" : "offline");
-    };
-
-    check();
-    const interval = setInterval(check, 10000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+    const selected = baselines.find((baseline) => baseline.id === baselineId);
+    setBaselineVersionId(latestVersionId(selected));
+  }, [baselineId, baselines]);
 
   useEffect(() => {
     const stored = readStoredAnalysis();
     if (!stored) return;
-
     setResult(stored.analysis);
-    setRestoredAt(stored.savedAt);
+      setRestoredAt(stored.savedAt);
+
+      if (stored.baselineId) {
+        const restoredBaselineId = stored.baselineId;
+        setBaselineId((current) => {
+          if (current && current.length > 0) {
+            return current;
+          }
+          return restoredBaselineId;
+        });
+      }
+
+      if (stored.jobId) {
+        const restoredJobId = stored.jobId;
+        setJobId((current) => {
+          if (current && current.length > 0) {
+            return current;
+          }
+          return restoredJobId;
+        });
+      }
   }, []);
 
-  const handleAnalyze = async () => {
+  useEffect(() => {
+    if (loading) {
+      setAnimatedScore(0);
+      return;
+    }
+    if (resultScore !== null) {
+      setAnimatedScore(0);
+      const frame = requestAnimationFrame(() => setAnimatedScore(resultScore));
+      return () => cancelAnimationFrame(frame);
+    }
+    setAnimatedScore(0);
+  }, [loading, resultScore]);
+
+  const handleAnalyze = useCallback(async () => {
     if (!hasBaseline || (!hasSelectedJob && !hasJobDescription)) {
-      setError("Please select a baseline and either choose a saved job or paste a description.");
+      setError("Please select a baseline and add a job description before running the assessment.");
       return;
     }
 
     setLoading(true);
     setError(null);
     setResult(null);
-    setShowRaw(false);
 
     try {
       let resolvedJobId = jobId;
@@ -330,35 +640,52 @@ export default function AnalyzePage() {
           body: JSON.stringify({ rawDescription: jobDescription }),
         });
 
-        if (!createResponse.ok) {
-          const message = await createResponse.text();
-          throw new Error(message || "Unable to save this job description.");
+        const created = (await createResponse.json().catch(() => null)) as JobDto | { id?: string } | null;
+
+        if (createResponse.status === 409) {
+          const existingJobId = created?.id;
+          setError("This job description already exists.");
+          if (existingJobId) {
+            setJobId(existingJobId);
+          }
+          return;
         }
 
-        const created = (await createResponse.json()) as { id?: string };
-        if (!created?.id) {
+        if (!createResponse.ok) {
+          const rawMessage =
+            created && typeof created === "object" && "message" in created
+              ? (created as Record<string, unknown>).message
+              : undefined;
+
+          const message =
+            typeof rawMessage === "string" && rawMessage.trim().length > 0
+              ? rawMessage
+              : "Unable to save this job description.";
+
+          throw new Error(message);
+        }
+
+        const jobIdFromServer = (created as JobDto)?.id ?? (created as { id?: string })?.id;
+        if (!jobIdFromServer) {
           throw new Error("Job creation response was incomplete.");
         }
 
-        resolvedJobId = created.id;
-        setJobId(created.id);
+        resolvedJobId = jobIdFromServer;
+        setJobId(resolvedJobId);
       }
 
       if (!baselineVersionId) {
-        throw new Error("A baseline version is required to run Analyze.");
+        throw new Error("A baseline resume is required to run this assessment.");
       }
 
-      const requestJob: Record<string, unknown> = hasSelectedJob
+      const requestJob = hasSelectedJob
         ? { id: resolvedJobId }
         : { raw_jd_text: jobDescription };
 
       const response = await fetch("/api/fit-scores", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          baseline_version_id: baselineVersionId,
-          job: requestJob,
-        }),
+        body: JSON.stringify({ baseline_version_id: baselineVersionId, job: requestJob }),
       });
 
       if (!response.ok) {
@@ -368,31 +695,20 @@ export default function AnalyzePage() {
 
       const raw = await response.json();
       const data = normalizeAnalysisResult(raw);
-
       setResult(data);
       setRestoredAt(null);
       markJourneyStepCompleted("analyze");
 
       const storedAt = new Date().toISOString();
-      const selectedJob = jobs.find((job) => job.id === resolvedJobId);
+      const jobForRecord = jobs.find((job) => job.id === resolvedJobId);
       const isSavedJob = Boolean(resolvedJobId && hasSelectedJob);
       const jobSourceType: JobSourceType = isSavedJob
-        ? selectedJob &&
-          (selectedJob.jdIngestionMethod === "URL" || Boolean(selectedJob.sourceUrl))
+        ? jobForRecord && (jobForRecord.jdIngestionMethod === "URL" || Boolean(jobForRecord.sourceUrl))
           ? "url"
           : "saved"
         : "pasted";
-      const jobSourceUrl = selectedJob?.sourceUrl ?? null;
-      const fitScore =
-        typeof data.score === "number"
-          ? data.score
-          : typeof data.fit_score === "number"
-            ? data.fit_score
-            : typeof data.overallScore === "number"
-              ? data.overallScore
-              : typeof data.overall_score === "number"
-                ? data.overall_score
-                : null;
+      const jobSourceUrl = jobForRecord?.sourceUrl ?? null;
+      const fitScore = resolveScore(data);
 
       const record: StoredAnalysisRecord = {
         savedAt: storedAt,
@@ -400,8 +716,8 @@ export default function AnalyzePage() {
         baselineId: baselineId || undefined,
         baselineVersionId: baselineVersionId || undefined,
         jobId: resolvedJobId || undefined,
-        jobTitle: selectedJob?.title ?? null,
-        company: selectedJob?.company ?? null,
+        jobTitle: jobForRecord?.title ?? null,
+        company: jobForRecord?.company ?? null,
         jobSource: {
           type: jobSourceType,
           url: jobSourceUrl,
@@ -413,466 +729,82 @@ export default function AnalyzePage() {
 
       saveLastAnalysis(record);
 
-      if (data.jobId) {
-        router.push(`/results?jobId=${data.jobId}`);
+      const targetJobId = data.jobId ?? resolvedJobId ?? jobId;
+      if (targetJobId) {
+        await router.push(`/results?jobId=${encodeURIComponent(targetJobId)}`);
       }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Unexpected error";
-      setError(message);
-      setResult(null);
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : "Unexpected error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    baselineId,
+    baselineVersionId,
+    hasBaseline,
+    hasJobDescription,
+    hasSelectedJob,
+    jobDescription,
+    jobId,
+    jobs,
+    router,
+  ]);
 
-  const scoreLabel = fitLabel(result?.score ?? null);
-  const quality = signalQuality(result?.score ?? null);
+  const handleGenerateResume = useCallback(() => {
+    router.push(studioHref);
+  }, [router, studioHref]);
 
-  const pillColor =
-    apiStatus === "online"
-      ? "rgba(74, 222, 128, 0.15)"
-      : apiStatus === "offline"
-        ? "rgba(248, 113, 113, 0.18)"
-        : "rgba(251, 191, 36, 0.18)";
+  const handleGenerateCoverLetter = useCallback(() => {
+    router.push(coverLetterHref);
+  }, [router, coverLetterHref]);
 
-  const pillBorder =
-    apiStatus === "online"
-      ? "1px solid rgba(74, 222, 128, 0.6)"
-      : apiStatus === "offline"
-        ? "1px solid rgba(248, 113, 113, 0.7)"
-        : "1px solid rgba(251, 191, 36, 0.6)";
-
-  const pillText =
-    apiStatus === "online" ? "Online" : apiStatus === "offline" ? "Offline" : "Checking";
-
-  const pillTextColor =
-    apiStatus === "online" ? "#4ade80" : apiStatus === "offline" ? "#fca5a5" : "#fbbf24";
-
-  const apiStatusPill = (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "8px 12px",
-        borderRadius: 999,
-        background: pillColor,
-        border: pillBorder,
-        color: pillTextColor,
-        fontSize: 13,
-        fontWeight: 700,
-      }}
-      title="API status"
-    >
-      <span
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: "50%",
-          background: pillTextColor,
-          boxShadow: `0 0 12px ${pillTextColor}`,
-        }}
-      />
-      <span>{pillText}</span>
-    </div>
-  );
-
-  const basePanelStyle: CSSProperties = ttrComponents.basePanel;
+  const handleViewDetails = useCallback(() => {
+    router.push(resultsHref);
+  }, [router, resultsHref]);
 
   return (
-    <InstrumentShell kicker="Role fit console" title="Baseline analyzer" rightSlot={apiStatusPill}>
-      <div style={ttrLayout.panelsRow}>
-        <section style={{ ...basePanelStyle, flex: 1.05 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Input</span>
-              <h2 style={ttrTypography.h2}>Baseline + role</h2>
-            </div>
-
-            <div
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 700,
-                color: "rgba(251,191,36,0.9)",
-                border: "1px solid rgba(251,191,36,0.35)",
-                background: "rgba(251,191,36,0.08)",
-              }}
-            >
-              Encrypted transit
-            </div>
-          </div>
-
-          <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
-              <label style={ttrComponents.fieldLabel} htmlFor="baselineId">
-                Baseline
-              </label>
-
-              <select
-                id="baselineId"
-                name="baselineId"
-                value={baselineId}
-                onChange={(event) => setBaselineId(event.target.value)}
-                style={ttrComponents.input}
-                disabled={baselineLoading || baselines.length === 0}
-              >
-                {baselineLoading && <option value="">Loading baselines…</option>}
-                {!baselineLoading && baselines.length === 0 && <option value="">No baselines uploaded yet</option>}
-                {baselines.map((baseline) => (
-                  <option key={baseline.id} value={baseline.id}>
-                    {baseline.originalFilename}
-                  </option>
-                ))}
-              </select>
-
-              {baselineError ? (
-                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{baselineError}</p>
-              ) : (
-                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                  Choose one of your uploaded baselines to analyze against this role.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label style={ttrComponents.fieldLabel} htmlFor="jobId">
-                Saved job posting (optional)
-              </label>
-
-              <select
-                id="jobId"
-                name="jobId"
-                value={jobId}
-                onChange={(event) => setJobId(event.target.value)}
-                style={ttrComponents.input}
-                disabled={jobsLoading || jobs.length === 0}
-              >
-                <option value="">Select a saved job</option>
-                {jobsLoading && <option value="">Loading saved jobs…</option>}
-                {!jobsLoading && jobs.length === 0 && <option value="">No saved jobs yet</option>}
-                {jobs.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {job.title || "Untitled role"}
-                    {job.company ? ` · ${job.company}` : ""}
-                  </option>
-                ))}
-              </select>
-
-              {jobsError ? (
-                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{jobsError}</p>
-              ) : (
-                <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                  Pick a previously saved job posting or paste a new description below.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label style={ttrComponents.fieldLabel} htmlFor="jobDescription">
-                Paste a new job description
-              </label>
-
-              <textarea
-                id="jobDescription"
-                name="jobDescription"
-                rows={8}
-                value={jobDescription}
-                onChange={(event) => setJobDescription(event.target.value)}
-                placeholder="Paste the role you want to target..."
-                style={{
-                  ...ttrComponents.input,
-                  resize: "vertical",
-                  minHeight: 150,
-                  fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-                }}
-              />
-
-              <p style={{ marginTop: 8, fontSize: 12, color: "rgba(226,232,240,0.65)" }}>
-                We only send this content to the analyzer service for this check. If you select a saved
-                job posting, we will use that instead.
-              </p>
-
-              <div style={{ fontSize: 12, color: "rgba(226,232,240,0.55)" }}>
-                Characters: {jobDescription.length}
-              </div>
-            </div>
-
-            {error && <div style={ttrComponents.dangerBox}>{error}</div>}
-
-            <button
-              type="button"
-              onClick={handleAnalyze}
-              disabled={!canAnalyze}
-              style={{
-                ...ttrComponents.primaryButton,
-                cursor: canAnalyze ? "pointer" : "not-allowed",
-                opacity: canAnalyze ? 1 : 0.6,
-              }}
-            >
-              {loading ? "Analyzing…" : "Analyze role fit"}
-            </button>
-
-          </div>
-        </section>
-
-        <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
-              pointerEvents: "none",
-            }}
+    <PageShell className="results-page-theme">
+      <div className="mx-auto flex max-w-5xl flex-col gap-12 py-10">
+        <AssessmentHeader />
+        <InputsSection
+          inputsReady={inputsReady}
+          baselines={baselines}
+          baselineId={baselineId}
+          baselineLoading={baselineLoading}
+          baselineError={baselineError}
+          selectedBaseline={selectedBaseline}
+          onBaselineChange={setBaselineId}
+          jobs={jobs}
+          jobsLoading={jobsLoading}
+          jobsError={jobsError}
+          jobId={jobId}
+          jobDescription={jobDescription}
+          selectedJob={selectedJob}
+          onJobChange={setJobId}
+          onJobDescriptionChange={setJobDescription}
+        />
+        <CompatibilitySection
+          inputsReady={inputsReady}
+          loading={loading}
+          score={resultScore}
+          animatedScore={animatedScore}
+          alignmentLabel={alignmentLabel}
+          timestampLabel={timestampLabel}
+          error={error}
+          onAssess={handleAnalyze}
+        />
+        {resultScore !== null ? (
+          <OutputsSection
+            score={resultScore}
+            threshold={GENERATION_SCORE_THRESHOLD}
+            onGenerateResume={handleGenerateResume}
+            onGenerateCoverLetter={handleGenerateCoverLetter}
+            onViewDetails={handleViewDetails}
+            canViewDetails={Boolean(jobContextId)}
           />
-
-          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Results</span>
-              <h2 style={ttrTypography.h2}>Fit telemetry</h2>
-            </div>
-            <div
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 700,
-                color: "rgba(226,232,240,0.9)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                background: "rgba(255,255,255,0.06)",
-              }}
-            >
-              Live feed
-            </div>
-          </div>
-
-          <div style={{ position: "relative", marginTop: 20 }}>
-            {!loading && !result && (
-              <div
-                style={{
-                  border: "1px dashed rgba(251,191,36,0.35)",
-                  borderRadius: 14,
-                  padding: "32px 22px",
-                  background: "rgba(255,255,255,0.03)",
-                  textAlign: "center",
-                }}
-              >
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    letterSpacing: 3,
-                    textTransform: "uppercase",
-                    color: "rgba(251,191,36,0.75)",
-                    fontWeight: 700,
-                  }}
-                >
-                  Awaiting analysis
-                </p>
-                <p style={{ marginTop: 10, fontSize: 15, color: "rgba(241,245,249,0.9)" }}>
-                  Run an analysis to see a scored ring, quick fit verdict, and tailored notes for this role.
-                </p>
-                {restoredAt ? (
-                  <p style={{ marginTop: 10, fontSize: 12, color: "rgba(226,232,240,0.75)" }}>
-                    Last run restored from this browser: {new Date(restoredAt).toLocaleString()}
-                  </p>
-                ) : null}
-              </div>
-            )}
-
-            {loading && <p style={{ margin: 0, fontSize: 13, color: "rgba(226,232,240,0.75)" }}>Analyzing…</p>}
-
-            {!loading && result && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                    <ScoreRing score={animatedScore} loading={loading} />
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fde68a" }}>{scoreLabel}</div>
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 13,
-                        letterSpacing: 2,
-                        textTransform: "uppercase",
-                        color: "rgba(251,191,36,0.75)",
-                        fontWeight: 700,
-                      }}
-                    >
-                      Alignment summary
-                    </p>
-
-                    <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: "rgba(241,245,249,0.95)" }}>
-                      {result.summary || "We will summarize how your baseline maps to this role once analysis completes."}
-                    </p>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div
-                        style={{
-                          width: 120,
-                          height: 8,
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.08)",
-                          overflow: "hidden",
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${Math.min(Math.max((result.score ?? 0) / 100, 0), 1) * 100}%`,
-                            height: "100%",
-                            background: quality.color,
-                            transition: "width 400ms ease",
-                          }}
-                        />
-                      </div>
-
-                      <span style={{ fontSize: 12, color: "rgba(226,232,240,0.7)", fontWeight: 700 }}>
-                        Signal quality: {quality.label}
-                      </span>
-                    </div>
-
-                    {result.baselineId && (
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-                        Baseline: {result.baselineId}
-                      </div>
-                    )}
-
-                    {restoredAt ? (
-                      <div style={{ fontSize: 12, color: "rgba(226,232,240,0.6)" }}>
-                        Restored from your last browser session: {new Date(restoredAt).toLocaleString()}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {result.strengths?.length ? (
-                  <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                      Signals in your favor
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap" }}>
-                      {result.strengths.map((item, index) => (
-                        <span key={`${item}-${index}`} style={ttrComponents.chip}>
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {result.gaps?.length ? (
-                  <div>
-                    <p style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 700, color: "#fca5a5" }}>
-                      Gaps to address
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap" }}>
-                      {result.gaps.map((item, index) => (
-                        <span
-                          key={`${item}-${index}`}
-                          style={{
-                            ...ttrComponents.chip,
-                            background: "rgba(248,113,113,0.12)",
-                            border: "1px solid rgba(248,113,113,0.4)",
-                            color: "#fecdd3",
-                          }}
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {result.recommendedActions?.length ? (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      padding: "12px 14px",
-                      borderRadius: 12,
-                      border: "1px solid rgba(251,191,36,0.25)",
-                      background: "rgba(251,191,36,0.06)",
-                    }}
-                  >
-                    <p style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 700, color: "#fde68a" }}>
-                      Next steps
-                    </p>
-
-                    <ol
-                      style={{
-                        margin: 0,
-                        paddingLeft: 18,
-                        display: "grid",
-                        gap: 6,
-                        color: "rgba(241,245,249,0.9)",
-                        fontSize: 14,
-                      }}
-                    >
-                      {result.recommendedActions.map((item, index) => (
-                        <li key={`${item}-${index}`}>{item}</li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
-
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
-                  <Link
-                    href={resultsHref}
-                    style={ttrComponents.quietButton}
-                  >
-                    View in Results
-                  </Link>
-                  <Link
-                    href={fitReviewHref}
-                    style={ttrComponents.quietButton}
-                  >
-                    Open Fit Review
-                  </Link>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowRaw((prev) => !prev)}
-                    style={{
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(255,255,255,0.04)",
-                      color: "rgba(255,255,255,0.75)",
-                      padding: "6px 10px",
-                      borderRadius: 10,
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {showRaw ? "Hide raw" : "View raw JSON"}
-                  </button>
-                </div>
-
-                {showRaw ? (
-                  <pre
-                    style={{
-                      margin: 0,
-                      marginTop: 6,
-                      padding: 12,
-                      borderRadius: 10,
-                      background: "rgba(0,0,0,0.35)",
-                      border: "1px solid rgba(255,255,255,0.05)",
-                      color: "#e2e8f0",
-                      fontSize: 12,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {JSON.stringify(result, null, 2)}
-                  </pre>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </section>
+        ) : null}
       </div>
-    </InstrumentShell>
+    </PageShell>
   );
 }
+

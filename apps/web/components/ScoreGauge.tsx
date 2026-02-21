@@ -6,9 +6,10 @@ export type ScoreGaugeProps = {
   score?: number | null;
   loading?: boolean;
   label?: string;
+  tierLabel?: string | null;
 };
 
-export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProps) {
+export function ScoreGauge({ score = 0, loading = false, label, tierLabel }: ScoreGaugeProps) {
   const radius = 72;
   const circumference = useMemo(() => 2 * Math.PI * radius, [radius]);
   const clampedScore = Math.min(Math.max(score ?? 0, 0), 100);
@@ -72,17 +73,29 @@ export function ScoreGauge({ score = 0, loading = false, label }: ScoreGaugeProp
         >
           {Math.round(clampedScore)}
         </div>
+        {tierLabel ? (
+          <span
+            style={{
+              marginTop: 6,
+              fontSize: 13,
+              letterSpacing: 0.4,
+              fontWeight: 500,
+              color: "var(--text-secondary)",
+            }}
+          >
+            {tierLabel}
+          </span>
+        ) : null}
         {label ? (
           <span
-          style={{
-            marginTop: 8,
-            fontSize: 16,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-          }}
-        >
+            style={{
+              marginTop: 6,
+              fontSize: 14,
+              letterSpacing: 0.5,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+            }}
+          >
             {label}
           </span>
         ) : null}

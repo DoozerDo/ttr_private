@@ -331,7 +331,6 @@ export function WorkspaceRunner({
   const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
   const [showComplianceModal, setShowComplianceModal] = useState(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
@@ -496,6 +495,15 @@ export function WorkspaceRunner({
   const gaugeScore =
     typeof displayResult?.score === "number" ? displayResult.score : null;
 
+  const alignmentTier = useMemo(() => {
+    if (typeof gaugeScore !== "number") return null;
+    if (gaugeScore >= 92) return "Strong Alignment";
+    if (gaugeScore >= 75) return "Moderate Alignment";
+    return "Limited Alignment";
+  }, [gaugeScore]);
+
+  const alignmentTierLabel = alignmentTier ? `Alignment: ${alignmentTier}` : null;
+
   const onScoreCompleted = useCallback(
     (event: {
       baselineId: string;
@@ -506,18 +514,6 @@ export function WorkspaceRunner({
       // Placeholder for future celebration hooks.
     },
     [],
-  );
-
-  const detailsToggleRow = (
-    <div className="flex justify-end">
-      <button
-        type="button"
-        onClick={() => setShowDetails((prev) => !prev)}
-        className="text-xs font-semibold text-slate-200 underline decoration-white/10 underline-offset-4 hover:decoration-white/30"
-      >
-        {showDetails ? "Hide details" : "Show details"}
-      </button>
-    </div>
   );
 
   const viewResultsHref = buildResultsUrl({
@@ -556,12 +552,12 @@ export function WorkspaceRunner({
     if (!jobId) return "Select a job to continue.";
     if (isRunning) return "Running compatibility score.";
     if (isComplianceBlocked) return "Compliance must be resolved before scoring.";
-    if (displayResult) return "Compatibility score ready.";
+    if (displayResult) return "Assessment complete.";
     return "Ready to run compatibility scoring.";
   }, [baselineId, jobId, isRunning, isComplianceBlocked, displayResult, latestCompletedScore]);
 
   const resultCardClasses = [
-    "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-slate-200",
+    "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-[13px] text-slate-200",
   ].join(" ");
 
   const runAssessment = useCallback(async () => {
@@ -588,7 +584,6 @@ export function WorkspaceRunner({
     setLatestAssessmentId(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
-    setShowDetails(false);
     setRunState(null);
     setShowUploadAgainCTA(false);
 
@@ -932,162 +927,35 @@ export function WorkspaceRunner({
             </div>
           ) : null}
           <div className="flex justify-center pt-3">
-            <ScoreGauge score={gaugeScore ?? 0} loading={isRunning} label="Score" />
+            <ScoreGauge
+              score={gaugeScore ?? 0}
+              loading={isRunning}
+              label="Compatibility Score"
+              tierLabel={alignmentTierLabel}
+            />
           </div>
           <div className="space-y-2 pt-3">
-            <div className="flex justify-end">{detailsToggleRow}</div>
             {isComplianceBlocked ? (
-              <>
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                    Top blockers
-                  </p>
-                  {topComplianceFlags.length ? (
-                    <ul className="space-y-1 text-xs text-slate-300">
-                      {topComplianceFlags.map((flag, index) => (
-                        <li key={`top-flag-${index}`}>
-                          <span className="font-semibold text-slate-200">{flag.title}</span>:{" "}
-                          {flag.message}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-slate-400">No blocked issues surfaced yet.</p>
-                  )}
-                </div>
-                {showDetails && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                        Compliance flags
-                      </p>
-                      <span className="text-xs text-slate-400">
-                        {hasComplianceFlags
-                          ? `${complianceFlagList.length} flagged`
-                          : "No details provided"}
-                      </span>
-                    </div>
-                    {hasComplianceFlags ? (
-                      <ul className="space-y-2">
-                        {complianceFlagList.map((flag, index) => (
-                          <li
-                            key={`flag-${index}`}
-                            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                          >
-                            <div className="flex gap-3">
-                              <span className="text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-300">
-                                {flag.severity?.toUpperCase() ?? "BLOCK"}
-                              </span>
-                              <div className="flex-1">
-                                <p className="text-sm font-semibold text-slate-100">{flag.title}</p>
-                                <p className="text-xs text-slate-300">{flag.message}</p>
-                                {debugUiEnabled && (flag.code || flag.confidence !== undefined) ? (
-                                  <p className="mt-1 text-[11px] text-amber-200">
-                                    {flag.code ? `Code: ${flag.code}` : null}
-                                    {flag.confidence !== undefined ? ` Confidence: ${flag.confidence}` : null}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-xs text-slate-400">Compliance flag details are hidden.</p>
-                    )}
-                  </div>
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Top blockers</p>
+                {topComplianceFlags.length ? (
+                  <ul className="space-y-1 text-[11px] text-slate-300">
+                    {topComplianceFlags.map((flag, index) => (
+                      <li key={`top-flag-${index}`}>
+                        <span className="font-semibold text-slate-200">{flag.title}</span>:{" "}
+                        {flag.message}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-400">No blocked issues surfaced yet.</p>
                 )}
-              </>
-            ) : (
-              <>
-                {showDetails ? (
-                  <div className="space-y-3">
-                    {dimensionEntries.length ? (
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Dimension scores
-                        </p>
-                        <div className="grid gap-1 text-xs text-slate-300">
-                          {dimensionEntries.map(([label, value], index) => (
-                            <p key={`${label}-${index}`}>{label}: {renderDimensionValue(value)}</p>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">Dimension breakdown is not available yet.</p>
-                    )}
-                    {complianceFlagList.length ? (
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Compliance flags
-                        </p>
-                        <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
-                          {complianceFlagList.map((flag, index) => (
-                            <li key={`flag-${index}`}>
-                              <span className="font-semibold text-slate-200">{flag.title}</span>:{" "}
-                              {flag.message}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {displayResult?.scoringProof ? (
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Scoring proof
-                        </p>
-                        <div className="grid gap-1 text-xs text-slate-300">
-                          <p>Assessment ID: {displayResult.scoringProof.assessmentId ?? "n/a"}</p>
-                          <p>
-                            Resume chars scored:{" "}
-                            {formatProofNumber(displayResult.scoringProof.baselineTextCharsScored)}
-                          </p>
-                          <p>
-                            Job chars scored:{" "}
-                            {formatProofNumber(displayResult.scoringProof.jobTextCharsScored)}
-                          </p>
-                          <p>
-                            Normalized responsibilities:{" "}
-                            {(displayResult.scoringProof.normalizedResponsibilitiesCount ?? 0).toLocaleString()}
-                          </p>
-                          <p>
-                            Normalized requirements:{" "}
-                            {(displayResult.scoringProof.normalizedRequirementsCount ?? 0).toLocaleString()}
-                          </p>
-                          <p>
-                            Job raw text characters:{" "}
-                            {(displayResult.scoringProof.jobRawTextCharCount ?? 0).toLocaleString()}
-                          </p>
-                          <p className="break-words text-xs text-slate-300">
-                            Job raw text SHA256: {displayResult.scoringProof.jobRawTextSha256 ?? "n/a"}
-                          </p>
-                          {displayResult.scoringProof.jobRawTextTooShort ? (
-                            <p className="text-[11px] uppercase tracking-[0.35em] text-amber-300">
-                              {displayResult.scoringProof.jobRawTextWarning ??
-                                "Raw job description is below the recommended length."}
-                            </p>
-                          ) : null}
-                          <p>
-                            Resume truncated:{" "}
-                            {displayResult.scoringProof.truncationAppliedBaseline ? "Yes" : "No"}
-                          </p>
-                          <p>
-                            Job truncated:{" "}
-                            {displayResult.scoringProof.truncationAppliedJob ? "Yes" : "No"}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">Scoring proof is unavailable for this run.</p>
-                    )}
-                  </div>
-                  ) : null}
-              </>
-            )}
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <FormButton onClick={handleViewResults} disabled={viewResultsDisabled}>
-              View results
+              View assessment
             </FormButton>
             {isComplianceBlocked ? (
               <FormButton onClick={handleResolveComplianceIssues}>Resolve compliance issues</FormButton>
