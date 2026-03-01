@@ -45,5 +45,5 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:dev
-            ghcr.io/targetthisrole/targetthisrole-${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/DoozerDo/ttr_private-${{ matrix.name }}:dev
+            ghcr.io/DoozerDo/ttr_private-${{ matrix.name }}:${{ github.sha }}
