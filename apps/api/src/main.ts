@@ -1,8 +1,75 @@
-﻿import { NestFactory } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { requestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+
+type ExpressLayer = {
+  name?: string;
+  route?: {
+    path?: string | string[];
+    methods?: Record<string, boolean>;
+  };
+  handle?: {
+    stack?: ExpressLayer[];
+  };
+  regexp?: RegExp & { fast_slash?: boolean };
+};
+
+function cleanPath(path: string): string {
+  const normalized = path.replace(/\/{2,}/g, '/');
+  return normalized === '' ? '/' : normalized;
+}
+
+function extractMountPath(layer: ExpressLayer): string {
+  if (!layer.regexp || layer.regexp.fast_slash) {
+    return '';
+  }
+
+  const source = layer.regexp.toString();
+  const match = source.match(/^\/\^\\\/(.*)\\\/\?\(\?=\\\/\|\$\)\/i$/);
+  if (!match?.[1]) {
+    return '';
+  }
+
+  const raw = match[1]
+    .replace(/\\\//g, '/')
+    .replace(/\(\?:\(\[\^\\\/]\+\?\)\)/g, ':param')
+    .replace(/\$$/g, '');
+
+  return raw ? `/${raw}` : '';
+}
+
+function collectRoutes(stack: ExpressLayer[], prefix = ''): string[] {
+  const routes: string[] = [];
+
+  for (const layer of stack) {
+    if (layer.route?.path) {
+      const paths = Array.isArray(layer.route.path)
+        ? layer.route.path
+        : [layer.route.path];
+      const methods = Object.entries(layer.route.methods ?? {})
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([method]) => method.toUpperCase());
+
+      for (const path of paths) {
+        const fullPath = cleanPath(`${prefix}${path}`);
+        for (const method of methods) {
+          routes.push(`ROUTE ${method} ${fullPath}`);
+        }
+      }
+      continue;
+    }
+
+    if (layer.name === 'router' && Array.isArray(layer.handle?.stack)) {
+      const mountPath = extractMountPath(layer);
+      routes.push(...collectRoutes(layer.handle.stack, `${prefix}${mountPath}`));
+    }
+  }
+
+  return routes;
+}
 
 async function bootstrap() {
   // Log anything that would otherwise kill a request or process silently
@@ -17,6 +84,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
+  app.use(requestLoggerMiddleware);
   app.use(cookieParser());
 
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -60,6 +128,18 @@ async function bootstrap() {
     );
   }
 
+  await app.init();
+  console.log('ROUTE_DUMP_START', new Date().toISOString());
+
+  const server = app.getHttpAdapter().getInstance() as {
+    _router?: { stack?: ExpressLayer[] };
+  };
+  const routeLines = collectRoutes(server._router?.stack ?? []);
+  for (const line of routeLines) {
+    console.log(line);
+  }
+  console.log('ROUTE_DUMP_END', new Date().toISOString());
+
   const port = config.get<number>('PORT') ?? 3001;
 
   await app.listen(port, '0.0.0.0');
@@ -69,3 +149,4 @@ bootstrap().catch((error) => {
   console.error('bootstrap failed', error);
   process.exit(1);
 });
+

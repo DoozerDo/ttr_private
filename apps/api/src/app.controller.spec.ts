@@ -28,6 +28,13 @@ describe('AppController', () => {
     expect(response.timestamp).toBeDefined();
   });
 
+  it('returns a root health payload', () => {
+    const response = appController.getRootHealth();
+
+    expect(response).toMatchObject({ status: 'ok', service: 'api' });
+    expect(response.timestamp).toBeDefined();
+  });
+
   it('returns version metadata with fallbacks', () => {
     const response = appController.getVersion();
 

@@ -9,13 +9,22 @@ export class AppController {
     return new Date().toISOString();
   }
 
-  @Get('health')
-  getHealth() {
+  private getHealthPayload() {
     return {
       status: 'ok',
       service: 'api',
       timestamp: this.getTimestamp(),
     };
+  }
+
+  @Get()
+  getRootHealth() {
+    return this.getHealthPayload();
+  }
+
+  @Get('health')
+  getHealth() {
+    return this.getHealthPayload();
   }
 
   @Get('version')
