@@ -1,7 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -13,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
-import { RelayEmailService } from '../email/relay-email.service';
+import { ResendEmailService } from '../email/resend-email.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -37,10 +40,12 @@ type ResendConfirmationResponseDto = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
-    private readonly relayEmailService: RelayEmailService,
+    private readonly resendEmailService: ResendEmailService,
     private readonly configService: ConfigService,
     @InjectRepository(UserToken)
     private readonly userTokensRepository: Repository<UserToken>,
@@ -101,13 +106,7 @@ export class AuthService {
     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
 
-    await this.relayEmailService.sendRawRelayEmail({
-      to: user.email,
-      subject: 'Confirm your account',
-      body: html,
-      replyTo: supportEmail,
-      type: 'signup_confirm',
-    });
+    await this.sendConfirmationEmail(user.email, html, supportEmail);
 
     return {
       success: true,
@@ -179,17 +178,32 @@ export class AuthService {
   async resendConfirmation(
     email: string,
   ): Promise<ResendConfirmationResponseDto> {
+    this.logger.log(`Confirmation resend requested for ${email}`);
+
     const successMessage = {
       success: true,
       message: 'If this email exists, a new confirmation email has been sent.',
     } as const;
 
     if (!this.requireEmailConfirmation) {
+      this.logger.log(
+        `Skipping confirmation resend for ${email} because email confirmation is disabled.`,
+      );
       return successMessage;
     }
 
     const user = await this.usersService.findByEmail(email);
-    if (!user || user.emailConfirmed) {
+    if (!user) {
+      this.logger.log(
+        `Confirmation resend no-op for ${email}: user not found.`,
+      );
+      return successMessage;
+    }
+
+    if (user.emailConfirmed) {
+      this.logger.log(
+        `Confirmation resend no-op for ${email}: email already confirmed.`,
+      );
       return successMessage;
     }
 
@@ -214,13 +228,7 @@ export class AuthService {
     const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
     const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
 
-    await this.relayEmailService.sendRawRelayEmail({
-      to: user.email,
-      subject: 'Confirm your account',
-      body: html,
-      replyTo: supportEmail,
-      type: 'signup_confirm',
-    });
+    await this.sendConfirmationEmail(user.email, html, supportEmail);
 
     return successMessage;
   }
@@ -280,6 +288,31 @@ export class AuthService {
     return template
       .replaceAll('{{confirm_url}}', confirmUrl)
       .replaceAll('{{support_email}}', supportEmail);
+  }
+
+  private async sendConfirmationEmail(
+    email: string,
+    html: string,
+    replyTo: string,
+  ): Promise<void> {
+    try {
+      await this.resendEmailService.sendEmail({
+        to: email,
+        subject: 'Confirm your account',
+        html,
+        replyTo,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to send confirmation email to ${email}: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new HttpException(
+        'Unable to send confirmation email. Please try again later.',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   private buildAuthResponse(user: User): AuthResponseDto {

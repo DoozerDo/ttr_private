@@ -11,7 +11,7 @@ import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { AccountType } from '../users/account-type.enum';
 import { UserToken } from './user-token.entity';
-import { RelayEmailService } from '../email/relay-email.service';
+import { ResendEmailService } from '../email/resend-email.service';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { AdminUsersService } from '../admin-users/admin-users.service';
 
@@ -42,9 +42,9 @@ describe('AuthService', () => {
           },
         },
         {
-          provide: RelayEmailService,
+          provide: ResendEmailService,
           useValue: {
-            sendRawRelayEmail: jest.fn(),
+            sendEmail: jest.fn(),
           },
         },
         {
