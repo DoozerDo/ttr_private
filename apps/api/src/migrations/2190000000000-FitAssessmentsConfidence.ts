@@ -5,23 +5,31 @@ export class FitAssessmentsConfidence2190000000000 implements MigrationInterface
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "fit_assessments"
-      ADD COLUMN "confidenceScore" integer
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "fit_assessments"
-      ADD COLUMN "confidenceReasons" jsonb
+      DO $$
+      BEGIN
+        IF to_regclass('public.fit_assessments') IS NOT NULL THEN
+          ALTER TABLE "fit_assessments"
+          ADD COLUMN IF NOT EXISTS "confidenceScore" integer;
+          ALTER TABLE "fit_assessments"
+          ADD COLUMN IF NOT EXISTS "confidenceReasons" jsonb;
+        END IF;
+      END
+      $$;
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "fit_assessments"
-      DROP COLUMN IF EXISTS "confidenceReasons"
-    `);
-    await queryRunner.query(`
-      ALTER TABLE "fit_assessments"
-      DROP COLUMN IF EXISTS "confidenceScore"
+      DO $$
+      BEGIN
+        IF to_regclass('public.fit_assessments') IS NOT NULL THEN
+          ALTER TABLE "fit_assessments"
+          DROP COLUMN IF EXISTS "confidenceReasons";
+          ALTER TABLE "fit_assessments"
+          DROP COLUMN IF EXISTS "confidenceScore";
+        END IF;
+      END
+      $$;
     `);
   }
 }

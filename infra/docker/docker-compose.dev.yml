@@ -1,67 +1,50 @@
-# docker-compose.yml (DigitalOcean runtime)
-# Uses GHCR images + Caddy reverse proxy in the proxy container.
-# Browser talks to the API via https://app.dev.../api (same origin as the web app).
-
 services:
-  api:
-    image: ghcr.io/targetthisrole/targetthisrole-api:dev
+  db:
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
-    env_file:
-      - ./.env
-      - ./.env.dreamhost
     environment:
-      NODE_ENV: production
-      PORT: 3001
-      DATABASE_URL: ${DATABASE_URL}
-      CORS_ORIGIN: ${CORS_ORIGIN}
-      APP_VERSION: ${APP_VERSION:-dev}
-      TYPEORM_SYNCHRONIZE: "true"
-    networks:
-      - ttr_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  api:
+    image: node:20-alpine
+    working_dir: /usr/src/app
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/postgres
+      JWT_SECRET: dev-local-super-long-random-string
+      TYPEORM_SYNCHRONIZE: "false"
+    ports:
+      - "3001:3001"
+    command: sh -c "npm install && npm run start:dev"
+    volumes:
+      - ../../apps/api:/usr/src/app
+      - /usr/src/app/node_modules
 
   web:
-    image: ghcr.io/targetthisrole/targetthisrole-web:dev
+    image: node:20-alpine
+    working_dir: /usr/src/app
     restart: unless-stopped
-    environment:
-      NODE_OPTIONS: --max_old_space_size=4096
-      NODE_ENV: production
-      API_BASE_URL: http://api:3001
-      WATCHPACK_POLLING: "true"
-      WATCHPACK_POLLING_INTERVAL: "500"
-      CHOKIDAR_USEPOLLING: "true"
-      CHOKIDAR_INTERVAL: "500"
-      # IMPORTANT: your proxy strips /api before forwarding to api:3001
-      # so the browser must call the API through the proxy path:
-      NEXT_PUBLIC_API_BASE_URL: https://${APP_DOMAIN}/api
-      NEXT_PUBLIC_BETA_FORCE_PRO: "false"
-      BETA_FORCE_PRO: "true"
     depends_on:
       - api
-    networks:
-      - ttr_dev
-
-  proxy:
-    image: ghcr.io/targetthisrole/targetthisrole-proxy:dev
-    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      CADDY_EMAIL: ${CADDY_EMAIL}
-      APP_DOMAIN: ${APP_DOMAIN}
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
     volumes:
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
-      - api
-    networks:
-      - ttr_dev
+      - ../../apps/web:/usr/src/app
+      - /usr/src/app/node_modules
 
 volumes:
-  caddy_data:
-  caddy_config:
-
-networks:
-  ttr_dev:
-    driver: bridge
+  db_data:

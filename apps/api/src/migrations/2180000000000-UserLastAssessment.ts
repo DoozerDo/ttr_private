@@ -5,15 +5,27 @@ export class UserLastAssessment2180000000000 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "users"
-      ADD COLUMN "lastAssessmentId" uuid
+      DO $$
+      BEGIN
+        IF to_regclass('public.users') IS NOT NULL THEN
+          ALTER TABLE "users"
+          ADD COLUMN IF NOT EXISTS "lastAssessmentId" uuid;
+        END IF;
+      END
+      $$;
     `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      ALTER TABLE "users"
-      DROP COLUMN IF EXISTS "lastAssessmentId"
+      DO $$
+      BEGIN
+        IF to_regclass('public.users') IS NOT NULL THEN
+          ALTER TABLE "users"
+          DROP COLUMN IF EXISTS "lastAssessmentId";
+        END IF;
+      END
+      $$;
     `);
   }
 }

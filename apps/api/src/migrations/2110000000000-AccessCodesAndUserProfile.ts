@@ -6,56 +6,85 @@ export class AccessCodesAndUserProfile2110000000000
   name = 'AccessCodesAndUserProfile2110000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "betaAccessApproved"`);
-
-    await queryRunner.query(`ALTER TABLE "beta_access_codes" RENAME TO "access_codes"`);
-
     await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_beta_access_codes_id" TO "PK_access_codes_id"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_beta_access_codes_codeHash" TO "UQ_access_codes_codeHash"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_createdBy" TO "FK_access_codes_createdBy"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_assigned" TO "FK_access_codes_assigned"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_redeemedBy" TO "FK_access_codes_redeemedBy"`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_revokedBy" TO "FK_access_codes_revokedBy"`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.users') IS NOT NULL THEN
+           EXECUTE 'ALTER TABLE "users" DROP COLUMN IF EXISTS "betaAccessApproved"';
+         END IF;
+       END
+       $$;`,
     );
 
     await queryRunner.query(
-      `ALTER INDEX "IDX_beta_access_codes_assignedUserId" RENAME TO "IDX_access_codes_assignedUserId"`,
-    );
-    await queryRunner.query(
-      `ALTER INDEX "IDX_beta_access_codes_redeemedAt" RENAME TO "IDX_access_codes_redeemedAt"`,
-    );
-    await queryRunner.query(
-      `ALTER INDEX "IDX_beta_access_codes_revokedAt" RENAME TO "IDX_access_codes_revokedAt"`,
-    );
-    await queryRunner.query(
-      `ALTER INDEX "IDX_beta_access_codes_createdAt" RENAME TO "IDX_access_codes_createdAt"`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.beta_access_codes') IS NOT NULL
+            AND to_regclass('public.access_codes') IS NULL THEN
+           EXECUTE 'ALTER TABLE "beta_access_codes" RENAME TO "access_codes"';
+         END IF;
+       END
+       $$;`,
     );
 
     await queryRunner.query(
-      `ALTER TABLE "users" ADD "roleTitle" character varying(150)`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.access_codes') IS NOT NULL THEN
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PK_beta_access_codes_id') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "PK_beta_access_codes_id" TO "PK_access_codes_id"';
+           END IF;
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'UQ_beta_access_codes_codeHash') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "UQ_beta_access_codes_codeHash" TO "UQ_access_codes_codeHash"';
+           END IF;
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_beta_access_codes_createdBy') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_createdBy" TO "FK_access_codes_createdBy"';
+           END IF;
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_beta_access_codes_assigned') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_assigned" TO "FK_access_codes_assigned"';
+           END IF;
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_beta_access_codes_redeemedBy') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_redeemedBy" TO "FK_access_codes_redeemedBy"';
+           END IF;
+           IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_beta_access_codes_revokedBy') THEN
+             EXECUTE 'ALTER TABLE "access_codes" RENAME CONSTRAINT "FK_beta_access_codes_revokedBy" TO "FK_access_codes_revokedBy"';
+           END IF;
+         END IF;
+       END
+       $$;`,
     );
+
     await queryRunner.query(
-      `ALTER TABLE "users" ADD "company" character varying(150)`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.IDX_beta_access_codes_assignedUserId') IS NOT NULL THEN
+           EXECUTE 'ALTER INDEX "IDX_beta_access_codes_assignedUserId" RENAME TO "IDX_access_codes_assignedUserId"';
+         END IF;
+         IF to_regclass('public.IDX_beta_access_codes_redeemedAt') IS NOT NULL THEN
+           EXECUTE 'ALTER INDEX "IDX_beta_access_codes_redeemedAt" RENAME TO "IDX_access_codes_redeemedAt"';
+         END IF;
+         IF to_regclass('public.IDX_beta_access_codes_revokedAt') IS NOT NULL THEN
+           EXECUTE 'ALTER INDEX "IDX_beta_access_codes_revokedAt" RENAME TO "IDX_access_codes_revokedAt"';
+         END IF;
+         IF to_regclass('public.IDX_beta_access_codes_createdAt') IS NOT NULL THEN
+           EXECUTE 'ALTER INDEX "IDX_beta_access_codes_createdAt" RENAME TO "IDX_access_codes_createdAt"';
+         END IF;
+       END
+       $$;`,
     );
+
     await queryRunner.query(
-      `ALTER TABLE "users" ADD "linkedinUrl" character varying(255)`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "users" ADD "intendedUse" character varying(255)`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "users" ADD "profileCompletedAt" TIMESTAMP WITH TIME ZONE`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.users') IS NOT NULL THEN
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "roleTitle" character varying(150)';
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "company" character varying(150)';
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "linkedinUrl" character varying(255)';
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "intendedUse" character varying(255)';
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "profileCompletedAt" TIMESTAMP WITH TIME ZONE';
+         END IF;
+       END
+       $$;`,
     );
   }
 

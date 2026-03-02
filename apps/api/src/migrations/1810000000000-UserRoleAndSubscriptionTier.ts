@@ -5,17 +5,27 @@ export class UserRoleAndSubscriptionTier1810000000000 implements MigrationInterf
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "users" ADD "role" character varying(50) NOT NULL DEFAULT 'user'`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "users" ADD "subscriptionTier" character varying(50) NOT NULL DEFAULT 'free'`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.users') IS NOT NULL THEN
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" character varying(50) NOT NULL DEFAULT ''user''';
+           EXECUTE 'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "subscriptionTier" character varying(50) NOT NULL DEFAULT ''free''';
+         END IF;
+       END
+       $$;`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "users" DROP COLUMN "subscriptionTier"`,
+      `DO $$
+       BEGIN
+         IF to_regclass('public.users') IS NOT NULL THEN
+           EXECUTE 'ALTER TABLE "users" DROP COLUMN IF EXISTS "subscriptionTier"';
+           EXECUTE 'ALTER TABLE "users" DROP COLUMN IF EXISTS "role"';
+         END IF;
+       END
+       $$;`,
     );
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "role"`);
   }
 }
