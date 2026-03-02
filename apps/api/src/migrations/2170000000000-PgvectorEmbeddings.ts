@@ -5,8 +5,26 @@ export class PgvectorEmbeddings2170000000000 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
-      CREATE EXTENSION IF NOT EXISTS vector
+      DO $$
+      BEGIN
+        CREATE EXTENSION IF NOT EXISTS "vector";
+      EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'pgvector extension not available, skipping vector schema';
+      END
+      $$;
     `);
+
+    const rows = await queryRunner.query(`
+      SELECT 1 FROM pg_type WHERE typname = 'vector' LIMIT 1
+    `);
+    const hasVector = Array.isArray(rows) && rows.length > 0;
+
+    if (!hasVector) {
+      console.warn(
+        '[migration:PgvectorEmbeddings2170000000000] pgvector not available; skipping vector columns/indexes',
+      );
+      return;
+    }
 
     await queryRunner.query(`
       ALTER TABLE "jobs"
@@ -30,6 +48,15 @@ export class PgvectorEmbeddings2170000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    const rows = await queryRunner.query(`
+      SELECT 1 FROM pg_type WHERE typname = 'vector' LIMIT 1
+    `);
+    const hasVector = Array.isArray(rows) && rows.length > 0;
+
+    if (!hasVector) {
+      return;
+    }
+
     await queryRunner.query(`
       DROP INDEX IF EXISTS "IDX_baseline_sections_embedding_ivfflat"
     `);
@@ -46,10 +73,6 @@ export class PgvectorEmbeddings2170000000000 implements MigrationInterface {
     await queryRunner.query(`
       ALTER TABLE "jobs"
       DROP COLUMN IF EXISTS "embedding"
-    `);
-
-    await queryRunner.query(`
-      DROP EXTENSION IF EXISTS vector
     `);
   }
 }

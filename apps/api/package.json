@@ -7,6 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "build:verify": "npm run build && node scripts/assert-safe-migrations.js",
     "print:assessment-debug": "node dist/scripts/print-assessment-debug.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",

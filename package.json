@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "build:web": "npm -w apps/web run build",
-    "build:api": "npm -w apps/api run build",
+    "build:api": "npm -w apps/api run build:verify",
     "build:both": "npm run build:api && npm run build:web",
     "lint:web": "npm -w apps/web run lint",
     "lint:api": "npm -w apps/api run lint",

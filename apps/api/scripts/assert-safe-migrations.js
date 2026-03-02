@@ -1,0 +1,32 @@
+const fs = require('fs');
+const path = require('path');
+
+const migrationPath = path.join(
+  __dirname,
+  '..',
+  'dist',
+  'migrations',
+  '2170000000000-PgvectorEmbeddings.js',
+);
+const unsafeSql = 'CREATE EXTENSION IF NOT EXISTS vector';
+
+if (!fs.existsSync(migrationPath)) {
+  console.error(
+    `[assert-safe-migrations] Missing compiled migration: ${migrationPath}`,
+  );
+  process.exit(1);
+}
+
+const content = fs.readFileSync(migrationPath, 'utf8');
+
+if (content.includes(unsafeSql)) {
+  console.error(
+    `[assert-safe-migrations] Unsafe SQL detected in compiled migration: ${migrationPath}`,
+  );
+  console.error(`[assert-safe-migrations] Found substring: "${unsafeSql}"`);
+  process.exit(1);
+}
+
+console.log(
+  `[assert-safe-migrations] OK: compiled migration is safe (${migrationPath})`,
+);
