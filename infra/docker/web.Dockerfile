@@ -14,7 +14,6 @@ COPY apps/web/types ./apps/web/types
 COPY apps/web/next.config.ts ./apps/web/next.config.ts
 COPY apps/web/next-env.d.ts ./apps/web/next-env.d.ts
 COPY apps/web/tsconfig.json ./apps/web/tsconfig.json
-COPY apps/web/postcss.config.mjs ./apps/web/postcss.config.mjs
 RUN cd apps/web && npm run build
 
 FROM node:20-slim AS runtime
