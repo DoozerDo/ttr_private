@@ -11,6 +11,13 @@ import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 
 const isDev = process.env.NODE_ENV === "development";
+const isDebugBuildIdEnabled = process.env.NEXT_PUBLIC_DEBUG_BUILD_ID === "true";
+const resolvedBuildSha =
+  process.env.NEXT_PUBLIC_GIT_SHA ??
+  process.env.NEXT_PUBLIC_RAILWAY_GIT_COMMIT_SHA ??
+  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
+  "unknown";
+const shortBuildSha = resolvedBuildSha.slice(0, 7);
 
 type StoredContext = {
   hasBaseline: boolean;
@@ -200,6 +207,11 @@ export function AppShell({ children, userEmail }: AppShellProps) {
     return () => {
       window.fetch = originalFetch;
     };
+  }, []);
+
+  useEffect(() => {
+    if (!isDebugBuildIdEnabled) return;
+    console.info(`WEB_BUILD_ID=${shortBuildSha}`);
   }, []);
 
   const journeyNavState = useMemo(() => {

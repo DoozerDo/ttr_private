@@ -113,14 +113,14 @@ export function markJourneyStepCompleted(stepId: JourneyStepId) {
 }
 
 export function useJourneyNavAppState(): JourneyNavAppState {
-  const [completedStepIds, setCompletedStepIds] = useState<JourneyStepId[]>(
-    () => loadPersisted().completedStepIds,
-  );
-  const [activeOverrideStepId, setActiveOverrideStepId] = useState<JourneyStepId | null>(
-    () => loadPersisted().activeOverrideStepId,
-  );
+  const [completedStepIds, setCompletedStepIds] = useState<JourneyStepId[]>([]);
+  const [activeOverrideStepId, setActiveOverrideStepId] = useState<JourneyStepId | null>(null);
 
   useEffect(() => {
+    const initial = loadPersisted();
+    setCompletedStepIds(initial.completedStepIds);
+    setActiveOverrideStepId(initial.activeOverrideStepId);
+
     const onStorage = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY) return;
       const next = loadPersisted();

@@ -60,10 +60,12 @@ export function setAutoGenerateThreshold(value: number): void {
 }
 
 export function useAutoGenerateThreshold(): [number, (value: number) => void] {
-  const [threshold, setThreshold] = useState(() => getAutoGenerateThreshold());
+  const [threshold, setThreshold] = useState(AUTO_GENERATE_THRESHOLD);
 
   useEffect(() => {
     if (!isWindowAvailable()) return undefined;
+
+    setThreshold(getAutoGenerateThreshold());
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key && event.key !== SETTINGS_STORAGE_KEY) return;
