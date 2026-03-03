@@ -1,5 +1,9 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const SERVICE_STARTED_AT = new Date();
 
 @Controller()
 export class AppController {
@@ -7,6 +11,64 @@ export class AppController {
 
   private getTimestamp() {
     return new Date().toISOString();
+  }
+
+  private getGitSha(): string {
+    const candidates = [
+      process.env.RAILWAY_GIT_COMMIT_SHA,
+      process.env.RAILWAY_GIT_COMMIT,
+      process.env.GITHUB_SHA,
+      process.env.VERCEL_GIT_COMMIT_SHA,
+      process.env.COMMIT_SHA,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && candidate.trim()) {
+        return candidate;
+      }
+    }
+
+    return 'unknown';
+  }
+
+  private getAppVersion(): string {
+    const configuredVersion = this.config.get<string>('APP_VERSION');
+    if (configuredVersion && configuredVersion.trim()) {
+      return configuredVersion;
+    }
+
+    try {
+      const pkgPath = join(process.cwd(), 'package.json');
+      const pkgRaw = readFileSync(pkgPath, 'utf-8');
+      const pkg = JSON.parse(pkgRaw) as { version?: string };
+      if (pkg.version && pkg.version.trim()) {
+        return pkg.version;
+      }
+    } catch {
+      return 'unknown';
+    }
+
+    return 'unknown';
+  }
+
+  private getRailwayMeta() {
+    return {
+      railwayPublicDomain: process.env.RAILWAY_PUBLIC_DOMAIN,
+      railwayPrivateDomain: process.env.RAILWAY_PRIVATE_DOMAIN,
+      railwayProjectName: process.env.RAILWAY_PROJECT_NAME,
+      railwayEnvironmentName: process.env.RAILWAY_ENVIRONMENT_NAME,
+      railwayServiceName: process.env.RAILWAY_SERVICE_NAME,
+      railwayProjectId: process.env.RAILWAY_PROJECT_ID,
+      railwayEnvironmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+      railwayServiceId: process.env.RAILWAY_SERVICE_ID,
+    };
+  }
+
+  private getRuntimeMeta() {
+    return {
+      startedAt: SERVICE_STARTED_AT.toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+    };
   }
 
   private getHealthPayload() {
@@ -29,22 +91,38 @@ export class AppController {
 
   @Get('version')
   getVersion() {
+    const version = this.config.get<string>('APP_VERSION') ?? 'unknown';
+    const runtime = this.getRuntimeMeta();
+
     return {
-      version: this.config.get<string>('APP_VERSION') ?? 'unknown',
+      version,
+      appVersion: this.getAppVersion(),
+      gitSha: this.getGitSha(),
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
+      startedAt: runtime.startedAt,
+      uptimeSeconds: runtime.uptimeSeconds,
+      railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
     };
   }
 
   @Get('status')
   getStatus() {
+    const version = this.config.get<string>('APP_VERSION') ?? 'unknown';
+    const runtime = this.getRuntimeMeta();
+
     return {
       status: 'ok',
       service: 'api',
-      version: this.config.get<string>('APP_VERSION') ?? 'unknown',
+      version,
+      appVersion: this.getAppVersion(),
+      gitSha: this.getGitSha(),
       env: this.config.get<string>('NODE_ENV') ?? 'development',
       port: this.config.get<number>('PORT') ?? 3001,
+      startedAt: runtime.startedAt,
+      uptimeSeconds: runtime.uptimeSeconds,
+      railway: this.getRailwayMeta(),
       timestamp: this.getTimestamp(),
     };
   }

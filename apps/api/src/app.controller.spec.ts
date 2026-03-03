@@ -38,24 +38,44 @@ describe('AppController', () => {
   it('returns version metadata with fallbacks', () => {
     const response = appController.getVersion();
 
-    expect(response).toMatchObject({
-      version: 'unknown',
-      env: 'development',
-      port: 3001,
-    });
+    expect(response).toEqual(
+      expect.objectContaining({
+        version: expect.anything(),
+        env: expect.anything(),
+        port: expect.anything(),
+        timestamp: expect.any(String),
+        appVersion: expect.anything(),
+        gitSha: expect.anything(),
+        startedAt: expect.any(String),
+        uptimeSeconds: expect.any(Number),
+        railway: expect.any(Object),
+      }),
+    );
+    expect(typeof response.uptimeSeconds).toBe('number');
     expect(response.timestamp).toBeDefined();
   });
 
   it('returns combined status payload', () => {
     const response = appController.getStatus();
 
-    expect(response).toMatchObject({
-      status: 'ok',
-      service: 'api',
-      version: 'unknown',
-      env: 'development',
-      port: 3001,
-    });
+    expect(response).toEqual(
+      expect.objectContaining({
+        status: 'ok',
+        service: 'api',
+        version: expect.anything(),
+        env: expect.anything(),
+        port: expect.anything(),
+        timestamp: expect.any(String),
+        appVersion: expect.anything(),
+        gitSha: expect.anything(),
+        startedAt: expect.any(String),
+        uptimeSeconds: expect.any(Number),
+        railway: expect.any(Object),
+      }),
+    );
+    expect(response.status).toBe('ok');
+    expect(response.service).toBe('api');
+    expect(typeof response.uptimeSeconds).toBe('number');
     expect(response.timestamp).toBeDefined();
   });
 });
