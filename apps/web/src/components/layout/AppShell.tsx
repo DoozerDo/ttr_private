@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ClientOnly } from "@/components/ClientOnly";
 import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
 import { TopNavAccountArea } from "./TopNavAccountArea";
 import { JourneyNavState } from "@/src/lib/journeyNav";
@@ -245,9 +246,11 @@ export function AppShell({ children, userEmail }: AppShellProps) {
 
         <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 py-8">
           {JOURNEY_NAV_V1_ENABLED ? (
-            <div className="mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-0 py-3">
-              <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
-            </div>
+            <ClientOnly>
+              <div className="mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-0 py-3">
+                <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
+              </div>
+            </ClientOnly>
           ) : null}
 
           {children}
