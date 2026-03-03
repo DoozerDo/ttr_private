@@ -33,7 +33,7 @@ export class ResendEmailService {
     }
 
     const replyTo =
-      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.ai';
+      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.com';
 
     const payload: Record<string, unknown> = {
       from,

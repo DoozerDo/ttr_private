@@ -18,9 +18,16 @@ import { AdminUsersService } from '../admin-users/admin-users.service';
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<UsersService>;
+  let resendEmailService: jest.Mocked<ResendEmailService>;
   let jwtService: JwtService;
   let configService: { get: jest.Mock };
   let adminUsersService: { isAdmin: jest.Mock };
+  let userTokensRepository: {
+    save: jest.Mock;
+    create: jest.Mock;
+    findOne: jest.Mock;
+    delete: jest.Mock;
+  };
   let accessCodesService: {
     redeemCodeForUser: jest.Mock;
     redeemAssignedCodeForUser: jest.Mock;
@@ -71,6 +78,9 @@ describe('AuthService', () => {
               if (key === 'NODE_ENV') {
                 return 'test';
               }
+              if (key === 'APP_PUBLIC_WEB_URL') {
+                return 'http://localhost:3000';
+              }
               return undefined;
             }),
           },
@@ -89,10 +99,12 @@ describe('AuthService', () => {
 
     service = module.get<AuthService>(AuthService);
     usersService = module.get(UsersService);
+    resendEmailService = module.get(ResendEmailService);
     jwtService = module.get(JwtService);
     configService = module.get(ConfigService);
     adminUsersService = module.get(AdminUsersService);
     accessCodesService = module.get(AccessCodesService);
+    userTokensRepository = module.get(getRepositoryToken(UserToken));
     jest.spyOn(jwtService, 'sign').mockReturnValue('signed-token');
   });
 
@@ -391,6 +403,71 @@ describe('AuthService', () => {
     expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
     expect(result.accessToken).toEqual('signed-token');
+  });
+
+  it('uses configured public web URL and support email in confirmation email content', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Beta',
+      lastName: 'User',
+      email: 'beta@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+    const savedUser: User = {
+      id: 'beta-user-id',
+      email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      emailConfirmed: false,
+      passwordHash: '',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'true';
+      if (key === 'NODE_ENV') return 'production';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'https://targetthisrole.com/';
+      if (key === 'SUPPORT_EMAIL') return 'support-beta@targetthisrole.com';
+      return undefined;
+    });
+
+    service = new AuthService(
+      usersService,
+      jwtService,
+      resendEmailService,
+      configService as unknown as ConfigService,
+      userTokensRepository as any,
+      accessCodesService as unknown as AccessCodesService,
+      adminUsersService as unknown as AdminUsersService,
+    );
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockImplementation(async ({ email, passwordHash }) => ({
+      ...savedUser,
+      email,
+      passwordHash,
+    }));
+
+    await service.register(payload);
+
+    expect(resendEmailService.sendEmail).toHaveBeenCalledTimes(1);
+    const emailPayload = resendEmailService.sendEmail.mock.calls[0][0];
+
+    expect(emailPayload.replyTo).toEqual('support-beta@targetthisrole.com');
+    expect(emailPayload.html).toContain('https://targetthisrole.com/auth/confirm?token=');
+    expect(emailPayload.html).toContain('support-beta@targetthisrole.com');
+    expect(emailPayload.html).not.toContain('targetthisrole.ai');
   });
 
 });

@@ -27,7 +27,7 @@ export class RelayEmailService {
     }
 
     const replyTo =
-      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.ai';
+      input.replyTo ?? process.env.MAIL_REPLY_TO ?? 'support@targetthisrole.com';
 
     const response = await fetch(relayUrl, {
       method: 'POST',

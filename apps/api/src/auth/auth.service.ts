@@ -26,6 +26,10 @@ import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { AdminUsersService } from '../admin-users/admin-users.service';
+import {
+  buildConfirmationUrl,
+  resolvePublicWebBaseUrl,
+} from './confirm-url';
 
 type RegisterResponseDto = {
   success: true;
@@ -41,6 +45,8 @@ type ResendConfirmationResponseDto = {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly publicWebBaseUrl: string;
+  private readonly supportEmail: string;
 
   constructor(
     private readonly usersService: UsersService,
@@ -51,7 +57,15 @@ export class AuthService {
     private readonly userTokensRepository: Repository<UserToken>,
     private readonly accessCodesService: AccessCodesService,
     private readonly adminUsersService: AdminUsersService,
-  ) {}
+  ) {
+    this.publicWebBaseUrl = resolvePublicWebBaseUrl({
+      nodeEnv: this.configService.get<string>('NODE_ENV'),
+      appPublicWebUrl: this.configService.get<string>('APP_PUBLIC_WEB_URL'),
+    });
+    const configuredSupportEmail =
+      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ?? '';
+    this.supportEmail = configuredSupportEmail || 'support@targetthisrole.com';
+  }
 
   async register(payload: RegisterDto): Promise<RegisterResponseDto> {
     if (payload.password !== payload.confirmPassword) {
@@ -99,14 +113,13 @@ export class AuthService {
       }),
     );
 
-    const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-    const supportEmail =
-      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-      'support@targetthisrole.ai';
-    const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-    const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
+    const confirmUrl = buildConfirmationUrl(this.publicWebBaseUrl, token);
+    const html = this.renderSignupConfirmationTemplate(
+      confirmUrl,
+      this.supportEmail,
+    );
 
-    await this.sendConfirmationEmail(user.email, html, supportEmail);
+    await this.sendConfirmationEmail(user.email, html, this.supportEmail);
 
     return {
       success: true,
@@ -221,14 +234,13 @@ export class AuthService {
       }),
     );
 
-    const appBaseUrl = this.configService.get<string>('APP_BASE_URL')?.trim();
-    const supportEmail =
-      this.configService.get<string>('SUPPORT_EMAIL')?.trim() ??
-      'support@targetthisrole.ai';
-    const confirmUrl = `${appBaseUrl ?? 'http://localhost:3000'}/auth/confirm?token=${encodeURIComponent(token)}`;
-    const html = this.renderSignupConfirmationTemplate(confirmUrl, supportEmail);
+    const confirmUrl = buildConfirmationUrl(this.publicWebBaseUrl, token);
+    const html = this.renderSignupConfirmationTemplate(
+      confirmUrl,
+      this.supportEmail,
+    );
 
-    await this.sendConfirmationEmail(user.email, html, supportEmail);
+    await this.sendConfirmationEmail(user.email, html, this.supportEmail);
 
     return successMessage;
   }
