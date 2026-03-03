@@ -167,8 +167,18 @@ export class BaselineService {
 
     // Strip out null bytes and non-printable control chars while preserving
     // structural whitespace (newline/tab/carriage return) needed for parsing.
+    const controlCharClass =
+      String.fromCharCode(0) +
+      String.fromCharCode(8) +
+      String.fromCharCode(11) +
+      String.fromCharCode(12) +
+      String.fromCharCode(14) +
+      '-' +
+      String.fromCharCode(31) +
+      String.fromCharCode(127);
+    const nonPrintableControlChars = new RegExp(`[${controlCharClass}]`, 'g');
     return content
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(nonPrintableControlChars, '')
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n');
   }

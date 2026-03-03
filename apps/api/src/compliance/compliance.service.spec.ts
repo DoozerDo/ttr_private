@@ -19,6 +19,8 @@ const buildAuditRepo = () => {
 
 describe('ComplianceService', () => {
   const repoMock = buildAuditRepo();
+  const job = { id: 'job-1', title: 'Support Manager', company: 'Acme' };
+  const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
   const service = new ComplianceService(
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore: manual repository injection
@@ -56,7 +58,6 @@ describe('ComplianceService', () => {
 
   it('persists audit metadata with baseline version details', async () => {
     const baselineVersion = { id: 'bv-1', hash: 'hash-1' };
-    const job = { id: 'job-1' };
 
     const result = await service.validateAndAudit({
       action: ComplianceAction.RESUME_GENERATION,
@@ -168,7 +169,6 @@ describe('ComplianceService', () => {
   });
 
   describe('invented company and role detection', () => {
-    const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
     const jobWithTitle = { ...job, title: 'Product Manager' };
 
     it('blocks invented company references not in the baseline', async () => {

@@ -132,7 +132,7 @@ describe('ApplicationsController', () => {
     expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'text/csv');
     expect(response.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
-      'attachment; filename=\"applications.csv\"',
+      'attachment; filename="applications.csv"',
     );
     expect(response.send).toHaveBeenCalledWith('csv-data');
     expect(response.setHeader).toHaveBeenCalledWith(

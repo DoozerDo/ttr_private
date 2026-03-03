@@ -642,7 +642,7 @@ const IC_TITLE_PATTERNS = LEVEL_TITLE_PATTERNS(IC_TITLE_KEYWORDS);
 const SENIOR_TITLE_PATTERNS = LEVEL_TITLE_PATTERNS(SENIOR_TITLE_KEYWORDS);
 
 const PSEUDO_TITLE_HINT_PATTERNS = [
-  /(?:role|position|title)\s*[:\-]?\s*(?:an?|the)?\s*([^\n.,]+)/i,
+  /(?:role|position|title)\s*[:-]?\s*(?:an?|the)?\s*([^\n.,]+)/i,
   /(?:we(?:'re| are)?|our team is|looking for|seeking|hiring(?: for)?)(?: an?| the)?\s*([^\n.,]+)/i,
 ];
 
@@ -897,7 +897,7 @@ export const scoreCxFitV2 = (
   const baselineScoringTextForBundles = baselineText;
 
   let domainTagsRole = [...domainTagsRoleOriginal];
-  let domainTagsBaseline = [...domainTagsBaselineOriginal];
+  const domainTagsBaseline = [...domainTagsBaselineOriginal];
 
   const industryBundleEvidence = INDUSTRY_BUNDLES.map((bundle) => {
     const jobHits = countBundleHits(jobScoringTextForBundles, bundle.terms);

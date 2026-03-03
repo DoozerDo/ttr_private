@@ -153,7 +153,7 @@ function collapseSpaces(line: string): string {
 function normalizeHeading(line: string): string {
   return line
     .toLowerCase()
-    .replace(/[:;.,\-]+$/u, "")
+    .replace(/[:;.,-]+$/u, "")
     .trim();
 }
 
@@ -354,7 +354,7 @@ export function normalizeJobDescription(
   const reqExtraction = extractBlockItems(reqBlock);
   let responsibilities = respExtraction.items;
   let requirements = reqExtraction.items;
-  let bulletsDetected = respExtraction.count + reqExtraction.count;
+  const bulletsDetected = respExtraction.count + reqExtraction.count;
   let fallbackSentenceSplitUsed = false;
 
   if (!responsibilities.length) {

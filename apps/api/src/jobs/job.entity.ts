@@ -26,7 +26,7 @@ export class Job {
   @Column({ type: 'varchar', length: 255, nullable: true })
   company!: string | null;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', name: 'description' })
   rawDescription!: string;
 
   @Column({ type: 'varchar', length: 2048, nullable: true })

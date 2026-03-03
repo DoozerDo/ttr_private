@@ -19,9 +19,9 @@ type DetectorPayload = {
 };
 
 const COMPANY_CONTEXT_PATTERN =
-  /\b(?:at|with|for|from|employer|organization|company|partnered with)\s+([A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+)+)/gi;
+  /\b(?:at|with|for|from|employer|organization|company|partnered with)\s+([A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+)+)/gi;
 const COMPANY_SUFFIX_PATTERN =
-  /\b([A-Z][\w&\.\-']+(?:\s+[A-Z][\w&\.\-']+)*\s+(?:Inc|Corp|LLC|LTD|Group|Labs|Technologies|Systems|Solutions|Studios|Partners|Agency|Works|Collective|Consulting|Ventures))\b/g;
+  /\b([A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+)*\s+(?:Inc|Corp|LLC|LTD|Group|Labs|Technologies|Systems|Solutions|Studios|Partners|Agency|Works|Collective|Consulting|Ventures))\b/g;
 const COMPANY_UPPERCASE_PATTERN = /\b(?:at|with|for|from)\s+([A-Z]{2,})\b/g;
 const COMPANY_SUFFIXES = [
   'inc',
@@ -64,11 +64,11 @@ const BASELINE_ROLE_SECTION_TYPES = new Set<string>([
 const EXPERIENCE_HEADER_DELIMITERS = /[-@|/]+/;
 
 const ROLE_CONTEXT_PATTERN =
-  /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4})/gi;
+  /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4})/gi;
 const ROLE_TRAILING_PATTERN =
-  /([A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4})\s+(?:role|title|position)\b/gi;
+  /([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4})\s+(?:role|title|position)\b/gi;
 const ROLE_GENERAL_PATTERN =
-  /\b[A-Za-z][\w&'.\-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.\-]*){0,4}\b/gi;
+  /\b[A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4}\b/gi;
 
 const COMPANY_ALLOWLIST = new Set([
   'team',
@@ -300,7 +300,7 @@ const SPELLED_NUMBER_WORDS: Record<string, number> = {
   three: 3,
   four: 4,
   five: 5,
-  six: 6,
+  six: 5,
   seven: 7,
   eight: 8,
   nine: 9,

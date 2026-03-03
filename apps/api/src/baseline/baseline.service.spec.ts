@@ -12,6 +12,7 @@ import { BaselineParsed } from './baseline-parsed.entity';
 import { BaselineVersion } from './baseline-version.entity';
 import { BaselineIngestionService } from './baseline-ingestion.service';
 import { BaselineService } from './baseline.service';
+import { EmbeddingService } from '../ai/embedding.service';
 
 describe('BaselineService - block policies', () => {
   let service: BaselineService;
@@ -208,6 +209,13 @@ const ingestionResult = {
             ingestFromText: jest.fn().mockResolvedValue(ingestionResult),
           },
         },
+        {
+          provide: EmbeddingService,
+          useValue: {
+            embedText: jest.fn().mockResolvedValue([]),
+            embedTexts: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
@@ -266,6 +274,85 @@ describe('BaselineService - reparse ingestion source', () => {
   let service: BaselineService;
   let baselineRepository: any;
   let ingestionService: any;
+  const sections: BaselineSection[] = [
+    {
+      id: 's-1',
+      baselineId: 'b-1',
+      sectionType: BaselineSectionType.EXPERIENCE as any,
+      title: null,
+      content: 'Did important work.',
+      includePolicy: BaselineIncludePolicy.OPTIONAL,
+      order: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as BaselineSection,
+  ];
+  const baseline: Baseline = {
+    id: 'b-1',
+    userId: 'user-1',
+    version: 1,
+    originalFilename: 'resume.pdf',
+    mimeType: 'application/pdf',
+    storagePath: '/tmp/resume.pdf',
+    hash: 'hash',
+    sections,
+    versions: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as Baseline;
+  const canonicalBaseline = {
+    identity: {
+      full_name: 'Test User',
+      current_title: null,
+      current_company: null,
+      location: null,
+    },
+    experience: [],
+    people_leadership: {
+      direct_reports: null,
+      managers_led: null,
+      global_teams: null,
+    },
+    operational_ownership: {
+      functions_owned: [],
+      process_design: null,
+      process_scaling: null,
+    },
+    tooling_and_platforms: {
+      tools: [],
+      ownership_level: 'unknown',
+    },
+    cross_functional_partnership: {
+      product: null,
+      engineering: null,
+      sales_cs: null,
+      executive: null,
+    },
+    customer_advocacy: {
+      executive_escalations: null,
+      voice_of_customer: null,
+      post_incident_rca: null,
+    },
+    scale_and_scope: {
+      customer_segment: 'unknown',
+      geo_scope: 'unknown',
+      org_stage: 'unknown',
+    },
+    metrics_and_outcomes: {
+      metrics_present: false,
+      metrics: [],
+    },
+    skills_and_tools: {
+      tools: [],
+      methodologies: [],
+      domains: [],
+    },
+    system_generated_read_only: {
+      missing_fields: [],
+      ambiguity_flags: [],
+      low_confidence_extractions: [],
+    },
+  };
 
   beforeEach(async () => {
     baselineRepository = {
@@ -295,6 +382,13 @@ describe('BaselineService - reparse ingestion source', () => {
         { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
         { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
         { provide: BaselineIngestionService, useValue: ingestionService },
+        {
+          provide: EmbeddingService,
+          useValue: {
+            embedText: jest.fn().mockResolvedValue([]),
+            embedTexts: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 

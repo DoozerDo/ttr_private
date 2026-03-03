@@ -464,13 +464,15 @@ export class ResumeService {
       return undefined;
     }
 
+    const createdAt = assessment.createdAt ? assessment.createdAt : new Date(0);
+
     return {
       overallScore: assessment.overallScore,
       verdict: assessment.verdict,
       dimensionScores: assessment.dimensionScores,
       weights: assessment.scoringV2?.rubric?.weights,
       scoringContractVersion: assessment.scoringV2?.rubric?.id,
-      createdAt: assessment.createdAt.toISOString(),
+      createdAt: createdAt.toISOString(),
     };
   }
 

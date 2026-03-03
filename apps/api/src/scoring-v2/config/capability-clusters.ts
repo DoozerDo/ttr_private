@@ -93,11 +93,9 @@ const loadRegistry = (): CapabilityClusterRegistry => {
   return { clusters };
 };
 
-let memoizedRegistry: CapabilityClusterRegistry | null = null;
+export const CAPABILITY_CLUSTER_REGISTRY: CapabilityClusterRegistry =
+  loadRegistry();
 
-export const getCapabilityClusterRegistry = (): CapabilityClusterRegistry => {
-  if (!memoizedRegistry) {
-    memoizedRegistry = loadRegistry();
-  }
-  return memoizedRegistry;
-};
+export function getCapabilityClusterRegistry(): CapabilityClusterRegistry {
+  return CAPABILITY_CLUSTER_REGISTRY;
+}

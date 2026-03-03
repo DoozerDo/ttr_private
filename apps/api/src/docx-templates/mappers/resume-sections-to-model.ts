@@ -676,7 +676,7 @@ function parseExperienceHeaderSegments(line: string) {
     .map((part) => part.trim())
     .filter(Boolean);
   const role = segments.shift() || line.trim();
-  let remaining = [...segments];
+  const remaining = [...segments];
   let dateRange: string | undefined;
   if (remaining.length && isDateRange(remaining[remaining.length - 1])) {
     dateRange = remaining.pop();

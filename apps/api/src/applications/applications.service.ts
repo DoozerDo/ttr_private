@@ -241,7 +241,7 @@ export class ApplicationsService {
     const now = new Date();
     const artifactRecord = this.buildArtifactRecord(input);
 
-    let entry = await this.applicationRepository.findOne({
+    const entry = await this.applicationRepository.findOne({
       where: { userId: input.userId, fingerprint },
     });
 

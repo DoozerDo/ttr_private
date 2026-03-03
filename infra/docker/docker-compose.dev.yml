@@ -12,7 +12,7 @@ services:
       - db_data:/var/lib/postgresql/data
 
   api:
-    image: node:20-alpine
+    image: node:20-bullseye-slim
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:
@@ -31,14 +31,14 @@ services:
       - /usr/src/app/node_modules
 
   web:
-    image: node:20-alpine
+    image: node:20-bullseye-slim
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:
       - api
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+      NEXT_PUBLIC_API_BASE_URL: http://api:3001
     ports:
       - "3000:3000"
     command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
