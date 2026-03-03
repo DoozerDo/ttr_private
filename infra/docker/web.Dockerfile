@@ -11,7 +11,6 @@ COPY apps/web/lib ./apps/web/lib
 COPY apps/web/public ./apps/web/public
 COPY apps/web/src ./apps/web/src
 COPY apps/web/types ./apps/web/types
-COPY apps/web/next.config.ts ./apps/web/next.config.ts
 RUN cd apps/web && npm run build
 
 FROM node:20-slim AS runtime
