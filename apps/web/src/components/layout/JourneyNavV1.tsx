@@ -196,7 +196,7 @@ export function JourneyNavV1({
   return (
     <nav
       aria-label={ariaLabel ?? "Current journey progress"}
-      className="journey-nav-root relative w-full"
+      className="journey-nav-root relative w-full min-h-[110px]"
     >
       <div key={pathname} className="journey-nav-clip-shell">
         <div className="journey-nav-inner relative">
@@ -302,10 +302,10 @@ export function JourneyNavV1({
 
       <style jsx>{`
         .journey-nav-root {
-          background: var(--surface-secondary);
+          background: var(--surface-secondary, rgba(15, 23, 42, 0.7));
           background-image: none;
           border-radius: 1.5rem;
-          border: 1px solid var(--metal-edge-outer);
+          border: 1px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
           padding: 0;
           box-shadow: inset 0 1px 0 var(--metal-edge-highlight),
             0 18px 45px rgba(1, 1, 1, 0.65);
@@ -326,7 +326,7 @@ export function JourneyNavV1({
           padding: 1.5rem;
           background: linear-gradient(
             180deg,
-            var(--surface-secondary) 0%,
+            var(--surface-secondary, rgba(15, 23, 42, 0.7)) 0%,
             rgba(3, 5, 9, 0.95) 100%
           );
         }
@@ -432,7 +432,7 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-locked {
-          color: var(--text-muted-tertiary);
+          color: var(--text-muted-tertiary, rgba(148, 163, 184, 0.72));
           cursor: not-allowed;
         }
 
@@ -458,14 +458,14 @@ export function JourneyNavV1({
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: var(--surface-secondary);
+          background-color: var(--surface-secondary, rgba(15, 23, 42, 0.7));
           background-image: radial-gradient(
             circle at 30% 30%,
             rgba(255, 255, 255, 0.08),
             rgba(8, 10, 15, 0.96) 65%
           );
           background-blend-mode: normal;
-          border: 2px solid var(--metal-edge-outer);
+          border: 2px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
             inset 0 0 0 2px rgba(255, 255, 255, 0.03),
             inset 0 2px 8px rgba(255, 255, 255, 0.05),
@@ -485,7 +485,7 @@ export function JourneyNavV1({
           position: absolute;
           inset: 0;
           border-radius: 999px;
-          background: var(--surface-secondary);
+          background: var(--surface-secondary, rgba(15, 23, 42, 0.7));
           pointer-events: none;
           z-index: 0;
         }
@@ -601,7 +601,7 @@ export function JourneyNavV1({
           font-size: 0.65rem;
           line-height: 1;
           text-align: center;
-          color: var(--text-muted-primary);
+          color: var(--text-muted-primary, rgba(226, 232, 240, 0.75));
         }
       `}</style>
     </nav>

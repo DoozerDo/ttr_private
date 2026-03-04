@@ -3,8 +3,7 @@
 import { usePathname } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ClientOnly } from "@/components/ClientOnly";
-import { JOURNEY_NAV_V1_ENABLED, JourneyNavV1 } from "./JourneyNavV1";
+import { JourneyNavV1 } from "./JourneyNavV1";
 import { TopNavAccountArea } from "./TopNavAccountArea";
 import { JourneyNavState } from "@/src/lib/journeyNav";
 import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -78,6 +77,7 @@ function isStepCompleted(state: unknown): boolean {
 
 export function AppShell({ children, userEmail }: AppShellProps) {
   const pathname = usePathname() ?? "/";
+  const isAdminRoute = pathname.startsWith("/admin");
   const [, setHasBaseline] = useState(false);
   const [, setHasJob] = useState(false);
   const lastPath = useRef(pathname);
@@ -236,34 +236,35 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
       <div className="flex min-h-screen flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-6 py-4">
-          <div className="flex flex-col gap-1">
-            <span className="text-sm text-[var(--text-secondary)]">Session console</span>
-            {isDev ? (
-              <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
-                Dev route: {pathname}
-              </span>
-            ) : null}
-          </div>
+        {isAdminRoute ? (
+          <header className="flex items-center justify-between border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-6 py-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-[var(--text-secondary)]">Session console</span>
+              {isDev ? (
+                <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
+                  Dev route: {pathname}
+                </span>
+              ) : null}
+            </div>
 
-          <div className="flex items-center gap-4">
-            {isDev ? (
-              <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
-                Dev health
-              </span>
-            ) : null}
-            <TopNavAccountArea initialEmail={userEmail} />
-          </div>
-        </header>
+            <div className="flex items-center gap-4">
+              {isDev ? (
+                <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
+                  Dev health
+                </span>
+              ) : null}
+              <TopNavAccountArea initialEmail={userEmail} />
+            </div>
+          </header>
+        ) : null}
 
         <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 py-8">
-          {JOURNEY_NAV_V1_ENABLED ? (
-            <ClientOnly>
-              <div className="mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-0 py-3">
-                <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
-              </div>
-            </ClientOnly>
-          ) : null}
+          <div
+            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-3"
+            data-testid="journey-nav"
+          >
+            <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
+          </div>
 
           {children}
         </main>
