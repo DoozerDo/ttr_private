@@ -77,7 +77,6 @@ function isStepCompleted(state: unknown): boolean {
 
 export function AppShell({ children, userEmail }: AppShellProps) {
   const pathname = usePathname() ?? "/";
-  const isAdminRoute = pathname.startsWith("/admin");
   const [, setHasBaseline] = useState(false);
   const [, setHasJob] = useState(false);
   const lastPath = useRef(pathname);
@@ -236,33 +235,14 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
       <div className="flex min-h-screen flex-1 flex-col">
-        {isAdminRoute ? (
-          <header className="flex items-center justify-between border-b border-[var(--border-strong)] bg-[var(--bg-surface)] px-6 py-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm text-[var(--text-secondary)]">Session console</span>
-              {isDev ? (
-                <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
-                  Dev route: {pathname}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="flex items-center gap-4">
-              {isDev ? (
-                <span className="text-[11px] uppercase tracking-[0.4em] text-[var(--text-secondary)]">
-                  Dev health
-                </span>
-              ) : null}
-              <TopNavAccountArea initialEmail={userEmail} />
-            </div>
-          </header>
-        ) : null}
-
         <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 py-8">
           <div
-            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-3"
+            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-3 pr-24 md:pr-28 relative"
             data-testid="journey-nav"
           >
+            <div className="absolute right-0 top-0 z-50">
+              <TopNavAccountArea initialEmail={userEmail} />
+            </div>
             <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
           </div>
 

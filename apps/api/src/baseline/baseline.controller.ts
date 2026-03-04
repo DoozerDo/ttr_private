@@ -21,7 +21,6 @@ import { CloneFitReviewBaselineDto } from './dto/fit-review-clone.dto';
 
 type UploadBaselineResponse = {
   baseline: any;
-  uploadStatus: any;
   baselineId: string;
   schemaVersion: string;
   userVerified: boolean;
@@ -31,6 +30,11 @@ type UploadBaselineResponse = {
     missingFields: number;
     lowConfidence: number;
   };
+};
+
+const stripBaselineVersioning = <T extends Record<string, unknown>>(baseline: T) => {
+  const { version: _version, versions: _versions, ...rest } = baseline;
+  return rest;
 };
 
 @Controller('baselines')
@@ -73,8 +77,9 @@ export class BaselineController {
     const systemFlags = canonical?.system_generated_read_only;
 
     return {
-      baseline: result.baseline,
-      uploadStatus: result.uploadStatus,
+      baseline: stripBaselineVersioning(
+        result.baseline as unknown as Record<string, unknown>,
+      ),
       baselineId: result.baseline.id,
       schemaVersion: canonical?.schema_version ?? 'baseline_schema_v1',
       userVerified: canonical?.user_verified ?? false,
@@ -113,7 +118,10 @@ export class BaselineController {
     }
 
     const include = includeArchived === 'true';
-    return this.baselineService.listBaselinesForUser(userId, include);
+    const baselines = await this.baselineService.listBaselinesForUser(userId, include);
+    return baselines.map((baseline) =>
+      stripBaselineVersioning(baseline as unknown as Record<string, unknown>),
+    );
   }
 
   @Patch(':id/archive')
@@ -127,7 +135,8 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.baselineService.archiveBaseline(userId, id);
+    const baseline = await this.baselineService.archiveBaseline(userId, id);
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
 
   @Patch(':id/restore')
@@ -141,7 +150,8 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.baselineService.restoreBaseline(userId, id);
+    const baseline = await this.baselineService.restoreBaseline(userId, id);
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
 
   @Get(':id')
@@ -155,7 +165,8 @@ export class BaselineController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.baselineService.getBaselineByIdForUser(id, userId);
+    const baseline = await this.baselineService.getBaselineByIdForUser(id, userId);
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
 
   @Get(':id/versions')

@@ -13,8 +13,6 @@ import {
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import {
   BaselineDto,
-  BaselineUploadResponse,
-  BaselineUploadStatus,
   archiveBaseline,
   listBaselines,
 } from "@/lib/baselines";
@@ -32,16 +30,6 @@ interface BaselineDashboardProps {
   selectedBaselineId?: string | null;
 }
 
-const isBaselineUploadResponse = (
-  value: unknown,
-): value is BaselineUploadResponse =>
-  Boolean(
-    value &&
-      typeof value === "object" &&
-      "baseline" in value &&
-      "uploadStatus" in value,
-  );
-
 const getDuplicateUploadMessage = (data: unknown): string | null => {
   if (!data || typeof data !== "object") return null;
 
@@ -51,17 +39,28 @@ const getDuplicateUploadMessage = (data: unknown): string | null => {
     (typeof maybeCode === "string" ? maybeCode : undefined) ??
     (typeof errorBody?.code === "string" ? errorBody.code : undefined);
 
-  if (duplicateCode !== "BASELINE_DUPLICATE") return null;
+  const topLevelMessage =
+    typeof (data as { message?: unknown }).message === "string"
+      ? ((data as { message?: unknown }).message as string)
+      : null;
+
+  if (
+    duplicateCode !== "BASELINE_DUPLICATE" &&
+    duplicateCode !== "CONFLICT" &&
+    topLevelMessage !== "This file has already been uploaded."
+  ) {
+    return null;
+  }
 
   if (typeof errorBody?.message === "string") {
     return errorBody.message;
   }
 
-  if (typeof (data as { message?: unknown }).message === "string") {
-    return (data as { message?: unknown }).message as string;
+  if (topLevelMessage) {
+    return topLevelMessage;
   }
 
-  return "This file matches a resume you’ve already uploaded. Use the existing version to continue.";
+  return "This file has already been uploaded.";
 };
 
 export function BaselineDashboard({
@@ -77,9 +76,6 @@ export function BaselineDashboard({
     ParsedInsufficientExtractedTextError | null
   >(null);
   const [duplicateErrorDetail, setDuplicateErrorDetail] = useState<string | null>(
-    null,
-  );
-  const [uploadStatus, setUploadStatus] = useState<BaselineUploadStatus | null>(
     null,
   );
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(
@@ -148,7 +144,6 @@ export function BaselineDashboard({
     if (isUploading) return;
     setError(null);
     setDuplicateErrorDetail(null);
-    setUploadStatus(null);
     setIsUploading(true);
     setInsufficientTextError(null);
 
@@ -183,7 +178,7 @@ export function BaselineDashboard({
 
         const duplicateDetail = getDuplicateUploadMessage(payload);
         if (duplicateDetail) {
-          setError("Duplicate resume detected");
+          setError(null);
           setDuplicateErrorDetail(duplicateDetail);
           return;
         }
@@ -199,20 +194,7 @@ export function BaselineDashboard({
         return;
       }
 
-      const uploadResponse = isBaselineUploadResponse(payload)
-        ? payload
-        : { baseline: payload as BaselineDto, uploadStatus: null };
-
-      const baselineRecord = uploadResponse.baseline;
-      const status =
-        uploadResponse.uploadStatus ??
-        (({
-          isDuplicate: false,
-          versionNumber: baselineRecord.version ?? 0,
-          message: `Resume uploaded as version ${baselineRecord.version ?? 0}.`,
-        } as BaselineUploadStatus));
-
-      setUploadStatus(status);
+      const baselineRecord = payload as BaselineDto;
 
       setBaselines((previous) => {
         const filtered = previous.filter((entry) => entry.id !== baselineRecord.id);
@@ -298,28 +280,14 @@ export function BaselineDashboard({
         </p>
       ) : null}
 
+      {duplicateErrorDetail ? (
+        <p className="text-sm text-slate-400">{duplicateErrorDetail}</p>
+      ) : null}
       {insufficientTextError ? (
         <InsufficientExtractedText error={insufficientTextError} />
       ) : error ? (
         <div style={ttrComponents.dangerBox}>
           <p className="m-0 text-[13px]">{error}</p>
-          {duplicateErrorDetail ? (
-            <p className="m-0 text-[11px] text-slate-100/80">
-              {duplicateErrorDetail}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {uploadStatus ? (
-        <div
-          style={{
-            ...(uploadStatus.isDuplicate
-              ? ttrComponents.warningBox
-              : ttrComponents.successBox),
-            marginTop: 4,
-          }}
-        >
-          <p className="m-0 text-[13px]">{uploadStatus.message}</p>
         </div>
       ) : null}
 

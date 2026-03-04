@@ -32,8 +32,8 @@ services:
 
   web:
     build:
-      context: ../..
-      dockerfile: infra/docker/web.Dockerfile
+      context: ../../apps/web
+      dockerfile: Dockerfile
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE_URL: http://localhost:3001

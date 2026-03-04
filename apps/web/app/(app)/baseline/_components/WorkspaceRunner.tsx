@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
-import { ScoreGauge } from "@/components/ScoreGauge";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -104,45 +102,6 @@ export function buildResultsUrl({
 
   return null;
 }
-
-const formatDimensionEntries = (
-  payload: FitResultPayload,
-): [string, DimensionScoreValue][] => {
-  const entries: [string, DimensionScoreValue][] = [];
-  const dims = payload.dimensionScores;
-
-  if (Array.isArray(dims)) {
-    dims.forEach((value, index) => {
-      entries.push([`Dimension ${index + 1}`, value]);
-    });
-    return entries;
-  }
-
-  if (dims && typeof dims === "object") {
-    Object.entries(dims).forEach(([key, value]) => {
-      entries.push([key, value]);
-    });
-  }
-
-  return entries;
-};
-
-const renderDimensionValue = (value: DimensionScoreValue): string => {
-  if (value === null || value === undefined) return "n/a";
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "n/a";
-  }
-};
-
-const formatProofNumber = (value?: number | null) => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value.toLocaleString();
-  }
-  return "n/a";
-};
 
 const extractErrorMessage = (payload: unknown): string | null => {
   if (payload && typeof payload === "object") {
@@ -293,33 +252,6 @@ const parseAnalysisRunResponse = async (
   throw new Error("Unable to run compatibility scoring right now.");
 };
 
-const pickTimestamp = (payload: FitResultPayload | null): string | null => {
-  if (!payload) return null;
-
-  const candidates = [
-    payload.assessedAt,
-    payload.runAt,
-    payload.createdAt,
-    payload.updatedAt,
-    payload.timestamp,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim().length) return candidate;
-  }
-
-  return null;
-};
-
-const formatTimestamp = (value: string | null): string => {
-  if (!value) return "Not yet";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
-};
-
 const BASELINE_STEP_ID: JourneyStepId = "baselines";
 export function WorkspaceRunner({
   baselineId,
@@ -331,15 +263,11 @@ export function WorkspaceRunner({
   const [isLoadingLastRun, setIsLoadingLastRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FitResultPayload | null>(null);
-  const [showComplianceModal, setShowComplianceModal] = useState(false);
-  const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [completeBanner, setCompleteBanner] = useState<string | null>(null);
-  const [latestAssessmentId, setLatestAssessmentId] = useState<string | null>(null);
   const [latestJobId, setLatestJobId] = useState<string | null>(null);
   const [latestBaselineId, setLatestBaselineId] = useState<string | null>(null);
   const [runState, setRunState] = useState<"ok" | "compliance_blocked" | null>(null);
   const [showUploadAgainCTA, setShowUploadAgainCTA] = useState(false);
-  const router = useRouter();
   const [selectedBaselineId, setSelectedBaselineId] = useState<string | null>(baselineId);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(jobId);
   const [inFlightPairKey, setInFlightPairKey] = useState<string | null>(null);
@@ -361,19 +289,6 @@ export function WorkspaceRunner({
     },
     [onProgressStateChange],
   );
-  const ensureScoreSummaryVisible = useCallback(() => {
-    if (!scoreSummaryRef.current || typeof window === "undefined") {
-      return;
-    }
-    const rect = scoreSummaryRef.current.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
-    const mostlyVisible = visibleHeight >= rect.height * 0.7;
-    if (!mostlyVisible) {
-      scoreSummaryRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, []);
-
   const requestBaselineUploadAgain = useCallback(() => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("baselineUploadAgainRequest"));
@@ -399,162 +314,12 @@ export function WorkspaceRunner({
   }, [jobId]);
 
   const displayResult = latestCompletedScore ?? result;
-  const dimensionEntries = useMemo(
-    () => (displayResult ? formatDimensionEntries(displayResult) : []),
-    [displayResult],
-  );
-
   const isDevMode = process.env.NODE_ENV !== "production";
   const debugUiEnabled = isDevMode || process.env.NEXT_PUBLIC_DEBUG_UI === "true";
-  const complianceTitleMap: Record<string, string> = {
-    invented_company: "Invented company reference",
-    invented_role: "Invented role or title",
-    invented_metric: "Invented metric",
-    invented_scope: "Invented scope or scale",
-    invented_timeline: "Invented timeline",
-  };
-
-  const complianceFlagList = useMemo(() => {
-    const rawFlags =
-      displayResult?.complianceFlags ??
-      displayResult?.compliance_flags ??
-      (displayResult as { compliance?: { flags?: unknown[] } } | null)?.compliance?.flags;
-    const normalizedFlags =
-      Array.isArray(rawFlags) ? rawFlags : rawFlags ? [rawFlags] : [];
-    return normalizedFlags.map((flag) => {
-      if (typeof flag === "string") {
-        return {
-          title: "Compliance issue",
-          message: flag,
-          severity: "BLOCK",
-          code: undefined,
-          confidence: undefined,
-        };
-      }
-
-      const typedFlag = flag as {
-        code?: string;
-        message?: string;
-        severity?: string;
-        confidence?: number;
-      };
-
-      const code =
-        typeof typedFlag.code === "string" && typedFlag.code.trim()
-          ? typedFlag.code
-          : undefined;
-      const message =
-        typeof typedFlag.message === "string" && typedFlag.message.trim()
-          ? typedFlag.message
-          : code ?? "Compliance issue";
-      const title =
-        (code && complianceTitleMap[code]) ||
-        complianceTitleMap[typedFlag.code ?? ""] ||
-        "Compliance issue";
-      const severity =
-        typeof typedFlag.severity === "string" ? typedFlag.severity : "BLOCK";
-      const confidence =
-        debugUiEnabled && typeof typedFlag.confidence === "number"
-          ? typedFlag.confidence
-          : undefined;
-
-      return {
-        title,
-        message,
-        severity,
-        code,
-        confidence,
-      };
-    });
-  }, [displayResult, debugUiEnabled]);
-
-  const hasComplianceFlags = complianceFlagList.length > 0;
-  const promptLikeFlag = complianceFlagList.find((flag) =>
-    flag.message.toLowerCase().includes("prompt-like"),
-  );
-  const jobSourceUrl =
-    (displayResult as { job?: { sourceUrl?: string | null } } | null)?.job?.sourceUrl ??
-    (displayResult as { jobSourceUrl?: string | null } | null)?.jobSourceUrl ??
-    null;
-  const isLinkedInSource =
-    typeof jobSourceUrl === "string" && jobSourceUrl.toLowerCase().includes("linkedin.com");
-  const showLinkedInHint = Boolean(promptLikeFlag && isLinkedInSource);
 
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(latestCompletedScore);
-
-  const isBlockedResult =
-    runState === "compliance_blocked" ||
-    displayResult?.verdict === "blocked" ||
-    (displayResult as { status?: string } | null)?.status === "compliance_blocked" ||
-    Boolean((displayResult as { compliance?: { blocked?: boolean } } | null)?.compliance?.blocked);
-
-  const isComplianceBlocked = isBlockedResult;
-  const topComplianceFlags = complianceFlagList.slice(0, 3);
-
-  const gaugeScore =
-    typeof displayResult?.score === "number" ? displayResult.score : null;
-
-  const alignmentTier = useMemo(() => {
-    if (typeof gaugeScore !== "number") return null;
-    if (gaugeScore >= 92) return "Strong Alignment";
-    if (gaugeScore >= 75) return "Moderate Alignment";
-    return "Limited Alignment";
-  }, [gaugeScore]);
-
-  const alignmentTierLabel = alignmentTier ? `Alignment: ${alignmentTier}` : null;
-
-  const onScoreCompleted = useCallback(
-    (event: {
-      baselineId: string;
-      jobId: string;
-      scoreValue: number | null;
-      verdict: string | null;
-    }) => {
-      // Placeholder for future celebration hooks.
-    },
-    [],
-  );
-
-  const viewResultsHref = buildResultsUrl({
-    assessmentId: latestAssessmentId,
-    jobId: latestJobId ?? jobId,
-    baselineId: latestBaselineId ?? baselineId,
-  });
-
-  const viewResultsDisabled =
-    isRunning || !viewResultsHref || isComplianceBlocked;
-  const viewResultsHelper = !viewResultsHref
-    ? "Compatibility score not ready yet."
-    : isComplianceBlocked
-      ? "Resolve compliance issues before viewing results."
-      : null;
-  const handleViewResults = () => {
-    if (!viewResultsDisabled && viewResultsHref) {
-      router.push(viewResultsHref);
-    }
-  };
-
-  const handleResolveComplianceIssues = () => {
-    if (!isComplianceBlocked) return;
-    setShowComplianceModal(true);
-  };
-
-  const requestJobEdit = useCallback(() => {
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(new CustomEvent("jobIngestionRequest"));
-  }, []);
-
-  const statusLine = useMemo(() => {
-    if (!baselineId && !jobId && latestCompletedScore) return "Latest compatibility score is ready.";
-    if (!baselineId && !jobId) return "Select a resume and a job to run scoring.";
-    if (!baselineId) return "Select a resume to continue.";
-    if (!jobId) return "Select a job to continue.";
-    if (isRunning) return "Running compatibility score.";
-    if (isComplianceBlocked) return "Compliance must be resolved before scoring.";
-    if (displayResult) return "Assessment complete.";
-    return "Ready to run compatibility scoring.";
-  }, [baselineId, jobId, isRunning, isComplianceBlocked, displayResult, latestCompletedScore]);
+  const score = typeof displayResult?.score === "number" ? displayResult.score : null;
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-[13px] text-slate-200",
@@ -581,7 +346,6 @@ export function WorkspaceRunner({
     setIsRunning(true);
     setError(null);
     setCompleteBanner(null);
-    setLatestAssessmentId(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
     setRunState(null);
@@ -616,20 +380,8 @@ export function WorkspaceRunner({
             : null;
       setLatestJobId(resolvedJobId);
       setLatestBaselineId(resolvedBaselineId);
-      setLatestAssessmentId(
-        typeof nextResult.assessmentId === "string" ? nextResult.assessmentId : null,
-      );
       setLatestCompletedScore(nextResult);
-      onScoreCompleted({
-        baselineId: baselineForRun,
-        jobId: jobForRun,
-        scoreValue:
-          typeof nextResult.score === "number" ? nextResult.score : null,
-        verdict: typeof nextResult.verdict === "string" ? nextResult.verdict : null,
-      });
 
-      const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
-      setLastRunAt(ts);
       const completionText =
         runState === "compliance_blocked" ? "Assessment blocked" : "Compatibility scored";
       reportProgressState({
@@ -638,15 +390,13 @@ export function WorkspaceRunner({
         isComplianceBlocked: runState === "compliance_blocked",
         isPreparingMatch: false,
       });
-        setCompleteBanner(completionText);
-        ensureScoreSummaryVisible();
+      setCompleteBanner(completionText);
     } catch (runError: unknown) {
       const message =
         extractErrorMessage(runError) ?? "Unable to run compatibility scoring right now.";
       const shouldShowUploadCTA = isMissingCanonicalRunError(runError, message);
       setError(message);
       setShowUploadAgainCTA(shouldShowUploadCTA);
-      setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
       setRunState(null);
@@ -664,6 +414,7 @@ export function WorkspaceRunner({
   }, [
     debugUiEnabled,
     inFlightPairKey,
+    isPreparingMatch,
     isRunning,
     reportProgressState,
     selectedBaselineId,
@@ -677,7 +428,6 @@ export function WorkspaceRunner({
     setError(null);
     setShowUploadAgainCTA(false);
     setCompleteBanner(null);
-    setLatestAssessmentId(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
 
@@ -725,17 +475,10 @@ export function WorkspaceRunner({
             : null;
       setLatestJobId(resolvedJobId);
       setLatestBaselineId(resolvedBaselineId);
-      setLatestAssessmentId(
-        typeof nextResult.assessmentId === "string" ? nextResult.assessmentId : null,
-      );
-
-      const ts = pickTimestamp(nextResult) ?? new Date().toISOString();
-      setLastRunAt(ts);
       setCompleteBanner("Loaded last run");
     } catch (loadError: unknown) {
       const message = extractErrorMessage(loadError) ?? "Unable to load the last run.";
       setError(message);
-      setLatestAssessmentId(null);
       setLatestJobId(null);
       setLatestBaselineId(null);
       setRunState(null);
@@ -759,7 +502,7 @@ export function WorkspaceRunner({
     });
     journeyNavAppState.setActiveOverride(BASELINE_STEP_ID);
     onAutoRunComplete?.();
-  }, [journeyNavAppState, onAutoRunComplete]);
+  }, [journeyNavAppState, onAutoRunComplete, reportProgressState]);
 
   useEffect(() => {
     if (autoRunTriggerTimerRef.current !== null) {
@@ -866,17 +609,7 @@ export function WorkspaceRunner({
   }, [completeBanner, handleAutoRunFinalize, displayResult, runState]);
 
   return (
-    <SetupModuleCard
-      label=""
-      title=""
-      description="Scoring begins automatically once you have selected both a resume and a job."
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-300">{statusLine}</p>
-        <div className="text-xs text-slate-400">
-          <div>Last run: {formatTimestamp(lastRunAt)}</div>
-        </div>
-      </div>
+    <SetupModuleCard label="" title="" description="">
       {isRunning ? (
         <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
           Scoring compatibility.
@@ -919,119 +652,16 @@ export function WorkspaceRunner({
 
       {showResult ? (
         <div ref={scoreSummaryRef} className={resultCardClasses}>
-          {completeBanner ? (
-            <div className="flex justify-end">
-              <span className="inline-flex items-center rounded-full border border-white/10 bg-slate-950/40 px-2 py-1 text-[11px] font-semibold text-slate-200">
-                {completeBanner}
-              </span>
+          <div className="flex flex-col items-center justify-center gap-6 py-10">
+            <div className="text-6xl font-bold tracking-tight text-[var(--text-primary)]">
+              {score ?? "--"}
             </div>
-          ) : null}
-          <div className="flex justify-center pt-3">
-            <ScoreGauge
-              score={gaugeScore ?? 0}
-              loading={isRunning}
-              label="Compatibility Score"
-              tierLabel={alignmentTierLabel}
-            />
-          </div>
-          <div className="space-y-2 pt-3">
-            {isComplianceBlocked ? (
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Top blockers</p>
-                {topComplianceFlags.length ? (
-                  <ul className="space-y-1 text-[11px] text-slate-300">
-                    {topComplianceFlags.map((flag, index) => (
-                      <li key={`top-flag-${index}`}>
-                        <span className="font-semibold text-slate-200">{flag.title}</span>:{" "}
-                        {flag.message}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-xs text-slate-400">No blocked issues surfaced yet.</p>
-                )}
-              </div>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <FormButton onClick={handleViewResults} disabled={viewResultsDisabled}>
-              View assessment
-            </FormButton>
-            {isComplianceBlocked ? (
-              <FormButton onClick={handleResolveComplianceIssues}>Resolve compliance issues</FormButton>
-            ) : null}
-          </div>
-          {viewResultsHelper ? (
-            <p className="text-[11px] text-slate-400 pt-2">{viewResultsHelper}</p>
-          ) : null}
-        </div>
-      ) : (
-        <p className="text-sm text-slate-400">Run a fit assessment to see your compatibility score.</p>
-      )}
-      {showComplianceModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-950 p-5 text-sm text-slate-200">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-slate-100">
-                  Compliance issues to resolve
-                </p>
-                <p className="text-xs text-slate-400">
-                  Resolve the issues below to continue scoring.
-                </p>
-              </div>
-              <FormButton variant="secondary" onClick={() => setShowComplianceModal(false)}>
-                Close
-              </FormButton>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {hasComplianceFlags ? (
-                <ul className="space-y-2">
-                  {complianceFlagList.map((flag, index) => (
-                    <li
-                      key={`modal-flag-${index}`}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-amber-300">
-                            {flag.severity?.toUpperCase() ?? "BLOCK"}
-                          </p>
-                          <p className="mt-2 text-sm font-semibold text-slate-100">
-                            {flag.title}
-                          </p>
-                          <p className="text-xs text-slate-300">{flag.message}</p>
-                        </div>
-                        {flag.code ? (
-                          <span className="text-[11px] text-slate-400">Code: {flag.code}</span>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-slate-400">No compliance flag details were provided.</p>
-              )}
-
-              {showLinkedInHint ? (
-                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-                  This can happen when a LinkedIn page injects non-job content into the description.
-                  Re-ingest the job or paste the job description text directly.
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <FormButton
-                  onClick={() => {
-                    requestJobEdit();
-                    setShowComplianceModal(false);
-                  }}
-                >
-                  Edit job description
-                </FormButton>
-              </div>
-            </div>
+            <a
+              href="/results"
+              className="whitespace-nowrap rounded-xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+            >
+              Review your results
+            </a>
           </div>
         </div>
       ) : null}

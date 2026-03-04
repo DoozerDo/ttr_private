@@ -1,12 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isIP } from 'node:net';
+import { createHash } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Job, JobIngestionMethod } from './job.entity';
 import { extractTextFromHtml } from './html-utils';
@@ -61,11 +62,6 @@ const MAX_DESCRIPTION_LENGTH = 100000;
 const MAX_HTML_BYTES = 1_000_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 4;
-const JOB_LIMIT = 5;
-const ALLOW_JOB_LIMIT_SKIP =
-  process.env.NODE_ENV !== 'production' ||
-  process.env.DISABLE_JOB_LIMIT === 'true';
-
 const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'text/plain']);
 const PRIVATE_NETWORK_URL_ERROR =
   'Job URLs hosted on private networks are not allowed.';
@@ -160,6 +156,7 @@ export class JobsService {
       ? sanitizeLinkedInJobText(originalRawDescription)
       : { text: originalRawDescription, removed: [] };
     const normalizedInput = this.normalizeRawDescription(sanitized.text);
+    const contentHash = this.computeContentHash(normalizedInput);
     this.validateDescriptionLength(normalizedInput);
     const embedding = await this.embeddingService.embed(normalizedInput);
 
@@ -208,7 +205,24 @@ export class JobsService {
     const sourceProviderId = payload.sourceProviderId?.trim() || null;
     const sourceExternalId = payload.sourceExternalId?.trim() || null;
     const canonicalUrl = payload.canonicalUrl?.trim() || null;
-    const dedupeHash = payload.dedupeHash?.trim() || null;
+    const dedupeHash = payload.dedupeHash?.trim() || contentHash;
+
+    if (dedupeHash) {
+      const duplicate = await this.jobRepository.findOne({
+        where: { userId, dedupeHash },
+        select: { id: true },
+      });
+
+      if (duplicate) {
+        throw new ConflictException({
+          error: {
+            code: 'JOB_DUPLICATE',
+            message: 'This file has already been uploaded.',
+            existingJobId: duplicate.id,
+          },
+        });
+      }
+    }
 
     await this.enforceJobLimit(userId);
 
@@ -310,21 +324,12 @@ export class JobsService {
   }
 
   private async enforceJobLimit(userId: string) {
-    const count = await this.jobRepository.count({ where: { userId } });
+    // Upload limits are intentionally disabled.
+    void userId;
+  }
 
-    if (ALLOW_JOB_LIMIT_SKIP) {
-      return;
-    }
-
-    if (count >= JOB_LIMIT) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'limit_reached',
-          entity: 'job',
-          limit: JOB_LIMIT,
-        },
-      });
-    }
+  private computeContentHash(content: string) {
+    return createHash('sha256').update(content, 'utf8').digest('hex');
   }
 
   private validateUrl(inputUrl: string) {

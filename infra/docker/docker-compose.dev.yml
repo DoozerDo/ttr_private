@@ -12,7 +12,9 @@ services:
       - db_data:/var/lib/postgresql/data
 
   api:
-    image: node:20-bullseye-slim
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:
@@ -31,7 +33,9 @@ services:
       - /usr/src/app/node_modules
 
   web:
-    image: node:20-bullseye-slim
+    build:
+      context: ../../apps/web
+      dockerfile: Dockerfile
     working_dir: /usr/src/app
     restart: unless-stopped
     depends_on:

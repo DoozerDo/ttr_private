@@ -86,6 +86,7 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<JobWarning | null>(null);
   const [detailsCopied, setDetailsCopied] = useState(false);
+  const [duplicateMessage, setDuplicateMessage] = useState<string | null>(null);
 
   const isUrlMode = ingestionMode === "URL";
   const canPreview = isUrlMode ? url.trim().length > 0 : rawDescription.trim().length > 0;
@@ -112,6 +113,7 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
     setError(null);
     setSuccess(null);
     setWarning(null);
+    setDuplicateMessage(null);
 
     try {
       const response = await fetch("/api/jobs/ingest", {
@@ -181,6 +183,7 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
     setError(null);
     setSuccess(null);
     setWarning(null);
+    setDuplicateMessage(null);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -243,11 +246,8 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
       }
 
       if (response.status === 409) {
-        const existingJobId = (data as Record<string, unknown>)?.existingJobId as string | undefined;
-        if (existingJobId) {
-          onResolved(existingJobId);
-          return;
-        }
+        setDuplicateMessage("This file has already been uploaded.");
+        return;
       }
 
       if (!response.ok) {
@@ -477,6 +477,11 @@ export function JobIngestionForm({ onResolved, onCancel }: JobIngestionFormProps
             </details>
           </Alert>
         )}
+        {duplicateMessage ? (
+          <p style={{ margin: 0, fontSize: 13, color: "rgba(203,213,225,0.9)" }}>
+            {duplicateMessage}
+          </p>
+        ) : null}
         {warning && (
           <Alert intent="warning" title="Partial parsing">
             <p style={{ margin: 0 }}>{warning.message}</p>

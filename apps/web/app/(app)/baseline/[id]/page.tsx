@@ -10,10 +10,8 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import type {
   BaselineDto,
   BaselineSectionDto,
-  BaselineVersionDto,
 } from "@/lib/baselines";
 import { formatDateTime } from "@/lib/format-date";
-import { BaselinePolicyEditor } from "./baseline-policy-editor";
 import { getBaselineDetailsHref } from "@/src/navigation/routes";
 
 function isNextRedirectError(error: unknown) {
@@ -117,34 +115,6 @@ async function fetchBaseline(id: string): Promise<BaselineFetchResult> {
   }
 }
 
-async function fetchBaselineVersions(
-  id: string,
-): Promise<BaselineVersionDto[] | null> {
-  try {
-    const response = await fetch(
-      await buildInternalApiUrl(`/api/baselines/${id}/versions`),
-      await buildInternalFetchOptions(),
-    );
-
-    if (response.status === 401 || response.status === 403) {
-      redirect("/auth/login");
-    }
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json()) as BaselineVersionDto[];
-  } catch (error) {
-    if (isNextRedirectError(error)) {
-      throw error;
-    }
-
-    console.error("Failed to fetch baseline versions", error);
-    return null;
-  }
-}
-
 const friendlyTitles: Record<string, string> = {
   SUMMARY: "Summary",
   EXPERIENCE: "Experience",
@@ -244,14 +214,6 @@ export default async function BaselineDetailPage({
 
   const baseline = baselineResult.baseline;
   const baselineFetchError = baselineResult.error;
-  const versions = baseline
-    ? await fetchBaselineVersions(resolvedParams.id)
-    : null;
-
-  const sortedVersions =
-    versions?.slice().sort((a, b) => b.versionNumber - a.versionNumber) ?? [];
-  const latestVersionId = sortedVersions[0]?.id ?? "";
-
   const groupedSections: GroupedSections = baseline
     ? organizeSections(baseline.sections ?? [])
     : {};
@@ -323,44 +285,6 @@ export default async function BaselineDetailPage({
 
         {baseline ? (
           <>
-            <BaselinePolicyEditor
-              baselineId={baseline.id}
-              versions={sortedVersions}
-              initialVersionId={latestVersionId}
-            />
-
-            <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Version history
-              </h2>
-              {sortedVersions.length > 0 ? (
-                <ul className="space-y-2">
-                  {sortedVersions.map((version) => (
-                    <li
-                      key={version.id}
-                      className="rounded-md border border-gray-100 bg-gray-50 p-4 text-sm text-gray-900"
-                    >
-                      <div className="flex flex-wrap justify-between gap-2">
-                        <span className="font-semibold">
-                          Version {version.versionNumber}
-                        </span>
-                        <span className="text-xs text-gray-600">
-                          {formatDateTime(version.createdAt)}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-700">
-                        Version hash: {version.fileHash}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-700">
-                  No version history available.
-                </p>
-              )}
-            </section>
-
             <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-semibold text-gray-900">
                 Parsed sections

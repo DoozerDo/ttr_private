@@ -1,7 +1,6 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useReducedMotion } from "framer-motion";
 import { useEffect, useRef, type KeyboardEvent, type ReactElement } from "react";
 
 import {
@@ -148,7 +147,6 @@ export function JourneyNavV1({
   onActiveStepAdvanced,
   ariaLabel,
 }: JourneyNavV1Props) {
-  const shouldReduceMotion = useReducedMotion();
   const pathname = usePathname() ?? "/";
   const router = useRouter();
 
@@ -186,8 +184,6 @@ export function JourneyNavV1({
     }
   }, [onActiveStepAdvanced, pathActiveStepId, state.steps]);
 
-  const shouldPulse = !shouldReduceMotion;
-
   const handleStepClick = (stepId: JourneyStepId) => {
     if (!onStepClick) return;
     onStepClick(stepId);
@@ -213,7 +209,6 @@ export function JourneyNavV1({
               const isActive = step.id === pathActiveStepId;
               const isCompleted = step.state === JourneyStepState.Completed;
               const isLocked = step.state === JourneyStepState.Locked;
-              const showPulse = shouldPulse && isActive;
 
               const route = routeLookup.get(step.id);
               const routeHref = route?.href;
@@ -231,7 +226,6 @@ export function JourneyNavV1({
 
               const iconAreaClass = [
                 "journey-nav-icon-area",
-                isActive ? "ttr-active-ring-pulse" : "",
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -239,10 +233,6 @@ export function JourneyNavV1({
               const stepContent = (
                 <>
                   <span className={iconAreaClass}>
-                    {showPulse ? (
-                      <span className="journey-nav-target-pulse" aria-hidden />
-                    ) : null}
-
                     {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
 
                     <span className="journey-nav-icon-target" aria-hidden>
@@ -307,8 +297,7 @@ export function JourneyNavV1({
           border-radius: 1.5rem;
           border: 1px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
           padding: 0;
-          box-shadow: inset 0 1px 0 var(--metal-edge-highlight),
-            0 18px 45px rgba(1, 1, 1, 0.65);
+          box-shadow: inset 0 1px 0 var(--metal-edge-highlight);
           position: relative;
           isolation: isolate;
         }
@@ -382,19 +371,11 @@ export function JourneyNavV1({
             rgba(194, 77, 12, 0.9),
             rgba(14, 17, 24, 0.85)
           );
-          box-shadow: 0 0 18px rgba(194, 77, 12, 0.55);
+          box-shadow: none;
         }
 
         .journey-nav-line-progress::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: 999px;
-          background: radial-gradient(circle, rgba(194, 77, 12, 0.35), rgba(194, 77, 12, 0));
-          opacity: 0.6;
-          filter: blur(8px);
-          pointer-events: none;
-          z-index: 1;
+          content: none;
         }
 
         .journey-nav-step-grid {
@@ -500,40 +481,9 @@ export function JourneyNavV1({
           z-index: 1;
         }
 
-        .journey-nav-target-pulse {
-          position: absolute;
-          inset: -6px;
-          border-radius: 999px;
-          background: radial-gradient(
-            circle,
-            rgba(194, 77, 12, 0.35),
-            rgba(194, 77, 12, 0)
-          );
-          pointer-events: none;
-          z-index: 0;
-          animation: journey-nav-target-pulse 3.4s ease-in-out infinite;
-        }
-
-        @keyframes journey-nav-target-pulse {
-          0% {
-            transform: scale(1);
-            opacity: 0.4;
-          }
-          60% {
-            transform: scale(1.08);
-            opacity: 0;
-          }
-          100% {
-            transform: scale(1);
-            opacity: 0;
-          }
-        }
-
         .journey-nav-step-active .journey-nav-icon-area {
           border-color: rgba(194, 77, 12, 0.9);
-          box-shadow: 0 0 22px rgba(194, 77, 12, 0.45),
-            inset 0 2px 8px rgba(255, 255, 255, 0.1),
-            inset 0 -6px 12px rgba(0, 0, 0, 0.7);
+          box-shadow: inset 0 2px 6px #ffffff14, inset 0 -4px 8px #00000099;
           pointer-events: none;
         }
 

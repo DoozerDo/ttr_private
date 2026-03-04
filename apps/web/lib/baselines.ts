@@ -82,17 +82,6 @@ export interface UpdateBaselineBlocksResponse {
   hash: string;
 }
 
-export interface BaselineUploadStatus {
-  isDuplicate: boolean;
-  versionNumber: number;
-  message: string;
-}
-
-export interface BaselineUploadResponse {
-  baseline: BaselineDto;
-  uploadStatus: BaselineUploadStatus;
-}
-
 const BASELINE_API_PATH = "/api/baselines";
 
 async function ensureJsonPayload<T>(response: Response, action: string) {

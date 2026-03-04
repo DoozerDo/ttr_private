@@ -117,12 +117,9 @@ export default async function BaselinePage({ searchParams }: BaselinePageProps) 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-slate-100">Target this role with clarity.</h1>
-        <p className="text-sm text-slate-300">
-          Target This Role compares your resume against a job description to generate a score. If
-          your score is strong enough, your personalized resume and cover letter will be generated
-          for you to use in the application process.
-        </p>
+        <h1 className="text-2xl font-semibold text-slate-100">
+          Compare your resume and a job description to determine compatibility.
+        </h1>
       </div>
       {showNewBaselineToast ? (
         <Alert intent="success" title="New version available">

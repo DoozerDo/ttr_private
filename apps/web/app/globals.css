@@ -197,26 +197,6 @@ body {
   box-shadow: var(--focus-ring);
 }
 
-/*
-  Pulse: keep it subtle and warm.
-  Animate shadow only (no brightness flicker).
-*/
-.ttr-active-ring-pulse {
-  animation: ttr-ring-pulse 2.8s ease-in-out infinite;
-}
-
-@keyframes ttr-ring-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(212, 99, 26, 0.18);
-  }
-  50% {
-    box-shadow: 0 0 10px 3px rgba(212, 99, 26, 0.20);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(212, 99, 26, 0.18);
-  }
-}
-
 @keyframes achievementFadeIn {
   0% {
     opacity: 0;

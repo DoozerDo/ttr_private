@@ -43,8 +43,6 @@ import {
   type FitReviewDimensionKey,
 } from './fit-review-dimensions';
 
-const BASELINE_LIMIT = 5;
-
 export type FileMetadata = {
   originalname: string;
   mimetype: string;
@@ -87,16 +85,9 @@ type PolicySectionInput = {
   order?: number | null;
 };
 
- type BaselineUploadStatus = {
-   isDuplicate: boolean;
-   versionNumber: number;
-   message: string;
- };
-
 export type BaselineCreationResult = {
   baselineId: string;
   baseline: Baseline;
-  uploadStatus: BaselineUploadStatus;
   ingestion?: BaselineIngestionResult;
   normalization?: CanonicalNormalizationResult;
 };
@@ -147,17 +138,9 @@ export class BaselineService {
   ) {}
 
   private async enforceBaselineLimit(manager: EntityManager, userId: string) {
-    const count = await manager.count(Baseline, { where: { userId } });
-
-    if (count >= BASELINE_LIMIT) {
-      throw new UnprocessableEntityException({
-        error: {
-          code: 'limit_reached',
-          entity: 'baseline',
-          limit: BASELINE_LIMIT,
-        },
-      });
-    }
+    // Upload limits are intentionally disabled.
+    void manager;
+    void userId;
   }
 
   private sanitizeSectionContent(content?: string | null) {
@@ -397,8 +380,7 @@ export class BaselineService {
       throw new ConflictException({
         error: {
           code: 'BASELINE_DUPLICATE',
-          message:
-            'This baseline already exists. Select the existing baseline instead of uploading again.',
+          message: 'This file has already been uploaded.',
           existingBaselineId: duplicate.id,
         },
       });
@@ -565,7 +547,6 @@ export class BaselineService {
       where: {
         userId,
         hash,
-        status: BaselineStatus.ACTIVE,
       },
       order: { createdAt: 'DESC' },
     });
@@ -670,11 +651,6 @@ export class BaselineService {
 return {
       baselineId: finalBaseline.id,
       baseline: finalBaseline,
-      uploadStatus: {
-        isDuplicate: false,
-        versionNumber: nextVersionNumber,
-        message: `Baseline uploaded as version ${nextVersionNumber}.`,
-      },
       normalization,
       ingestion: parseResult?.ingestion,
     };
@@ -718,10 +694,8 @@ return {
         userId,
         ...statusFilter,
       },
-      relations: ['versions'],
       order: {
         createdAt: 'DESC',
-        versions: { versionNumber: 'DESC', createdAt: 'DESC' },
       },
     });
   }
@@ -765,37 +739,16 @@ return {
   async getBaselineByIdForUser(id: string, userId: string) {
     const baseline = await this.baselineRepository.findOne({
       where: { id, userId },
-      relations: ['sections', 'versions'],
+      relations: ['sections'],
       order: {
         sections: {
           order: 'ASC',
-        },
-        versions: {
-          versionNumber: 'DESC',
-          createdAt: 'DESC',
         },
       },
     });
 
     if (!baseline) {
       throw new NotFoundException('Baseline not found');
-    }
-
-    const latestVersion =
-      baseline.versions?.[0] ??
-      (await this.getLatestVersionForBaseline(baseline.id));
-
-    if (latestVersion) {
-      const policies = await this.baselineBlockPolicyRepository.find({
-        where: { baselineVersionId: latestVersion.id },
-        relations: ['baselineSection'],
-        order: { order: 'ASC' },
-      });
-
-      baseline.sections = this.applyPoliciesToSections(
-        baseline.sections ?? [],
-        policies,
-      );
     }
 
     return baseline;

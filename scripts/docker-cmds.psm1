@@ -76,8 +76,11 @@ WARNING:
 #>
 ## Import-Module .\docker-cmds.psm1  
 Function Invoke-BuildBoth {
+    # Smoke verification:
+    # - Builds api + web using current Dockerfile paths from compose.
+    # - Starts containers detached.
     Invoke-SyncEnvFiles
-    docker compose -f infra\docker\docker-compose.local.yml up -d --build api web
+    docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 }
 function Invoke-BuildAll {
     Invoke-SyncEnvFiles
