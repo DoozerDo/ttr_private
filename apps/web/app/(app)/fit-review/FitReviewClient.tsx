@@ -560,15 +560,6 @@ export default function FitReviewClient() {
             <section style={{ ...ttrComponents.basePanel, flex: 0.95, position: "relative" }}>
               <div
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "radial-gradient(circle at 15% 0%, rgba(34,197,94,0.08), transparent 32%), radial-gradient(circle at 90% 16%, rgba(251,191,36,0.06), transparent 30%)",
-                  pointerEvents: "none",
-                }}
-              />
-              <div
-                style={{
                   position: "relative",
                   display: "flex",
                   gap: 20,

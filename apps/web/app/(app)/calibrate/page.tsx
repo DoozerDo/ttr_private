@@ -505,16 +505,6 @@ export default function CalibratePage() {
         <section style={{ ...basePanelStyle, flex: 0.95, overflow: "hidden" }}>
           <div
             style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "radial-gradient(circle at 20% 0%, rgba(251,191,36,0.08), transparent 35%), radial-gradient(circle at 90% 20%, rgba(255,255,255,0.05), transparent 30%)",
-              pointerEvents: "none",
-            }}
-          />
-
-          <div
-            style={{
               position: "relative",
               display: "flex",
               alignItems: "center",

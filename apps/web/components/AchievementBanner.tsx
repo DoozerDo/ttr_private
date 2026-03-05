@@ -34,11 +34,7 @@ export function AchievementBanner({ achievements }: AchievementBannerProps) {
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-white/10 bg-slate-900/30 px-5 py-4 text-left">
-      <div
-        className="absolute left-0 top-0 h-full w-[3px]"
-        style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
-      />
-      <div className="pl-3">
+      <div>
         <div className="relative flex items-center gap-4">
           <div
             className="grid h-14 w-14 place-items-center rounded-2xl border border-white/10 bg-slate-900/60 text-2xl font-semibold text-white"

@@ -9,11 +9,9 @@ import { ComplianceViolationPanel } from "@/components/ComplianceViolationPanel"
 import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
-import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
-import { humanizeConfidenceReason } from "@/lib/confidence";
 import type { Achievement } from "@/types/achievement";
 import {
   formatErrorMessage,
@@ -223,7 +221,7 @@ const DRIVER_COPY: Record<
       action: "Review the process stories in Resume Studio to keep these examples tied to current work.",
     },
     watch: {
-      why: `${PUBLIC_DIMENSION_LABELS.support_operations_and_process_rigor} sits at {percent}, so deeper process detail would raise confidence.`,
+      why: `${PUBLIC_DIMENSION_LABELS.support_operations_and_process_rigor} sits at {percent}, so deeper process detail would strengthen alignment.`,
       action: "Add a process example in Resume Studio and connect the steps in Fit Review.",
     },
     fix: {
@@ -705,15 +703,6 @@ export default function ResultsPage() {
     : isLowScore
       ? lowScoreHeroText
       : heroSupportTextFallback;
-  const confidenceScore =
-    typeof latest?.confidenceScore === "number" ? latest.confidenceScore : null;
-  const confidenceReasons = Array.isArray(latest?.confidenceReasons)
-    ? latest.confidenceReasons.filter(Boolean)
-    : [];
-  const humanizedConfidenceReasons = confidenceReasons.map((reason) =>
-    humanizeConfidenceReason(reason),
-  );
-  const showConfidence = confidenceScore !== null;
   const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
   const dimensionCardClassName = dimensionCardBaseClass;
   const achievementForScore = useMemo<Achievement | null>(() => {
@@ -729,7 +718,6 @@ export default function ResultsPage() {
     };
   }, [executionMode]);
 
-  const jobTrackerHref = "/job-tracker";
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -842,7 +830,10 @@ export default function ResultsPage() {
   ]);
 
   const showScoreDrivers =
-    Boolean(scoringRubric && scoreDrivers.length) && !isExceptionalScore && !isLowScore;
+    Boolean(scoringRubric && scoreDrivers.length) &&
+    !isExceptionalScore &&
+    !isLowScore &&
+    !executionMode;
 
   const renderDriverGrid = (showExtraLine: boolean) => (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -1200,7 +1191,7 @@ export default function ResultsPage() {
           description="Review your score and the reasons behind it and then advance to your personalized document creation."
         />
 
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
           {!latest ? (
             <EmptyState
               title="No analysis yet"
@@ -1218,46 +1209,17 @@ export default function ResultsPage() {
             />
           ) : (
             <div className="space-y-6">
-              <div className="rounded-3xl border border-white/10 bg-slate-900/30 p-6 shadow-inner">
-                <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
-                  <div className="flex justify-center lg:justify-start lg:w-[240px]">
-                    <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} />
-                  </div>
+              <div className="rounded-3xl border border-white/10 bg-slate-900/30 p-6">
+                <div className="flex flex-col gap-6 lg:items-start">
                   <div className="space-y-4 text-center lg:text-left">
                     <p className="text-3xl font-semibold text-white">{heroHeading}</p>
                     <p className="text-xl font-semibold text-white">{heroScoreText}</p>
                     {heroSupportText ? (
                       <p className="text-sm text-slate-300">{heroSupportText}</p>
                     ) : null}
-                    {showConfidence ? (
-                      <div className="space-y-1 text-sm text-slate-300">
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                          Confidence
-                        </p>
-                        <p className="text-sm font-semibold text-slate-200">
-                          Confidence: {confidenceScore}%
-                        </p>
-                        {humanizedConfidenceReasons.length ? (
-                          <details className="text-xs text-slate-400">
-                            <summary className="cursor-pointer text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                              Confidence reasons
-                            </summary>
-                            <ul className="mt-2 space-y-1 text-xs text-slate-300 list-disc pl-5">
-                              {humanizedConfidenceReasons.map((reason) => (
-                                <li key={reason}>{reason}</li>
-                              ))}
-                            </ul>
-                          </details>
-                        ) : null}
-                      </div>
-                    ) : null}
                     {achievementForScore ? (
                       <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-200">
-                        <div
-                          className="absolute left-0 top-0 h-full w-[3px]"
-                          style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
-                        />
-                        <div className="pl-4">
+                        <div>
                           <div className="flex items-start gap-3">
                             <span className="text-2xl text-emerald-200">✓</span>
                             <p className="text-sm text-slate-200">
@@ -1272,7 +1234,7 @@ export default function ResultsPage() {
                         <FormButton onClick={() => void router.push(fitReviewPath)}>
                           Open Fit Review
                         </FormButton>
-                      ) : executionMode ? (
+                      ) : (
                         <FormButton
                           className="ttr-btn-primary"
                           onClick={() => void router.push(studioHref)}
@@ -1280,20 +1242,6 @@ export default function ResultsPage() {
                         >
                           Open Resume &amp; Cover Letter Studio
                         </FormButton>
-                      ) : (
-                        <>
-                          <FormButton onClick={() => void router.push(fitReviewPath)}>
-                            Open Fit Review
-                          </FormButton>
-                          <FormButton
-                            variant="secondary"
-                            className="ttr-btn-primary"
-                            onClick={() => void router.push(studioHref)}
-                            disabled={!canOpenStudio}
-                          >
-                            Open Resume &amp; Cover Letter Studio
-                          </FormButton>
-                        </>
                       )}
                     </div>
                     {isLowScore ? (
@@ -1362,7 +1310,7 @@ export default function ResultsPage() {
 
         {showScoreDrivers ? (
           executionMode ? (
-            <details className="group rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <details className="group rounded-2xl border border-white/10 bg-white/5 p-6">
               <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
                 <span>Score drivers</span>
                 <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Tap to expand</span>
@@ -1370,7 +1318,7 @@ export default function ResultsPage() {
               <div className="mt-4">{renderDriverGrid(false)}</div>
             </details>
           ) : (
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Score drivers</p>
               </div>
@@ -1380,7 +1328,7 @@ export default function ResultsPage() {
         ) : null}
 
         {evaluationNotesAvailable ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                 Evaluation notes
@@ -1412,7 +1360,7 @@ export default function ResultsPage() {
         
 
         {!scoringV2?.rubric ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Experience areas</p>
               <h2 className="text-lg font-semibold text-slate-100">Score breakdown</h2>
@@ -1485,74 +1433,17 @@ export default function ResultsPage() {
               <p className="mt-4 text-sm text-slate-400">Key term details are not available for this run.</p>
             )}
             <p className="mt-3 text-xs text-slate-300">
-              Clarify or expand the baseline evidence in{" "}
-              <Link href={fitReviewPath} className="text-amber-300 underline">
-                Fit Review
-              </Link>{" "}
+              Clarify or expand the baseline evidence{" "}
+              {isLowScore ? (
+                <>
+                  in{" "}
+                  <Link href={fitReviewPath} className="text-amber-300 underline">
+                    Fit Review
+                  </Link>{" "}
+                </>
+              ) : null}
               so the same experience language shows up naturally and the matched terms reflect the story you tell elsewhere.
             </p>
-            </div>
-          </section>
-        ) : null}
-
-        {executionMode ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Next move</p>
-              <h2 className="text-lg font-semibold text-slate-100">Next Move</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Follow these five steps to translate the score into execution.
-              </p>
-            </div>
-            <div className="grid gap-4">
-              <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-sm font-semibold text-slate-100">1. Understand the Score</p>
-              <p className="text-sm text-slate-300">
-                {hasAnalysis
-                  ? "Review the rubric and driver cards above to see how the verdict formed."
-                  : "Load the latest analysis to populate the score and supporting context."}
-              </p>
-            </article>
-            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-sm font-semibold text-slate-100">2. Decide Whether to Apply</p>
-              <p className="text-sm text-slate-300">
-                Use Fit Review to weigh the highlighted gaps and confirm the path forward.
-              </p>
-              <div className="mt-2">
-                <FormButton onClick={() => void router.push(fitReviewPath)}>Open Fit Review</FormButton>
-              </div>
-            </article>
-            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-sm font-semibold text-slate-100">3. Generate or Polish Resume</p>
-              <p className="text-sm text-slate-300">
-                Generate a tailored resume and cover letter from this job and your selected baseline. This does not change the fit score.
-              </p>
-              <div className="mt-2">
-                <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
-                  Open Resume &amp; Cover Letter Studio
-                </FormButton>
-              </div>
-            </article>
-            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-sm font-semibold text-slate-100">4. Apply and Log</p>
-              <p className="text-sm text-slate-300">
-                Capture the opportunity in your tracker so the next steps stay visible.
-              </p>
-              <div className="mt-2">
-                <FormButton onClick={() => void router.push(jobTrackerHref)}>Add to Tracker</FormButton>
-              </div>
-            </article>
-            <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-              <p className="text-sm font-semibold text-slate-100">5. Prepare for Interviews</p>
-              <p className="text-sm text-slate-300">
-                Practice around the highlighted gaps with the Interview Toolkit.
-              </p>
-              <div className="mt-2">
-                <FormButton onClick={() => void router.push(interviewToolkitHref)}>
-                  Open Interview Toolkit
-                </FormButton>
-              </div>
-              </article>
             </div>
           </section>
         ) : null}
@@ -1565,7 +1456,7 @@ export default function ResultsPage() {
 
         {debugMode ? (
           <div className="space-y-6">
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Selection</p>
                 <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
@@ -1614,7 +1505,7 @@ export default function ResultsPage() {
               </div>
             </section>
 
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">

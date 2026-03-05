@@ -24,7 +24,7 @@ export const ttrRadii = {
 
 export const ttrShadows = {
   header: "0 10px 35px rgba(0,0,0,0.3)",
-  panel: "0 15px 45px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)",
+  panel: "inset 0 1px 0 rgba(255,255,255,0.05)",
   panelInset: "inset 0 1px 0 rgba(255,255,255,0.03)",
   button: "0 15px 25px rgba(249,115,22,0.25)",
 };
@@ -32,8 +32,7 @@ export const ttrShadows = {
 export const ttrLayout: Record<string, CSSProperties> = {
   shell: {
     minHeight: "100vh",
-    background:
-      "radial-gradient(circle at 20% 20%, rgba(251,191,36,0.08), transparent 30%), radial-gradient(circle at 80% 0%, rgba(248,113,113,0.08), transparent 30%), linear-gradient(180deg, #0f172a, #0b1220 60%, #0f172a)",
+    background: "#0b1220",
     color: ttrColors.textSecondary,
     padding: "40px 0 64px",
   },
@@ -97,8 +96,7 @@ export const ttrComponents: Record<string, CSSProperties> = {
     padding: "14px 16px",
     borderRadius: ttrRadii.shell,
     border: "1px solid rgba(255,255,255,0.06)",
-    background:
-      "linear-gradient(120deg, rgba(255,255,255,0.02), rgba(251,191,36,0.05))",
+    background: "#0f172a",
     boxShadow: ttrShadows.header,
   },
 
@@ -107,10 +105,8 @@ export const ttrComponents: Record<string, CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: ttrRadii.panel,
     padding: 20,
-    background:
-      "linear-gradient(135deg, rgba(15,23,42,0.85), rgba(30,41,59,0.75))",
+    background: "#0f172a",
     boxShadow: ttrShadows.panel,
-    backdropFilter: "blur(10px)",
     overflow: "visible",
     flex: "1 1 420px",
     minWidth: 320,

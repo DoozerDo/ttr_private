@@ -35,7 +35,7 @@ export function SetupModuleCard({
     <section
       style={mergedStyle}
       className={[
-        "flex flex-col gap-5 rounded-2xl border border-white/10 bg-slate-950/50 shadow-xl shadow-black/80",
+        "flex flex-col gap-5 rounded-2xl border border-white/10 bg-slate-950/50",
         className,
       ]
         .filter(Boolean)

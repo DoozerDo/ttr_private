@@ -235,10 +235,17 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
       <div className="flex min-h-screen flex-1 flex-col">
-        <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 py-8">
+        <main className="flex-1 overflow-y-auto bg-[var(--bg-app)] px-6 pt-10 pb-8">
           <div
-            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-3 pr-24 md:pr-28 relative"
+            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2 pr-24 md:pr-28 relative"
             data-testid="journey-nav"
+            style={{
+              backgroundColor: "var(--bg-app)",
+              backgroundImage: "none",
+              boxShadow: "none",
+              filter: "none",
+              backdropFilter: "none",
+            }}
           >
             <div className="absolute right-0 top-0 z-50">
               <TopNavAccountArea initialEmail={userEmail} />

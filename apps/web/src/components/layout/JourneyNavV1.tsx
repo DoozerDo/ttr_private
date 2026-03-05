@@ -233,8 +233,6 @@ export function JourneyNavV1({
               const stepContent = (
                 <>
                   <span className={iconAreaClass}>
-                    {isActive ? <span className="journey-nav-radar-sweep" aria-hidden /> : null}
-
                     <span className="journey-nav-icon-target" aria-hidden>
                       {renderStepIcon(step.id)}
                     </span>
@@ -292,19 +290,17 @@ export function JourneyNavV1({
 
       <style jsx>{`
         .journey-nav-root {
-          background: var(--surface-secondary, rgba(15, 23, 42, 0.7));
+          background-color: transparent;
           background-image: none;
           border-radius: 1.5rem;
-          border: 1px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
+          border: none;
+          border-bottom: 1px solid var(--border-strong, #2a3342);
           padding: 0;
-          box-shadow: inset 0 1px 0 var(--metal-edge-highlight);
+          box-shadow: none;
+          filter: none;
+          backdrop-filter: none;
           position: relative;
           isolation: isolate;
-        }
-
-        .journey-nav-root::before,
-        .journey-nav-root::after {
-          content: none;
         }
 
         .journey-nav-clip-shell {
@@ -312,18 +308,24 @@ export function JourneyNavV1({
           overflow: hidden;
           isolation: isolate;
           border-radius: inherit;
-          padding: 1.5rem;
-          background: linear-gradient(
-            180deg,
-            var(--surface-secondary, rgba(15, 23, 42, 0.7)) 0%,
-            rgba(3, 5, 9, 0.95) 100%
-          );
+          padding: 1rem;
+          background-color: var(--surface-secondary, #111827);
+          background-image: none;
+          border: 1px solid var(--border-subtle, #1f2632);
+          box-shadow: none;
+          filter: none;
+          backdrop-filter: none;
         }
 
         .journey-nav-inner {
           position: relative;
+          background-color: transparent;
+          background-image: none;
+          box-shadow: none;
+          filter: none;
+          backdrop-filter: none;
           --journey-icon-size: 64px;
-          --journey-padding: 1.5rem;
+          --journey-padding: 1rem;
           --journey-line-y: calc(var(--journey-padding) + var(--journey-icon-size) / 2);
         }
 
@@ -426,8 +428,7 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {
-          box-shadow: 0 12px 30px rgba(2, 5, 12, 0.45),
-            inset 0 0 12px rgba(255, 255, 255, 0.08);
+          box-shadow: none;
         }
 
         .journey-nav-icon-area {
@@ -439,19 +440,11 @@ export function JourneyNavV1({
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: var(--surface-secondary, rgba(15, 23, 42, 0.7));
-          background-image: radial-gradient(
-            circle at 30% 30%,
-            rgba(255, 255, 255, 0.08),
-            rgba(8, 10, 15, 0.96) 65%
-          );
+          background-color: rgba(8, 10, 15, 0.96);
+          background-image: none;
           background-blend-mode: normal;
           border: 2px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-            inset 0 0 0 2px rgba(255, 255, 255, 0.03),
-            inset 0 2px 8px rgba(255, 255, 255, 0.05),
-            inset 0 -6px 18px rgba(0, 0, 0, 0.8),
-            0 9px 28px rgba(0, 0, 0, 0.65);
+          box-shadow: none;
           overflow: visible;
           --journey-nav-target-translate: 0px;
           transform: translateY(var(--journey-nav-target-translate)) scale(1);
@@ -462,71 +455,33 @@ export function JourneyNavV1({
         }
 
         .journey-nav-icon-area::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: 999px;
-          background: var(--surface-secondary, rgba(15, 23, 42, 0.7));
-          pointer-events: none;
-          z-index: 0;
+          content: none;
         }
         .journey-nav-icon-area::after {
-          content: "";
-          position: absolute;
-          inset: 24%;
-          border-radius: 999px;
-          border: 1px solid rgba(255, 255, 255, 0.04);
-          opacity: 0.55;
-          pointer-events: none;
-          z-index: 1;
+          content: none;
         }
 
         .journey-nav-step-active .journey-nav-icon-area {
           border-color: rgba(194, 77, 12, 0.9);
-          box-shadow: inset 0 2px 6px #ffffff14, inset 0 -4px 8px #00000099;
+          box-shadow: none;
           pointer-events: none;
         }
 
         .journey-nav-step-completed .journey-nav-icon-area {
-          box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.9),
-            0 6px 18px rgba(0, 0, 0, 0.5),
-            0 0 12px rgba(194, 77, 12, 0.3);
+          box-shadow: none;
         }
 
         .journey-nav-step-locked .journey-nav-icon-area {
-          background: radial-gradient(
-            circle at 30% 30%,
-            rgba(255, 255, 255, 0.04),
-            rgba(16, 18, 26, 0.9)
-          );
+          background: rgba(16, 18, 26, 0.9);
           border-color: rgba(148, 163, 184, 0.35);
-          box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+          box-shadow: none;
         }
 
-        .journey-nav-radar-sweep {
-          position: absolute;
-          inset: 12%;
-          border-radius: 999px;
-          background: conic-gradient(
-            from 140deg,
-            rgba(194, 77, 12, 0.08),
-            rgba(194, 77, 12, 0.65) 30%,
-            rgba(194, 77, 12, 0.1) 65%,
-            transparent 100%
-          );
-          animation: radar-rotate 6.4s linear infinite;
-          opacity: 0.9;
-          pointer-events: none;
-          z-index: 1;
-        }
-
-        @keyframes radar-rotate {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
+        .journey-nav-step-active,
+        .journey-nav-step-active * {
+          filter: none !important;
+          box-shadow: none !important;
+          text-shadow: none !important;
         }
 
         .journey-nav-icon-target {
