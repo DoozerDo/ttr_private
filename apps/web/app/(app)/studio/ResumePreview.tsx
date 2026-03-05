@@ -147,9 +147,10 @@ function buildPreviewSections(payload: unknown): ResumePreviewSection[] {
     grouped.set(heading, existing);
   }
 
-  return SECTION_ORDER.map((heading) => grouped.get(heading)).filter(
-    (section): section is ResumePreviewSection => Boolean(section) && section.bullets.length > 0,
-  );
+  return SECTION_ORDER
+    .map((heading) => grouped.get(heading))
+    .filter((section): section is ResumePreviewSection => section !== undefined)
+    .filter((section) => section.bullets.length > 0);
 }
 
 type Props = {

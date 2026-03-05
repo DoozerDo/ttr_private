@@ -14,6 +14,21 @@ import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
+import {
+  buildCoverLetterParagraphs,
+  collectNormalizedContextValues,
+  createDocumentState,
+  downloadBlob,
+  extractComplianceWarnings,
+  formatPreview,
+  getFilenameFromContentDisposition,
+  mapApplicationConfidence,
+  normalizeAuditId,
+  readDuplicateCoverLetterId,
+  readTrackerField,
+  trimToString,
+  type ResumeFocusOption,
+} from "@/src/lib/studio/helpers";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { ResumePreview } from "./ResumePreview";
 import { listJobs } from "@/lib/jobsClient";
