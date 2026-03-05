@@ -294,11 +294,12 @@ async function assertValidDocxZip(
     }
     if (options?.expectStyles) {
       expect(documentXml).toContain('<w:b');
-      expect(documentXml).toContain('<w:i');
     }
     if (options?.expectSectionHeaders) {
-      expect(documentXml).toContain('<w:pBdr');
-      expect(documentXml).toContain('<w:bottom');
+      expect(documentXml).toContain('PROFESSIONAL SUMMARY');
+      expect(documentXml).toContain('CORE COMPETENCIES');
+      expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
+      expect(documentXml).toContain('EDUCATION');
     }
     if (options?.expectExperienceHeader) {
       expect(documentXml).toContain('Senior Program Manager');
@@ -309,8 +310,8 @@ async function assertValidDocxZip(
       expect(documentXml).toContain('w:after="120"');
     }
     if (options?.expectBullets) {
-      expect(documentXml).toContain('<w:numId');
-      expect(documentXml).toContain('<w:ilvl');
+      expect(documentXml).toContain('ListBullet');
+      expect(documentXml).toContain('• ');
     }
   }
 }
@@ -413,10 +414,10 @@ describe('ResumeService', () => {
     const zip = await JSZip.loadAsync(exportResult.buffer);
     const documentXml = await zip.file('word/document.xml')!.async('text');
     expect(documentXml.indexOf('John Candidate')).toBeLessThan(
-      documentXml.indexOf('SKILLS'),
+      documentXml.indexOf('CORE COMPETENCIES'),
     );
-    expect(documentXml).toContain('SKILLS');
-    expect(documentXml).toContain('EXPERIENCE');
+    expect(documentXml).toContain('CORE COMPETENCIES');
+    expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
     expect(exportResult.auditId).toBe('audit-1');
     expect(exportResult.baselineVersionHash).toBe('hash-1');
@@ -434,14 +435,14 @@ describe('ResumeService', () => {
     const zip = await JSZip.loadAsync(exportResult.buffer);
     const documentXml = await zip.file('word/document.xml')!.async('text');
 
-    const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
+    const skillMatches = documentXml.match(/CORE COMPETENCIES/g) ?? [];
     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
 
     expect(skillMatches).toHaveLength(1);
     expect(experienceMatches).toHaveLength(1);
     expect(headerMatches).toHaveLength(1);
-    expect(documentXml).toContain('<w:numId');
+    expect(documentXml).toContain('ListBullet');
   });
 
   it('exports PDF content with valid header', async () => {

@@ -522,7 +522,7 @@ export class ResumeService {
       );
       const template = getDocxTemplate<ResumeDocxModel>(
         'resume',
-        'resume_v1',
+        DEFAULT_RESUME_TEMPLATE_KEY,
       );
       const renderContext: DocxRenderContextBase = {
         templateKey: DEFAULT_RESUME_TEMPLATE_KEY,

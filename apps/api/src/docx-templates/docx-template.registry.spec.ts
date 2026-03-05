@@ -6,14 +6,14 @@ import {
 } from './docx-template.registry';
 
 describe('docx template registry file loader', () => {
-  it('registers resume_v1 and loads non-empty template bytes', () => {
-    const template = getDocxTemplate('resume', 'resume_v1');
+  it('registers resume_v2 and loads non-empty template bytes', () => {
+    const template = getDocxTemplate('resume', 'resume_v2');
     expect(template).toBeDefined();
 
-    const templatePath = resolveTemplateFilePath('TTR_Resume_Template_v1.docx');
+    const templatePath = resolveTemplateFilePath('TTR_Resume_Template_v2.docx');
     expect(templatePath).toContain('templates');
 
-    const bytes = loadTemplateFileBytes('TTR_Resume_Template_v1.docx');
+    const bytes = loadTemplateFileBytes('TTR_Resume_Template_v2.docx');
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
 

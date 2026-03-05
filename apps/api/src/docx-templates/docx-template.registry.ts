@@ -4,7 +4,7 @@ import type { DocxTemplateDefinition, DocxTemplateKind, DocxTemplateKey } from '
 
 const templates: Map<DocxTemplateKind, Map<DocxTemplateKey, DocxTemplateDefinition<unknown>>> = new Map();
 
-export const DEFAULT_RESUME_TEMPLATE_KEY = 'resume_v1';
+export const DEFAULT_RESUME_TEMPLATE_KEY = 'resume_v2';
 export const DEFAULT_COVER_LETTER_TEMPLATE_KEY = 'classic_professional_v1';
 
 function normalizeTemplatesDir(value?: string | null): string | null {

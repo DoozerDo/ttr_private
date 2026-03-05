@@ -98,6 +98,33 @@ export interface CoverLetterDocxModel {
   signatureName?: string;
 }
 
+export interface ResumeV2ExperienceItem {
+  title: string;
+  company: string;
+  dates: string;
+  location: string;
+  bullets: string[];
+}
+
+export interface ResumeV2EducationItem {
+  degree: string;
+  school: string;
+  grad_year: string;
+}
+
+export interface ResumeV2TemplateModel {
+  full_name: string;
+  headline: string;
+  location: string;
+  email: string;
+  phone: string;
+  linkedin: string;
+  summary: string;
+  core_competencies: string;
+  experience: ResumeV2ExperienceItem[];
+  education: ResumeV2EducationItem[];
+}
+
 export interface DocxRenderResult {
   buffer: Buffer;
   metadata?: Record<string, unknown>;
