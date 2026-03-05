@@ -43,6 +43,10 @@ import {
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { buildResumeDraftSections } from './resume-draft-bullets';
+import {
+  buildBaselineEvidenceTermInventory,
+  summarizeClaimRisk,
+} from './claim-risk';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -362,9 +366,17 @@ export class ResumeService {
       throw new NotFoundException('Job not found');
     }
 
-    const sections = buildResumeDraftSections(
-      allowedSections,
-      job?.rawDescription ?? null,
+    const claimRiskInventory = buildBaselineEvidenceTermInventory({
+      sections: allowedSections,
+      baselineVersion,
+    });
+
+    const sections = buildResumeDraftSections(allowedSections, {
+      jobText: job?.rawDescription ?? null,
+      claimRiskInventory,
+    });
+    const claimRiskSummary = summarizeClaimRisk(
+      sections.flatMap((section) => section.bullets.map((bullet) => bullet.claimRisk)),
     );
 
     const normalizedBaselineSections =
@@ -462,6 +474,7 @@ export class ResumeService {
       trackerEntryId: trackerEntry.id,
       trackerStatus: trackerEntry.status,
       opportunityId: opportunity?.id ?? null,
+      claimRiskSummary,
     };
   }
 

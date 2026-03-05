@@ -56,7 +56,7 @@ describe('resume draft bullets', () => {
           content: 'Led support transformation with measurable outcomes.',
         } as never,
       ],
-      'support transformation outcomes',
+      { jobText: 'support transformation outcomes' },
     );
 
     expect(draftSections).toHaveLength(1);
@@ -70,4 +70,3 @@ describe('resume draft bullets', () => {
     expect(draftSections[0].bullets[0].confidence).toBeTruthy();
   });
 });
-

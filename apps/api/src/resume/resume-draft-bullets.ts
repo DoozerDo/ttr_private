@@ -1,4 +1,9 @@
 import { BaselineIncludePolicy, BaselineSection } from '../baseline/baseline-section.entity';
+import {
+  BaselineEvidenceTermInventory,
+  ClaimRiskResult,
+  detectClaimRiskForBullet,
+} from './claim-risk';
 
 export type ResumeDraftBulletConfidence = 'High' | 'Medium' | 'Low';
 
@@ -15,6 +20,7 @@ export interface ResumeDraftBullet {
   source: ResumeDraftBulletSource;
   confidence: ResumeDraftBulletConfidence;
   keywordOverlapCount?: number;
+  claimRisk: ClaimRiskResult;
 }
 
 export interface ResumeDraftSection {
@@ -160,11 +166,19 @@ export function splitSectionContentToBulletTexts(
 
 export function buildDraftBulletsForSection(
   section: Pick<BaselineSection, 'id' | 'sectionType' | 'order' | 'content'>,
-  keywords?: Set<string>,
+  options?: {
+    keywords?: Set<string>;
+    claimRiskInventory?: BaselineEvidenceTermInventory;
+  },
 ): ResumeDraftBullet[] {
   const parsed = splitSectionContentToBulletTexts(section.content);
   const withScores = parsed.map((entry, index) => {
-    const overlap = keywords ? countKeywordOverlap(entry.text, keywords) : 0;
+    const overlap = options?.keywords
+      ? countKeywordOverlap(entry.text, options.keywords)
+      : 0;
+    const claimRisk = options?.claimRiskInventory
+      ? detectClaimRiskForBullet(entry.text, options.claimRiskInventory)
+      : { level: 'None', flaggedTerms: [] };
     return {
       id: `${section.id}:${entry.sourceIndex}`,
       text: entry.text,
@@ -176,6 +190,7 @@ export function buildDraftBulletsForSection(
       },
       confidence: inferBulletConfidence(entry.text),
       keywordOverlapCount: overlap,
+      claimRisk,
       _stableIndex: index,
     };
   });
@@ -192,13 +207,19 @@ export function buildDraftBulletsForSection(
 
 export function buildResumeDraftSections(
   sections: BaselineSection[],
-  jobText?: string | null,
+  options?: {
+    jobText?: string | null;
+    claimRiskInventory?: BaselineEvidenceTermInventory;
+  },
 ): ResumeDraftSection[] {
-  const keywords = extractJobKeywords(jobText);
+  const keywords = extractJobKeywords(options?.jobText);
   const keywordSet = keywords.length ? new Set(keywords) : undefined;
 
   return sections.map((section) => {
-    const bullets = buildDraftBulletsForSection(section, keywordSet);
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: keywordSet,
+      claimRiskInventory: options?.claimRiskInventory,
+    });
     return {
       id: section.id,
       type: section.sectionType,

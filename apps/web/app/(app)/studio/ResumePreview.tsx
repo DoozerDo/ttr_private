@@ -14,6 +14,15 @@ type ResumeDraftBullet = {
   text?: string;
   confidence?: "High" | "Medium" | "Low";
   source?: ResumeDraftBulletSource;
+  claimRisk?: {
+    level?: "None" | "Low" | "Medium" | "High";
+    flaggedTerms?: Array<{
+      term?: string;
+      normalized?: string;
+      reason?: string;
+      evidenceFound?: boolean;
+    }>;
+  };
 };
 
 type ResumeSection = {
@@ -32,7 +41,15 @@ type ResumePreviewSection = {
     text: string;
     confidence?: string;
     source?: ResumeDraftBulletSource;
+    claimRiskLevel: "None" | "Low" | "Medium" | "High";
+    claimRiskTerms: Array<{ term: string; reason?: string }>;
   }>;
+};
+
+type ClaimRiskSummary = {
+  high: number;
+  medium: number;
+  low: number;
 };
 
 const SECTION_ORDER: Array<ResumePreviewSection["heading"]> = [
@@ -121,11 +138,30 @@ function buildPreviewSections(payload: unknown): ResumePreviewSection[] {
         const text = trimText(bullet.text);
         if (!text) return null;
         const bulletId = trimText(bullet.id) ?? `${existing.id}-${section.id ?? "section"}-${index}`;
+        const claimRiskLevel: "None" | "Low" | "Medium" | "High" =
+          bullet.claimRisk?.level === "High" ||
+          bullet.claimRisk?.level === "Medium" ||
+          bullet.claimRisk?.level === "Low"
+            ? bullet.claimRisk.level
+            : "None";
         return {
           id: bulletId,
           text,
           confidence: trimText(bullet.confidence),
           source: bullet.source,
+          claimRiskLevel,
+          claimRiskTerms: Array.isArray(bullet.claimRisk?.flaggedTerms)
+            ? bullet.claimRisk!.flaggedTerms
+                .map((term) => {
+                  const value = trimText(term.term);
+                  if (!value) return null;
+                  return {
+                    term: value,
+                    reason: trimText(term.reason),
+                  };
+                })
+                .filter((term): term is NonNullable<typeof term> => Boolean(term))
+            : [],
         };
       })
       .filter((bullet): bullet is NonNullable<typeof bullet> => Boolean(bullet));
@@ -140,6 +176,8 @@ function buildPreviewSections(payload: unknown): ResumePreviewSection[] {
           text,
           confidence: undefined,
           source: undefined,
+          claimRiskLevel: "None",
+          claimRiskTerms: [],
         });
       });
     }
@@ -153,6 +191,30 @@ function buildPreviewSections(payload: unknown): ResumePreviewSection[] {
     .filter((section) => section.bullets.length > 0);
 }
 
+function readClaimRiskSummary(payload: unknown, sections: ResumePreviewSection[]): ClaimRiskSummary {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const summary = record.claimRiskSummary;
+    if (summary && typeof summary === "object") {
+      const summaryRecord = summary as Record<string, unknown>;
+      const high = typeof summaryRecord.high === "number" ? summaryRecord.high : 0;
+      const medium = typeof summaryRecord.medium === "number" ? summaryRecord.medium : 0;
+      const low = typeof summaryRecord.low === "number" ? summaryRecord.low : 0;
+      return { high, medium, low };
+    }
+  }
+
+  const derived: ClaimRiskSummary = { high: 0, medium: 0, low: 0 };
+  for (const section of sections) {
+    for (const bullet of section.bullets) {
+      if (bullet.claimRiskLevel === "High") derived.high += 1;
+      if (bullet.claimRiskLevel === "Medium") derived.medium += 1;
+      if (bullet.claimRiskLevel === "Low") derived.low += 1;
+    }
+  }
+  return derived;
+}
+
 type Props = {
   payload: unknown;
   fallbackText?: string;
@@ -160,6 +222,10 @@ type Props = {
 
 export function ResumePreview({ payload, fallbackText }: Props) {
   const sections = useMemo(() => buildPreviewSections(payload), [payload]);
+  const claimRiskSummary = useMemo(
+    () => readClaimRiskSummary(payload, sections),
+    [payload, sections],
+  );
   const [showEvidenceByDefault, setShowEvidenceByDefault] = useState(false);
   const [expandedEvidence, setExpandedEvidence] = useState<Set<string>>(new Set());
 
@@ -184,6 +250,13 @@ export function ResumePreview({ payload, fallbackText }: Props) {
         Show evidence by default
       </label>
 
+      {claimRiskSummary.high || claimRiskSummary.medium || claimRiskSummary.low ? (
+        <p className="text-xs text-amber-200">
+          Claim risks detected: {claimRiskSummary.high} high, {claimRiskSummary.medium} medium,{" "}
+          {claimRiskSummary.low} low.
+        </p>
+      ) : null}
+
       {sections.map((section) => (
         <article key={section.id} className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">
@@ -194,7 +267,14 @@ export function ResumePreview({ payload, fallbackText }: Props) {
               const isExpanded = showEvidenceByDefault || expandedEvidence.has(bullet.id);
               return (
                 <li key={bullet.id} className="space-y-2">
-                  <p>{bullet.text}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p>{bullet.text}</p>
+                    {bullet.claimRiskLevel !== "None" ? (
+                      <span className="rounded-full border border-amber-300/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+                        Claim risk: {bullet.claimRiskLevel}
+                      </span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     className="text-xs font-medium text-slate-300 underline underline-offset-2"
@@ -207,7 +287,7 @@ export function ResumePreview({ payload, fallbackText }: Props) {
                       })
                     }
                   >
-                    {isExpanded ? "Hide evidence" : "Show evidence"}
+                    {isExpanded ? "Hide details" : "Show details"}
                   </button>
                   {isExpanded ? (
                     <div className="rounded-lg border border-white/10 bg-slate-900/30 px-2 py-1 text-xs text-slate-300">
@@ -220,6 +300,27 @@ export function ResumePreview({ payload, fallbackText }: Props) {
                           : "Unknown"}
                       </p>
                       <p>Confidence: {bullet.confidence ?? "Unknown"}</p>
+                      {bullet.claimRiskLevel !== "None" ? (
+                        <div className="mt-2 space-y-1">
+                          <p className="font-semibold text-amber-200">
+                            Claim risk level: {bullet.claimRiskLevel}
+                          </p>
+                          <p>
+                            This term does not appear in your baseline. Remove it or replace it
+                            with language grounded in your verified experience.
+                          </p>
+                          {bullet.claimRiskTerms.length ? (
+                            <ul className="list-disc pl-4">
+                              {bullet.claimRiskTerms.map((term, index) => (
+                                <li key={`${term.term}-${index}`}>
+                                  {term.term}
+                                  {term.reason ? `: ${term.reason}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>

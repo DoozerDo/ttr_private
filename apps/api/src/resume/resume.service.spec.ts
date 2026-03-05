@@ -416,6 +416,7 @@ describe('ResumeService', () => {
     expect(documentXml.indexOf('John Candidate')).toBeLessThan(
       documentXml.indexOf('CORE COMPETENCIES'),
     );
+    expect(documentXml).not.toContain('Claim risk');
     expect(documentXml).toContain('CORE COMPETENCIES');
     expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
@@ -454,6 +455,7 @@ describe('ResumeService', () => {
     expect(exportResult.buffer.byteLength).toBeGreaterThan(10);
     expect(exportResult.buffer.slice(0, 4).toString('ascii')).toBe('%PDF');
     const pdfText = exportResult.buffer.toString('utf8');
+    expect(pdfText).not.toContain('Claim risk');
     expect(pdfText).toContain('T*');
     expect(pdfText).not.toContain('startxref\n0');
   });
