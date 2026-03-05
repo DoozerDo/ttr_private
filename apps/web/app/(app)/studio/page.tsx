@@ -185,6 +185,19 @@ type ResumeSection = {
   content?: string;
 };
 
+type ResumeFocusOption =
+  | "Auto (recommended)"
+  | "Operational Leadership"
+  | "Technical Depth"
+  | "Customer Experience Strategy"
+  | "Scaling Operations";
+
+type ResumeEvidenceSource = {
+  role: string;
+  organization: string;
+  confidence: "High" | "Medium" | "Low";
+};
+
 function createDocumentState(): DocumentState {
   return {
     response: null,
@@ -433,7 +446,92 @@ function formatBulletLine(line: string): string {
   return trimmed.replace(/^[-•]+\s*/, "").trim() || trimmed;
 }
 
-function renderSectionContent(content?: string): ReactNode | null {
+function getEvidenceConfidence(score: number | null): "High" | "Medium" | "Low" {
+  if (score === null) return "Medium";
+  if (score >= 80) return "High";
+  if (score >= 60) return "Medium";
+  return "Low";
+}
+
+function mapApplicationConfidence(score: number | null): "Very High" | "High" | "Moderate" | "Low" {
+  if (score === null) return "Moderate";
+  if (score >= 85) return "Very High";
+  if (score >= 70) return "High";
+  if (score >= 55) return "Moderate";
+  return "Low";
+}
+
+function extractRoleAndOrganizationFromLine(line: string): {
+  role?: string;
+  organization?: string;
+} {
+  const text = line.trim().replace(/^[-•]+\s*/, "");
+  if (!text) return {};
+
+  const atMatch = text.match(/^(.+?)\s+(?:at|@)\s+(.+)$/i);
+  if (atMatch?.[1] && atMatch?.[2]) {
+    return {
+      role: atMatch[1].trim(),
+      organization: atMatch[2].trim(),
+    };
+  }
+
+  const dashMatch = text.match(/^(.+?)\s*[-|]\s*(.+)$/);
+  if (dashMatch?.[1] && dashMatch?.[2]) {
+    return {
+      role: dashMatch[1].trim(),
+      organization: dashMatch[2].trim(),
+    };
+  }
+
+  return {};
+}
+
+function inferBaselineEvidenceSource(
+  baseline: BaselineDto | undefined,
+  fallbackRole: string | undefined,
+  fallbackOrganization: string | undefined,
+  score: number | null,
+): ResumeEvidenceSource {
+  let role = trimToString(fallbackRole) ?? "Verified baseline role";
+  let organization = trimToString(fallbackOrganization) ?? "Verified baseline organization";
+  const roleFromFallback = role;
+  const orgFromFallback = organization;
+
+  const sections = baseline?.sections;
+  if (Array.isArray(sections) && sections.length) {
+    const ordered = [...sections].sort((a, b) => a.order - b.order);
+    for (const section of ordered) {
+      const lines = splitSectionLines(section.content ?? "");
+      for (const line of lines) {
+        const parsed = extractRoleAndOrganizationFromLine(line);
+        if (parsed.role && role === roleFromFallback) {
+          role = parsed.role;
+        }
+        if (parsed.organization && organization === orgFromFallback) {
+          organization = parsed.organization;
+        }
+        if (role !== roleFromFallback && organization !== orgFromFallback) {
+          break;
+        }
+      }
+      if (role !== roleFromFallback && organization !== orgFromFallback) {
+        break;
+      }
+    }
+  }
+
+  return {
+    role,
+    organization,
+    confidence: getEvidenceConfidence(score),
+  };
+}
+
+function renderSectionContent(
+  content: string | undefined,
+  evidenceSource: ResumeEvidenceSource,
+): ReactNode | null {
   if (!content) return null;
   const lines = splitSectionLines(content);
   if (!lines.length) return null;
@@ -443,7 +541,17 @@ function renderSectionContent(content?: string): ReactNode | null {
     return (
       <ul className="space-y-1 pl-4 text-sm leading-relaxed text-slate-200">
         {bulletLines.map((line, index) => (
-          <li key={`${line}-${index}`}>{formatBulletLine(line)}</li>
+          <li key={`${line}-${index}`} className="space-y-2">
+            <p>{formatBulletLine(line)}</p>
+            <details className="rounded-lg border border-white/10 bg-slate-900/30 px-2 py-1 text-xs text-slate-300">
+              <summary className="cursor-pointer font-semibold text-slate-200">
+                Evidence Source
+              </summary>
+              <p>Role: {evidenceSource.role}</p>
+              <p>Organization: {evidenceSource.organization}</p>
+              <p>Confidence: {evidenceSource.confidence}</p>
+            </details>
+          </li>
         ))}
       </ul>
     );
@@ -498,7 +606,10 @@ function resolveResumeSectionHeading(section: ResumeSection) {
   return resumeSectionHeadingByType[typeKey] ?? typeKey;
 }
 
-function buildResumePreview(payload: unknown): ReactNode | null {
+function buildResumePreview(
+  payload: unknown,
+  evidenceSource: ResumeEvidenceSource,
+): ReactNode | null {
   const sections = extractResumeSections(payload);
   if (!sections || !sections.length) return null;
   const normalizedSections = sections
@@ -512,7 +623,7 @@ function buildResumePreview(payload: unknown): ReactNode | null {
   return (
     <div className="space-y-6">
       {normalizedSections.map((section, index) => {
-        const content = renderSectionContent(section.content);
+        const content = renderSectionContent(section.content, evidenceSource);
         if (!content && !section.title) return null;
         const heading = resolveResumeSectionHeading(section);
         const key = section.id ?? heading ?? `resume-section-${index}`;
@@ -570,7 +681,7 @@ export default function StudioPage() {
   }, [versionTouched]);
 
   const [versions, setVersions] = useState<BaselineVersionDto[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [, setVersionsLoading] = useState(false);
   const [versionsError, setVersionsError] = useState<string | null>(null);
 
   const [analysis, setAnalysis] = useState<LatestAnalysis | null>(null);
@@ -583,6 +694,7 @@ export default function StudioPage() {
     useState<"docx" | "pdf" | null>(null);
   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
   const [resumeAuditId, setResumeAuditId] = useState<string | undefined>();
+  const [resumeFocus, setResumeFocus] = useState<ResumeFocusOption>("Auto (recommended)");
 
   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
   const [coverGenerating, setCoverGenerating] = useState(false);
@@ -617,14 +729,15 @@ export default function StudioPage() {
     () => jobs.find((job) => job.id === selectedJobId),
     [jobs, selectedJobId],
   );
+  const selectedBaseline = useMemo(
+    () => baselines.find((baseline) => baseline.id === selectedBaselineId),
+    [baselines, selectedBaselineId],
+  );
 
   const selectedVersion = useMemo(
     () => versions.find((version) => version.id === selectedBaselineVersionId),
     [versions, selectedBaselineVersionId],
   );
-  const selectedVersionLabel = selectedVersion?.versionNumber
-    ? `Version ${selectedVersion.versionNumber}`
-    : "";
 
   useEffect(() => {
     setCoverLetterComplianceBlocked(null);
@@ -684,10 +797,14 @@ export default function StudioPage() {
     }
     return null;
   }, [analysis]);
+  const applicationConfidence = useMemo(
+    () => mapApplicationConfidence(analysisScore),
+    [analysisScore],
+  );
 
   const generationMessage = useMemo(() => {
     if (!selectedBaselineVersionId) {
-      return "Select a baseline version before generating documents.";
+      return "Select a baseline that is ready before generating documents.";
     }
     if (analysisScore === null) {
       return "Run the compatibility check before generating a resume or cover letter.";
@@ -699,18 +816,110 @@ export default function StudioPage() {
     Boolean(selectedJobId && selectedBaselineId && selectedBaselineVersionId) &&
     analysisScore !== null;
 
+  const hasResumeArtifact = Boolean(resumeState.response);
   const canExportDocuments = readyForDocuments && isPro;
+  const canExportResume = canExportDocuments && hasResumeArtifact;
+  const baselineEvidenceSource = useMemo(
+    () =>
+      inferBaselineEvidenceSource(
+        selectedBaseline,
+        selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? undefined,
+        selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? undefined,
+        analysisScore,
+      ),
+    [
+      analysis?.company,
+      analysis?.companyName,
+      analysis?.jobTitle,
+      analysis?.title,
+      analysisScore,
+      selectedBaseline,
+      selectedJob?.company,
+      selectedJob?.title,
+    ],
+  );
 
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
   const resumeStructuredPreview = useMemo(
-    () => buildResumePreview(resumeState.response),
-    [resumeState.response],
+    () => buildResumePreview(resumeState.response, baselineEvidenceSource),
+    [baselineEvidenceSource, resumeState.response],
   );
   const coverLetterParagraphs = useMemo(
     () => buildCoverLetterParagraphs(coverState.response),
     [coverState.response],
   );
   const hasCoverLetterArtifact = Boolean(coverState.response);
+  const positioningNarrative = useMemo(() => {
+    if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
+      return analysis.summary.trim();
+    }
+    return "Operational leadership in support organizations with verified cross-functional execution.";
+  }, [analysis?.summary]);
+  const positioningBullets = useMemo(() => {
+    return [
+      "leadership scope",
+      "incident management programs",
+      "operational scaling",
+    ];
+  }, []);
+  const keywordCoverageRows = useMemo(() => {
+    if (!analysis || typeof analysis !== "object") return [];
+    const record = analysis as Record<string, unknown>;
+    const matched = Array.isArray(record.matchedTerms)
+      ? record.matchedTerms.filter((item): item is string => typeof item === "string")
+      : [];
+    const missing = Array.isArray(record.missingTerms)
+      ? record.missingTerms.filter((item): item is string => typeof item === "string")
+      : [];
+    const rows: Array<{ term: string; status: "covered" | "partial" | "missing" }> = [];
+    for (const term of matched.slice(0, 4)) {
+      rows.push({ term, status: "covered" });
+    }
+    for (const term of missing.slice(0, 4)) {
+      rows.push({ term, status: "missing" });
+    }
+    if (!rows.length) {
+      rows.push(
+        { term: "Operational leadership", status: analysisScore !== null && analysisScore >= 80 ? "covered" : "partial" },
+        { term: "Incident management", status: analysisScore !== null && analysisScore >= 70 ? "covered" : "partial" },
+        { term: "Cross-functional coordination", status: "covered" },
+      );
+    }
+    return rows.slice(0, 6);
+  }, [analysis, analysisScore]);
+  const resumeStrengthMetrics = useMemo(() => {
+    const score = analysisScore ?? 0;
+    return [
+      {
+        label: "Experience Alignment",
+        value: score >= 85 ? "Strong" : score >= 70 ? "Moderate" : "Needs work",
+      },
+      {
+        label: "Keyword Coverage",
+        value: keywordCoverageRows.some((row) => row.status === "missing") ? "Partial" : "Strong",
+      },
+      {
+        label: "Leadership Signals",
+        value: score >= 75 ? "Strong" : "Moderate",
+      },
+      {
+        label: "Technical Depth",
+        value: score >= 70 ? "Moderate" : "Needs work",
+      },
+    ];
+  }, [analysisScore, keywordCoverageRows]);
+  const readinessChecks = useMemo(
+    () => ({
+      resumeAligned: Boolean(resumeState.response),
+      coverLetterGenerated: Boolean(coverState.response),
+      fitScoreAboveThreshold: typeof analysisScore === "number" && analysisScore >= 70,
+    }),
+    [analysisScore, coverState.response, resumeState.response],
+  );
+  const applicationReadinessStatus =
+    readinessChecks.resumeAligned &&
+    readinessChecks.coverLetterGenerated &&
+    readinessChecks.fitScoreAboveThreshold;
   const hasComplianceBlockedDetails = Boolean(
     coverLetterComplianceBlocked &&
       (coverLetterComplianceBlocked.flags.some((flag) => Boolean(flag.message)) ||
@@ -728,6 +937,19 @@ export default function StudioPage() {
     };
     if (coverLetterJobContext) {
       payload.jobContext = coverLetterJobContext;
+    }
+    return payload;
+  }
+
+  function buildResumePayload(oneTap: boolean) {
+    const payload: Record<string, unknown> = {
+      jobId: selectedJobId,
+      baselineId: selectedBaselineId,
+      baselineVersionId: selectedBaselineVersionId,
+      oneTap,
+    };
+    if (resumeFocus !== "Auto (recommended)") {
+      payload.resumeFocus = resumeFocus;
     }
     return payload;
   }
@@ -820,7 +1042,7 @@ export default function StudioPage() {
         const payload = await readResponsePayload(response);
         if (canceled) return;
         if (!response.ok || !Array.isArray(payload)) {
-          const message = formatErrorMessage(payload, "Baseline versions could not be loaded.");
+          const message = formatErrorMessage(payload, "Baseline snapshot could not be loaded.");
           setVersionsError(message);
           setVersions([]);
           setSelectedBaselineVersionId("");
@@ -850,7 +1072,7 @@ export default function StudioPage() {
       } catch (error) {
         if (canceled) return;
         const message =
-          error instanceof Error ? error.message : "Baseline versions could not be loaded.";
+          error instanceof Error ? error.message : "Baseline snapshot could not be loaded.";
         setVersionsError(message);
         setVersions([]);
         setSelectedBaselineVersionId("");
@@ -934,12 +1156,7 @@ export default function StudioPage() {
     setResumeState(createDocumentState());
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
-    const payload = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
-      oneTap: false,
-    };
+    const payload = buildResumePayload(false);
     try {
       const response = await fetch("/api/resume", {
         method: "POST",
@@ -981,16 +1198,16 @@ export default function StudioPage() {
       }));
       return;
     }
+    if (!hasResumeArtifact) {
+      setResumeState((current) => ({
+        ...current,
+        error: "Generate Resume before downloading.",
+      }));
+      return;
+    }
     setResumeExportFormat(format);
-    setResumeState(createDocumentState());
-    setResumeWarningFlags([]);
-    setResumeAuditId(undefined);
-    const payload = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
-      oneTap: true,
-    };
+    setResumeState((current) => ({ ...current, error: null, tierGateError: null }));
+    const payload = buildResumePayload(true);
     try {
       const response = await fetch(`/api/resume/export?format=${encodeURIComponent(format)}`, {
         method: "POST",
@@ -1186,6 +1403,11 @@ export default function StudioPage() {
           {analysisError}
         </Alert>
       ) : null}
+      {versionsError ? (
+        <Alert intent="error" title="Baseline snapshot unavailable">
+          {versionsError}
+        </Alert>
+      ) : null}
 
       <section className="space-y-6 rounded-2xl border border-white/10 bg-slate-900/40 p-6">
         <div className="space-y-3">
@@ -1241,64 +1463,80 @@ export default function StudioPage() {
             </label>
           )}
 
-          {selectedBaselineId ? (
-            <label className="flex flex-col gap-2 text-sm text-slate-400">
-              Baseline version
-              <select
-                className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-                value={selectedBaselineVersionId}
-                onChange={(event) => {
-                  pendingVersionSelectionRef.current = null;
-                  setSelectedBaselineVersionId(event.target.value);
-                  setVersionTouched(true);
-                }}
-                disabled={versionsLoading}
-              >
-                {versions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    {version.versionNumber ? `Version ${version.versionNumber}` : version.id}
-                    {version.fileHash ? ` (${version.fileHash.slice(0, 8)})` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {versionsError ? (
-            <Alert intent="error" title="Versions unavailable">
-              {versionsError}
-            </Alert>
-          ) : null}
-          {selectedBaselineId && !versionsLoading && versions.length === 0 ? (
-            <Alert intent="warning" title="No baseline versions">
-              Upload a baseline version for this baseline before generating documents.
-            </Alert>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-200">
-            <span>
-              Fit Score:{" "}
-              <span className="font-semibold text-white">
-                {analysisLoading
-                  ? "Loading..."
-                  : analysisScore !== null
-                  ? analysisScore.toFixed(1)
-                  : "n/a"}
-              </span>
-            </span>
-            <span className="text-slate-400">|</span>
-            <span>
-              Status: <span className="font-semibold text-emerald-300">Ready to apply</span>
-            </span>
-          </div>
         </div>
       </section>
+
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Targeting Context
+        </h2>
+        <p className="text-sm text-slate-300">
+          Role: <span className="font-semibold text-slate-100">{selectedJob?.title ?? "Not selected"}</span>
+        </p>
+        <p className="text-sm text-slate-300">
+          Baseline:{" "}
+          <span className="font-semibold text-slate-100">
+            {selectedBaseline?.originalFilename ||
+              (selectedBaseline ? `Baseline ${selectedBaseline.version}` : "Not selected")}
+          </span>
+        </p>
+        <p className="text-sm text-slate-300">
+          Fit Score:{" "}
+          <span className="font-semibold text-slate-100">
+            {analysisLoading
+              ? "Loading..."
+              : analysisScore !== null
+              ? analysisScore.toFixed(1)
+              : "n/a"}
+          </span>{" "}
+          •{" "}
+          <span className="font-semibold text-emerald-300">
+            Confidence: {applicationConfidence}
+          </span>
+        </p>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Role Positioning Guidance
+        </h2>
+        <p className="text-sm text-slate-300">For this role your strongest narrative is:</p>
+        <p className="text-sm font-semibold text-slate-100">{positioningNarrative}</p>
+        <p className="text-sm text-slate-300">Your resume should emphasize:</p>
+        <ul className="space-y-1 text-sm text-slate-200">
+          {positioningBullets.map((bullet) => (
+            <li key={`positioning-${bullet}`}>• {bullet}</li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <label className="flex flex-col gap-2 text-sm text-slate-400">
+          Resume Focus
+          <select
+            className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
+            value={resumeFocus}
+            onChange={(event) => setResumeFocus(event.target.value as ResumeFocusOption)}
+          >
+            <option value="Auto (recommended)">Auto (recommended)</option>
+            <option value="Operational Leadership">Operational Leadership</option>
+            <option value="Technical Depth">Technical Depth</option>
+            <option value="Customer Experience Strategy">Customer Experience Strategy</option>
+            <option value="Scaling Operations">Scaling Operations</option>
+          </select>
+        </label>
+      </section>
+
+      <p className="text-xs text-slate-400">
+        Documents generated from your verified baseline and job analysis.
+      </p>
 
       <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-sm text-slate-300">
-              Generate a tailored resume from your selected job, baseline, and fit context.
+              Generate a targeted resume based on your selected role, baseline, and job analysis.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1308,14 +1546,14 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={!canExportDocuments || resumeExportFormat === "docx"}
+              disabled={!canExportResume || resumeExportFormat === "docx"}
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("pdf")}
-              disabled={!canExportDocuments || resumeExportFormat === "pdf"}
+              disabled={!canExportResume || resumeExportFormat === "pdf"}
             >
               {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1384,6 +1622,40 @@ export default function StudioPage() {
                 </div>
               </div>
             ) : null}
+
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">
+                Resume Strength vs Job
+              </h3>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {resumeStrengthMetrics.map((metric) => (
+                  <div key={`resume-strength-${metric.label}`} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2">
+                    <p className="text-xs text-slate-400">{metric.label}</p>
+                    <p className="text-sm font-semibold text-slate-100">{metric.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-300">
+                Keyword Coverage Map
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                {keywordCoverageRows.map((row) => (
+                  <li key={`keyword-coverage-${row.term}`} className="flex items-center gap-2">
+                    <span>
+                      {row.status === "covered"
+                        ? "✔ Covered"
+                        : row.status === "partial"
+                        ? "⚠ Partial"
+                        : "✖ Missing"}
+                    </span>
+                    <span className="text-slate-300">{row.term}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         ) : (
           <EmptyState title="No resume generated yet" body="Generate Resume to preview it." />
@@ -1393,9 +1665,9 @@ export default function StudioPage() {
       <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Cover Letter</h2>
             <p className="text-sm text-slate-300">
-              Generate a tailored cover letter for this job and baseline pair.
+              Generate a targeted cover letter aligned with the role and your verified experience.
             </p>
           </div>
           <FormButton onClick={handleCoverDraft} disabled={!readyForDocuments || coverGenerating}>
@@ -1555,16 +1827,29 @@ export default function StudioPage() {
         ) : null}
       </section>
 
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Application Readiness
+        </h2>
+        <div className="space-y-1 text-sm text-slate-200">
+          <p>{readinessChecks.resumeAligned ? "✔" : "✖"} Resume aligned</p>
+          <p>{readinessChecks.coverLetterGenerated ? "✔" : "✖"} Cover letter generated</p>
+          <p>{readinessChecks.fitScoreAboveThreshold ? "✔" : "✖"} Fit Score above threshold</p>
+        </div>
+        <p className="text-sm font-semibold text-slate-100">
+          Status: {applicationReadinessStatus ? "Ready to Apply" : "In Progress"}
+        </p>
+      </section>
+
       {selectedBaselineId && selectedBaselineVersionId ? (
         <details className="space-y-4">
           <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold uppercase tracking-[0.3em] text-slate-200 shadow-sm">
-            Advanced Controls
+            Advanced Resume Controls
           </summary>
           <BaselineBlockPolicyPanel
             baselineId={selectedBaselineId}
             baselineVersionId={selectedBaselineVersionId}
             baselineVersionHash={selectedVersion?.fileHash ?? null}
-            baselineVersionLabel={selectedVersionLabel}
             refreshSignal={versionRefreshSignal}
             onVersionAdvance={handleBlockPolicyVersionAdvance}
             onPoliciesSaved={refreshBlockPolicyList}
@@ -1574,3 +1859,4 @@ export default function StudioPage() {
     </PageShell>
   );
 }
+

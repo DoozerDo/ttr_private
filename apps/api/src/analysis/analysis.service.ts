@@ -274,6 +274,23 @@ type FitScoreResponse = {
   status?: 'ok' | 'compliance_blocked' | 'error';
 };
 
+type ScoreBreakdownDimension = {
+  key:
+    | 'role_scope_and_seniority'
+    | 'support_operations_and_process_rigor'
+    | 'tooling_and_platform_experience'
+    | 'domain_and_business_context'
+    | 'change_leadership_and_customer_advocacy';
+  label: string;
+  score: number;
+  weight: number;
+};
+
+type ScoreBreakdown = {
+  total_score: number;
+  dimensions: ScoreBreakdownDimension[];
+};
+
 type RunFitAssessmentOkResponse = FitScoreResponse & {
   status: 'ok';
 };
@@ -389,6 +406,91 @@ export class AnalysisService {
 
   private clampPercent(value: number) {
     return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private readonly scoreBreakdownMeta: Array<{
+    key: ScoreBreakdownDimension['key'];
+    label: ScoreBreakdownDimension['label'];
+    weight: number;
+  }> = [
+    {
+      key: 'role_scope_and_seniority',
+      label: 'Role Scope and Seniority',
+      weight: 25,
+    },
+    {
+      key: 'support_operations_and_process_rigor',
+      label: 'Support Operations and Process Rigor',
+      weight: 25,
+    },
+    {
+      key: 'tooling_and_platform_experience',
+      label: 'Tooling and Platform Experience',
+      weight: 20,
+    },
+    {
+      key: 'domain_and_business_context',
+      label: 'Domain and Business Context',
+      weight: 15,
+    },
+    {
+      key: 'change_leadership_and_customer_advocacy',
+      label: 'Change Leadership and Customer Advocacy',
+      weight: 15,
+    },
+  ];
+
+  private roundToTenth(value: number) {
+    return Math.round(value * 10) / 10;
+  }
+
+  private buildScoreBreakdown(assessment: FitAssessment): ScoreBreakdown {
+    const dimensionPoints = assessment.scoringV2?.rubric?.dimensionPoints;
+    if (dimensionPoints) {
+      const dimensions = this.scoreBreakdownMeta.map((entry) => {
+        const raw = dimensionPoints[entry.key];
+        const score = this.roundToTenth(typeof raw === 'number' ? raw : 0);
+        return {
+          key: entry.key,
+          label: entry.label,
+          score: Math.max(0, Math.min(entry.weight, score)),
+          weight: entry.weight,
+        };
+      });
+      const total_score = this.roundToTenth(
+        dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+      );
+      return { total_score, dimensions };
+    }
+
+    const legacyPercents = {
+      role_scope_and_seniority:
+        assessment.dimensionScores?.experienceAlignment ?? 0,
+      support_operations_and_process_rigor:
+        assessment.dimensionScores?.leadershipLevel ?? 0,
+      tooling_and_platform_experience:
+        assessment.dimensionScores?.technicalPlatformFit ?? 0,
+      domain_and_business_context:
+        assessment.dimensionScores?.industryContext ?? 0,
+      change_leadership_and_customer_advocacy:
+        assessment.dimensionScores?.strategicTacticalFit ?? 0,
+    };
+
+    const dimensions = this.scoreBreakdownMeta.map((entry) => {
+      const percent = legacyPercents[entry.key];
+      const score = this.roundToTenth((Math.max(0, Math.min(100, percent)) / 100) * entry.weight);
+      return {
+        key: entry.key,
+        label: entry.label,
+        score,
+        weight: entry.weight,
+      };
+    });
+
+    const total_score = this.roundToTenth(
+      dimensions.reduce((sum, dimension) => sum + dimension.score, 0),
+    );
+    return { total_score, dimensions };
   }
 
   private leadershipLevelFromBandDelta(bandDelta: number) {
@@ -2583,6 +2685,7 @@ export class AnalysisService {
       overallScore: assessment.scoringV2?.score ?? assessment.overallScore,
       dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
     });
+    const scoreBreakdown = this.buildScoreBreakdown(assessment);
 
     return {
       ok: true,
@@ -2603,6 +2706,7 @@ export class AnalysisService {
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
       scoring_v2: assessment.scoringV2 ?? null,
+      score_breakdown: scoreBreakdown,
       narrative,
     };
   }

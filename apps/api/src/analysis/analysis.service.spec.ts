@@ -331,6 +331,44 @@ const sampleScoringV2: CxFitV2Result = {
     expect(result.scoring_v2).toBe(sampleScoringV2);
   });
 
+  it('exposes score_breakdown invariants for latest assessment payload', async () => {
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      createdAt: new Date(),
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+    const breakdown = result.score_breakdown;
+
+    expect(breakdown).toBeDefined();
+    expect(breakdown.dimensions).toHaveLength(5);
+    expect(breakdown.total_score).toBeCloseTo(
+      breakdown.dimensions.reduce((sum, dim) => sum + dim.score, 0),
+      5,
+    );
+    breakdown.dimensions.forEach((dimension) => {
+      expect(dimension.score).toBeGreaterThanOrEqual(0);
+      expect(dimension.score).toBeLessThanOrEqual(dimension.weight);
+    });
+  });
+
   it('rejects ambiguous JD inputs', async () => {
     await expect(
       service.scoreCompatibility('user-1', {

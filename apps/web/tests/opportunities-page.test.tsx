@@ -29,20 +29,18 @@ describe("OpportunitiesPage", () => {
     });
     expect(
       screen.getByText(
-        "Analyze a role to determine compatibility. When you choose to pursue it, it becomes an opportunity and is tracked here.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Opportunities are created when you enter Resume Studio for roles scoring 70 or higher, or when you override from Fit Review.",
+        "Analyze roles to unlock opportunity intelligence and recommended next actions.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Analyze a Job/i })).toBeInTheDocument();
     expect(screen.getByText("Actions Needed")).toBeInTheDocument();
     expect(screen.getByText("No actions needed right now.")).toBeInTheDocument();
+    expect(screen.getByText("Opportunity Intelligence")).toBeInTheDocument();
+    expect(screen.getByText("Jobs Analyzed")).toBeInTheDocument();
+    expect(screen.getByText("Sort By")).toBeInTheDocument();
   });
 
-  it("renders grouped opportunity rows and required table columns", async () => {
+  it("renders intelligence cards and strategic action CTA", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.includes("/api/opportunities/grouped")) {
@@ -77,16 +75,18 @@ describe("OpportunitiesPage", () => {
     render(<OpportunitiesPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Opportunity Tracker").length).toBeGreaterThan(0);
+      expect(screen.getByText("Opportunity Intelligence")).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByRole("button", { name: /Acme/i }));
-    expect(screen.getByText("Date Created")).toBeInTheDocument();
-    expect(screen.getByText("Job Title")).toBeInTheDocument();
-    expect(screen.getAllByText("Company").length).toBeGreaterThan(0);
-    expect(screen.getByText("Salary")).toBeInTheDocument();
-    expect(screen.getByText("Fit")).toBeInTheDocument();
-    expect(screen.getByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Next Action")).toBeInTheDocument();
+    expect(screen.getByText("Staff PM")).toBeInTheDocument();
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("Application Confidence:")).toBeInTheDocument();
+    expect(screen.getByText("Competition Risk:")).toBeInTheDocument();
+    expect(screen.getByText("Strength Signals")).toBeInTheDocument();
+    expect(screen.getByText("Gap Signals")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prepare Application Materials" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "highest_confidence" },
+    });
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("highest_confidence");
   });
 });

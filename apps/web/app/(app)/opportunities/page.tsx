@@ -56,6 +56,8 @@ type ActionCard = {
   message: string;
 };
 
+type IntelligenceSort = "best_fit" | "highest_confidence" | "lowest_competition_risk" | "most_strategic";
+
 const STATUS_LABEL: Record<Status, string> = {
   SAVED: "Saved",
   APPLIED: "Applied",
@@ -125,6 +127,46 @@ const actionTitle = (t: ActionType) =>
 const emailDraft = (o: Opportunity) =>
   `Subject: Follow-up on ${o.jobTitle} opportunity\n\nHello [Recruiter Name],\n\nI am following up on my candidacy for the ${o.jobTitle} role at ${o.companyName}.\nI remain interested in the opportunity and would appreciate any update on timeline and next steps.\n\nThank you for your time.\n\nBest,\n[Your Name]`;
 
+function mapApplicationConfidence(score: number): "Very High" | "High" | "Moderate" | "Low" {
+  if (score >= 90) return "Very High";
+  if (score >= 80) return "High";
+  if (score >= 70) return "Moderate";
+  return "Low";
+}
+
+function mapCompetitionRisk(score: number): "Low" | "Moderate" | "High" {
+  if (score >= 85) return "Low";
+  if (score >= 70) return "Moderate";
+  return "High";
+}
+
+function inferSignalsFromRoleTitle(roleTitle: string) {
+  const normalized = roleTitle.toLowerCase();
+  const strengths = [
+    normalized.includes("support")
+      ? "SaaS support operations"
+      : "Cross-functional coordination",
+    normalized.includes("incident")
+      ? "Incident management leadership"
+      : "Operational process leadership",
+    normalized.includes("manager") || normalized.includes("lead")
+      ? "Team leadership and enablement"
+      : "Customer experience strategy",
+  ];
+  const gaps = [
+    normalized.includes("hardware")
+      ? "Scaled cloud operations exposure"
+      : "Hardware manufacturing exposure",
+    normalized.includes("enterprise")
+      ? "Global enterprise stakeholder depth"
+      : "Enterprise-scale transformation examples",
+  ];
+  return {
+    strengths: Array.from(new Set(strengths)).slice(0, 3),
+    gaps: Array.from(new Set(gaps)).slice(0, 2),
+  };
+}
+
 export default function OpportunitiesPage() {
   const router = useRouter();
   const params = useSearchParams();
@@ -145,6 +187,7 @@ export default function OpportunitiesPage() {
   const [resetTarget, setResetTarget] = useState<Opportunity | null>(null);
   const [dormantTarget, setDormantTarget] = useState<Opportunity | null>(null);
   const [draftTarget, setDraftTarget] = useState<Opportunity | null>(null);
+  const [sortBy, setSortBy] = useState<IntelligenceSort>("best_fit");
 
   const opportunities = useMemo(
     () =>
@@ -177,6 +220,48 @@ export default function OpportunitiesPage() {
     const completed = opportunities.filter((o) => sectionFor(o) === "completed");
     return { active, dormant, completed };
   }, [opportunities]);
+
+  const intelligenceSummary = useMemo(() => {
+    const jobsAnalyzed = opportunities.length;
+    const strongTargets = opportunities.filter((o) => o.currentScore >= 85).length;
+    const possibleTargets = opportunities.filter(
+      (o) => o.currentScore >= 70 && o.currentScore < 85,
+    ).length;
+    const lowProbability = opportunities.filter((o) => o.currentScore < 70).length;
+    return { jobsAnalyzed, strongTargets, possibleTargets, lowProbability };
+  }, [opportunities]);
+
+  const sortedIntelligenceRows = useMemo(() => {
+    const rows = [...opportunities];
+    rows.sort((a, b) => {
+      if (sortBy === "highest_confidence") {
+        const confA = mapApplicationConfidence(a.currentScore);
+        const confB = mapApplicationConfidence(b.currentScore);
+        const rank: Record<ReturnType<typeof mapApplicationConfidence>, number> = {
+          "Very High": 0,
+          High: 1,
+          Moderate: 2,
+          Low: 3,
+        };
+        if (rank[confA] !== rank[confB]) return rank[confA] - rank[confB];
+      } else if (sortBy === "lowest_competition_risk") {
+        const riskA = mapCompetitionRisk(a.currentScore);
+        const riskB = mapCompetitionRisk(b.currentScore);
+        const rank: Record<ReturnType<typeof mapCompetitionRisk>, number> = {
+          Low: 0,
+          Moderate: 1,
+          High: 2,
+        };
+        if (rank[riskA] !== rank[riskB]) return rank[riskA] - rank[riskB];
+      } else if (sortBy === "most_strategic") {
+        const strategicA = a.currentScore + (a.currentBand === "ELITE" ? 8 : a.currentBand === "STRONG" ? 4 : 0);
+        const strategicB = b.currentScore + (b.currentBand === "ELITE" ? 8 : b.currentBand === "STRONG" ? 4 : 0);
+        if (strategicA !== strategicB) return strategicB - strategicA;
+      }
+      return b.currentScore - a.currentScore;
+    });
+    return rows;
+  }, [opportunities, sortBy]);
 
   const groups = useMemo(() => {
     const mk = (rows: Opportunity[]) => {
@@ -504,14 +589,46 @@ export default function OpportunitiesPage() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <h2 className="text-lg font-semibold text-slate-100">Opportunity Tracker</h2>
-          <p className="text-xs text-slate-400">
-            Sorted by viability band, score, then latest status change.
-          </p>
+          <h2 className="text-lg font-semibold text-slate-100">Opportunity Intelligence</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Jobs Analyzed</p>
+              <p className="mt-1 text-2xl font-semibold text-white">{intelligenceSummary.jobsAnalyzed}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Strong Targets</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-200">{intelligenceSummary.strongTargets}</p>
+            </div>
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Possible Targets</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-200">{intelligenceSummary.possibleTargets}</p>
+            </div>
+            <div className="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Low Probability</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-200">{intelligenceSummary.lowProbability}</p>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label className="flex max-w-sm flex-col gap-2 text-sm text-slate-300">
+              Sort By
+              <select
+                className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-white"
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value as IntelligenceSort)}
+              >
+                <option value="best_fit">Best Fit</option>
+                <option value="highest_confidence">Highest Confidence</option>
+                <option value="lowest_competition_risk">Lowest Competition Risk</option>
+                <option value="most_strategic">Most Strategic</option>
+              </select>
+            </label>
+          </div>
+
           {!hasRows && !loading ? (
             <EmptyState
               title="Your opportunities will appear here."
-              body="Analyze a role to determine compatibility. When you choose to pursue it, it becomes an opportunity and is tracked here."
+              body="Analyze roles to unlock opportunity intelligence and recommended next actions."
               cta={
                 <Link href="/analyze">
                   <FormButton>Analyze a Job</FormButton>
@@ -520,36 +637,56 @@ export default function OpportunitiesPage() {
               className="mt-6 min-h-[320px] justify-center border-white/15 bg-slate-950/40"
             />
           ) : (
-            <div className="mt-4 space-y-4">{renderTable("active", groups.active)}</div>
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              {sortedIntelligenceRows.map((o) => {
+                const confidence = mapApplicationConfidence(o.currentScore);
+                const competitionRisk = mapCompetitionRisk(o.currentScore);
+                const signals = inferSignalsFromRoleTitle(o.jobTitle);
+                return (
+                  <article key={o.id} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                    <div className="space-y-1">
+                      <p className="text-lg font-semibold text-white">{o.jobTitle}</p>
+                      <p className="text-sm text-slate-300">{o.companyName}</p>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                      <p className="text-slate-300">
+                        Fit Score: <span className="font-semibold text-white">{o.currentScore}</span>
+                      </p>
+                      <p className="text-slate-300">
+                        Application Confidence: <span className="font-semibold text-white">{confidence}</span>
+                      </p>
+                      <p className="text-slate-300">
+                        Competition Risk: <span className="font-semibold text-white">{competitionRisk}</span>
+                      </p>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Strength Signals</p>
+                        <ul className="mt-1 space-y-1 text-sm text-slate-200">
+                          {signals.strengths.map((signal) => (
+                            <li key={`${o.id}-strength-${signal}`}>• {signal}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gap Signals</p>
+                        <ul className="mt-1 space-y-1 text-sm text-slate-200">
+                          {signals.gaps.map((signal) => (
+                            <li key={`${o.id}-gap-${signal}`}>• {signal}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <FormButton onClick={() => void router.push("/studio")}>
+                        Prepare Application Materials
+                      </FormButton>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           )}
-          {!hasRows && !loading ? (
-            <p className="mt-4 text-center text-xs text-slate-400">
-              Opportunities are created when you enter Resume Studio for roles scoring 70 or higher, or
-              when you override from Fit Review.
-            </p>
-          ) : null}
-        </section>
-
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-100">Dormant</h2>
-            <FormButton variant="ghost" onClick={() => setDormantOpen((s) => !s)}>
-              {dormantOpen ? "Collapse" : "Expand"}
-            </FormButton>
-          </div>
-          {dormantOpen ? <div className="mt-4 space-y-4">{renderTable("dormant", groups.dormant)}</div> : null}
-        </section>
-
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-100">Completed</h2>
-            <FormButton variant="ghost" onClick={() => setCompletedOpen((s) => !s)}>
-              {completedOpen ? "Collapse" : "Expand"}
-            </FormButton>
-          </div>
-          {completedOpen ? (
-            <div className="mt-4 space-y-4">{renderTable("completed", groups.completed)}</div>
-          ) : null}
         </section>
       </div>
 

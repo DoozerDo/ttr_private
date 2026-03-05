@@ -122,7 +122,33 @@ type LatestAnalysis = {
   } | null;
   confidenceScore?: number | null;
   confidenceReasons?: string[] | null;
+  score_breakdown?: {
+    total_score: number;
+    dimensions: Array<{
+      key:
+        | "role_scope_and_seniority"
+        | "support_operations_and_process_rigor"
+        | "tooling_and_platform_experience"
+        | "domain_and_business_context"
+        | "change_leadership_and_customer_advocacy";
+      label: string;
+      score: number;
+      weight: number;
+    }>;
+  } | null;
 };
+
+export function resolveDisplayedFitScore(latest: LatestAnalysis | null): number | null {
+  if (!latest) return null;
+  const breakdownTotal = latest.score_breakdown?.total_score;
+  if (typeof breakdownTotal === "number") return breakdownTotal;
+  const scoringV2Score = latest.scoring_v2?.score;
+  if (typeof scoringV2Score === "number") return scoringV2Score;
+  const fallback =
+    latest.overallScore ??
+    (typeof latest.score === "number" ? latest.score : latest.score ?? null);
+  return typeof fallback === "number" ? fallback : null;
+}
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
 
@@ -173,6 +199,21 @@ const LOW_EXPERIENCE_THRESHOLD = 70;
 
 const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
+
+function mapApplicationConfidenceLabel(value?: number | null): "Very High" | "High" | "Moderate" | "Low" {
+  if (typeof value !== "number") return "Moderate";
+  if (value >= 85) return "Very High";
+  if (value >= 70) return "High";
+  if (value >= 55) return "Moderate";
+  return "Low";
+}
+
+function mapGapSeverityLabel(gap: string): "Low Risk" | "Moderate Risk" | "High Risk" {
+  const normalized = gap.toLowerCase();
+  if (normalized.includes("missing") || normalized.includes("no ")) return "High Risk";
+  if (normalized.includes("limited") || normalized.includes("exposure")) return "Moderate Risk";
+  return "Low Risk";
+}
 
 type ScoreDriver = {
   key: ScoringContractV1DimensionKey;
@@ -663,14 +704,50 @@ export default function ResultsPage() {
   };
 
   const activeScore = useMemo(() => {
-    if (!latest) return null;
-    const scoringV2Score = latest.scoring_v2?.score;
-    if (typeof scoringV2Score === "number") return scoringV2Score;
-    const fallback =
-      latest.overallScore ??
-      (typeof latest.score === "number" ? latest.score : latest.score ?? null);
-    return typeof fallback === "number" ? fallback : null;
+    return resolveDisplayedFitScore(latest);
   }, [latest]);
+
+  const scoreBreakdown = useMemo(() => {
+    if (latest?.score_breakdown?.dimensions?.length) {
+      return latest.score_breakdown;
+    }
+    const rubric = latest?.scoring_v2?.rubric;
+    if (!rubric?.dimensionPoints) return null;
+    const dimensions = [
+      {
+        key: "role_scope_and_seniority",
+        label: "Role Scope and Seniority",
+        score: rubric.dimensionPoints.role_scope_and_seniority ?? 0,
+        weight: 25,
+      },
+      {
+        key: "support_operations_and_process_rigor",
+        label: "Support Operations and Process Rigor",
+        score: rubric.dimensionPoints.support_operations_and_process_rigor ?? 0,
+        weight: 25,
+      },
+      {
+        key: "tooling_and_platform_experience",
+        label: "Tooling and Platform Experience",
+        score: rubric.dimensionPoints.tooling_and_platform_experience ?? 0,
+        weight: 20,
+      },
+      {
+        key: "domain_and_business_context",
+        label: "Domain and Business Context",
+        score: rubric.dimensionPoints.domain_and_business_context ?? 0,
+        weight: 15,
+      },
+      {
+        key: "change_leadership_and_customer_advocacy",
+        label: "Change Leadership and Customer Advocacy",
+        score: rubric.dimensionPoints.change_leadership_and_customer_advocacy ?? 0,
+        weight: 15,
+      },
+    ];
+    const total_score = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
+    return { total_score, dimensions };
+  }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
   const resultsAssessmentId = latest?.assessmentId ?? null;
@@ -705,6 +782,31 @@ export default function ResultsPage() {
       : heroSupportTextFallback;
   const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
   const dimensionCardClassName = dimensionCardBaseClass;
+  const applicationConfidence = useMemo(
+    () => mapApplicationConfidenceLabel(latest?.confidenceScore ?? activeScore ?? null),
+    [activeScore, latest?.confidenceScore],
+  );
+  const strategicStrengths = useMemo(() => {
+    const fromNarrative = Array.isArray(latest?.narrative?.strengths) ? latest.narrative.strengths : [];
+    const fromLatest = Array.isArray(latest?.strengths) ? latest.strengths : [];
+    return Array.from(new Set([...fromNarrative, ...fromLatest]))
+      .filter((item) => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 4);
+  }, [latest?.narrative?.strengths, latest?.strengths]);
+  const strategicGaps = useMemo(() => {
+    const fromNarrative = Array.isArray(latest?.narrative?.gaps) ? latest.narrative.gaps : [];
+    const fromLatest = Array.isArray(latest?.gaps) ? latest.gaps : [];
+    return Array.from(new Set([...fromNarrative, ...fromLatest]))
+      .filter((item) => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 5);
+  }, [latest?.gaps, latest?.narrative?.gaps]);
+  const positioningNarrative = useMemo(() => {
+    if (narrativeSummary) return narrativeSummary;
+    if (strategicStrengths.length) {
+      return `Position yourself around ${strategicStrengths.slice(0, 2).join(" and ")}.`;
+    }
+    return "Position yourself as a role-aligned operator with verified baseline evidence and measurable outcomes.";
+  }, [narrativeSummary, strategicStrengths]);
   const achievementForScore = useMemo<Achievement | null>(() => {
     if (!executionMode) return null;
     return {
@@ -1209,6 +1311,58 @@ export default function ResultsPage() {
             />
           ) : (
             <div className="space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <p className="text-sm text-slate-300">
+                    Fit Score:{" "}
+                    <span className="font-semibold text-white">
+                      {typeof activeScore === "number" ? activeScore.toFixed(1) : "Pending"}
+                    </span>
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    Application Confidence:{" "}
+                    <span className="font-semibold text-white">{applicationConfidence}</span>
+                  </p>
+                </div>
+              </div>
+              {scoreBreakdown ? (
+                <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                  <h2 className="text-lg font-semibold text-slate-100">Score Breakdown</h2>
+                  <p className="mt-1 text-sm text-slate-300">
+                    Shows how your Fit Score is built across the five scoring dimensions.
+                  </p>
+                  <div className="mt-4 space-y-3">
+                    {scoreBreakdown.dimensions.map((dimension) => {
+                      const percent =
+                        dimension.weight > 0
+                          ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
+                          : 0;
+                      return (
+                        <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="text-slate-200">{dimension.label}</span>
+                            <span className="font-semibold text-white">
+                              {dimension.score.toFixed(1)} / {dimension.weight}
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full rounded bg-white/10">
+                            <div
+                              className="h-1.5 rounded bg-white/40"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+                      <span className="font-semibold text-slate-200">Total</span>
+                      <span className="font-semibold text-white">
+                        {scoreBreakdown.total_score.toFixed(1)} / 100
+                      </span>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
               <div className="rounded-3xl border border-white/10 bg-slate-900/30 p-6">
                 <div className="flex flex-col gap-6 lg:items-start">
                   <div className="space-y-4 text-center lg:text-left">
@@ -1240,7 +1394,7 @@ export default function ResultsPage() {
                           onClick={() => void router.push(studioHref)}
                           disabled={!canOpenStudio}
                         >
-                          Open Resume &amp; Cover Letter Studio
+                          Prepare Application Materials
                         </FormButton>
                       )}
                     </div>
@@ -1260,6 +1414,39 @@ export default function ResultsPage() {
                   <p className="mt-2 text-sm text-slate-300">{narrativeSummary}</p>
                 </div>
               ) : null}
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Why You Are Strong for This Role</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(strategicStrengths.length
+                    ? strategicStrengths
+                    : [
+                        "Operational leadership tied to measurable outcomes",
+                        "Experience scaling support and process execution",
+                        "Cross-functional coordination under pressure",
+                      ]
+                  ).map((item) => (
+                    <li key={`strength-${item}`}>• {item}</li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Gap Signals</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(strategicGaps.length ? strategicGaps : ["Domain specificity depth"])
+                    .slice(0, 4)
+                    .map((gap) => (
+                      <li key={`gap-${gap}`}>
+                        {gap} - {mapGapSeverityLabel(gap)}
+                      </li>
+                    ))}
+                </ul>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Recommended Positioning</h2>
+                <p className="mt-3 text-sm text-slate-300">{positioningNarrative}</p>
+              </section>
               {scoringRubric ? (
                 <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

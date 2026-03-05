@@ -15,7 +15,6 @@ type BaselineBlockPolicyPanelProps = {
   baselineId: string;
   baselineVersionId: string;
   baselineVersionHash: string | null;
-  baselineVersionLabel?: string;
   refreshSignal?: number;
   onVersionAdvance?: (newVersionId: string, newHash: string | null) => void;
   onPoliciesSaved?: () => void;
@@ -25,7 +24,6 @@ export function BaselineBlockPolicyPanel({
   baselineId,
   baselineVersionId,
   baselineVersionHash,
-  baselineVersionLabel,
   refreshSignal,
   onVersionAdvance,
   onPoliciesSaved,
@@ -150,13 +148,6 @@ export function BaselineBlockPolicyPanel({
           <p className="text-xs text-slate-300">
             Manage how each block is treated during resume and cover generation.
           </p>
-          {localVersionHash ? (
-            <p className="mt-2 text-[11px] text-slate-400">
-              Version hash{" "}
-              {baselineVersionLabel ? `${baselineVersionLabel}: ` : ""}
-              <span className="font-mono text-slate-200">{localVersionHash}</span>
-            </p>
-          ) : null}
         </div>
         <button
           type="button"
