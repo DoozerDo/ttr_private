@@ -24,6 +24,7 @@ import {
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { ApplicationsService } from '../applications/applications.service';
+import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
 
 const baselineSection: BaselineSection = {
@@ -240,6 +241,11 @@ const buildService = (
       status: 'Prepared',
     }),
   } as Partial<ApplicationsService>;
+  const opportunitiesService = {
+    createFromResumeStudio: jest.fn().mockResolvedValue({
+      id: 'opportunity-1',
+    }),
+  } as Partial<OpportunitiesService>;
 
   const service = new ResumeService(
     baselineRepository,
@@ -249,12 +255,14 @@ const buildService = (
     fitAssessmentRepository,
     complianceService,
     applicationsService as ApplicationsService,
+    opportunitiesService as OpportunitiesService,
   );
 
   return {
     service,
     complianceService,
     applicationsService: applicationsService as jest.Mocked<ApplicationsService>,
+    opportunitiesService: opportunitiesService as jest.Mocked<OpportunitiesService>,
   };
 };
 
@@ -350,13 +358,17 @@ describe('ResumeService', () => {
   });
 
   it('records tracker entry info from resume generation', async () => {
-    const { service, applicationsService } = buildService(AUTO_GENERATE_THRESHOLD);
+    const { service, applicationsService, opportunitiesService } = buildService(
+      AUTO_GENERATE_THRESHOLD,
+    );
 
     const result = await service.generateResume('user-1', baseRequest);
 
     expect(applicationsService.upsertPreparedFromResumeGeneration).toHaveBeenCalled();
+    expect(opportunitiesService.createFromResumeStudio).toHaveBeenCalled();
     expect(result.trackerEntryId).toBe('tracker-entry');
     expect(result.trackerStatus).toBe('Prepared');
+    expect(result.opportunityId).toBe('opportunity-1');
   });
 
   it('returns draft quality when fit score is below threshold', async () => {
@@ -449,10 +461,17 @@ describe('ResumeService', () => {
     const baselineWithMojibake: Baseline = {
       ...mockBaseline,
       sections: [
+        baselineSection,
         {
           ...summarySection,
-          content: `Summary\nâ€¢ First bullet\n• Second bullet\n&&¢ Third bullet`,
+          content: `Summary
+â€¢ First bullet with detailed leadership outcomes across multi-quarter planning and execution.
+• Second bullet covering cross-functional operations, stakeholder alignment, and measurable program impact.
+&&¢ Third bullet focused on systems improvement, delivery quality, and coaching outcomes.
+Additional context line to ensure extracted text length remains above validation minimum for PDF generation tests.`,
         },
+        skillsSection,
+        extraSection,
       ],
     };
 
@@ -480,6 +499,13 @@ describe('ResumeService', () => {
       jobsRepository,
       fitAssessmentRepository,
       complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn() } as OpportunitiesService,
     );
 
     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');

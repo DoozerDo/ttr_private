@@ -624,11 +624,13 @@ export default function StudioPage() {
   const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
 
   const router = useRouter();
-  const trackerEntryId = readTrackerField(resumeState.response, "trackerEntryId");
+  const trackerEntryId =
+    readTrackerField(resumeState.response, "opportunityId") ??
+    readTrackerField(resumeState.response, "trackerEntryId");
   const trackerStatus = readTrackerField(resumeState.response, "trackerStatus");
   const handleOpenTracker = useCallback(() => {
     if (!trackerEntryId) return;
-    void router.push(`/applications?focus=${encodeURIComponent(trackerEntryId)}`);
+    void router.push(`/opportunities?focus=${encodeURIComponent(trackerEntryId)}`);
   }, [router, trackerEntryId]);
 
   const { isPro } = useEntitlements();
@@ -1427,15 +1429,15 @@ export default function StudioPage() {
                   Next move
                 </p>
                 <p className="text-sm text-slate-100">
-                  Added to Application Tracker as{' '}
+                  Added to Opportunity Tracker as{' '}
                   <span className="font-semibold text-white">
-                    {trackerStatus ?? 'Prepared'}
+                    {trackerStatus ?? 'Saved'}
                   </span>
                   .
                 </p>
                 <div className="mt-3 flex justify-end">
                   <FormButton onClick={handleOpenTracker}>
-                    Open Application Tracker
+                    Open Opportunity Tracker
                   </FormButton>
                 </div>
               </div>

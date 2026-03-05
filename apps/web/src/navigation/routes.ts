@@ -39,8 +39,8 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "jobTracker",
-    label: "APPLICATION LOG",
-    href: "/applications",
+    label: "Opportunities",
+    href: "/opportunities",
     requiresAuth: true,
     subtext: "What roles am I pursuing?",
   },
