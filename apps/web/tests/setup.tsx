@@ -167,7 +167,10 @@ afterEach(() => {
   mockUseParams.mockClear();
   mockNotFound.mockClear();
   mockRedirect.mockClear();
-  if (typeof localStorage !== "undefined") {
+  if (
+    typeof localStorage !== "undefined" &&
+    typeof (localStorage as Storage).clear === "function"
+  ) {
     localStorage.clear();
   }
 });

@@ -9,6 +9,7 @@ import {
   JourneyStepState,
   resolveJourneyNavStateFromPathname,
 } from "@/src/lib/journeyNav";
+import { JourneyProgressIcon } from "@/src/components/icons/JourneyProgressIcon";
 import { routeLookup } from "@/src/navigation/routes";
 
 export const JOURNEY_NAV_V1_ENABLED =
@@ -28,97 +29,28 @@ const LOCKED_TOOLTIP = "Locked until previous steps are completed.";
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
-const renderStepIcon = (stepId: JourneyStepId): ReactElement | null => {
+const renderStepIcon = (stepId: JourneyStepId, isActive: boolean): ReactElement | null => {
   if (stepId === "results") {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        role="presentation"
-        strokeWidth="1.5"
-        stroke="currentColor"
-        fill="none"
-      >
-        <circle cx="12" cy="12" r="8" strokeLinecap="round" strokeLinejoin="round" />
-        <path
-          d="M4 12a8 8 0 0 1 16 0"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M12 12l4.5-5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M12 12h-3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
-      </svg>
+      <JourneyProgressIcon stage={2} active={isActive} className="h-full w-full" />
     );
   }
 
   if (stepId === "baselines") {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        role="presentation"
-        strokeWidth="1.5"
-        stroke="currentColor"
-        fill="none"
-      >
-        <circle cx="12" cy="12" r="8" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="12" cy="12" r="5" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
-      </svg>
+      <JourneyProgressIcon stage={1} active={isActive} className="h-full w-full" />
     );
   }
 
   if (stepId === "studio") {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        role="presentation"
-        strokeWidth="1.6"
-        stroke="currentColor"
-        fill="none"
-      >
-        <path d="M6 4h8l5 5v11H6z" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M14 4v6h6" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M8 11h8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M8 15h8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M8 19h5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <JourneyProgressIcon stage={3} active={isActive} className="h-full w-full" />
     );
   }
 
   if (stepId === "jobTracker") {
     return (
-      <svg
-        viewBox="0 0 24 24"
-        role="presentation"
-        strokeWidth="1.4"
-        stroke="currentColor"
-        fill="none"
-      >
-        <rect
-          x="6"
-          y="4"
-          width="12"
-          height="16"
-          rx="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path d="M9.5 8h5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M9.5 12h5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M9.5 16h3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5 6c1 0 1 1.5 0 1.5" strokeLinecap="round" />
-        <path d="M5 10c1 0 1 1.5 0 1.5" strokeLinecap="round" />
-        <path d="M5 14c1 0 1 1.5 0 1.5" strokeLinecap="round" />
-        <path d="M5 18c1 0 1 1.5 0 1.5" strokeLinecap="round" />
-      </svg>
+      <JourneyProgressIcon stage={4} active={isActive} className="h-full w-full" />
     );
   }
 
@@ -234,7 +166,7 @@ export function JourneyNavV1({
                 <>
                   <span className={iconAreaClass}>
                     <span className="journey-nav-icon-target" aria-hidden>
-                      {renderStepIcon(step.id)}
+                      {renderStepIcon(step.id, isActive)}
                     </span>
                   </span>
 
@@ -429,6 +361,10 @@ export function JourneyNavV1({
 
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {
           box-shadow: none;
+        }
+        .journey-nav-step-button:not(.journey-nav-step-locked):hover
+          .journey-progress-icon-layer-next {
+          opacity: 0.32 !important;
         }
 
         .journey-nav-icon-area {

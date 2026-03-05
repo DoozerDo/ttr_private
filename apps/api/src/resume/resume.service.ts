@@ -26,6 +26,7 @@ import { ComplianceAction } from '../compliance/compliance.types';
 import { Job } from '../jobs/job.entity';
 import { ApplicationsService } from '../applications/applications.service';
 import type { CxFitScoreSnapshot } from '../applications/applications.service';
+import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import '../docx-templates/templates';
 import {
@@ -68,6 +69,7 @@ export class ResumeService {
     private readonly fitAssessmentRepository: Repository<FitAssessment>,
     private readonly complianceService: ComplianceService,
     private readonly applicationsService: ApplicationsService,
+    private readonly opportunitiesService: OpportunitiesService,
   ) {}
 
   private async findLatestAssessment(userId: string, jobId: string) {
@@ -433,6 +435,15 @@ export class ResumeService {
       resumeArtifactId: audit.id,
       resumeArtifactType: 'resume',
     });
+    const opportunity = await this.opportunitiesService.createFromResumeStudio(
+      userId,
+      {
+        companyName: job?.company ?? 'Unknown company',
+        jobTitle: job?.title ?? 'Untitled role',
+        fitScore: latestAssessment?.overallScore ?? 0,
+        baselineVersionUsed: baselineVersion.id,
+      },
+    );
 
     const quality =
         latestAssessment &&
@@ -454,6 +465,7 @@ export class ResumeService {
       quality,
       trackerEntryId: trackerEntry.id,
       trackerStatus: trackerEntry.status,
+      opportunityId: opportunity?.id ?? null,
     };
   }
 

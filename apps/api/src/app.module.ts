@@ -17,6 +17,7 @@ import { RealityCheckModule } from './reality-check/reality-check.module';
 import { ResumeModule } from './resume/resume.module';
 import { StarStoriesModule } from './star-stories/star-stories.module';
 import { JobTrackerModule } from './job-tracker/job-tracker.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 import { AccessCodesModule } from './access-codes/access-codes.module';
@@ -53,6 +54,7 @@ import { AccessCodesModule } from './access-codes/access-codes.module';
     InterviewsModule,
     JobsModule,
     JobTrackerModule,
+    OpportunitiesModule,
     ResumeModule,
     CoverLettersModule,
     EmailModule,
