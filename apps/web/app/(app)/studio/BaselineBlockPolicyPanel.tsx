@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Alert } from "@/components/Alert";
 import {
@@ -146,7 +146,7 @@ export function BaselineBlockPolicyPanel({
     <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-white">Blocks</h2>
+          <h2 className="text-lg font-semibold text-white">Content Policy</h2>
           <p className="text-xs text-slate-300">
             Manage how each block is treated during resume and cover generation.
           </p>

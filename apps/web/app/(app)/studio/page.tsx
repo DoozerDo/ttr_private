@@ -10,11 +10,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { ScoreGauge } from "@/components/ScoreGauge";
-import {
-  coverLetterClosingTemplates,
-  defaultClosingTemplateKey,
-} from "@/lib/coverLetters";
+import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
@@ -420,22 +416,6 @@ function getFilenameFromContentDisposition(headerValue: string | null): string |
   return parsed || null;
 }
 
-function mapVerdict(value?: string | null): "Apply" | "Consider" | "Skip" | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized.includes("apply")) return "Apply";
-  if (normalized.includes("consider")) return "Consider";
-  if (
-    normalized.includes("skip") ||
-    normalized.includes("pass") ||
-    normalized.includes("decline")
-  ) {
-    return "Skip";
-  }
-  return null;
-}
-
 function splitSectionLines(content: string): string[] {
   return content
     .split(/\r?\n/)
@@ -621,8 +601,6 @@ export default function StudioPage() {
     setShowComplianceDetails(false);
   }
 
-  const [closingTemplateKey, setClosingTemplateKey] = useState(defaultClosingTemplateKey);
-
   const router = useRouter();
   const trackerEntryId =
     readTrackerField(resumeState.response, "opportunityId") ??
@@ -723,16 +701,10 @@ export default function StudioPage() {
 
   const canExportDocuments = readyForDocuments && isPro;
 
-  const verdictLabel = useMemo(() => mapVerdict(analysis?.verdict), [analysis?.verdict]);
-  const analysisSummary = analysis?.summary;
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
   const resumeStructuredPreview = useMemo(
     () => buildResumePreview(resumeState.response),
     [resumeState.response],
-  );
-  const selectedClosingTemplate = useMemo(
-    () => coverLetterClosingTemplates.find((template) => template.key === closingTemplateKey),
-    [closingTemplateKey],
   );
   const coverLetterParagraphs = useMemo(
     () => buildCoverLetterParagraphs(coverState.response),
@@ -750,7 +722,7 @@ export default function StudioPage() {
       jobId: selectedJobId,
       baselineId: selectedBaselineId,
       baselineVersionId: selectedBaselineVersionId,
-      closingTemplateKey,
+      closingTemplateKey: defaultClosingTemplateKey,
       documentType: "cover_letter",
       oneTap,
     };
@@ -1302,53 +1274,23 @@ export default function StudioPage() {
               Upload a baseline version for this baseline before generating documents.
             </Alert>
           ) : null}
-        </div>
-      </section>
-
-      {selectedBaselineId && selectedBaselineVersionId ? (
-        <BaselineBlockPolicyPanel
-          baselineId={selectedBaselineId}
-          baselineVersionId={selectedBaselineVersionId}
-          baselineVersionHash={selectedVersion?.fileHash ?? null}
-          baselineVersionLabel={selectedVersionLabel}
-          refreshSignal={versionRefreshSignal}
-          onVersionAdvance={handleBlockPolicyVersionAdvance}
-          onPoliciesSaved={refreshBlockPolicyList}
-        />
-      ) : null}
-
-      <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Latest snapshot</p>
-            <h2 className="text-lg font-semibold text-slate-100">CX fit score</h2>
-          </div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            {isPro ? "Downloads available for Pro+" : "Upgrade to Pro to download documents."}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
-          <ScoreGauge score={analysisScore ?? undefined} loading={analysisLoading} label="fit score" />
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-              {verdictLabel ?? "Verdict pending"}
-            </p>
-            <p className="text-3xl font-semibold text-white">
-              {analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
-            </p>
-            <p className="text-sm text-slate-300">
-              {analysisSummary ?? "Run the compatibility check in the Resume builder to unlock analysis."}
-            </p>
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-200">
+            <span>
+              Fit Score:{" "}
+              <span className="font-semibold text-white">
+                {analysisLoading
+                  ? "Loading..."
+                  : analysisScore !== null
+                  ? analysisScore.toFixed(1)
+                  : "n/a"}
+              </span>
+            </span>
+            <span className="text-slate-400">|</span>
+            <span>
+              Status: <span className="font-semibold text-emerald-300">Ready to apply</span>
+            </span>
           </div>
         </div>
-
-        {!analysis ? (
-          <EmptyState
-            title="No analysis yet"
-            body="Run the latest compatibility scoring to surface a score and verdict."
-          />
-        ) : null}
       </section>
 
       <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
@@ -1356,12 +1298,12 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-sm text-slate-300">
-              Generate a resume draft based on your selected job, baseline, and fit assessment.
+              Generate a tailored resume from your selected job, baseline, and fit context.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <FormButton onClick={handleResumeDraft} disabled={!readyForDocuments || resumeGenerating}>
-              {resumeGenerating ? "Generating..." : "Generate draft"}
+              {resumeGenerating ? "Generating..." : "Generate Resume"}
             </FormButton>
             <FormButton
               variant="secondary"
@@ -1444,7 +1386,7 @@ export default function StudioPage() {
             ) : null}
           </div>
         ) : (
-          <EmptyState title="No resume generated yet" body="Generate a draft to preview it." />
+          <EmptyState title="No resume generated yet" body="Generate Resume to preview it." />
         )}
       </section>
 
@@ -1453,52 +1395,13 @@ export default function StudioPage() {
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-sm text-slate-300">
-              Generate a cover letter draft with an industry-aligned closing template.
+              Generate a tailored cover letter for this job and baseline pair.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleCoverDraft} disabled={!readyForDocuments || coverGenerating}>
-              {coverGenerating ? "Generating..." : "Generate draft"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportCoverLetter("docx")}
-              disabled={
-                !canExportDocuments || coverExportFormat === "docx" || !!coverLetterComplianceBlocked
-              }
-            >
-              {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportCoverLetter("pdf")}
-              disabled={
-                !canExportDocuments || coverExportFormat === "pdf" || !!coverLetterComplianceBlocked
-              }
-            >
-              {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-            </FormButton>
-          </div>
+          <FormButton onClick={handleCoverDraft} disabled={!readyForDocuments || coverGenerating}>
+            {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+          </FormButton>
         </div>
-
-        <label className="flex flex-col gap-2 text-sm text-slate-400">
-          Closing template
-          <select
-            className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-            value={closingTemplateKey}
-            onChange={(event) => setClosingTemplateKey(event.target.value)}
-          >
-            {coverLetterClosingTemplates.map((template) => (
-              <option key={template.key} value={template.key}>
-                {template.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {selectedClosingTemplate ? (
-          <p className="text-sm text-slate-300">{selectedClosingTemplate.text}</p>
-        ) : null}
 
         {generationMessage ? (
           <Alert intent="warning" title="Prerequisites missing">
@@ -1587,7 +1490,27 @@ export default function StudioPage() {
         ) : null}
 
         {isPro && hasCoverLetterArtifact && !coverLetterComplianceBlocked ? (
-          <p className="text-sm text-slate-300">Downloads are available.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-slate-300">Downloads are available.</p>
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportCoverLetter("docx")}
+              disabled={
+                !canExportDocuments || coverExportFormat === "docx" || !!coverLetterComplianceBlocked
+              }
+            >
+              {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+            </FormButton>
+            <FormButton
+              variant="secondary"
+              onClick={() => void exportCoverLetter("pdf")}
+              disabled={
+                !canExportDocuments || coverExportFormat === "pdf" || !!coverLetterComplianceBlocked
+              }
+            >
+              {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+            </FormButton>
+          </div>
         ) : !isPro ? (
           <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
         ) : null}
@@ -1626,11 +1549,28 @@ export default function StudioPage() {
           ) : (
             <EmptyState
               title="No cover letter generated yet"
-              body="Generate a draft to preview it."
+              body="Generate Cover Letter to preview it."
             />
           )
         ) : null}
       </section>
+
+      {selectedBaselineId && selectedBaselineVersionId ? (
+        <details className="space-y-4">
+          <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold uppercase tracking-[0.3em] text-slate-200 shadow-sm">
+            Advanced Controls
+          </summary>
+          <BaselineBlockPolicyPanel
+            baselineId={selectedBaselineId}
+            baselineVersionId={selectedBaselineVersionId}
+            baselineVersionHash={selectedVersion?.fileHash ?? null}
+            baselineVersionLabel={selectedVersionLabel}
+            refreshSignal={versionRefreshSignal}
+            onVersionAdvance={handleBlockPolicyVersionAdvance}
+            onPoliciesSaved={refreshBlockPolicyList}
+          />
+        </details>
+      ) : null}
     </PageShell>
   );
 }
