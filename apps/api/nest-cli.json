@@ -8,6 +8,10 @@
       {
         "include": "scoring-v2/config/**/*.json",
         "outDir": "dist"
+      },
+      {
+        "include": "../templates/**/*",
+        "outDir": "dist/templates"
       }
     ]
   }

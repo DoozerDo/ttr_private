@@ -106,5 +106,6 @@ export interface DocxRenderResult {
 export interface DocxTemplateDefinition<TModel> {
   kind: DocxTemplateKind;
   key: DocxTemplateKey;
+  sourceType?: 'docx' | 'programmatic';
   render(model: TModel, context: DocxRenderContextBase): Promise<DocxRenderResult>;
 }
