@@ -42,6 +42,7 @@ import {
   getDocxTemplate,
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
+import { buildResumeDraftSections } from './resume-draft-bullets';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -351,21 +352,6 @@ export class ResumeService {
       throw new UnprocessableEntityException(payload);
     }
 
-    const sections = allowedSections.map((section) => ({
-      id: section.id,
-      type: section.sectionType,
-      title: section.title,
-      content: section.content,
-      includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-      order: section.order,
-      source: 'baseline',
-    }));
-
-    const normalizedBaselineSections =
-      this.complianceService.normalizeSectionsForOutput(
-        baseline.sections ?? [],
-      );
-
     const job = jobId
       ? await this.jobsRepository.findOne({
           where: { id: jobId, userId },
@@ -375,6 +361,16 @@ export class ResumeService {
     if (jobId && !job) {
       throw new NotFoundException('Job not found');
     }
+
+    const sections = buildResumeDraftSections(
+      allowedSections,
+      job?.rawDescription ?? null,
+    );
+
+    const normalizedBaselineSections =
+      this.complianceService.normalizeSectionsForOutput(
+        baseline.sections ?? [],
+      );
 
     const latestAssessment = jobId
       ? await this.findLatestAssessment(userId, jobId)

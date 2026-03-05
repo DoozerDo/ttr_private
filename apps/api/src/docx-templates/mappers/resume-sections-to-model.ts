@@ -14,6 +14,7 @@ import {
   ResumeOtherItem,
   ResumeDocxHeader,
 } from '../docx-template.types';
+import type { ResumeDraftBullet } from '../../resume/resume-draft-bullets';
 
 export type ResumeExportSection = {
   id?: string;
@@ -23,6 +24,8 @@ export type ResumeExportSection = {
   order?: number;
   includePolicy?: string;
   source?: string;
+  bullets?: ResumeDraftBullet[] | Array<{ text?: string | null }>;
+  rawContent?: string | null;
 };
 
 const BULLET_GLYPH = '\u2022';
@@ -138,8 +141,10 @@ function buildSectionBuckets(
     }
 
     let key = resolveSectionKey(section.type);
-    const contentWithoutHeader = removeHeaderLines(section.content, headerLines);
-    if (!contentWithoutHeader) {
+    const sourceContent = section.rawContent ?? section.content;
+    const contentWithoutHeader = removeHeaderLines(sourceContent, headerLines);
+    const draftBulletTexts = normalizeDraftBulletTexts(section.bullets);
+    if (!contentWithoutHeader && !draftBulletTexts.length) {
       continue;
     }
 
@@ -147,13 +152,19 @@ function buildSectionBuckets(
       key === 'other' &&
       !hasExplicitSummary &&
       !synthesizedSummaryFromOther &&
-      isLikelyIntroSection(contentWithoutHeader)
+      isLikelyIntroSection(contentWithoutHeader ?? draftBulletTexts.join('\n'))
     ) {
       key = 'summary';
       synthesizedSummaryFromOther = true;
     }
 
-    const items = buildSectionItems(key, contentWithoutHeader, quarantined);
+    const items =
+      buildSectionItemsFromDraftBullets(
+        key,
+        draftBulletTexts,
+        contentWithoutHeader,
+        section.title,
+      ) ?? buildSectionItems(key, contentWithoutHeader, quarantined);
     if (!items.length) {
       continue;
     }
@@ -378,6 +389,109 @@ function resolveSectionKey(type?: BaselineSectionType | string | null) {
     return 'other';
   }
   return SECTION_TYPE_KEY_MAP[type as BaselineSectionType] ?? 'other';
+}
+
+function normalizeDraftBulletTexts(
+  bullets?: ResumeExportSection['bullets'],
+): string[] {
+  return (bullets ?? [])
+    .map((bullet) => {
+      if (!bullet || typeof bullet !== 'object') return '';
+      const text = 'text' in bullet ? bullet.text : '';
+      return (text ?? '').trim();
+    })
+    .filter((text) => text.length > 0);
+}
+
+function buildExperienceItemsFromDraftBullets(
+  bulletTexts: string[],
+  sectionTitle?: string | null,
+): ExperienceItem[] {
+  if (!bulletTexts.length) return [];
+  return [
+    {
+      role: sectionTitle?.trim() || 'Professional Experience',
+      company: undefined,
+      location: undefined,
+      dateRange: undefined,
+      description: undefined,
+      bullets: cleanBullets(bulletTexts),
+    },
+  ];
+}
+
+function mergeDraftBulletsIntoExperienceItems(
+  parsedItems: ExperienceItem[],
+  draftBulletTexts: string[],
+): ExperienceItem[] {
+  if (!parsedItems.length) return [];
+  if (!draftBulletTexts.length) return parsedItems;
+
+  const merged = parsedItems.map((item) => ({ ...item, bullets: [...(item.bullets ?? [])] }));
+  let cursor = 0;
+
+  for (const item of merged) {
+    const expectedCount = item.bullets.length;
+    if (expectedCount > 0 && cursor < draftBulletTexts.length) {
+      const replacement = draftBulletTexts.slice(cursor, cursor + expectedCount);
+      if (replacement.length) {
+        item.bullets = replacement;
+      }
+      cursor += replacement.length;
+      continue;
+    }
+
+    if (!item.bullets.length && cursor < draftBulletTexts.length) {
+      item.bullets = [draftBulletTexts[cursor]];
+      cursor += 1;
+    }
+  }
+
+  if (cursor < draftBulletTexts.length && merged.length) {
+    merged[merged.length - 1]!.bullets.push(...draftBulletTexts.slice(cursor));
+  }
+
+  return merged;
+}
+
+function buildSectionItemsFromDraftBullets(
+  key: ResumeSectionKey,
+  bulletTexts: string[],
+  contentWithoutHeader?: string | null,
+  sectionTitle?: string | null,
+): ResumeSectionItem[] | null {
+  if (!bulletTexts.length) return null;
+
+  switch (key) {
+    case 'summary':
+      return [{ paragraphs: bulletTexts }];
+    case 'skills':
+      return [
+        {
+          groups: bulletTexts.map((text) => ({
+            values: text
+              .split(/[,\u2022;]/)
+              .map((segment) => segment.trim())
+              .filter(Boolean),
+          })),
+        },
+      ];
+    case 'experience':
+      if (contentWithoutHeader) {
+        const parsedItems = buildExperienceItems(contentWithoutHeader);
+        if (parsedItems.length) {
+          return mergeDraftBulletsIntoExperienceItems(parsedItems, bulletTexts);
+        }
+      }
+      return buildExperienceItemsFromDraftBullets(bulletTexts, sectionTitle);
+    case 'education':
+      return bulletTexts.map((raw) => ({ raw }));
+    case 'certifications':
+      return bulletTexts.map((title) => ({ title }));
+    case 'other':
+    default:
+      return [{ lines: bulletTexts }];
+  }
 }
 
 function buildSectionItems(
