@@ -133,9 +133,7 @@ export class AuthService {
   async login(payload: LoginDto): Promise<AuthResponseDto> {
     const user = await this.validateCredentials(payload);
 
-    const isAdmin = await this.adminUsersService.isAdmin(user.id);
-
-    if (this.requireAccessCode && !isAdmin) {
+    if (this.requireAccessCode) {
       const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
         user.id,
       );
@@ -145,10 +143,7 @@ export class AuthService {
           await this.accessCodesService.redeemAssignedCodeForUser(user);
 
         if (!redeemedAssignedCode) {
-          throw new ForbiddenException({
-            code: 'ACCESS_CODE_REQUIRED',
-            message: 'Access code required.',
-          });
+          throw new ForbiddenException('Access code required');
         }
       }
     }

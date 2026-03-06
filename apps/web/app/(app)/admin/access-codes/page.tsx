@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { adminServerFetch } from "../_lib/adminServerFetch";
+import { CopyCodeButton } from "./CopyCodeButton";
 
 type AccessCodeRow = {
   id: string;
@@ -32,12 +33,37 @@ type GeneratedAccessCodeResponse = {
   notes: string | null;
 };
 
+function unwrapArrayPayload<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+
+  if (payload && typeof payload === "object") {
+    const candidate = payload as { data?: unknown; items?: unknown };
+
+    if (Array.isArray(candidate.data)) {
+      return candidate.data as T[];
+    }
+
+    if (Array.isArray(candidate.items)) {
+      return candidate.items as T[];
+    }
+  }
+
+  return [];
+}
+
 async function loadCodes() {
-  return adminServerFetch<AccessCodeRow[]>("/admin/access-codes", "Load access codes");
+  const payload = await adminServerFetch<unknown>("/admin/access-codes", "Load access codes");
+  return unwrapArrayPayload<AccessCodeRow>(payload);
 }
 
 async function loadUsers() {
-  return adminServerFetch<AdminUserRow[]>("/admin/users", "Load admin users for access code assignment");
+  const payload = await adminServerFetch<unknown>(
+    "/admin/users",
+    "Load admin users for access code assignment",
+  );
+  return unwrapArrayPayload<AdminUserRow>(payload);
 }
 
 async function generateAction(formData: FormData) {
@@ -88,19 +114,32 @@ export default async function AdminAccessCodesPage({
 }: {
   searchParams?: SearchParamsShape | Promise<SearchParamsShape>;
 }) {
-  const [rows, users, resolvedSearchParams] = await Promise.all([
-    loadCodes(),
-    loadUsers(),
-    Promise.resolve(searchParams ?? {}),
-  ]);
+  let rows: AccessCodeRow[] = [];
+  let users: AdminUserRow[] = [];
+  let resolvedSearchParams: SearchParamsShape = {};
+  let loadError: string | null = null;
+
+  try {
+    [rows, users, resolvedSearchParams] = await Promise.all([
+      loadCodes(),
+      loadUsers(),
+      Promise.resolve(searchParams ?? {}),
+    ]);
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : "Unable to load access codes.";
+  }
 
   const generatedCodeParam = resolvedSearchParams.generatedCode;
-  const generatedCode = (Array.isArray(generatedCodeParam) ? generatedCodeParam[0] : generatedCodeParam)?.trim() || "";
+  const generatedCode =
+    (Array.isArray(generatedCodeParam)
+      ? generatedCodeParam[0]
+      : generatedCodeParam
+    )?.trim() || "";
 
   const assignedUserIds = new Set(
     rows
-      .filter((row) => row.status === "assigned")
-      .map((row) => row.assignedUserId)
+      .filter((row) => row?.status === "assigned")
+      .map((row) => row?.assignedUserId)
       .filter((id): id is string => Boolean(id)),
   );
 
@@ -118,10 +157,17 @@ export default async function AdminAccessCodesPage({
         </p>
       </header>
 
+      {loadError ? (
+        <section className="rounded-3xl border border-rose-500/40 bg-rose-500/10 px-6 py-4 text-sm font-medium text-rose-200">
+          Unable to load access codes: {loadError}
+        </section>
+      ) : null}
+
       {generatedCode ? (
         <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Code generated (shown once)</p>
           <p className="mt-2 font-mono text-lg text-emerald-100">{generatedCode}</p>
+          <CopyCodeButton code={generatedCode} />
           <p className="mt-1 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
         </section>
       ) : null}

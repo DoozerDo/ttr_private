@@ -191,7 +191,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('allows admin users to log in when access code is required', async () => {
+  it('enforces access code for admin users when access code is required', async () => {
     const payload: LoginDto = {
       email: 'admin@example.com',
       password: 'Password123',
@@ -233,15 +233,10 @@ describe('AuthService', () => {
       return undefined;
     });
 
-    adminUsersService.isAdmin.mockResolvedValue(true);
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
 
-    const result = await service.login(payload);
-
-    expect(result.accessToken).toEqual('signed-token');
-    expect(result.user).toMatchObject({
-      id: savedUser.id,
-      email: savedUser.email,
-    });
+    await expect(service.login(payload)).rejects.toThrow('Access code required');
   });
 
   it('auto-redeems an assigned access code during login when no active access code exists', async () => {
@@ -285,8 +280,6 @@ describe('AuthService', () => {
       }
       return undefined;
     });
-
-    adminUsersService.isAdmin.mockResolvedValue(false);
 
     accessCodesService.userHasActiveAccess.mockResolvedValue(false);
     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(true);
@@ -344,17 +337,10 @@ describe('AuthService', () => {
       return undefined;
     });
 
-    adminUsersService.isAdmin.mockResolvedValue(false);
-
     accessCodesService.userHasActiveAccess.mockResolvedValue(false);
     accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
 
-    await expect(service.login(payload)).rejects.toMatchObject({
-      response: {
-        code: 'ACCESS_CODE_REQUIRED',
-        message: 'Access code required.',
-      },
-    });
+    await expect(service.login(payload)).rejects.toThrow('Access code required');
 
     expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);

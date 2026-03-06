@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
@@ -21,6 +22,8 @@ import { OpportunitiesModule } from './opportunities/opportunities.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 import { AccessCodesModule } from './access-codes/access-codes.module';
+import { AccessGuard } from './auth/guards/access.guard';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -61,6 +64,16 @@ import { AccessCodesModule } from './access-codes/access-codes.module';
     StarStoriesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: AccessGuard,
+    },
+  ],
 })
 export class AppModule {}
