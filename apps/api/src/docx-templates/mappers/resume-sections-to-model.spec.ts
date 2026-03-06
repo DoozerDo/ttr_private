@@ -148,4 +148,38 @@ IT professional with nearly 20 years of experience, starting in IT support befor
     const otherSection = model.sections.find((section) => section.key === 'other');
     expect(otherSection).toBeUndefined();
   });
+
+  it('keeps draft-bullet sections even when content is empty', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        content: '',
+        bullets: [{ text: 'Leads operational support programs.' }],
+      },
+      {
+        type: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        content: '',
+        bullets: [{ text: 'Incident Management' }, { text: 'SaaS Operations' }],
+      },
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: '',
+        bullets: [{ text: 'Reduced escalations by 30%.' }],
+      },
+      {
+        type: BaselineSectionType.EDUCATION,
+        title: 'Education',
+        content: '',
+        bullets: [{ text: 'B.S. Business | State U | 2015' }],
+      },
+    ]);
+
+    expect(model.sections.find((section) => section.key === 'summary')).toBeDefined();
+    expect(model.sections.find((section) => section.key === 'skills')).toBeDefined();
+    expect(model.sections.find((section) => section.key === 'experience')).toBeDefined();
+    expect(model.sections.find((section) => section.key === 'education')).toBeDefined();
+  });
 });

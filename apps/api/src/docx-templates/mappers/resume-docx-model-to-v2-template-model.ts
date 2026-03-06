@@ -11,20 +11,43 @@ import {
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE_PATTERN = /\+?\d[\d().\-\s]{7,}\d/;
 const LINKEDIN_PATTERN = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s|,]+/i;
+const BULLET_PREFIX = '\u2022';
 
 function toText(value?: string | null): string {
   return value?.trim() ?? '';
 }
 
+function isContactLike(value: string): boolean {
+  const normalized = toText(value);
+  if (!normalized) return false;
+  return (
+    EMAIL_PATTERN.test(normalized) ||
+    PHONE_PATTERN.test(normalized) ||
+    LINKEDIN_PATTERN.test(normalized)
+  );
+}
+
 function pickSummary(model: ResumeDocxModel): string {
   const summarySection = model.sections.find((section) => section.key === 'summary');
   if (!summarySection) return '';
-  return summarySection.items
-    .filter((item): item is { paragraphs: string[] } => 'paragraphs' in item)
-    .flatMap((item) => item.paragraphs)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .join('\n');
+
+  const lines: string[] = [];
+  for (const item of summarySection.items) {
+    if ('paragraphs' in item && Array.isArray(item.paragraphs)) {
+      lines.push(...item.paragraphs.map((paragraph) => paragraph.trim()));
+      continue;
+    }
+    if ('lines' in item && Array.isArray(item.lines)) {
+      lines.push(...item.lines.map((line) => line.trim()));
+      continue;
+    }
+    if ('raw' in item) {
+      const raw = toText(item.raw);
+      if (raw) lines.push(raw);
+    }
+  }
+
+  return lines.filter((line) => line.length > 0 && !isContactLike(line)).join('\n');
 }
 
 function pickCoreCompetencies(model: ResumeDocxModel): string {
@@ -37,19 +60,29 @@ function pickCoreCompetencies(model: ResumeDocxModel): string {
       for (const group of item.groups) {
         for (const value of group.values ?? []) {
           const normalized = toText(value);
-          if (normalized) lines.push(normalized);
+          if (normalized && !isContactLike(normalized)) {
+            lines.push(normalized);
+          }
         }
       }
     }
     if ('lines' in item && Array.isArray(item.lines)) {
       for (const line of item.lines) {
         const normalized = toText(line);
-        if (normalized) lines.push(normalized);
+        if (normalized && !isContactLike(normalized)) {
+          lines.push(normalized);
+        }
       }
     }
   }
 
-  return lines.map((line) => `• ${line}`).join('\n');
+  const deduped = lines.filter(
+    (line, index) =>
+      lines.findIndex(
+        (candidate) => candidate.toLowerCase() === line.toLowerCase(),
+      ) === index,
+  );
+  return deduped.map((line) => `${BULLET_PREFIX} ${line}`).join('\n');
 }
 
 function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
@@ -63,10 +96,15 @@ function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
     .map((item) => {
       const bullets = (item.bullets ?? [])
         .map((bullet) => toText(bullet))
-        .filter(Boolean);
+        .filter((bullet) => Boolean(bullet) && !isContactLike(bullet));
+
       if (!bullets.length && item.description?.trim()) {
-        bullets.push(item.description.trim());
+        const description = item.description.trim();
+        if (!isContactLike(description)) {
+          bullets.push(description);
+        }
       }
+
       return {
         title: toText(item.role),
         company: toText(item.company),
@@ -74,7 +112,12 @@ function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
         location: toText(item.location),
         bullets,
       };
-    });
+    })
+    .filter(
+      (item) =>
+        Boolean(item.title || item.company || item.dates || item.location) &&
+        item.bullets.length > 0,
+    );
 }
 
 function parseEducationItem(item: ResumeSectionItem): ResumeV2EducationItem | null {
@@ -88,7 +131,9 @@ function parseEducationItem(item: ResumeSectionItem): ResumeV2EducationItem | nu
     .map((part) => part.trim())
     .filter(Boolean);
   const gradYearFromRaw =
-    raw.match(/\b(19|20)\d{2}\b/)?.[0] ?? parts.find((part) => /\b(19|20)\d{2}\b/.test(part)) ?? '';
+    raw.match(/\b(19|20)\d{2}\b/)?.[0] ??
+    parts.find((part) => /\b(19|20)\d{2}\b/.test(part)) ??
+    '';
 
   return {
     degree: toText(entry.degree) || parts[0] || raw,
@@ -110,7 +155,8 @@ function pickEducation(model: ResumeDocxModel): ResumeV2EducationItem[] {
       degree: toText(entry.degree),
       school: toText(entry.school),
       grad_year: toText(entry.grad_year),
-    }));
+    }))
+    .filter((entry) => Boolean(entry.degree || entry.school || entry.grad_year));
 }
 
 function extractContactFields(contactLines: string[] | undefined) {

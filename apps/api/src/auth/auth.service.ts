@@ -47,6 +47,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly publicWebBaseUrl: string;
   private readonly supportEmail: string;
+  private registrationNotifyEmailMissingLogged = false;
 
   constructor(
     private readonly usersService: UsersService,
@@ -92,6 +93,7 @@ export class AuthService {
       lastName: payload.lastName.trim(),
       emailConfirmed: !this.requireEmailConfirmation,
     });
+    await this.notifyNewRegistration(user);
 
     if (!this.requireEmailConfirmation) {
       return {
@@ -324,6 +326,59 @@ export class AuthService {
         'Unable to send confirmation email. Please try again later.',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  private async notifyNewRegistration(user: User): Promise<void> {
+    const notifyEmail =
+      this.configService.get<string>('REGISTRATION_NOTIFY_EMAIL')?.trim() ?? '';
+    const createdAtIso =
+      user.createdAt instanceof Date
+        ? user.createdAt.toISOString()
+        : new Date().toISOString();
+    const environmentName =
+      this.configService.get<string>('RAILWAY_ENVIRONMENT_NAME')?.trim() ||
+      this.configService.get<string>('NODE_ENV')?.trim() ||
+      process.env.NODE_ENV ||
+      'unknown';
+
+    const fallbackLog = JSON.stringify({
+      event: 'registration_success',
+      userId: user.id,
+      email: user.email,
+      createdAt: createdAtIso,
+      environment: environmentName,
+    });
+
+    if (!notifyEmail) {
+      if (!this.registrationNotifyEmailMissingLogged) {
+        this.registrationNotifyEmailMissingLogged = true;
+        this.logger.warn(
+          'REGISTRATION_NOTIFY_EMAIL is not configured. Registration notifications will be logged only.',
+        );
+      }
+      this.logger.log(fallbackLog);
+      return;
+    }
+
+    try {
+      await this.resendEmailService.sendEmail({
+        to: notifyEmail,
+        subject: 'New TTR registration',
+        text: [
+          `User email: ${user.email}`,
+          `User id: ${user.id}`,
+          `Created: ${createdAtIso}`,
+          `Environment: ${environmentName}`,
+        ].join('\n'),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to send registration notification for user ${user.id}: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      this.logger.log(fallbackLog);
     }
   }
 

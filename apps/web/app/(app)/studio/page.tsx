@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -371,6 +372,7 @@ export default function StudioPage() {
   const hasResumeArtifact = Boolean(resumeState.response);
   const canExportDocuments = readyForDocuments && isPro;
   const canExportResume = canExportDocuments && hasResumeArtifact;
+  const isResumeDownloadLocked = !isPro;
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
   const coverLetterParagraphs = useMemo(
     () => buildCoverLetterParagraphs(coverState.response),
@@ -720,10 +722,6 @@ export default function StudioPage() {
       return;
     }
     if (!isPro) {
-      setResumeState((current) => ({
-        ...current,
-        error: "Upgrade to Pro to download documents.",
-      }));
       return;
     }
     if (!hasResumeArtifact) {
@@ -1074,14 +1072,18 @@ export default function StudioPage() {
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("docx")}
-              disabled={!canExportResume || resumeExportFormat === "docx"}
+              disabled={
+                isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"
+              }
             >
               {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportResume("pdf")}
-              disabled={!canExportResume || resumeExportFormat === "pdf"}
+              disabled={
+                isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"
+              }
             >
               {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1110,10 +1112,23 @@ export default function StudioPage() {
           </Alert>
         ) : null}
 
-        {isPro && coverState.response && !coverLetterComplianceBlocked ? (
+        {isResumeDownloadLocked ? (
+          <Alert intent="warning">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <p>Upgrade to Pro to download documents.</p>
+                <p>Resume preview is available below.</p>
+              </div>
+              <Link
+                href="/pricing"
+                className="text-sm font-semibold text-slate-100 underline decoration-slate-300/70 underline-offset-4 transition hover:text-white"
+              >
+                Upgrade to Pro
+              </Link>
+            </div>
+          </Alert>
+        ) : isPro ? (
           <p className="text-sm text-slate-300">Downloads are available.</p>
-        ) : !isPro ? (
-          <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
         ) : null}
 
         {resumeState.response ? (

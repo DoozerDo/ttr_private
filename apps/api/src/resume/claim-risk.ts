@@ -319,19 +319,20 @@ export function detectClaimRiskForBullet(
     });
   }
 
+  const levelRank: Record<ClaimRiskLevel, number> = {
+    None: 0,
+    Low: 1,
+    Medium: 2,
+    High: 3,
+  };
   let level: ClaimRiskLevel = 'None';
   for (const entry of flaggedTerms) {
     const entryLevel = classifyRisk(entry.normalized);
-    if (entryLevel === 'High') {
-      level = 'High';
-      break;
-    }
-    if (entryLevel === 'Medium' && level !== 'High') {
-      level = 'Medium';
-      continue;
-    }
-    if (entryLevel === 'Low' && level === 'None') {
-      level = 'Low';
+    if (levelRank[entryLevel] > levelRank[level]) {
+      level = entryLevel;
+      if (level === 'High') {
+        break;
+      }
     }
   }
 

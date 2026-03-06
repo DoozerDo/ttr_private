@@ -129,27 +129,33 @@ function buildSectionBuckets(
   quarantined: string[],
 ): Map<ResumeSectionKey, ResumeDocxSection> {
   const buckets = new Map<ResumeSectionKey, ResumeDocxSection>();
+  const hasNonOtherSection = sections.some(
+    (section) => resolveSectionKey(section.type) !== 'other',
+  );
   const hasExplicitSummary = sections.some((section) => {
     const key = resolveSectionKey(section.type);
-    return key === 'summary' && Boolean(normalizeContent(section.content));
+    if (key !== 'summary') return false;
+    const content = normalizeContent(section.rawContent ?? section.content);
+    const draftBulletTexts = normalizeDraftBulletTexts(section.bullets);
+    return Boolean(content) || draftBulletTexts.length > 0;
   });
   let synthesizedSummaryFromOther = false;
 
   for (const section of sections) {
-    if (shouldSkipSection(section)) {
-      continue;
-    }
-
     let key = resolveSectionKey(section.type);
     const sourceContent = section.rawContent ?? section.content;
     const contentWithoutHeader = removeHeaderLines(sourceContent, headerLines);
     const draftBulletTexts = normalizeDraftBulletTexts(section.bullets);
+    if (shouldSkipSection(section, contentWithoutHeader, draftBulletTexts)) {
+      continue;
+    }
     if (!contentWithoutHeader && !draftBulletTexts.length) {
       continue;
     }
 
     if (
       key === 'other' &&
+      hasNonOtherSection &&
       !hasExplicitSummary &&
       !synthesizedSummaryFromOther &&
       isLikelyIntroSection(contentWithoutHeader ?? draftBulletTexts.join('\n'))
@@ -203,6 +209,7 @@ function isLikelyIntroSection(content: string) {
   const lines = splitLines(content);
   if (!lines.length) return false;
   if (lines.length > 10) return false;
+  if (lines.some((line) => isContactLine(line))) return false;
 
   const bulletLikeCount = lines.filter(
     (line) => line.startsWith(BULLET_GLYPH) || BULLET_PATTERN.test(line),
@@ -245,8 +252,15 @@ function removeHeaderLines(content?: string | null, headerLines?: Set<string>) {
   return filtered.join('\n');
 }
 
-function shouldSkipSection(section: ResumeExportSection) {
-  const content = normalizeContent(section.content);
+function shouldSkipSection(
+  section: ResumeExportSection,
+  contentWithoutHeader?: string | null,
+  draftBulletTexts: string[] = [],
+) {
+  if (draftBulletTexts.length > 0) return false;
+  const content = normalizeContent(
+    contentWithoutHeader ?? section.rawContent ?? section.content,
+  );
   if (!content) return true;
   return isLikelyContactOnlySection(content);
 }
@@ -376,12 +390,60 @@ function looksLikeContact(line: string) {
 
 function extractHeaderLines(sections: ResumeExportSection[]) {
   for (const section of sections) {
+    const key = resolveSectionKey(section.type);
+    if (key === 'experience' || key === 'education' || key === 'skills' || key === 'certifications') {
+      continue;
+    }
     const lines = splitLines(section.content);
     if (lines.length) {
-      return lines.slice(0, 4);
+      const headerLines: string[] = [];
+      for (const line of lines.slice(0, 4)) {
+        if (!line.trim()) continue;
+
+        if (!headerLines.length) {
+          headerLines.push(line);
+          continue;
+        }
+
+        if (looksLikeTimelineLine(line)) {
+          break;
+        }
+
+        if (looksLikeContact(line) || isLikelyHeaderRoleLine(line)) {
+          headerLines.push(line);
+          continue;
+        }
+
+        if (looksLikeSentence(line)) {
+          break;
+        }
+      }
+      if (headerLines.length) {
+        return headerLines;
+      }
     }
   }
   return [];
+}
+
+function isLikelyHeaderRoleLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes('|')) return true;
+  if (trimmed.split(/\s+/).length > 6) return false;
+  if (looksLikeTimelineLine(trimmed)) return false;
+  return /(?:engineer|manager|director|lead|specialist|consultant|administrator|architect)/i.test(
+    trimmed,
+  );
+}
+
+function looksLikeTimelineLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/\b(19|20)\d{2}\b/.test(trimmed)) return true;
+  return /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i.test(
+    trimmed,
+  );
 }
 
 function resolveSectionKey(type?: BaselineSectionType | string | null) {
@@ -871,7 +933,12 @@ function isFunctionalLabel(line: string) {
 }
 
 function isDateRange(value: string) {
-  return /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(value);
+  return (
+    /\d{4}\s*[-–—]\s*(\d{4}|present)/i.test(value) ||
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*[-–—]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}|present)\b/i.test(
+      value,
+    )
+  );
 }
 
 function isExperienceHeader(line: string) {

@@ -470,4 +470,65 @@ describe('AuthService', () => {
     expect(emailPayload.html).not.toContain('targetthisrole.ai');
   });
 
+  it('sends internal registration notification when REGISTRATION_NOTIFY_EMAIL is configured', async () => {
+    const payload: RegisterDto = {
+      firstName: 'Notify',
+      lastName: 'User',
+      email: 'notify@example.com',
+      password: 'Password123',
+      confirmPassword: 'Password123',
+    };
+    const createdAt = new Date('2026-03-05T12:00:00.000Z');
+    const savedUser: User = {
+      id: 'notify-user-id',
+      email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      emailConfirmed: true,
+      passwordHash: '',
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'REGISTRATION_NOTIFY_EMAIL') return 'ops@example.com';
+      return undefined;
+    });
+
+    service = new AuthService(
+      usersService,
+      jwtService,
+      resendEmailService,
+      configService as unknown as ConfigService,
+      userTokensRepository as any,
+      accessCodesService as unknown as AccessCodesService,
+      adminUsersService as unknown as AdminUsersService,
+    );
+
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockResolvedValue(savedUser);
+
+    await service.register(payload);
+
+    expect(resendEmailService.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'ops@example.com',
+        subject: 'New TTR registration',
+      }),
+    );
+  });
+
 });

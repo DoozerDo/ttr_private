@@ -81,6 +81,13 @@ const STOPWORDS = new Set([
 const BULLET_LINE_PATTERN =
   /^\s*(?:[-*•●◦▪▹►‣]\s+|(?:\(?\d{1,3}\)?[.)])\s+|(?:[a-zA-Z][.)])\s+)(.+)$/;
 
+function buildNoClaimRiskResult(): ClaimRiskResult {
+  return {
+    level: 'None',
+    flaggedTerms: [],
+  };
+}
+
 function normalizeLine(line: string) {
   return line.replace(/\u00a0/g, ' ').trim();
 }
@@ -178,7 +185,7 @@ export function buildDraftBulletsForSection(
       : 0;
     const claimRisk = options?.claimRiskInventory
       ? detectClaimRiskForBullet(entry.text, options.claimRiskInventory)
-      : { level: 'None', flaggedTerms: [] };
+      : buildNoClaimRiskResult();
     return {
       id: `${section.id}:${entry.sourceIndex}`,
       text: entry.text,
