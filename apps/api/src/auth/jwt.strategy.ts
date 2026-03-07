@@ -4,8 +4,10 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { UsersService } from '../users/users.service';
 import { getEntitlementsForTier } from '../features/feature-gates';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import type { AuthUserDto } from './dto/auth-response.dto';
 import type { Request } from 'express';
+import { isFounderEmail } from './founder-access';
 
 type JwtPayload = {
   sub: string;
@@ -60,7 +62,7 @@ function extractTokenFromCookie(
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    configService: ConfigService,
+    private readonly configService: ConfigService,
     private readonly usersService: UsersService,
   ) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
@@ -87,12 +89,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User not found');
     }
 
-    const entitlements = getEntitlementsForTier(user.subscriptionTier);
+    const isFounder = isFounderEmail(
+      user.email,
+      this.configService.get<string>('FOUNDER_EMAILS'),
+    );
+    const resolvedTier = isFounder ? SubscriptionTier.PRO : user.subscriptionTier;
+    const resolvedRole = isFounder ? 'admin' : user.role;
+    const entitlements = getEntitlementsForTier(resolvedTier);
 
     const { passwordHash, ...sanitizedUser } = user;
 
     return {
       ...sanitizedUser,
+      role: resolvedRole,
+      subscriptionTier: resolvedTier,
       entitlements,
       id: user.id,
       userId: user.id,

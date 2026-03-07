@@ -22,10 +22,12 @@ import { LoginDto, RedeemAccessCodeAndLoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/user.entity';
 import { getEntitlementsForTier } from '../features/feature-gates';
+import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import type { AuthResponseDto } from './dto/auth-response.dto';
 import { UserToken } from './user-token.entity';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { AdminUsersService } from '../admin-users/admin-users.service';
+import { isFounderEmail } from './founder-access';
 import {
   buildConfirmationUrl,
   resolvePublicWebBaseUrl,
@@ -132,8 +134,12 @@ export class AuthService {
 
   async login(payload: LoginDto): Promise<AuthResponseDto> {
     const user = await this.validateCredentials(payload);
+    const isFounder = this.isFounder(user.email);
+    if (isFounder) {
+      this.logger.log(`Founder override applied for ${user.email}`);
+    }
 
-    if (this.requireAccessCode) {
+    if (this.requireAccessCode && !isFounder) {
       const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
         user.id,
       );
@@ -378,12 +384,16 @@ export class AuthService {
   }
 
   private buildAuthResponse(user: User): AuthResponseDto {
-    const entitlements = getEntitlementsForTier(user.subscriptionTier);
+    const isFounder = this.isFounder(user.email);
+    const resolvedTier = isFounder ? SubscriptionTier.PRO : user.subscriptionTier;
+    const entitlements = getEntitlementsForTier(resolvedTier);
+    const resolvedRole = isFounder ? 'admin' : user.role;
 
     const payload = {
       sub: user.id,
       email: user.email,
-      subscriptionTier: user.subscriptionTier,
+      subscriptionTier: resolvedTier,
+      role: resolvedRole,
       entitlements,
     };
 
@@ -397,10 +407,19 @@ export class AuthService {
       accessToken,
       user: {
         ...sanitizedUser,
+        role: resolvedRole,
+        subscriptionTier: resolvedTier,
         id: stableId,
         userId: stableId,
         entitlements,
       },
     };
+  }
+
+  private isFounder(email?: string | null): boolean {
+    return isFounderEmail(
+      email,
+      this.configService.get<string>('FOUNDER_EMAILS'),
+    );
   }
 }

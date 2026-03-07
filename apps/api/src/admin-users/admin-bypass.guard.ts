@@ -7,6 +7,7 @@
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AdminUsersService } from './admin-users.service';
+import { isFounderEmail } from '../auth/founder-access';
 
 /**
  * Dev-only admin access:
@@ -47,12 +48,21 @@ export class AdminBypassGuard implements CanActivate {
       const userIdCandidate = normalizeCandidate(req?.user?.userId);
       const idCandidate = normalizeCandidate(req?.user?.id);
       const subCandidate = normalizeCandidate(req?.user?.sub);
+      const emailCandidate = normalizeCandidate(req?.user?.email);
 
       const userCandidates = [userIdCandidate, idCandidate, subCandidate].filter(
         Boolean,
       );
 
       authedUserId = userCandidates[0] ?? '';
+
+      const isFounder = isFounderEmail(
+        emailCandidate,
+        this.config.get<string>('FOUNDER_EMAILS'),
+      );
+      if (isFounder) {
+        return true;
+      }
 
       const rawDevHeader = req?.headers?.['x-dev-user-id'];
       const devUserId =

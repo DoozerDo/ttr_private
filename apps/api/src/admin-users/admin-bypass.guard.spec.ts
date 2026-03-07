@@ -15,9 +15,16 @@ describe('AdminBypassGuard', () => {
       }),
     }) as ExecutionContext;
 
-  const makeConfig = (nodeEnv: string): ConfigService =>
+  const makeConfig = (
+    nodeEnv: string,
+    founderEmails?: string,
+  ): ConfigService =>
     ({
-      get: (key: string) => (key === 'NODE_ENV' ? nodeEnv : undefined),
+      get: (key: string) => {
+        if (key === 'NODE_ENV') return nodeEnv;
+        if (key === 'FOUNDER_EMAILS') return founderEmails;
+        return undefined;
+      },
     }) as ConfigService;
 
   const makeAdminService = (): AdminUsersService =>
@@ -56,5 +63,16 @@ describe('AdminBypassGuard', () => {
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(adminService.isAdmin).toHaveBeenCalledWith('dev-id');
+  });
+
+  it('allows founder email without admin_users lookup', async () => {
+    const config = makeConfig('production', 'founder@targetthisrole.com');
+    const adminService = makeAdminService();
+    const guard = new AdminBypassGuard(config, adminService);
+
+    const context = makeContext({ id: 'founder-id', email: 'Founder@TargetThisRole.com' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(adminService.isAdmin).not.toHaveBeenCalled();
   });
 });

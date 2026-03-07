@@ -391,6 +391,58 @@ describe('AuthService', () => {
     expect(result.accessToken).toEqual('signed-token');
   });
 
+  it('allows founder login without access code and applies admin/pro overrides', async () => {
+    const payload: LoginDto = {
+      email: 'Founder@TargetThisRole.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'founder-user-id',
+      email: payload.email,
+      firstName: 'Founder',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    usersService.findByEmail.mockResolvedValue(savedUser);
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'FOUNDER_EMAILS') return 'founder@targetthisrole.com';
+      if (key === 'NODE_ENV') return 'test';
+      return undefined;
+    });
+
+    accessCodesService.userHasActiveAccess.mockResolvedValue(false);
+    accessCodesService.redeemAssignedCodeForUser.mockResolvedValue(false);
+
+    const result = await service.login(payload);
+
+    expect(accessCodesService.userHasActiveAccess).not.toHaveBeenCalled();
+    expect(accessCodesService.redeemAssignedCodeForUser).not.toHaveBeenCalled();
+    expect(result.user).toMatchObject({
+      id: savedUser.id,
+      role: 'admin',
+      subscriptionTier: SubscriptionTier.PRO,
+    });
+    expect(result.user.entitlements.effectiveTier).toEqual(SubscriptionTier.PRO);
+  });
+
   it('uses configured public web URL and support email in confirmation email content', async () => {
     const payload: RegisterDto = {
       firstName: 'Beta',
