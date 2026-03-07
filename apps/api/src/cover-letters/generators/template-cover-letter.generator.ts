@@ -36,6 +36,8 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       baselineBlocks,
       constraints,
     );
+    const strategicStrengths = (input.gapAnalysis?.strengths ?? []).slice(0, 2);
+    const majorGaps = (input.gapAnalysis?.criticalGaps ?? []).slice(0, 2);
     const focusAreas = this.buildFocusAreas(constrainedJob);
     const tone = input.tone?.trim() || null;
     const safeMode = Boolean(input.safeMode);
@@ -43,7 +45,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const paragraphs = safeMode
       ? [
           this.composeSafeIntro(constrainedJob, tone),
-          this.composeSafeStrengths(baselineStatements, tone),
+          this.composeSafeStrengths(baselineStatements, tone, strategicStrengths),
           this.composeSafeExecution(constrainedJob),
           this.composeSafeClosing(
             constrainedJob,
@@ -53,8 +55,13 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
         ]
       : [
           this.composeIntro(constrainedJob, tone),
-          this.composeStrengths(baselineStatements, tone),
-          this.composeExecution(constrainedJob, focusAreas, baselineStatements),
+          this.composeStrengths(baselineStatements, tone, strategicStrengths),
+          this.composeExecution(
+            constrainedJob,
+            focusAreas,
+            baselineStatements,
+            majorGaps,
+          ),
           this.composeClosing(
             constrainedJob,
             tone,
@@ -243,38 +250,63 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return `I am applying for ${roleDescriptor}. This letter relies solely on the approved baseline text and the responsibilities you shared, keeping every claim anchored to verified content and avoiding speculation.${toneLine}`;
   }
 
-  private composeStrengths(statements: string[], tone: string | null) {
+  private composeStrengths(
+    statements: string[],
+    tone: string | null,
+    strategicStrengths: string[],
+  ) {
     const toneLine = tone
       ? ` The same ${tone} style appears across these examples.`
       : '';
 
     if (statements.length === 0) {
-      return `The approved baseline focuses on the way I plan work, collaborate with partners, and document outcomes in plain language.${toneLine} I will rely solely on that text to describe my strengths and keep the narrative consistent with verified material.`;
+      const strengthsLine = strategicStrengths.length
+        ? ` My strongest alignment areas are ${this.formatList(strategicStrengths)}.`
+        : '';
+      return `The approved baseline focuses on the way I plan work, collaborate with partners, and document outcomes in plain language.${toneLine}${strengthsLine} I will rely solely on that text to describe my strengths and keep the narrative consistent with verified material.`;
     }
 
     const highlights = statements.slice(0, 3);
 
-    return `Documented experience from the baseline includes ${this.formatList(highlights)}.${toneLine} These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.`;
+    const strengthsLine = strategicStrengths.length
+      ? ` Strongest alignment for this role includes ${this.formatList(strategicStrengths)}.`
+      : '';
+    return `Documented experience from the baseline includes ${this.formatList(highlights)}.${toneLine}${strengthsLine} These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.`;
   }
 
-  private composeSafeStrengths(statements: string[], tone: string | null) {
+  private composeSafeStrengths(
+    statements: string[],
+    tone: string | null,
+    strategicStrengths: string[],
+  ) {
     const toneLine = tone
       ? ` The same ${tone} style appears across these passages.`
       : '';
 
     if (statements.length === 0) {
-      return `The approved baseline emphasizes how I plan work, collaborate with teammates, and document outcomes in plain language.${toneLine} I will stick to that verified material when describing strengths.`;
+      const strengthsLine = strategicStrengths.length
+        ? ` Key strengths I can verify include ${this.formatList(strategicStrengths)}.`
+        : '';
+      return `The approved baseline emphasizes how I plan work, collaborate with teammates, and document outcomes in plain language.${toneLine}${strengthsLine} I will stick to that verified material when describing strengths.`;
     }
 
     const highlights = statements.slice(0, 2);
 
-    return `The allowed baseline highlights ${this.formatList(highlights)}.${toneLine} Each sentence comes directly from approved content so every strength remains verifiable.`;
+    const strengthsLine = strategicStrengths.length
+      ? ` Verified strengths for this role include ${this.formatList(strategicStrengths)}.`
+      : '';
+    return `The allowed baseline highlights ${this.formatList(highlights)}.${toneLine}${strengthsLine} Each sentence comes directly from approved content so every strength remains verifiable.`;
   }
 
   private composeExecution(
     job: NormalizedJob,
     focusAreas: string[],
     statements: string[],
+    majorGaps: Array<{
+      title: string;
+      requirementEvidence: string;
+      baselineEvidence: string | null;
+    }>,
   ) {
     const priorities =
       focusAreas.length > 0
@@ -292,7 +324,12 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       ? ` At ${job.company}, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.`
       : ' I will confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.';
 
-    return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${collaborationLine}`;
+    const gapLine = majorGaps.length
+      ? ` I will also proactively address likely interview risks around ${this.formatList(
+          majorGaps.map((gap) => gap.title),
+        )} by connecting transferable baseline evidence and calling out growth areas directly.`
+      : '';
+    return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${gapLine}${collaborationLine}`;
   }
 
   private composeSafeExecution(job: NormalizedJob) {

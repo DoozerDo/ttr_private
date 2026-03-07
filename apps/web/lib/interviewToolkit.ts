@@ -10,8 +10,25 @@ export type StudyPacket = {
     verdict: string;
     strengths: string[];
     gaps: string[];
+    criticalGaps: Array<{
+      gapId: string;
+      title: string;
+      description: string;
+      severityScore: number;
+      requirementEvidence: string;
+      baselineEvidence: string | null;
+      reasoning: string;
+    }>;
+    recommendedActions: string[];
     createdAt: string;
   } | null;
+  interviewRiskBriefing: Array<{
+    riskId: string;
+    topic: string;
+    whyTheyMayChallengeYou: string;
+    howToAddressIt: string;
+    exampleTalkingPoint: string;
+  }>;
   recommendedStories: StarStory[];
   recentStories: StarStory[];
   questions: InterviewQuestion[];

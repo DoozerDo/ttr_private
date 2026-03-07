@@ -108,6 +108,16 @@ type LatestAnalysis = {
   breakdown?: DimensionBreakdown | null;
   strengths?: string[];
   gaps?: string[];
+  criticalGaps?: Array<{
+    gapId: string;
+    title: string;
+    description: string;
+    severityScore: number;
+    requirementEvidence: string;
+    baselineEvidence: string | null;
+    reasoning: string;
+  }>;
+  recommendedActions?: string[];
   complianceFlags?: string[];
   summary?: string | null;
   evaluationNotes?: string[] | null;
@@ -794,12 +804,22 @@ export default function ResultsPage() {
       .slice(0, 4);
   }, [latest?.narrative?.strengths, latest?.strengths]);
   const strategicGaps = useMemo(() => {
+    const fromCritical = Array.isArray(latest?.criticalGaps)
+      ? latest.criticalGaps
+          .map((gap) => (typeof gap?.title === "string" ? gap.title : ""))
+          .filter((item) => item.trim().length > 0)
+      : [];
     const fromNarrative = Array.isArray(latest?.narrative?.gaps) ? latest.narrative.gaps : [];
     const fromLatest = Array.isArray(latest?.gaps) ? latest.gaps : [];
-    return Array.from(new Set([...fromNarrative, ...fromLatest]))
+    return Array.from(new Set([...fromCritical, ...fromNarrative, ...fromLatest]))
       .filter((item) => typeof item === "string" && item.trim().length > 0)
       .slice(0, 5);
-  }, [latest?.gaps, latest?.narrative?.gaps]);
+  }, [latest?.criticalGaps, latest?.gaps, latest?.narrative?.gaps]);
+  const recommendedActions = useMemo(() => {
+    return Array.isArray(latest?.recommendedActions)
+      ? latest.recommendedActions.filter((item) => typeof item === "string" && item.trim().length > 0)
+      : [];
+  }, [latest?.recommendedActions]);
   const positioningNarrative = useMemo(() => {
     if (narrativeSummary) return narrativeSummary;
     if (strategicStrengths.length) {
@@ -1431,7 +1451,7 @@ export default function ResultsPage() {
               </section>
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Gap Signals</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Critical Gaps</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(strategicGaps.length ? strategicGaps : ["Domain specificity depth"])
                     .slice(0, 4)
@@ -1446,6 +1466,32 @@ export default function ResultsPage() {
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                 <h2 className="text-lg font-semibold text-slate-100">Recommended Positioning</h2>
                 <p className="mt-3 text-sm text-slate-300">{positioningNarrative}</p>
+              </section>
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Recommended Actions</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(recommendedActions.length
+                    ? recommendedActions
+                    : [
+                        "Improve resume positioning for the top gap.",
+                        "Generate a targeted cover letter that addresses transferability.",
+                        "Prepare interview responses for likely challenge areas.",
+                      ]
+                  ).map((item) => (
+                    <li key={`action-${item}`}>{item}</li>
+                  ))}
+                </ul>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
+                    Improve Resume
+                  </FormButton>
+                  <FormButton onClick={() => void router.push("/cover-letters")}>
+                    Generate Cover Letter
+                  </FormButton>
+                  <FormButton onClick={() => void router.push(interviewToolkitHref)}>
+                    Prepare for Interview
+                  </FormButton>
+                </div>
               </section>
               {scoringRubric ? (
                 <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">

@@ -6,6 +6,7 @@ import { Baseline } from '../baseline/baseline.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { Job } from '../jobs/job.entity';
 import { ApplicationsModule } from '../applications/applications.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
@@ -27,6 +28,6 @@ import { ResumeService } from './resume.service';
     OpportunitiesModule,
   ],
   controllers: [ResumeController],
-  providers: [ResumeService],
+  providers: [ResumeService, GapAnalysisService],
 })
 export class ResumeModule {}

@@ -78,6 +78,11 @@ import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 import type { FitScoreRubricJson } from './prompts/fit-score-rubric.v1';
 import { normalizeJobDescription } from './job-normalizer';
+import {
+  CriticalGap,
+  GapAnalysisResult,
+  GapAnalysisService,
+} from './gap-analysis.service';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -250,6 +255,8 @@ type FitScoreResponse = {
   };
   strengths?: string[];
   gaps?: string[];
+  criticalGaps?: CriticalGap[];
+  recommendedActions?: string[];
   compliance_flags?: Array<{ code: string; message?: string }>;
   audit_id?: string | null;
   auditId?: string | null;
@@ -317,6 +324,8 @@ type RunFitAssessmentComplianceBlockedResponse = {
   dimensionScores?: FitAssessment['dimensionScores'];
   strengths?: string[];
   gaps?: string[];
+  criticalGaps?: CriticalGap[];
+  recommendedActions?: string[];
   scoring_v2?: CxFitV2Result;
   scoringProof?: ScoringProofSnapshot;
   debug?: CompatibilityRunDebugPayload;
@@ -375,6 +384,7 @@ export class AnalysisService {
     private readonly usersRepository: Repository<User>,
     private readonly fitScoringService: FitScoringService,
     private readonly complianceService: ComplianceService,
+    private readonly gapAnalysisService: GapAnalysisService,
   ) {}
 
   private readonly logger = new Logger(AnalysisService.name);
@@ -529,6 +539,78 @@ export class AnalysisService {
     if (score >= 85) return 'Apply';
     if (score >= 70) return 'Consider';
     return 'Skip';
+  }
+
+  private mapAssessmentDimensionPercents(
+    assessment: FitAssessment,
+  ): Record<string, number> {
+    const fromV2 = assessment.scoringV2?.rubric?.dimensionPercents;
+    if (fromV2) {
+      return {
+        role_scope_and_seniority: fromV2.role_scope_and_seniority ?? 0,
+        support_operations_and_process_rigor:
+          fromV2.support_operations_and_process_rigor ?? 0,
+        tooling_and_platform_experience:
+          fromV2.tooling_and_platform_experience ?? 0,
+        domain_and_business_context: fromV2.domain_and_business_context ?? 0,
+        change_leadership_and_customer_advocacy:
+          fromV2.change_leadership_and_customer_advocacy ?? 0,
+      };
+    }
+
+    return {
+      role_scope_and_seniority: assessment.dimensionScores?.experienceAlignment ?? 0,
+      support_operations_and_process_rigor:
+        assessment.dimensionScores?.leadershipLevel ?? 0,
+      tooling_and_platform_experience:
+        assessment.dimensionScores?.technicalPlatformFit ?? 0,
+      domain_and_business_context: assessment.dimensionScores?.industryContext ?? 0,
+      change_leadership_and_customer_advocacy:
+        assessment.dimensionScores?.strategicTacticalFit ?? 0,
+    };
+  }
+
+  private async buildGapInsightsForAssessment(
+    assessment: FitAssessment,
+  ): Promise<GapAnalysisResult> {
+    const job = await this.jobRepository.findOne({
+      where: { id: assessment.jobId, userId: assessment.userId },
+    });
+
+    if (!job) {
+      return {
+        strengths: assessment.strengths ?? [],
+        criticalGaps: (assessment.gaps ?? []).map((gap, index) => ({
+          gapId: `legacy_gap_${index + 1}`,
+          title: gap,
+          description: `Coverage is limited for ${gap}.`,
+          severityScore: 0.5,
+          requirementEvidence: gap,
+          baselineEvidence: null,
+          reasoning: 'Derived from previously stored fit assessment gap output.',
+        })),
+        recommendedActions: [],
+        interviewRisks: [],
+      };
+    }
+
+    const baselineSections = await this.baselineSectionRepository.find({
+      where: { baselineId: assessment.baselineId },
+      order: { order: 'ASC' },
+    });
+
+    const allowedSections = baselineSections.filter(
+      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+    );
+
+    return this.gapAnalysisService.analyze({
+      baselineSections: allowedSections.map((section) => ({
+        content: section.content ?? '',
+      })),
+      jobRequirements: job.normalizedRequirements ?? [],
+      jobResponsibilities: job.normalizedResponsibilities ?? [],
+      dimensionPercents: this.mapAssessmentDimensionPercents(assessment),
+    });
   }
 
   private normalizeKeywords(text: string) {
@@ -1665,8 +1747,14 @@ export class AnalysisService {
           )
         : undefined;
 
-    const strengths = allowDebug ? scoring?.strengths ?? [] : [];
-    const gaps = allowDebug ? scoring?.gaps ?? [] : [];
+    const gapInsights = this.gapAnalysisService.analyze({
+      baselineSections: sectionPayload,
+      jobRequirements: normalizedJobRequirements,
+      jobResponsibilities: normalizedJobResponsibilities,
+      dimensionPercents: scoringV2.rubric.dimensionPercents,
+    });
+    const strengths = gapInsights.strengths;
+    const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
     const complianceFlags = scoring?.complianceFlags ?? [];
     const finalScore = scoringV2.score;
 
@@ -1790,6 +1878,8 @@ export class AnalysisService {
       breakdown,
       strengths,
       gaps,
+      criticalGaps: gapInsights.criticalGaps,
+      recommendedActions: gapInsights.recommendedActions,
       compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
       audit_id: compliance.audit.id,
       auditId: compliance.audit.id,
@@ -1803,7 +1893,7 @@ export class AnalysisService {
       overallScore: finalScore,
       dimensionScores: legacyDimensionScores,
       complianceFlags,
-      summary: scoring?.summary,
+      summary: scoring?.summary ?? this.buildSummaryFromTerms(strengths, gaps),
       ...(debugInfo ? { debug: debugInfo } : {}),
       ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
       scoringProof,
@@ -2199,8 +2289,14 @@ export class AnalysisService {
             )
           : undefined;
 
-      const strengths = allowDebug ? debugScoring?.strengths ?? [] : [];
-      const gaps = allowDebug ? debugScoring?.gaps ?? [] : [];
+      const gapInsights = this.gapAnalysisService.analyze({
+        baselineSections: sectionPayload,
+        jobRequirements: normalizedJobRequirements,
+        jobResponsibilities: normalizedJobResponsibilities,
+        dimensionPercents: scoringV2.rubric.dimensionPercents,
+      });
+      const strengths = gapInsights.strengths;
+      const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
       const complianceFlags = debugScoring?.complianceFlags ?? [];
       const finalScore = scoringV2.score;
 
@@ -2309,11 +2405,15 @@ export class AnalysisService {
         dimensionScores: legacyDimensionScores,
         strengths,
         gaps,
+        criticalGaps: gapInsights.criticalGaps,
+        recommendedActions: gapInsights.recommendedActions,
         scoring_v2: scoringV2,
         ...(debugInfo ? { debug: debugInfo } : {}),
         ...(fitScoreDebug ? { fit_score_debug: fitScoreDebug } : {}),
         scoringProof,
-        summary: debugScoring?.summary,
+        summary:
+          debugScoring?.summary ??
+          this.buildSummaryFromTerms(strengths, gaps),
         confidenceScore: confidenceResult.confidenceScore,
         confidenceReasons: confidenceResult.confidenceReasons,
         compliance: {
@@ -2379,6 +2479,8 @@ export class AnalysisService {
         breakdown,
         strengths,
         gaps,
+        criticalGaps: gapInsights.criticalGaps,
+        recommendedActions: gapInsights.recommendedActions,
         compliance_flags: this.coerceComplianceFlags(compliance.complianceFlags),
         audit_id: compliance.audit.id,
         auditId: compliance.audit.id,
@@ -2392,7 +2494,9 @@ export class AnalysisService {
         overallScore: finalScore,
         dimensionScores: legacyDimensionScores,
         complianceFlags,
-        summary: debugScoring?.summary,
+        summary:
+          debugScoring?.summary ??
+          this.buildSummaryFromTerms(strengths, gaps),
         ...(debugInfo ? { debug: debugInfo } : {}),
         scoringProof: successScoringProof,
         confidenceScore: confidenceResult.confidenceScore,
@@ -2656,9 +2760,10 @@ export class AnalysisService {
   }
 
   private async buildLatestAssessmentPayload(assessment: FitAssessment) {
+    const gapInsights = await this.buildGapInsightsForAssessment(assessment);
     const summary = this.buildSummaryFromTerms(
-      assessment.strengths ?? [],
-      assessment.gaps ?? [],
+      gapInsights.strengths ?? [],
+      gapInsights.criticalGaps.map((gap) => gap.title),
     );
 
     const baselineVersionRecord = assessment.baselineVersion
@@ -2698,8 +2803,10 @@ export class AnalysisService {
       score: assessment.overallScore,
       verdict: assessment.verdict,
       dimensionScores: assessment.dimensionScores,
-      strengths: assessment.strengths,
-      gaps: assessment.gaps,
+      strengths: gapInsights.strengths,
+      gaps: gapInsights.criticalGaps.map((gap) => gap.title),
+      criticalGaps: gapInsights.criticalGaps,
+      recommendedActions: gapInsights.recommendedActions,
       complianceFlags: assessment.complianceFlags,
       summary,
       confidenceScore: assessment.confidenceScore ?? null,

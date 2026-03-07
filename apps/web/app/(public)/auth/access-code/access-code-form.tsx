@@ -53,11 +53,19 @@ function needsProfileCompletion(value: unknown): boolean {
   );
 }
 
-export function AccessCodeForm({ initialEmail, returnPath }: { initialEmail: string; returnPath: string }) {
+export function AccessCodeForm({
+  initialEmail,
+  initialCode,
+  returnPath,
+}: {
+  initialEmail: string;
+  initialCode?: string;
+  returnPath: string;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState((initialCode ?? "").trim().toUpperCase());
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

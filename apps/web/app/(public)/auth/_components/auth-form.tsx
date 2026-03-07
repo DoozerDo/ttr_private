@@ -101,6 +101,14 @@ function isEmailNotConfirmedError(message: string | undefined, status: number): 
   );
 }
 
+function isAccessRequiredError(message: string | undefined, status: number): boolean {
+  return (
+    status === 403 &&
+    typeof message === "string" &&
+    message.toLowerCase().includes("access code required")
+  );
+}
+
 export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
@@ -123,12 +131,44 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
   const helperLinkLabel = isLogin ? "Sign up" : "Log in";
   const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
 
+  const buildAwaitingAccessPath = (trimmedEmail: string) => {
+    const params = new URLSearchParams();
+    params.set("email", trimmedEmail);
+    const safeNext = sanitizeReturnPath(returnPath);
+    if (safeNext) {
+      params.set("next", safeNext);
+    }
+    return `/awaiting-access?${params.toString()}`;
+  };
+
+  const buildRedeemPath = (trimmedEmail: string) => {
+    const params = new URLSearchParams();
+    params.set("email", trimmedEmail);
+    const safeNext = sanitizeReturnPath(returnPath);
+    if (safeNext) {
+      params.set("next", safeNext);
+    }
+    return `/redeem?${params.toString()}`;
+  };
+
   const handleLoginSuccess = async () => {
     const targetPath = sanitizeReturnPath(returnPath) ?? "/baseline";
     const meResponse = await fetch("/api/users/me", {
       method: "GET",
       credentials: "include",
     });
+
+    if (!meResponse.ok) {
+      if (meResponse.status === 403) {
+        const awaitingPath = buildAwaitingAccessPath(email.trim());
+        await router.replace(awaitingPath);
+        await router.refresh();
+        return;
+      }
+      setError("Unable to continue. Please try again.");
+      return;
+    }
+
     const mePayload = meResponse.ok ? await meResponse.json().catch(() => null) : null;
 
     if (needsProfileCompletion(mePayload)) {
@@ -165,12 +205,12 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
       const messageFromApi = extractAuthApiMessage(data) ?? "Login failed";
 
       if (response.status === 403 && hasAccessCodeRequired(data)) {
-        const params = new URLSearchParams();
-        params.set("email", trimmedEmail);
-        if (returnPath) {
-          params.set("next", returnPath);
-        }
-        router.push(`/auth/access-code?${params.toString()}`);
+        router.push(buildRedeemPath(trimmedEmail));
+        return;
+      }
+
+      if (isAccessRequiredError(messageFromApi, response.status)) {
+        router.push(buildRedeemPath(trimmedEmail));
         return;
       }
 
@@ -303,6 +343,11 @@ export function AuthForm({ mode, returnPath }: AuthFormProps) {
           ? "Check your inbox for a verification email from Target This Role."
           : "Account created.");
       setMessage(successMessage);
+
+      if (!requiresVerification) {
+        await router.replace(buildAwaitingAccessPath(trimmedEmail));
+        await router.refresh();
+      }
     } catch (submitError) {
       console.error("Auth request failed", submitError);
       setError("Unable to reach authentication service");

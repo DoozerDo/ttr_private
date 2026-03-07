@@ -15,6 +15,7 @@ import { CalibrationController } from './calibration.controller';
 import { FitScoresController } from './fit-scores.controller';
 import { AnalysisService } from './analysis.service';
 import { FitScoringService } from './fit-scoring.service';
+import { GapAnalysisService } from './gap-analysis.service';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { FitScoringService } from './fit-scoring.service';
     ComplianceModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
-  providers: [AnalysisService, FitScoringService],
+  providers: [AnalysisService, FitScoringService, GapAnalysisService],
+  exports: [GapAnalysisService],
 })
 export class AnalysisModule {}

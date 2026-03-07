@@ -3,15 +3,23 @@
 import { useState } from "react";
 
 type CopyCodeButtonProps = {
-  code: string;
+  value: string;
+  idleLabel?: string;
+  copiedLabel?: string;
+  className?: string;
 };
 
-export function CopyCodeButton({ code }: CopyCodeButtonProps) {
+export function CopyCodeButton({
+  value,
+  idleLabel = "Copy",
+  copiedLabel = "Copied",
+  className,
+}: CopyCodeButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -23,9 +31,12 @@ export function CopyCodeButton({ code }: CopyCodeButtonProps) {
     <button
       type="button"
       onClick={handleCopy}
-      className="mt-3 rounded-md border border-emerald-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100 hover:bg-emerald-500/20"
+      className={
+        className ??
+        "rounded-md border border-emerald-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100 hover:bg-emerald-500/20"
+      }
     >
-      {copied ? "Copied" : "Copy code"}
+      {copied ? copiedLabel : idleLabel}
     </button>
   );
 }

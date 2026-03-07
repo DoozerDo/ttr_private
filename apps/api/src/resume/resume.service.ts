@@ -15,6 +15,7 @@ import {
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import {
   getInsufficientExtractedTextDetails,
@@ -75,6 +76,7 @@ export class ResumeService {
     private readonly complianceService: ComplianceService,
     private readonly applicationsService: ApplicationsService,
     private readonly opportunitiesService: OpportunitiesService,
+    private readonly gapAnalysisService: GapAnalysisService,
   ) {}
 
   private async findLatestAssessment(userId: string, jobId: string) {
@@ -371,8 +373,34 @@ export class ResumeService {
       baselineVersion,
     });
 
+    const latestAssessment = jobId
+      ? await this.findLatestAssessment(userId, jobId)
+      : null;
+    const gapInsights =
+      job && latestAssessment
+        ? this.gapAnalysisService.analyze({
+            baselineSections: allowedSections.map((section) => ({
+              content: section.content ?? '',
+            })),
+            jobRequirements: job.normalizedRequirements ?? [],
+            jobResponsibilities: job.normalizedResponsibilities ?? [],
+            dimensionPercents:
+              latestAssessment.scoringV2?.rubric?.dimensionPercents ?? undefined,
+          })
+        : null;
+
+    const gapContextText = gapInsights
+      ? [
+          ...gapInsights.strengths,
+          ...gapInsights.criticalGaps.map((gap) => gap.requirementEvidence),
+        ].join('\n')
+      : '';
+    const draftJobText = [job?.rawDescription ?? '', gapContextText]
+      .filter(Boolean)
+      .join('\n');
+
     const sections = buildResumeDraftSections(allowedSections, {
-      jobText: job?.rawDescription ?? null,
+      jobText: draftJobText || null,
       claimRiskInventory,
     });
     const claimRiskSummary = summarizeClaimRisk(
@@ -384,9 +412,6 @@ export class ResumeService {
         baseline.sections ?? [],
       );
 
-    const latestAssessment = jobId
-      ? await this.findLatestAssessment(userId, jobId)
-      : null;
     const cxFitScoreSnapshot = this.buildCxFitScoreSnapshot(latestAssessment);
 
     const shouldEnforceOneTap = options?.enforceOneTap ?? true;
@@ -475,6 +500,7 @@ export class ResumeService {
       trackerStatus: trackerEntry.status,
       opportunityId: opportunity?.id ?? null,
       claimRiskSummary,
+      gapAnalysis: gapInsights,
     };
   }
 

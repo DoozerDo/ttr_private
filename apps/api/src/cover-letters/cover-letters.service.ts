@@ -8,6 +8,8 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { DataSource, Repository } from 'typeorm';
+import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import {
   BaselineIncludePolicy,
   BaselineSection,
@@ -99,10 +101,12 @@ export class CoverLettersService {
   private readonly baselineBlockPolicyRepository: Repository<BaselineBlockPolicy>;
   private readonly jobRepository: Repository<Job>;
   private readonly generator: CoverLetterGenerator;
+  private readonly fitAssessmentRepository: Repository<FitAssessment>;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly complianceService: ComplianceService,
+    private readonly gapAnalysisService: GapAnalysisService,
   ) {
     this.coverLetterRepository = this.dataSource.getRepository(CoverLetter);
     this.baselineRepository = this.dataSource.getRepository(Baseline);
@@ -111,6 +115,7 @@ export class CoverLettersService {
     this.baselineBlockPolicyRepository =
       this.dataSource.getRepository(BaselineBlockPolicy);
     this.jobRepository = this.dataSource.getRepository(Job);
+    this.fitAssessmentRepository = this.dataSource.getRepository(FitAssessment);
     this.generator = new TemplateCoverLetterGenerator();
   }
 
@@ -336,6 +341,19 @@ export class CoverLettersService {
       input.complianceConstraints,
     );
     const requestSafeMode = complianceConstraints?.mode === 'strict';
+    const latestAssessment = await this.fitAssessmentRepository.findOne({
+      where: { userId, jobId: job.id, baselineId: baseline.id },
+      order: { createdAt: 'DESC' },
+    });
+    const gapInsights = this.gapAnalysisService.analyze({
+      baselineSections: allowedSections.map((section) => ({
+        content: section.content ?? '',
+      })),
+      jobRequirements: job.normalizedRequirements ?? [],
+      jobResponsibilities: job.normalizedResponsibilities ?? [],
+      dimensionPercents:
+        latestAssessment?.scoringV2?.rubric?.dimensionPercents ?? undefined,
+    });
 
     let generation = this.generator.generate({
       baselineId: baseline.id,
@@ -347,6 +365,10 @@ export class CoverLettersService {
       tone: input.tone,
       safeMode: requestSafeMode,
       complianceConstraints,
+      gapAnalysis: {
+        strengths: gapInsights.strengths,
+        criticalGaps: gapInsights.criticalGaps,
+      },
     });
 
     const requestedJobContext = this.normalizeRequestedJobContext(
@@ -385,6 +407,10 @@ export class CoverLettersService {
         tone: input.tone,
         safeMode: true,
         complianceConstraints,
+        gapAnalysis: {
+          strengths: gapInsights.strengths,
+          criticalGaps: gapInsights.criticalGaps,
+        },
       });
 
       complianceResult = await this.evaluateCompliance(

@@ -37,6 +37,15 @@ export type CoverLetterGenerationInput = {
   tone?: string;
   safeMode?: boolean;
   complianceConstraints?: CoverLetterComplianceConstraints;
+  gapAnalysis?: {
+    strengths: string[];
+    criticalGaps: Array<{
+      title: string;
+      requirementEvidence: string;
+      baselineEvidence: string | null;
+      reasoning: string;
+    }>;
+  };
 };
 
 export type CoverLetterGenerationResult = {

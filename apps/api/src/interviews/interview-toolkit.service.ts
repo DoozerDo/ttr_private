@@ -10,11 +10,13 @@ import { Repository } from 'typeorm';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { Job } from '../jobs/job.entity';
 import { StarStory } from '../star-stories/star-story.entity';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
 import type { InterviewGap } from './interview-types';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
+import { BaselineSection } from '../baseline/baseline-section.entity';
 
 export type StudyPacket = {
   job: Pick<Job, 'id' | 'title' | 'company'>;
@@ -25,8 +27,25 @@ export type StudyPacket = {
     verdict: string;
     strengths: string[];
     gaps: string[];
+    criticalGaps: Array<{
+      gapId: string;
+      title: string;
+      description: string;
+      severityScore: number;
+      requirementEvidence: string;
+      baselineEvidence: string | null;
+      reasoning: string;
+    }>;
+    recommendedActions: string[];
     createdAt: string;
   } | null;
+  interviewRiskBriefing: Array<{
+    riskId: string;
+    topic: string;
+    whyTheyMayChallengeYou: string;
+    howToAddressIt: string;
+    exampleTalkingPoint: string;
+  }>;
   recommendedStories: StarStory[];
   recentStories: StarStory[];
   questions: ReturnType<InterviewQuestionGeneratorService['generateQuestions']>;
@@ -49,8 +68,11 @@ export class InterviewToolkitService {
     private readonly starStoryRepository: Repository<StarStory>,
     @InjectRepository(BaselineVersion)
     private readonly baselineVersionRepository: Repository<BaselineVersion>,
+    @InjectRepository(BaselineSection)
+    private readonly baselineSectionRepository: Repository<BaselineSection>,
     private readonly questionGenerator: InterviewQuestionGeneratorService,
     private readonly complianceService: ComplianceService,
+    private readonly gapAnalysisService: GapAnalysisService,
   ) {}
 
   private async requireJob(jobId: string, userId: string) {
@@ -73,14 +95,38 @@ export class InterviewToolkitService {
       order: { createdAt: 'DESC' },
     });
 
+    const baselineSections = assessment
+      ? await this.baselineSectionRepository.find({
+          where: { baselineId: assessment.baselineId },
+          order: { order: 'ASC' },
+        })
+      : [];
+
+    const gapInsights = assessment
+      ? this.gapAnalysisService.analyze({
+          baselineSections: baselineSections.map((section) => ({
+            content: section.content ?? '',
+          })),
+          jobRequirements: job.normalizedRequirements ?? [],
+          jobResponsibilities: job.normalizedResponsibilities ?? [],
+          dimensionPercents:
+            assessment.scoringV2?.rubric?.dimensionPercents ?? undefined,
+        })
+      : null;
+
     const fitSnapshot = assessment
       ? {
           assessmentId: assessment.id,
           baselineId: assessment.baselineId,
           overallScore: assessment.overallScore,
           verdict: assessment.verdict,
-          strengths: assessment.strengths ?? [],
-          gaps: assessment.gaps ?? [],
+          strengths: gapInsights?.strengths ?? assessment.strengths ?? [],
+          gaps:
+            gapInsights?.criticalGaps.map((gap) => gap.title) ??
+            assessment.gaps ??
+            [],
+          criticalGaps: gapInsights?.criticalGaps ?? [],
+          recommendedActions: gapInsights?.recommendedActions ?? [],
           createdAt: assessment.createdAt.toISOString(),
         }
       : null;
@@ -91,7 +137,10 @@ export class InterviewToolkitService {
       take: 12,
     });
 
-    const normalizedGaps = fitSnapshot?.gaps ?? [];
+    const normalizedGaps =
+      fitSnapshot?.criticalGaps?.length
+        ? fitSnapshot.criticalGaps.map((gap) => gap.title)
+        : fitSnapshot?.gaps ?? [];
     const storyMatches = normalizedGaps.length
       ? stories.filter((story) => this.matchesAnyGap(story, normalizedGaps))
       : [];
@@ -110,6 +159,7 @@ export class InterviewToolkitService {
     return {
       job: { id: job.id, title: job.title, company: job.company },
       fitSnapshot,
+      interviewRiskBriefing: gapInsights?.interviewRisks ?? [],
       recommendedStories,
       recentStories: stories.slice(0, 5),
       questions,

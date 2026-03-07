@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { adminServerFetch } from "../_lib/adminServerFetch";
 import { CopyCodeButton } from "./CopyCodeButton";
 
@@ -66,6 +67,26 @@ async function loadUsers() {
   return unwrapArrayPayload<AdminUserRow>(payload);
 }
 
+async function resolvePublicWebOrigin(): Promise<string> {
+  const configured =
+    process.env.APP_PUBLIC_WEB_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  if (!host) {
+    return "";
+  }
+  const protocol =
+    requestHeaders.get("x-forwarded-proto") ??
+    (process.env.NODE_ENV === "production" ? "https" : "http");
+  return `${protocol}://${host}`.replace(/\/+$/, "");
+}
+
 async function generateAction(formData: FormData) {
   "use server";
   const assignedUserId = (formData.get("assignedUserId") as string | null)?.trim();
@@ -117,13 +138,15 @@ export default async function AdminAccessCodesPage({
   let rows: AccessCodeRow[] = [];
   let users: AdminUserRow[] = [];
   let resolvedSearchParams: SearchParamsShape = {};
+  let webOrigin = "";
   let loadError: string | null = null;
 
   try {
-    [rows, users, resolvedSearchParams] = await Promise.all([
+    [rows, users, resolvedSearchParams, webOrigin] = await Promise.all([
       loadCodes(),
       loadUsers(),
       Promise.resolve(searchParams ?? {}),
+      resolvePublicWebOrigin(),
     ]);
   } catch (error) {
     loadError = error instanceof Error ? error.message : "Unable to load access codes.";
@@ -135,6 +158,10 @@ export default async function AdminAccessCodesPage({
       ? generatedCodeParam[0]
       : generatedCodeParam
     )?.trim() || "";
+  const generatedInviteLink =
+    generatedCode && webOrigin
+      ? `${webOrigin}/redeem?code=${encodeURIComponent(generatedCode)}`
+      : "";
 
   const assignedUserIds = new Set(
     rows
@@ -167,8 +194,27 @@ export default async function AdminAccessCodesPage({
         <section className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Code generated (shown once)</p>
           <p className="mt-2 font-mono text-lg text-emerald-100">{generatedCode}</p>
-          <CopyCodeButton code={generatedCode} />
-          <p className="mt-1 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
+          <div className="mt-2 flex gap-2">
+            <CopyCodeButton
+              value={generatedCode}
+              idleLabel="Copy code"
+              className="rounded-md border border-emerald-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100 hover:bg-emerald-500/20"
+            />
+          </div>
+          {generatedInviteLink ? (
+            <>
+              <p className="mt-3 text-xs uppercase tracking-[0.2em] text-emerald-200">Invite link</p>
+              <p className="mt-1 break-all font-mono text-sm text-emerald-100">{generatedInviteLink}</p>
+              <div className="mt-2 flex gap-2">
+                <CopyCodeButton
+                  value={generatedInviteLink}
+                  idleLabel="Copy invite link"
+                  className="rounded-md border border-emerald-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100 hover:bg-emerald-500/20"
+                />
+              </div>
+            </>
+          ) : null}
+          <p className="mt-2 text-xs text-emerald-200/90">Copy and share this now. It cannot be revealed later.</p>
         </section>
       ) : null}
 

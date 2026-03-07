@@ -593,12 +593,30 @@ export default function InterviewToolkitPage() {
                       Top strength: {packet.fitSnapshot.strengths[0]}
                     </span>
                   ) : null}
-                  {packet.fitSnapshot && packet.fitSnapshot.gaps.length ? (
+                  {packet.fitSnapshot &&
+                  (packet.fitSnapshot.criticalGaps?.length || packet.fitSnapshot.gaps.length) ? (
                     <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-                      Key gap: {packet.fitSnapshot.gaps[0]}
+                      Key gap:{" "}
+                      {packet.fitSnapshot.criticalGaps?.[0]?.title ??
+                        packet.fitSnapshot.gaps[0]}
                     </span>
                   ) : null}
                 </div>
+                {packet.interviewRiskBriefing?.length ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Interview Risk Briefing
+                    </p>
+                    <ul className="space-y-2 text-sm text-slate-200">
+                      {packet.interviewRiskBriefing.slice(0, 3).map((risk) => (
+                        <li key={risk.riskId}>
+                          <span className="font-semibold text-white">{risk.topic}:</span>{" "}
+                          {risk.whyTheyMayChallengeYou}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
@@ -628,7 +646,13 @@ export default function InterviewToolkitPage() {
                     </ul>
                   )}
                 </div>
-                  <LikelyQuestionsPanel signals={packet.fitSnapshot?.gaps ?? []} />
+                  <LikelyQuestionsPanel
+                    signals={
+                      packet.fitSnapshot?.criticalGaps?.length
+                        ? packet.fitSnapshot.criticalGaps.map((gap) => gap.title)
+                        : packet.fitSnapshot?.gaps ?? []
+                    }
+                  />
                 {packet.recentStories.length > 0 ? (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
