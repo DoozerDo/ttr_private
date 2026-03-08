@@ -17,7 +17,7 @@ const sidebarNavRoutes: RouteConfig[] = [
     label: "TARGET",
     href: "/baseline",
     requiresAuth: true,
-    subtext: "Upload a baseline to begin targeting a role",
+    subtext: "Set your baseline",
   },
   {
     id: "results",
@@ -26,7 +26,7 @@ const sidebarNavRoutes: RouteConfig[] = [
     requiresAuth: true,
     requiresBaseline: true,
     requiresJob: true,
-    subtext: "Understand the verdict for this role",
+    subtext: "See fit score, strengths, and risks",
   },
   {
     id: "studio",
@@ -35,14 +35,14 @@ const sidebarNavRoutes: RouteConfig[] = [
     requiresAuth: true,
     requiresBaseline: true,
     requiresJob: true,
-    subtext: "Draft and export your documents",
+    subtext: "Generate and export your documents",
   },
   {
     id: "jobTracker",
-    label: "Application Tracker",
+    label: "Opportunities",
     href: "/job-tracker",
     requiresAuth: true,
-    subtext: "Track applications and stage progress",
+    subtext: "Manage active roles in one place",
   },
   {
     id: "interviewToolkit",
@@ -50,7 +50,7 @@ const sidebarNavRoutes: RouteConfig[] = [
     href: "/interview-toolkit",
     requiresAuth: true,
     requiresJob: true,
-    subtext: "Interview scheduled. Now what?",
+    subtext: "Prepare answers and stories",
   },
 ];
 

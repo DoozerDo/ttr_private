@@ -62,7 +62,7 @@ type ScoringV2Result = {
 };
 
 const HERO_MESSAGE =
-  "Review your current fit, validate the top evidence gaps, and launch a qualification interview when you are ready.";
+  "Review your fit, close the top evidence gaps, and launch your qualification interview.";
 const ACTIONABLE_DIMENSION_COUNT = 2;
 
 function parseTimestamp(value?: string | null) {
@@ -579,8 +579,8 @@ export default function FitReviewClient() {
           {!hasAnalysis ? (
             <div className="px-6 py-10">
               <EmptyState
-                title="Fit Review needs Analyze"
-                body="Run Analyze to load the latest compatibility score and focus on the most important gaps."
+                title="Run Analyze first"
+                body="Load the latest fit score before starting your recovery path."
                 cta={
                   <FormButton variant="ghost" onClick={() => router.push("/analyze")}>
                     Run Analyze
@@ -611,13 +611,17 @@ export default function FitReviewClient() {
                     flexShrink: 0,
                   }}
                 >
-                  <ScoreGauge score={getAssessmentScore(displayAssessment) ?? undefined} loading={loading} label="CX Fit Score" />
+                  <ScoreGauge
+                    score={getAssessmentScore(displayAssessment) ?? undefined}
+                    loading={loading}
+                    label="Fit Score"
+                  />
                   <span style={ttrTypography.caption}>{verdictInfo.label}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <span style={ttrTypography.subtleLabel}>Result</span>
-                    <h2 style={ttrTypography.h2}>Current fit assessment</h2>
+                    <span style={ttrTypography.subtleLabel}>Current result</span>
+                    <h2 style={ttrTypography.h2}>Fit assessment</h2>
                   </div>
                   <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
                     {displayAssessment?.summary ?? "Capture evidence for the highlighted dimensions to evolve the baseline."}
@@ -645,13 +649,13 @@ export default function FitReviewClient() {
                     </p>
                   </div>
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
-                  <p className="text-xs text-slate-300">{heroScoreText}</p>
+                  <p className="text-lg font-semibold text-slate-100">{heroScoreText}</p>
                   <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-3">
                     <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                      Why this score is trustworthy
+                      Why you can trust this score
                     </p>
                     <p className="mt-1 text-sm text-slate-300">
-                      The score is tied to rubric dimensions and the exact baseline/job context used in Analyze.
+                      The score is tied to rubric dimensions and your exact baseline and job context.
                     </p>
                   </div>
                 </div>
@@ -661,8 +665,8 @@ export default function FitReviewClient() {
 
           <section style={{ ...ttrComponents.basePanel }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Recovery path</span>
-              <h2 style={ttrTypography.h2}>Top evidence gaps to review</h2>
+              <span style={ttrTypography.subtleLabel}>Recovery plan</span>
+              <h2 style={ttrTypography.h2}>Top evidence gaps</h2>
             </div>
             <div
               style={{
@@ -772,7 +776,7 @@ export default function FitReviewClient() {
           <section style={{ ...ttrComponents.basePanel }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={ttrTypography.subtleLabel}>Qualification proof</span>
-                <h2 style={ttrTypography.h2}>Launch baseline expansion interview</h2>
+                <h2 style={ttrTypography.h2}>Launch qualification interview</h2>
               </div>
               <p className="mt-2 text-sm text-slate-300">
                 Use this when you believe you are qualified and want to prove it with structured evidence.
@@ -790,7 +794,7 @@ export default function FitReviewClient() {
                   {isStartingInterview ? "Starting interview..." : "I think I'm qualified"}
                 </FormButton>
                 <p className="text-xs text-slate-400">
-                  Next: answer interview prompts, review additions, compute expanded fit, and promote a new baseline version.
+                  Next: answer prompts, validate additions, compute expanded fit, and promote your new baseline.
                 </p>
               </div>
           </section>

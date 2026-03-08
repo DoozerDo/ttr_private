@@ -22,6 +22,26 @@ type JobTrackerEntry = {
   updatedAt?: string | null;
 };
 
+type Opportunity = {
+  id: string;
+  companyName: string;
+  jobTitle: string;
+  currentScore: number;
+};
+
+type OpportunityGrouped = {
+  companyName: string;
+  opportunities: Opportunity[];
+};
+
+type OpportunityActionCard = {
+  type: string;
+  opportunityId: string;
+  companyName: string;
+  jobTitle: string;
+  message: string;
+};
+
 const CANONICAL_STAGE_OPTIONS = [
   { value: 'Applied', label: 'Applied' },
   { value: 'Interviewing', label: 'Interviewing' },
@@ -128,6 +148,13 @@ export default function JobTrackerPage() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [opportunityActions, setOpportunityActions] = useState<OpportunityActionCard[]>([]);
+  const [opportunitySummary, setOpportunitySummary] = useState({
+    jobsAnalyzed: 0,
+    strongTargets: 0,
+    possibleTargets: 0,
+    lowProbability: 0,
+  });
 
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -179,10 +206,49 @@ export default function JobTrackerPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await apiFetchJson<JobTrackerEntry[]>('/api/job-tracker', {
-        method: 'GET',
-      });
+      const [trackerResult, groupedResult, actionsResult] = await Promise.allSettled([
+        apiFetchJson<JobTrackerEntry[]>('/api/job-tracker', { method: 'GET' }),
+        apiFetchJson<OpportunityGrouped[]>('/api/opportunities/grouped', { method: 'GET' }),
+        apiFetchJson<OpportunityActionCard[]>('/api/opportunities/actions-needed', { method: 'GET' }),
+      ]);
+
+      if (trackerResult.status !== 'fulfilled') {
+        throw trackerResult.reason;
+      }
+
+      const data = trackerResult.value;
       setEntries(Array.isArray(data) ? data : []);
+
+      if (groupedResult.status === 'fulfilled' && Array.isArray(groupedResult.value)) {
+        const opportunities = groupedResult.value.flatMap((group) =>
+          Array.isArray(group.opportunities) ? group.opportunities : [],
+        );
+        const jobsAnalyzed = opportunities.length;
+        const strongTargets = opportunities.filter((entry) => entry.currentScore >= 85).length;
+        const possibleTargets = opportunities.filter(
+          (entry) => entry.currentScore >= 70 && entry.currentScore < 85,
+        ).length;
+        const lowProbability = opportunities.filter((entry) => entry.currentScore < 70).length;
+        setOpportunitySummary({
+          jobsAnalyzed,
+          strongTargets,
+          possibleTargets,
+          lowProbability,
+        });
+      } else {
+        setOpportunitySummary({
+          jobsAnalyzed: 0,
+          strongTargets: 0,
+          possibleTargets: 0,
+          lowProbability: 0,
+        });
+      }
+
+      if (actionsResult.status === 'fulfilled' && Array.isArray(actionsResult.value)) {
+        setOpportunityActions(actionsResult.value.slice(0, 3));
+      } else {
+        setOpportunityActions([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load entries');
     } finally {
@@ -348,8 +414,8 @@ export default function JobTrackerPage() {
     <PageShell>
       <div className="space-y-8">
         <PageHeader
-          title="Application Tracker"
-          description="Your canonical beta surface for tracking application progress."
+          title="Opportunities"
+          description="Your canonical beta destination for managing active roles and next steps."
           rightSlot={
             <div className="flex flex-wrap gap-2">
               <FormButton
@@ -386,8 +452,8 @@ export default function JobTrackerPage() {
 
         <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Canonical beta tracker</p>
-            <h2 className="text-lg font-semibold text-slate-100">Track every application in one place</h2>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Canonical beta destination</p>
+            <h2 className="text-lg font-semibold text-slate-100">Manage every opportunity in one place</h2>
             <p className="text-sm text-slate-300">
               Keep stage, fit, source, and notes current so next actions stay obvious.
             </p>
@@ -403,11 +469,54 @@ export default function JobTrackerPage() {
         </section>
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Opportunity signals</h2>
+            <p className="text-xs text-slate-400">
+              Prioritization context from analyzed roles, kept inside this same destination.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Jobs analyzed</p>
+              <p className="mt-1 text-2xl font-semibold text-white">{opportunitySummary.jobsAnalyzed}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Strong targets</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-200">{opportunitySummary.strongTargets}</p>
+            </div>
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Possible targets</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-200">{opportunitySummary.possibleTargets}</p>
+            </div>
+            <div className="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Low probability</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-200">{opportunitySummary.lowProbability}</p>
+            </div>
+          </div>
+          {opportunityActions.length ? (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Top actions needed</p>
+              {opportunityActions.map((action) => (
+                <div
+                  key={`${action.opportunityId}-${action.type}`}
+                  className="rounded-xl border border-white/10 bg-slate-900/40 p-3"
+                >
+                  <p className="text-sm font-semibold text-white">
+                    {action.jobTitle} at {action.companyName}
+                  </p>
+                  <p className="text-xs text-slate-300">{action.message}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-100">Tracked applications</h2>
+              <h2 className="text-lg font-semibold text-slate-100">Tracked opportunities</h2>
               <p className="text-xs text-slate-400">
-                Switch between table and pipeline views to update stage quickly.
+                Switch between table and pipeline views to update status quickly.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
@@ -625,7 +734,7 @@ export default function JobTrackerPage() {
                 {formMode} Entry
               </h2>
               <p className="text-xs text-slate-400">
-                Add a new application or update an existing one from a single form.
+                Add a new opportunity or update an existing one from a single form.
               </p>
             </div>
             <span className="text-xs uppercase tracking-[0.2em] text-slate-500">

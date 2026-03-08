@@ -117,7 +117,7 @@ export function ResultsV2({
 }: ResultsV2Props) {
   const showDelta = typeof delta === "number";
   const deltaLabel = showDelta
-    ? `${delta >= 0 ? "▲" : "▼"} ${delta >= 0 ? `+${delta}` : delta.toString()}`
+    ? `${delta >= 0 ? "+" : ""}${delta}`
     : null;
   const deltaColor = delta && delta > 0 ? "var(--delta-positive)" : "var(--delta-negative)";
 
@@ -150,7 +150,7 @@ export function ResultsV2({
       >
         <PageHeader
           title="Results"
-          description="Review your score and the reasons behind it and then advance to your personalized document creation."
+          description="Review your score, strengths, and risks, then move to the next step."
         />
 
         <section style={heroCardStyle}>
@@ -237,15 +237,15 @@ export function ResultsV2({
           }}
         >
           {[{
-              title: "What improved",
+              title: "Strengths",
               items: whatImproved,
             },
             {
-              title: "Highest leverage gap",
+              title: "Risks",
               items: leverageGaps,
             },
             {
-              title: "Compliance status",
+              title: "Critical requirements",
               items: complianceItems,
             },
           ].map((section) => (
@@ -289,3 +289,4 @@ export function ResultsV2({
     </div>
   );
 }
+

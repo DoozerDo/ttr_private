@@ -1297,7 +1297,7 @@ export default function ResultsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Results"
-          description="Review your score and the reasons behind it and then advance to your personalized document creation."
+          description="Review your score, strengths, and risks, then move to your next step."
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -1319,26 +1319,30 @@ export default function ResultsPage() {
           ) : (
             <div className="space-y-6">
               <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Verdict
-                  </p>
-                  <p className="text-3xl font-semibold text-white">{activeVerdictDecision.verdict}</p>
-                  <p className="text-sm text-slate-300">{strategicBrief.strategicSummary}</p>
-                  <p className="text-sm text-slate-300">
-                    Fit Score:{" "}
-                    <span className="font-semibold text-white">
+                <div className="grid gap-4 md:grid-cols-[1.1fr,0.9fr] md:items-end">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Fit score
+                    </p>
+                    <p className="text-5xl font-semibold leading-none text-white">
                       {typeof activeScore === "number" ? activeScore.toFixed(1) : "Pending"}
-                    </span>
-                  </p>
-                  <p className="text-sm text-slate-300">
-                    Application Confidence:{" "}
-                    <span className="font-semibold text-white">{applicationConfidence}</span>
-                  </p>
+                    </p>
+                    <p className="text-sm text-slate-300">{strategicBrief.strategicSummary}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                      Verdict
+                    </p>
+                    <p className="text-2xl font-semibold text-white">{activeVerdictDecision.verdict}</p>
+                    <p className="text-sm text-slate-300">
+                      Application confidence:{" "}
+                      <span className="font-semibold text-white">{applicationConfidence}</span>
+                    </p>
+                  </div>
                 </div>
               </div>
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Why You Can Win</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Strengths</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(strategicBrief.whyYouCanWin.length
                     ? strategicBrief.whyYouCanWin
@@ -1360,7 +1364,7 @@ export default function ResultsPage() {
               </section>
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">What May Hurt You</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Risks</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {riskItems.map((risk) => (
                       <li key={risk.id} className="space-y-1">
@@ -1376,13 +1380,32 @@ export default function ResultsPage() {
                 </ul>
               </section>
 
+              {criticalGapDetails.length ? (
+                <section className="rounded-2xl border border-amber-400/30 bg-amber-950/10 p-5">
+                  <h2 className="text-lg font-semibold text-amber-100">Critical requirements</h2>
+                  <ul className="mt-3 space-y-3 text-sm text-amber-50">
+                    {criticalGapDetails.slice(0, 3).map((gap, index) => (
+                      <li key={`${gap.title}-${index}`} className="space-y-1">
+                        <p className="font-semibold text-amber-100">{gap.title}</p>
+                        <p className="text-amber-100/85">{gap.requirementEvidence}</p>
+                        {gap.baselineEvidence ? (
+                          <p className="text-xs text-amber-100/75">
+                            Current baseline evidence: {gap.baselineEvidence}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                 <h2 className="text-lg font-semibold text-slate-100">Best Next Move</h2>
                 <p className="mt-2 text-sm text-slate-300">{strategicBrief.bestNextMove}</p>
               </section>
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Actions</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Next action</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(recommendedActions.length
                     ? recommendedActions
@@ -1396,18 +1419,21 @@ export default function ResultsPage() {
                   ))}
                 </ul>
                 <div className="mt-4 flex flex-wrap gap-3">
+                  <FormButton onClick={() => void router.push(fitReviewPath)}>
+                    Open Fit Review
+                  </FormButton>
                   <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
                     Improve Resume for This Role
                   </FormButton>
                   <FormButton onClick={() => void router.push("/cover-letters")}>
-                    Generate Cover Letter That Addresses Gaps
+                    Generate Cover Letter
                   </FormButton>
                   <FormButton onClick={() => void router.push(interviewToolkitHref)}>
-                    Prepare for Interview Risks
+                    Prepare Interview Responses
                   </FormButton>
                 </div>
                 <p className="mt-3 text-xs text-slate-400">
-                  Each action uses the same fit and gap analysis shown above.
+                  Start with Fit Review to recover low-fit or borderline roles.
                 </p>
               </section>
               {scoreBreakdown ? (
@@ -1475,7 +1501,7 @@ export default function ResultsPage() {
               ) : (
                 <div className="rounded-2xl border border-rose-600/40 bg-rose-950/10 p-4 text-sm text-rose-200">
                   <p className="font-semibold text-rose-100">
-                    scoring_v2 missing from analysis payload
+                    Full scoring breakdown is unavailable for this run
                   </p>
                   <p className="text-rose-300">
                     <strong>Assessment ID:</strong> {diagnosticAssessmentId}
@@ -1487,7 +1513,7 @@ export default function ResultsPage() {
                     <strong>Top-level keys:</strong> {analysisKeys.length ? analysisKeys.join(", ") : "none"}
                   </p>
                   <p className="mt-2 text-xs text-rose-300">
-                    Rubric breakdown requires scoring_v2.rubric. Refresh or rerun the analysis to load that payload.
+                    Refresh or rerun analysis to load the rubric breakdown.
                   </p>
                 </div>
               )}
@@ -1725,7 +1751,7 @@ export default function ResultsPage() {
         {scoringV2?.rubric ? (
           <details className="group rounded-2xl border border-white/10 bg-white/5 p-4">
             <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-              Debug details
+              Analysis details
             </summary>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>

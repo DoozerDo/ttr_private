@@ -1018,7 +1018,7 @@ export default function InterviewSessionPage() {
               <div className="flex flex-wrap gap-3">
                 <FormButton onClick={() => router.push("/results")}>Back to Results</FormButton>
                 <FormButton variant="secondary" onClick={() => router.push("/job-tracker")}>
-                  Back to Application Tracker
+                  Back to Opportunities
                 </FormButton>
               </div>
             }
@@ -1149,7 +1149,7 @@ export default function InterviewSessionPage() {
                             </span>
                             {gap ? (
                               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1">
-                                Domain: {gap.domain} ? Confidence: {gap.confidence}
+                                Domain: {gap.domain} | Confidence: {gap.confidence}
                               </span>
                             ) : null}
                           </div>
@@ -1165,15 +1165,18 @@ export default function InterviewSessionPage() {
                             </p>
                           ) : null}
                           <p className="text-[11px] text-slate-400">
-                            Reason: Generated from gap {question.gapId}.
+                            Built from gap {question.gapId}.
                           </p>
                         </div>
-                        <textarea
-                          value={answers[index] ?? ""}
-                          onChange={(event) => handleChange(index, event.target.value)}
-                          className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-3 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
-                          rows={6}
-                        />
+                        <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-3">
+                          <textarea
+                            value={answers[index] ?? ""}
+                            onChange={(event) => handleChange(index, event.target.value)}
+                            className="w-full rounded-xl border border-white/20 bg-slate-900/60 px-3 py-3 text-sm text-slate-100 outline-none focus:border-amber-400 focus:bg-white/10"
+                            rows={6}
+                            placeholder="Write a specific, evidence-based response."
+                          />
+                        </div>
                         {complianceFlags.length ? (
                           <Alert intent="warning" title="Compliance checks">
                             <ul className="list-disc space-y-1 pl-4 text-xs text-slate-200">
@@ -1195,9 +1198,8 @@ export default function InterviewSessionPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <FormButton onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving..." : "Step 1: Save responses"}
+                  {saving ? "Saving..." : "Save responses"}
                 </FormButton>
-                <span className="text-xs text-slate-400">Session ID: {sessionId}</span>
               </div>
               {message ? <Alert intent="success">{message}</Alert> : null}
               {error ? <Alert intent="error">{error}</Alert> : null}
@@ -1205,10 +1207,8 @@ export default function InterviewSessionPage() {
 
             <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
               <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Loop progress
-                </p>
-                <h3 className="text-lg font-semibold text-slate-100">Completion status</h3>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Progress</p>
+                <h3 className="text-lg font-semibold text-slate-100">Where you are</h3>
                 <p className="text-sm text-slate-300">{completionReason}</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {loopSteps.map((step) => (
@@ -1381,15 +1381,15 @@ export default function InterviewSessionPage() {
                     Back to Fit Review
                   </Link>
                   <Link href="/studio" className="text-xs text-sky-300 underline">
-                    Open Studio for documents
+                    Open Resume Studio
                   </Link>
                   <Link href="/job-tracker" className="text-xs text-sky-300 underline">
-                    Open Application Tracker
+                    Open Opportunities
                   </Link>
                 </div>
                 {interviewComplete ? (
                   <p className="text-xs text-emerald-300">
-                    Interview completion criteria met. You can now move directly to promotion and refreshed analysis.
+                    Interview complete. You can now refresh Fit Review and continue to document generation.
                   </p>
                 ) : null}
                 {hasExpandedFitData ? (
@@ -1408,3 +1408,5 @@ export default function InterviewSessionPage() {
     </PageShell>
   );
 }
+
+

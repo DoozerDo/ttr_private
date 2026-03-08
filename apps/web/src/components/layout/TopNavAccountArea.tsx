@@ -151,9 +151,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <span aria-hidden="true" className="text-xs">
-              ˅
-            </span>
+            <span aria-hidden="true" className="text-xs font-semibold uppercase tracking-wide">Menu</span>
           </button>
 
           {menuOpen ? (
@@ -191,3 +189,4 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
     </div>
   );
 }
+
