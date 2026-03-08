@@ -161,6 +161,53 @@ export function resolveDisplayedFitScore(latest: LatestAnalysis | null): number 
   return typeof fallback === "number" ? fallback : null;
 }
 
+type ScoreBreakdownShape = {
+  total_score: number;
+  dimensions: Array<{
+    key: string;
+    label: string;
+    score: number;
+    weight: number;
+  }>;
+};
+
+const EVIDENCE_LABEL_BY_KEY: Record<string, string> = {
+  role_scope_and_seniority: "Leadership scope alignment",
+  support_operations_and_process_rigor: "Operational domain alignment",
+  tooling_and_platform_experience: "Tooling/platform alignment",
+  domain_and_business_context: "Customer environment alignment",
+  change_leadership_and_customer_advocacy: "Change leadership alignment",
+};
+
+function trimEvidenceLine(line: string, maxLength = 80): string {
+  if (line.length <= maxLength) return line;
+  return `${line.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[] {
+  if (!scoreBreakdown?.dimensions?.length) return [];
+
+  return scoreBreakdown.dimensions
+    .map((dimension) => {
+      const contribution = dimension.weight > 0 ? dimension.score / dimension.weight : 0;
+      return {
+        ...dimension,
+        contribution,
+      };
+    })
+    .filter((dimension) => dimension.score > 0 && dimension.contribution > 0)
+    .sort((a, b) => {
+      if (b.contribution !== a.contribution) return b.contribution - a.contribution;
+      return b.score - a.score;
+    })
+    .slice(0, 3)
+    .map((dimension) =>
+      trimEvidenceLine(
+        `${EVIDENCE_LABEL_BY_KEY[dimension.key] ?? "Role alignment signal"}: ${dimension.label}.`,
+      ),
+    );
+}
+
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
 
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
@@ -752,6 +799,7 @@ export default function ResultsPage() {
     const total_score = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
     return { total_score, dimensions };
   }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
+  const evidenceLines = useMemo(() => buildEvidenceLines(scoreBreakdown), [scoreBreakdown]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
   const resultsAssessmentId = latest?.assessmentId ?? null;
@@ -766,7 +814,7 @@ export default function ResultsPage() {
     [activeScore],
   );
 
-  const executionMode = typeof activeScore === "number" && activeScore >= 70;
+  const executionMode = typeof activeScore === "number" && activeScore > 70;
   const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
   const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
@@ -1297,7 +1345,7 @@ export default function ResultsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Results"
-          description="Review your score, strengths, and risks, then move to your next step."
+          description="Review your fit score and take the next step."
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -1317,138 +1365,65 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <div className="grid gap-4 md:grid-cols-[1.1fr,0.9fr] md:items-end">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Fit score</p>
+                <div className="mt-2 space-y-4">
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                      Fit score
-                    </p>
                     <p className="text-5xl font-semibold leading-none text-white">
                       {typeof activeScore === "number" ? activeScore.toFixed(1) : "Pending"}
                     </p>
-                    <p className="text-sm text-slate-300">{strategicBrief.strategicSummary}</p>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                      Verdict
-                    </p>
-                    <p className="text-2xl font-semibold text-white">{activeVerdictDecision.verdict}</p>
+                    <p className="text-sm font-semibold text-slate-100">{activeVerdictDecision.verdict}</p>
                     <p className="text-sm text-slate-300">
-                      Application confidence:{" "}
-                      <span className="font-semibold text-white">{applicationConfidence}</span>
+                      {executionMode
+                        ? "Strong match. Move forward with role-specific documents."
+                        : strategicBrief.strategicSummary}
                     </p>
+                  </div>
+
+                  {evidenceLines.length ? (
+                    <section className="my-4">
+                      <h3 className="text-sm font-semibold text-slate-200">Evidence from your background</h3>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
+                        {evidenceLines.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+
+                  <div className="space-y-3">
+                    {executionMode ? (
+                      <>
+                        <FormButton
+                          onClick={() => void router.push(studioHref)}
+                          disabled={!canOpenStudio}
+                          className="w-full sm:w-auto"
+                        >
+                          Open Studio
+                        </FormButton>
+                        <p className="text-xs text-slate-400">
+                          {canOpenStudio
+                            ? "Generate your resume and cover letter for this role."
+                            : "Studio will unlock after baseline promotion is complete."}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <FormButton onClick={() => void router.push(fitReviewPath)} className="w-full sm:w-auto">
+                          Open Fit Review
+                        </FormButton>
+                        <p className="text-xs text-slate-400">
+                          Use Fit Review to close the top gaps, then continue in Studio.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Strengths</h2>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(strategicBrief.whyYouCanWin.length
-                    ? strategicBrief.whyYouCanWin
-                    : [
-                        {
-                          id: "win-fallback-1",
-                          title: "Baseline alignment captured in this role",
-                          detail:
-                            "Load a completed analysis to see requirement-level evidence for your strongest win factors.",
-                        },
-                      ]
-                  ).map((item) => (
-                    <li key={item.id} className="space-y-1">
-                      <p className="font-semibold text-slate-100">{item.title}</p>
-                      <p className="text-slate-300">{item.detail}</p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
 
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Risks</h2>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {riskItems.map((risk) => (
-                      <li key={risk.id} className="space-y-1">
-                        <p className="font-semibold text-slate-100">
-                          {risk.title} <span className="text-slate-400">({risk.riskType})</span>
-                        </p>
-                        <p className="text-slate-300">{risk.detail}</p>
-                        {risk.impactLine ? (
-                          <p className="text-xs font-semibold text-amber-300">{risk.impactLine}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                </ul>
-              </section>
-
-              {criticalGapDetails.length ? (
-                <section className="rounded-2xl border border-amber-400/30 bg-amber-950/10 p-5">
-                  <h2 className="text-lg font-semibold text-amber-100">Critical requirements</h2>
-                  <ul className="mt-3 space-y-3 text-sm text-amber-50">
-                    {criticalGapDetails.slice(0, 3).map((gap, index) => (
-                      <li key={`${gap.title}-${index}`} className="space-y-1">
-                        <p className="font-semibold text-amber-100">{gap.title}</p>
-                        <p className="text-amber-100/85">{gap.requirementEvidence}</p>
-                        {gap.baselineEvidence ? (
-                          <p className="text-xs text-amber-100/75">
-                            Current baseline evidence: {gap.baselineEvidence}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Best Next Move</h2>
-                <p className="mt-2 text-sm text-slate-300">{strategicBrief.bestNextMove}</p>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Next action</h2>
-                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-900/40 p-3">
-                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Artifact readiness</p>
-                  <p className="mt-1 text-sm text-slate-200">
-                    {readyForDocument
-                      ? "Ready to generate in Studio."
-                      : "Not ready yet. Complete interview promotion to generate artifacts from a promoted baseline version."}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Baseline version in context: {latestBaselineVersionId || "Unavailable"}
-                  </p>
-                </div>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(recommendedActions.length
-                    ? recommendedActions
-                    : [
-                        "Tailor your resume to the most role-critical strengths and risks.",
-                        "Build a cover letter that proactively addresses the top risk.",
-                        "Prepare interview responses for the highest-risk challenge areas.",
-                      ]
-                  ).map((item) => (
-                    <li key={`action-${item}`}>{item}</li>
-                  ))}
-                </ul>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <FormButton onClick={() => void router.push(fitReviewPath)}>
-                    Open Fit Review
-                  </FormButton>
-                  <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
-                    Improve Resume for This Role
-                  </FormButton>
-                  <FormButton onClick={() => void router.push("/cover-letters")}>
-                    Generate Cover Letter
-                  </FormButton>
-                  <FormButton onClick={() => void router.push(interviewToolkitHref)}>
-                    Prepare Interview Responses
-                  </FormButton>
-                </div>
-                <p className="mt-3 text-xs text-slate-400">
-                  Start with Fit Review to recover low-fit or borderline roles.
-                </p>
-              </section>
               {scoreBreakdown ? (
-                <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                <details open className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
                   <summary className="cursor-pointer text-sm font-semibold text-slate-200">
                     Supporting score breakdown
                   </summary>
@@ -1483,360 +1458,23 @@ export default function ResultsPage() {
                     </div>
                   </div>
                 </details>
-              ) : null}
-              {scoringRubric ? (
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                    {rubricDimensionEntries.map((dimension) => (
-                    <div key={dimension.key} className={dimensionCardClassName}>
-                        {executionMode ? (
-                          <div
-                            className="mb-3 h-[2px] w-full rounded"
-                            style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
-                          />
-                        ) : null}
-                        <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                          {dimension.label}
-                        </p>
-                        <p className="mt-1 text-lg font-semibold text-white">
-                          {dimension.percent !== null ? `${dimension.percent.toFixed(1)}%` : "Pending"}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                        {dimension.points !== null ? dimension.points.toFixed(1) : "—"} /{" "}
-                        {dimension.weight !== null ? dimension.weight.toFixed(1) : "—"} points
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               ) : (
-                <div className="rounded-2xl border border-rose-600/40 bg-rose-950/10 p-4 text-sm text-rose-200">
-                  <p className="font-semibold text-rose-100">
-                    Full scoring breakdown is unavailable for this run
-                  </p>
-                  <p className="text-rose-300">
-                    <strong>Assessment ID:</strong> {diagnosticAssessmentId}
-                  </p>
-                  <p className="text-rose-300">
-                    <strong>Analysis loaded:</strong> {hasAnalysis ? "true" : "false"}
-                  </p>
-                  <p className="text-rose-300">
-                    <strong>Top-level keys:</strong> {analysisKeys.length ? analysisKeys.join(", ") : "none"}
-                  </p>
-                  <p className="mt-2 text-xs text-rose-300">
-                    Refresh or rerun analysis to load the rubric breakdown.
-                  </p>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-300">
+                  Supporting score breakdown is unavailable for this run.
                 </div>
               )}
             </div>
           )}
         </section>
-
-        {showScoreDrivers ? (
-          executionMode ? (
-            <details className="group rounded-2xl border border-white/10 bg-white/5 p-6">
-              <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-100">
-                <span>Score drivers</span>
-                <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Tap to expand</span>
-              </summary>
-              <div className="mt-4">{renderDriverGrid(false)}</div>
-            </details>
-          ) : (
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Score drivers</p>
-              </div>
-              {renderDriverGrid(true)}
-            </section>
-          )
-        ) : null}
-
-        {evaluationNotesAvailable ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Evaluation notes
-              </p>
-              <h2 className="text-lg font-semibold text-slate-100">Evaluation notes</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Evaluation notes capture the context or guardrails tied to this run; review them if compliance notices appear.
-              </p>
-            </div>
-            <ul className="space-y-2 text-sm text-slate-200">
-              {evaluationNotes.map((note, index) => (
-                <li
-                  key={`${note}-${index}`}
-                  className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3"
-                >
-                  {note}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {complianceError?.type === "insufficient_extracted_text" ? (
-          <InsufficientExtractedText error={complianceError} />
-        ) : complianceError ? (
-          <ComplianceViolationPanel error={complianceError} />
-        ) : null}
-
-        
-
-        {!scoringV2?.rubric ? (
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Experience areas</p>
-              <h2 className="text-lg font-semibold text-slate-100">Score breakdown</h2>
-              <p className="mt-1 text-sm text-slate-300">{summaryCopy}</p>
-            <p className="text-sm text-slate-300">
-              Experience areas describe how your background contributes to each category while the key terms below track whether the job language also appears; focus on the lower contributors to clarify authentic experience.
-            </p>
-          </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {dimensionEntries.map((dimension) => (
-              <div key={dimension.key} className={dimensionCardClassName}>
-                {executionMode ? (
-                  <div
-                    className="mb-3 h-[2px] w-full rounded"
-                    style={{ backgroundColor: "var(--accent-primary)", opacity: 0.9 }}
-                  />
-                ) : null}
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
-                  {dimension.label}
-                </p>
-                <p className="mt-1 text-lg font-semibold text-white">
-                  {dimension.value !== null ? dimension.value.toFixed(1) : "Not available"}
-                </p>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4 text-sm text-slate-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Key terms</p>
-                <p className="text-sm text-slate-300">
-                  Key terms track the job-specific language that appears in your baseline content while experience areas describe how your background contributes to the role.
-                </p>
-                <p className="mt-2 text-xs text-slate-400">{keyTermSummary}</p>
-              </div>
-              <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Context</span>
-            </div>
-            {keyTermDetailsAvailable ? (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Matched terms</p>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-100">
-                    {keyTermDetails.matchedKeyTerms.slice(0, 6).map((term) => (
-                      <li key={`matched-${term}`} className="flex items-center gap-2">
-                        <span className="text-emerald-300">•</span>
-                        <span>{term}</span>
-                      </li>
-                    ))}
-                    {!keyTermDetails.matchedKeyTerms.length ? (
-                      <li className="text-sm text-slate-500">Not provided.</li>
-                    ) : null}
-                  </ul>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Missing or weak terms</p>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-100">
-                    {keyTermDetails.missingKeyTerms.slice(0, 6).map((term) => (
-                      <li key={`missing-${term}`} className="flex items-center gap-2">
-                        <span className="text-amber-300">•</span>
-                        <span>{term}</span>
-                      </li>
-                    ))}
-                    {!keyTermDetails.missingKeyTerms.length ? (
-                      <li className="text-sm text-slate-500">Not documented.</li>
-                    ) : null}
-                  </ul>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-slate-400">Key term details are not available for this run.</p>
-            )}
-            <p className="mt-3 text-xs text-slate-300">
-              Clarify or expand the baseline evidence{" "}
-              {isLowScore ? (
-                <>
-                  in{" "}
-                  <Link href={fitReviewPath} className="text-amber-300 underline">
-                    Fit Review
-                  </Link>{" "}
-                </>
-              ) : null}
-              so the same experience language shows up naturally and the matched terms reflect the story you tell elsewhere.
-            </p>
-            </div>
-          </section>
-        ) : null}
-
         {error ? (
           <Alert intent="error" title="Uh oh">
             {error}
           </Alert>
         ) : null}
 
-        {debugMode ? (
-          <div className="space-y-6">
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Selection</p>
-                <h2 className="text-lg font-semibold text-slate-100">Latest IDs</h2>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                    Baseline
-                  </label>
-                  <TextInput
-                    value={baselineId}
-                    onChange={(event) => setManualBaselineId(event.target.value)}
-                    placeholder="Baseline ID"
-                    readOnly={analysisSource === "latest"}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                    Job
-                  </label>
-                  <TextInput
-                    value={jobId}
-                    onChange={(event) => setManualJobId(event.target.value)}
-                    placeholder="Job ID"
-                  />
-                </div>
-              </div>
-
-              {!baselineId ? (
-                <Alert intent="warning">
-                  Enter a baseline ID or visit the{" "}
-                  <Link href="/baseline" className="text-sky-300 underline">
-                    baseline library
-                  </Link>{" "}
-                  to add one before generating resumes.
-                </Alert>
-              ) : null}
-
-              <div className="flex flex-wrap items-center gap-3">
-                <FormButton variant="secondary" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
-                  {loadingLatest ? "Loading latest..." : "Load latest analysis"}
-                </FormButton>
-                <span className="text-xs text-slate-400">{latestStatusMessage}</span>
-              </div>
-            </section>
-
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Latest analysis
-                  </p>
-                  <h2 className="text-lg font-semibold text-slate-100">Raw JSON</h2>
-                </div>
-              </div>
-
-              {latest ? (
-                <pre className="whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-900/50 p-3 text-sm text-slate-200">
-                  {JSON.stringify(latest, null, 2)}
-                </pre>
-              ) : (
-                <EmptyState
-                  title="No analysis yet"
-                  body="Load the latest analysis to inspect the JSON payload."
-                  cta={
-                    <FormButton variant="ghost" onClick={() => void loadLatest()} disabled={!jobId || loading || loadingLatest}>
-                      {loadingLatest ? "Loading latest..." : "Load analysis"}
-                    </FormButton>
-                  }
-                  className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
-                />
-              )}
-            </section>
-          </div>
-        ) : null}
-
-        {scoringV2?.rubric ? (
-          <details className="group rounded-2xl border border-white/10 bg-white/5 p-4">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-100">
-              Analysis details
-            </summary>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline band</p>
-                <p className="text-sm text-white">{debugFields?.baselineBand ?? "n/a"}</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Role band</p>
-                <p className="text-sm text-white">{debugFields?.roleBand ?? "n/a"}</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline coverage</p>
-                <p className="text-sm text-white">
-                  {formatPercentValue(debugFields?.baselineCoveragePercent)}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Responsibility overlap</p>
-                <p className="text-sm text-white">
-                  {formatPercentValue(debugFields?.responsibilityOverlapPercent)}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job scoring source</p>
-                <p className="text-sm text-white">
-                  {debugFields?.jobScoringTextSource ?? scoringV2.jobTextSource ?? "n/a"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline ID</p>
-                <p className="text-sm text-white">{latest?.baselineId ?? "n/a"}</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Baseline version hash</p>
-                <p className="text-sm text-white">{latest?.baselineVersionHash ?? "n/a"}</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Job ID</p>
-                <p className="text-sm text-white">{latest?.jobId ?? "n/a"}</p>
-              </div>
-              <div className="sm:col-span-2">
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Tooling coverage</p>
-                <p className="text-sm text-white">
-                  Required {formatPercentValue(debugFields?.toolingCoverage?.requiredCoverage)} • Preferred{" "}
-                  {formatPercentValue(debugFields?.toolingCoverage?.preferredCoverage)}
-                </p>
-              </div>
-              <div className="sm:col-span-2">
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (role)</p>
-                <p className="text-sm text-white">
-                  {debugFields?.domainTagsRole?.join(", ") || "None"}
-                </p>
-              </div>
-              <div className="sm:col-span-2">
-                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Domain tags (baseline)</p>
-                <p className="text-sm text-white">
-                  {debugFields?.domainTagsBaseline?.join(", ") || "None"}
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-col items-start gap-2">
-              <button
-                type="button"
-                onClick={handleCopyDebugJson}
-                className="rounded-full border border-white/20 bg-slate-800 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 hover:border-white/40"
-              >
-                Copy debug JSON
-              </button>
-              {debugCopyStatus ? <p className="text-xs text-slate-400">{debugCopyStatus}</p> : null}
-            </div>
-          </details>
-        ) : null}
-
         </div>
       </PageShell>
     );
   }
+
+

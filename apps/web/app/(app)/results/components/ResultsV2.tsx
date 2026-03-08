@@ -1,10 +1,26 @@
 "use client";
 
 import type React from "react";
-import { ScoreGauge } from "@/components/ScoreGauge";
 import { PageHeader } from "@/components/PageHeader";
-import { humanizeConfidenceReason } from "@/lib/confidence";
+import { ScoreGauge } from "@/components/ScoreGauge";
 import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
+
+type ScoreBreakdownDimensionKey =
+  | "role_scope_and_seniority"
+  | "support_operations_and_process_rigor"
+  | "tooling_and_platform_experience"
+  | "domain_and_business_context"
+  | "change_leadership_and_customer_advocacy";
+
+type ScoreBreakdown = {
+  total_score: number;
+  dimensions: Array<{
+    key: ScoreBreakdownDimensionKey;
+    label: string;
+    score: number;
+    weight: number;
+  }>;
+};
 
 type ResultsV2Props = {
   heroHeading: string;
@@ -24,77 +40,39 @@ type ResultsV2Props = {
   delta?: number | null;
   confidenceScore?: number | null;
   confidenceReasons?: string[] | null;
+  scoreBreakdown?: ScoreBreakdown | null;
 };
 
-const sectionCardStyle: React.CSSProperties = {
-  backgroundColor: "var(--bg-surface)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: "var(--card-radius)",
-  padding: "var(--space-md)",
+const EVIDENCE_LABEL_BY_KEY: Record<ScoreBreakdownDimensionKey, string> = {
+  role_scope_and_seniority: "Leadership scope alignment",
+  support_operations_and_process_rigor: "Operational domain alignment",
+  tooling_and_platform_experience: "Tooling/platform alignment",
+  domain_and_business_context: "Customer environment alignment",
+  change_leadership_and_customer_advocacy: "Change leadership alignment",
 };
 
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: "var(--text-section-title)",
-  marginBottom: "var(--space-sm)",
-  color: "var(--text-primary)",
-  fontWeight: 700,
-};
-
-const sectionListStyle: React.CSSProperties = {
-  listStyleType: "disc",
-  paddingLeft: "var(--space-lg)",
-  margin: 0,
-  fontSize: "var(--text-body)",
-  color: "var(--text-secondary)",
-};
-
-const heroCardStyle: React.CSSProperties = {
-  backgroundColor: "var(--bg-surface)",
-  borderRadius: "calc(var(--card-radius) + 4px)",
-  border: "1px solid var(--border-strong)",
-  padding: "calc(var(--space-lg))",
-};
-
-const heroColumnStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-sm)",
-  color: "var(--text-primary)",
-};
-
-function buildComplianceSummary(
-  complianceError: ParsedComplianceError | null,
-  complianceFlags?: string[] | null,
-): string[] {
-  const items: string[] = [];
-  if (complianceError?.type === "insufficient_extracted_text") {
-    const details = complianceError.details;
-    items.push(
-      `Insufficient extracted resume text. Extracted ${details.extractedChars.toLocaleString()} characters. Minimum is ${details.minChars.toLocaleString()}.`,
-    );
-  } else if (complianceError?.type === "COMPLIANCE_VIOLATION") {
-    for (const violation of complianceError.violations) {
-      if (violation.message) {
-        items.push(violation.message);
-      } else if (violation.code) {
-        items.push(violation.code);
-      }
-    }
-  }
-  if (Array.isArray(complianceFlags) && complianceFlags.length) {
-    items.push(...complianceFlags.slice(0, 3));
-  }
-  if (!items.length) {
-    items.push("No compliance concerns detected.");
-  }
-  return items.slice(0, 3);
+function trimEvidenceLine(line: string, maxLength = 80): string {
+  if (line.length <= maxLength) return line;
+  return `${line.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-function buildSectionItems(values: string[], fallback: string) {
-  if (!values.length) {
-    return [fallback];
-  }
-  return values.slice(0, 3);
+export function buildEvidenceLines(scoreBreakdown?: ScoreBreakdown | null): string[] {
+  if (!scoreBreakdown?.dimensions?.length) return [];
+
+  return scoreBreakdown.dimensions
+    .map((dimension) => ({
+      ...dimension,
+      contribution: dimension.weight > 0 ? dimension.score / dimension.weight : 0,
+    }))
+    .filter((dimension) => dimension.score > 0 && dimension.contribution > 0)
+    .sort((a, b) => {
+      if (b.contribution !== a.contribution) return b.contribution - a.contribution;
+      return b.score - a.score;
+    })
+    .slice(0, 3)
+    .map((dimension) =>
+      trimEvidenceLine(`${EVIDENCE_LABEL_BY_KEY[dimension.key]}: ${dimension.label}.`),
+    );
 }
 
 export function ResultsV2({
@@ -102,34 +80,12 @@ export function ResultsV2({
   heroScoreText,
   heroSupportText,
   activeScore,
-  isLowScore,
-  levelLabel,
-  strengths,
-  gaps,
-  complianceError,
-  complianceFlags,
   primaryActionLabel,
   onPrimaryAction,
   primaryActionDisabled,
-  delta,
-  confidenceScore,
-  confidenceReasons,
+  scoreBreakdown,
 }: ResultsV2Props) {
-  const showDelta = typeof delta === "number";
-  const deltaLabel = showDelta
-    ? `${delta >= 0 ? "+" : ""}${delta}`
-    : null;
-  const deltaColor = delta && delta > 0 ? "var(--delta-positive)" : "var(--delta-negative)";
-
-  const normalizedConfidenceReasons = (confidenceReasons ?? []).filter(Boolean);
-  const humanizedConfidenceReasons = normalizedConfidenceReasons.map((reason) =>
-    humanizeConfidenceReason(reason),
-  );
-  const showConfidence = typeof confidenceScore === "number";
-
-  const whatImproved = buildSectionItems(strengths, "Strengths will appear here once the analysis completes.");
-  const leverageGaps = buildSectionItems(gaps, "Highest leverage gaps will surface after analysis.");
-  const complianceItems = buildComplianceSummary(complianceError, complianceFlags);
+  const evidenceLines = buildEvidenceLines(scoreBreakdown);
 
   return (
     <div
@@ -141,152 +97,100 @@ export function ResultsV2({
     >
       <div
         style={{
-          maxWidth: 1200,
+          maxWidth: 980,
           margin: "0 auto",
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-lg)",
         }}
       >
-        <PageHeader
-          title="Results"
-          description="Review your score, strengths, and risks, then move to the next step."
-        />
+        <PageHeader title="Results" description="Review your fit score and take the next step." />
 
-        <section style={heroCardStyle}>
-          <div
-            className="grid gap-8 lg:grid-cols-[1.4fr,0.6fr] lg:items-center"
-            style={{}}
-          >
-            <div style={heroColumnStyle}>
-              <div
-                style={{
-                  fontSize: "var(--text-hero-size)",
-                  fontWeight: 600,
-                  color: showDelta ? deltaColor : "var(--text-primary)",
-                }}
-              >
-                {showDelta ? deltaLabel : "Baseline Established"}
-              </div>
-              <div
-                style={{
-                  fontSize: "var(--text-score-size)",
-                  fontWeight: 600,
-                  color: "var(--text-primary)",
-                }}
-              >
-                {showDelta ? `New Score: ${heroScoreText.replace("Score: ", "")}` : `Initial Score: ${heroScoreText.replace("Score: ", "")}`}
-              </div>
-              <div
-                style={{
-                  fontSize: "18px",
-                  color: "var(--text-secondary)",
-                  fontWeight: 600,
-                }}
-              >
-                Alignment Level {levelLabel}
-              </div>
-              {heroSupportText ? (
-                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--text-body)" }}>
-                  {heroSupportText}
-                </p>
+        <section
+          style={{
+            backgroundColor: "var(--bg-surface)",
+            borderRadius: "calc(var(--card-radius) + 4px)",
+            border: "1px solid var(--border-strong)",
+            padding: "calc(var(--space-lg))",
+          }}
+        >
+          <div className="grid gap-8 lg:grid-cols-[1.25fr,0.75fr] lg:items-center">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{heroHeading}</p>
+              <p className="text-5xl font-semibold leading-none text-white">
+                {heroScoreText.replace("Score: ", "")}
+              </p>
+              {heroSupportText ? <p className="text-sm text-slate-300">{heroSupportText}</p> : null}
+
+              {evidenceLines.length ? (
+                <section style={{ marginTop: 16, marginBottom: 16 }}>
+                  <h3 className="text-sm font-semibold text-slate-200">Evidence from your background</h3>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
+                    {evidenceLines.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </section>
               ) : null}
-              {showConfidence ? (
-                <div style={{ marginTop: 4 }}>
-                  <p style={{ margin: 0, color: "var(--text-slate-400)", fontSize: "12px", letterSpacing: "0.3em", textTransform: "uppercase" }}>
-                    Confidence
-                  </p>
-                  <p style={{ margin: 0, color: "var(--text-slate-200)", fontSize: "14px", fontWeight: 600 }}>
-                    Confidence: {confidenceScore}%
-                  </p>
-                  {humanizedConfidenceReasons.length ? (
-                    <details className="text-xs text-slate-400" style={{ marginTop: 4 }}>
-                      <summary className="cursor-pointer" style={{ letterSpacing: "0.3em", textTransform: "uppercase", fontWeight: 600 }}>
-                        Confidence reasons
-                      </summary>
-                      <ul className="mt-2 space-y-1" style={{ listStyle: "disc", marginLeft: "1rem", paddingLeft: 0 }}>
-                        {humanizedConfidenceReasons.map((reason) => (
-                          <li key={reason} className="text-xs text-slate-300">
-                            {reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                </div>
-              ) : null}
+
+              <button
+                type="button"
+                className="results-v2-primary-cta"
+                onClick={onPrimaryAction}
+                disabled={primaryActionDisabled}
+                style={{
+                  backgroundColor: "var(--accent-primary)",
+                  color: "var(--verdict-apply-text)",
+                  border: "none",
+                  borderRadius: "var(--button-radius)",
+                  padding: "calc(var(--space-sm) + var(--space-md)) calc(var(--space-lg) + var(--space-sm))",
+                  cursor: primaryActionDisabled ? "not-allowed" : "pointer",
+                  opacity: primaryActionDisabled ? 0.6 : 1,
+                }}
+              >
+                {primaryActionLabel}
+              </button>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
+            <div className="flex items-center justify-center">
               <ScoreGauge score={activeScore ?? undefined} loading={activeScore === null} label="Current score" />
             </div>
           </div>
         </section>
 
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-lg)",
-          }}
-        >
-          {[{
-              title: "Strengths",
-              items: whatImproved,
-            },
-            {
-              title: "Risks",
-              items: leverageGaps,
-            },
-            {
-              title: "Critical requirements",
-              items: complianceItems,
-            },
-          ].map((section) => (
-            <section key={section.title} style={sectionCardStyle}>
-              <div style={sectionTitleStyle}>{section.title}</div>
-              <ul style={sectionListStyle}>
-                {section.items.map((item, index) => (
-                  <li key={`${section.title}-${index}`}>{item}</li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-
-        <div
-          style={{
-            marginTop: "var(--space-lg)",
-            display: "flex",
-            justifyContent: "center",
-          }}
-        >
-          <button
-            type="button"
-            className="results-v2-primary-cta"
-            onClick={onPrimaryAction}
-            disabled={primaryActionDisabled}
-            style={{
-              backgroundColor: "var(--accent-primary)",
-              color: "var(--verdict-apply-text)",
-              border: "none",
-              borderRadius: "var(--button-radius)",
-              padding: "calc(var(--space-sm) + var(--space-md)) calc(var(--space-lg) + var(--space-sm))",
-              cursor: primaryActionDisabled ? "not-allowed" : "pointer",
-              opacity: primaryActionDisabled ? 0.6 : 1,
-            }}
-          >
-            {primaryActionLabel}
-          </button>
-        </div>
+        {scoreBreakdown ? (
+          <details open className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+              Supporting score breakdown
+            </summary>
+            <div className="mt-4 space-y-3">
+              {scoreBreakdown.dimensions.map((dimension) => {
+                const percent =
+                  dimension.weight > 0
+                    ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
+                    : 0;
+                return (
+                  <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-slate-200">{dimension.label}</span>
+                      <span className="font-semibold text-white">
+                        {dimension.score.toFixed(1)} / {dimension.weight}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded bg-white/10">
+                      <div className="h-1.5 rounded bg-white/40" style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+                <span className="font-semibold text-slate-200">Total</span>
+                <span className="font-semibold text-white">{scoreBreakdown.total_score.toFixed(1)} / 100</span>
+              </div>
+            </div>
+          </details>
+        ) : null}
       </div>
     </div>
   );
 }
-
