@@ -115,6 +115,8 @@ export type RiskFactor = {
   title: string;
   riskType: RiskType;
   detail: string;
+  isCriticalRequirement: boolean;
+  impactLine?: string;
 };
 
 export type StrategicBrief = {
@@ -165,6 +167,66 @@ function severityBand(score?: number | null): "high" | "medium" | "low" {
   return "low";
 }
 
+const OWNERSHIP_KEYWORD_PATTERN =
+  /\b(own|lead|build|drive|responsible for|establish)\b/i;
+
+const REQUIREMENT_STOPWORDS = new Set([
+  "and",
+  "with",
+  "for",
+  "from",
+  "into",
+  "across",
+  "support",
+  "teams",
+  "team",
+  "experience",
+  "required",
+  "preferred",
+  "role",
+  "the",
+  "this",
+  "that",
+]);
+
+function tokenizeRequirement(value: string): string[] {
+  return (value.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(
+    (token) => token.length >= 4 && !REQUIREMENT_STOPWORDS.has(token),
+  );
+}
+
+function buildRequirementTokenFrequency(gaps: StrategicGap[]): Map<string, number> {
+  const freq = new Map<string, number>();
+  for (const gap of gaps) {
+    const requirement = cleanPhrase(gap.requirementEvidence ?? gap.title ?? "");
+    if (!requirement) continue;
+    const tokens = new Set(tokenizeRequirement(requirement));
+    for (const token of tokens) {
+      freq.set(token, (freq.get(token) ?? 0) + 1);
+    }
+  }
+  return freq;
+}
+
+function detectCriticalRequirement(
+  gap: StrategicGap,
+  index: number,
+  band: "high" | "medium" | "low",
+  tokenFrequency: Map<string, number>,
+): boolean {
+  const requirement = cleanPhrase(gap.requirementEvidence ?? gap.title ?? "");
+  const hasOwnershipLanguage = OWNERSHIP_KEYWORD_PATTERN.test(requirement);
+  const tokens = tokenizeRequirement(requirement);
+  const hasRepeatedKeyword = tokens.some((token) => (tokenFrequency.get(token) ?? 0) >= 2);
+  const appearsNearTop = index <= 1;
+
+  if (band !== "high") return false;
+  if (appearsNearTop && hasOwnershipLanguage) return true;
+  if (appearsNearTop && hasRepeatedKeyword) return true;
+  if (hasOwnershipLanguage && hasRepeatedKeyword) return true;
+  return false;
+}
+
 function classifyRiskType(gap: StrategicGap): RiskType {
   const hasBaselineEvidence = Boolean(gap.baselineEvidence?.trim());
   const severity = typeof gap.severityScore === "number" ? gap.severityScore : null;
@@ -210,11 +272,21 @@ function buildWinFactors(
 }
 
 function buildRiskFactors(gaps: StrategicGap[]): RiskFactor[] {
-  return gaps.slice(0, 3).map((gap, index) => {
+  const topGaps = gaps.slice(0, 3);
+  const tokenFrequency = buildRequirementTokenFrequency(topGaps);
+  let criticalImpactUsed = false;
+
+  return topGaps.map((gap, index) => {
     const riskType = classifyRiskType(gap);
     const band = severityBand(gap.severityScore);
     const jdPhrase = extractJobLanguagePhrase(gap);
     const baseline = cleanPhrase(gap.baselineEvidence ?? "");
+    const isCriticalRequirement = detectCriticalRequirement(
+      gap,
+      index,
+      band,
+      tokenFrequency,
+    );
 
     let detail: string;
     if (riskType === "Hard Gap") {
@@ -244,11 +316,28 @@ function buildRiskFactors(gaps: StrategicGap[]): RiskFactor[] {
       )}", so the experience may exist, but it is not clearly surfaced as direct role-fit evidence today.`;
     }
 
+    const qualifiesForCandidacySignal =
+      !criticalImpactUsed &&
+      riskType === "Hard Gap" &&
+      band === "high" &&
+      isCriticalRequirement;
+
+    const impactLine = qualifiesForCandidacySignal
+      ? "This requirement may materially affect candidacy for this role."
+      : undefined;
+
+    if (qualifiesForCandidacySignal) {
+      criticalImpactUsed = true;
+      detail = `${detail} Hiring managers may view this as a significant gap.`;
+    }
+
     return {
       id: `risk-${index + 1}`,
       title: gap.title,
       riskType,
       detail,
+      isCriticalRequirement,
+      impactLine,
     };
   });
 }

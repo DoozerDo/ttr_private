@@ -20,6 +20,7 @@ import {
 } from "@/lib/compliance/parseComplianceError";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
+import type { RiskFactor } from "@/lib/resultsInsights";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -812,6 +813,20 @@ export default function ResultsPage() {
       criticalGapDetails,
     ],
   );
+  const riskItems: RiskFactor[] =
+    strategicBrief.whatMayHurtYou.length > 0
+      ? strategicBrief.whatMayHurtYou
+      : [
+          {
+            id: "risk-fallback-1",
+            title: "Top role risks unavailable",
+            riskType: "Evidence Gap",
+            detail:
+              "Run a fresh analysis to surface role-specific risks and evidence-level gaps.",
+            isCriticalRequirement: false,
+            impactLine: undefined,
+          },
+        ];
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -1347,23 +1362,15 @@ export default function ResultsPage() {
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                 <h2 className="text-lg font-semibold text-slate-100">What May Hurt You</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(strategicBrief.whatMayHurtYou.length
-                    ? strategicBrief.whatMayHurtYou
-                    : [
-                        {
-                          id: "risk-fallback-1",
-                          title: "Top role risks unavailable",
-                          riskType: "Evidence Gap",
-                          detail:
-                            "Run a fresh analysis to surface role-specific risks and evidence-level gaps.",
-                        },
-                      ]
-                  ).map((risk) => (
+                  {riskItems.map((risk) => (
                       <li key={risk.id} className="space-y-1">
                         <p className="font-semibold text-slate-100">
                           {risk.title} <span className="text-slate-400">({risk.riskType})</span>
                         </p>
                         <p className="text-slate-300">{risk.detail}</p>
+                        {risk.impactLine ? (
+                          <p className="text-xs font-semibold text-amber-300">{risk.impactLine}</p>
+                        ) : null}
                       </li>
                     ))}
                 </ul>

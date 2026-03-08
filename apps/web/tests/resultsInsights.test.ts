@@ -62,6 +62,7 @@ describe("results insights helpers", () => {
     expect(brief.strategicSummary).toContain("Apply.");
     expect(brief.whyYouCanWin[0].detail).toContain("The role emphasizes");
     expect(brief.whatMayHurtYou[0].riskType).toBe("Soft Gap");
+    expect(brief.whatMayHurtYou[0].isCriticalRequirement).toBe(false);
     expect(brief.whatMayHurtYou[0].detail).toContain("Experience implementing AI automation in support operations");
     expect(brief.whatMayHurtYou[0].detail).toContain("Led support workflow automation rollout across escalation queues");
     expect(brief.bestNextMove).toContain("Apply and tailor your resume");
@@ -86,6 +87,8 @@ describe("results insights helpers", () => {
     expect(risk.detail).toContain("This role explicitly calls for");
     expect(risk.detail).toContain("Own enterprise customer incident response for high-severity escalations");
     expect(risk.detail).toContain("does not currently show direct evidence");
+    expect(risk.isCriticalRequirement).toBe(true);
+    expect(risk.impactLine).toBe("This requirement may materially affect candidacy for this role.");
   });
 
   it("produces meaningfully different risk explanations when job language and baseline evidence differ", () => {
@@ -123,5 +126,62 @@ describe("results insights helpers", () => {
     expect(riskA).toContain("Led workflow automation initiatives across support queues");
     expect(riskB).toContain("Managed queue coverage for a single regional support pod");
     expect(riskA).not.toEqual(riskB);
+  });
+
+  it("does not emit candidacy signal for non-critical or non-hard risks", () => {
+    const brief = buildStrategicBrief({
+      verdict: "Borderline",
+      strengths: ["Operations"],
+      criticalGaps: [
+        {
+          title: "Tool Adoption",
+          requirementEvidence: "Improve team adoption of support tools",
+          baselineEvidence: "Led tooling onboarding sessions",
+          severityScore: 0.79,
+        },
+        {
+          title: "Process Reporting",
+          requirementEvidence: "Track weekly KPI reporting for support queues",
+          baselineEvidence: null,
+          severityScore: 0.55,
+        },
+      ],
+    });
+
+    expect(brief.whatMayHurtYou[0].riskType).toBe("Soft Gap");
+    expect(brief.whatMayHurtYou[0].impactLine).toBeUndefined();
+    expect(brief.whatMayHurtYou[1].riskType).toBe("Hard Gap");
+    expect(brief.whatMayHurtYou[1].impactLine).toBeUndefined();
+  });
+
+  it("limits candidacy impact signal to one risk even when multiple qualify", () => {
+    const brief = buildStrategicBrief({
+      verdict: "Skip",
+      strengths: ["Operations"],
+      criticalGaps: [
+        {
+          title: "AI Support Tooling",
+          requirementEvidence: "Own AI support tooling strategy and establish governance",
+          baselineEvidence: null,
+          severityScore: 0.92,
+        },
+        {
+          title: "Incident Command",
+          requirementEvidence: "Lead enterprise customer incident response and drive escalation command",
+          baselineEvidence: null,
+          severityScore: 0.9,
+        },
+        {
+          title: "Global Support Design",
+          requirementEvidence: "Build global support operations model across regions",
+          baselineEvidence: null,
+          severityScore: 0.88,
+        },
+      ],
+    });
+
+    const signaled = brief.whatMayHurtYou.filter((risk) => Boolean(risk.impactLine));
+    expect(signaled).toHaveLength(1);
+    expect(signaled[0].isCriticalRequirement).toBe(true);
   });
 });
