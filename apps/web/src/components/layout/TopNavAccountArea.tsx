@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
-import { settingsRoute } from "@/src/navigation/routes";
+import { SettingsPanel } from "@/src/components/settings/SettingsPanel";
 
 type AuthState = "loading" | "authenticated" | "unauthenticated";
 
@@ -21,6 +20,7 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
   const [email, setEmail] = useState<string | null>(initialEmail ?? null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -125,68 +125,98 @@ export function TopNavAccountArea({ initialEmail }: TopNavAccountAreaProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const label =
-    authState === "authenticated"
-      ? "Log out"
-      : authState === "unauthenticated"
-        ? "Sign in"
-        : "Checking...";
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
 
-  const onClick = authState === "authenticated" ? handleLogout : handleSignIn;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSettingsOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [settingsOpen]);
 
   return (
-    <div className="flex items-center gap-3">
-      {authState === "authenticated" && email ? (
-        <span className="max-w-[160px] truncate text-sm font-semibold text-[var(--text-primary)]">
-          {email}
-        </span>
-      ) : null}
-      {authState === "authenticated" ? (
-        <div className="relative z-50" ref={menuRef}>
+    <>
+      <div className="flex items-center gap-3">
+        {authState === "authenticated" ? (
+          <div className="relative z-50" ref={menuRef}>
+            <button
+              type="button"
+              className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+              aria-label="Settings"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              Settings
+            </button>
+
+            {menuOpen ? (
+              <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 shadow-xl">
+                {email ? (
+                  <p className="mb-2 truncate px-2 text-xs font-medium text-[var(--text-muted-secondary)]">
+                    {email}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+                  onClick={() => {
+                    setSettingsOpen(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Open Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={isProcessing}
+                  className="mt-1 w-full rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-left text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--bg-elevated)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isProcessing ? "Logging out..." : "Logout"}
+                </button>
+                {logoutError ? (
+                  <p className="mt-2 text-xs text-[var(--status-danger)]">{logoutError}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
           <button
             type="button"
-            className="flex items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] shadow-sm transition-colors duration-150 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-            aria-label="Account menu"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={handleSignIn}
+            disabled={authState === "loading" || isProcessing}
+            className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <span aria-hidden="true" className="text-xs font-semibold uppercase tracking-wide">Menu</span>
+            {authState === "loading" ? "Checking..." : "Sign in"}
           </button>
+        )}
+      </div>
 
-          {menuOpen ? (
-            <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3 shadow-xl">
-              <Link
-                href={settingsRoute.href}
-                className="block rounded-lg px-3 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                {settingsRoute.label}
-              </Link>
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={isProcessing}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-left text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--verdict-apply-text)] hover:bg-[var(--accent-primary-hover)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-              >
-                {isProcessing ? "Logging out" : "Logout"}
-              </button>
-              {logoutError ? (
-                <p className="mt-2 text-xs text-[var(--status-danger)]">{logoutError}</p>
-              ) : null}
-            </div>
-          ) : null}
+      {settingsOpen ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Settings"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSettingsOpen(false);
+            }
+          }}
+        >
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto">
+            <SettingsPanel onClose={() => setSettingsOpen(false)} compact />
+          </div>
         </div>
       ) : null}
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={authState === "loading" || isProcessing}
-        className="rounded-full border border-[var(--border-subtle)] px-4 py-1 text-sm font-semibold text-[var(--text-primary)] transition-colors duration-150 bg-[var(--bg-elevated)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {label}
-      </button>
-    </div>
+    </>
   );
 }
 

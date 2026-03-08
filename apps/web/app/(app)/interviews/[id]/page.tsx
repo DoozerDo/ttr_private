@@ -952,6 +952,17 @@ export default function InterviewSessionPage() {
   const fitReviewUrl = session?.jobId
     ? `/fit-review?jobId=${encodeURIComponent(session.jobId)}`
     : "/fit-review";
+  const studioUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    if (session?.jobId) {
+      params.set("jobId", session.jobId);
+    }
+    if (analyzeBaselineVersionId) {
+      params.set("baselineVersionId", analyzeBaselineVersionId);
+    }
+    const query = params.toString();
+    return query ? `/studio?${query}` : "/studio";
+  }, [analyzeBaselineVersionId, session?.jobId]);
   const completionReason = backendIndicatesCompletion
     ? "Backend marked this interview as complete."
     : allQuestionsAnswered
@@ -1365,6 +1376,11 @@ export default function InterviewSessionPage() {
                     New baseline version is ready: {promotedBaselineReference}
                   </Alert>
                 ) : null}
+                {!promotedBaselineReference ? (
+                  <Alert intent="warning" title="Artifact readiness">
+                    Artifacts are not ready yet. Promote a baseline version, then generate documents in Studio.
+                  </Alert>
+                ) : null}
                 {promotedBaselineMetadata ? (
                   <ul className="space-y-1 text-xs text-slate-300">
                     <li>Baseline version id: {promotedBaselineMetadata.baselineVersionId ?? "n/a"}</li>
@@ -1380,7 +1396,7 @@ export default function InterviewSessionPage() {
                   <Link href={fitReviewUrl} className="text-xs text-sky-300 underline">
                     Back to Fit Review
                   </Link>
-                  <Link href="/studio" className="text-xs text-sky-300 underline">
+                  <Link href={studioUrl} className="text-xs text-sky-300 underline">
                     Open Resume Studio
                   </Link>
                   <Link href="/job-tracker" className="text-xs text-sky-300 underline">

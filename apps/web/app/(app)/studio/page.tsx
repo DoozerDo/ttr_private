@@ -357,7 +357,7 @@ export default function StudioPage() {
 
   const generationMessage = useMemo(() => {
     if (!selectedBaselineVersionId) {
-      return "Select a baseline that is ready before generating documents.";
+      return "Artifacts are not ready yet. Promote a baseline version in Interview completion, then return here.";
     }
     if (analysisScore === null) {
       return "Run the compatibility check before generating a resume or cover letter.";
@@ -379,6 +379,13 @@ export default function StudioPage() {
     [coverState.response],
   );
   const hasCoverLetterArtifact = Boolean(coverState.response);
+  const artifactReadinessState = useMemo<
+    "not_ready" | "ready_to_generate" | "generated"
+  >(() => {
+    if (!selectedBaselineVersionId || analysisScore === null) return "not_ready";
+    if (!hasResumeArtifact && !hasCoverLetterArtifact) return "ready_to_generate";
+    return "generated";
+  }, [analysisScore, hasCoverLetterArtifact, hasResumeArtifact, selectedBaselineVersionId]);
   const positioningNarrative = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return analysis.summary.trim();
@@ -1007,6 +1014,12 @@ export default function StudioPage() {
           </span>
         </p>
         <p className="text-sm text-slate-300">
+          Baseline Version ID:{" "}
+          <span className="font-semibold text-slate-100">
+            {selectedBaselineVersionId || "Not selected"}
+          </span>
+        </p>
+        <p className="text-sm text-slate-300">
           Fit Score:{" "}
           <span className="font-semibold text-slate-100">
             {analysisLoading
@@ -1020,6 +1033,29 @@ export default function StudioPage() {
             Confidence: {applicationConfidence}
           </span>
         </p>
+      </section>
+
+      <section className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Artifact Readiness
+        </h2>
+        {artifactReadinessState === "not_ready" ? (
+          <Alert intent="warning" title="Not ready">
+            Artifacts are locked until a baseline version is selected and fit analysis is available.
+          </Alert>
+        ) : null}
+        {artifactReadinessState === "ready_to_generate" ? (
+          <Alert intent="success" title="Ready to generate">
+            Resume and cover letter can now be generated from baseline version{" "}
+            <strong>{selectedBaselineVersionId}</strong>.
+          </Alert>
+        ) : null}
+        {artifactReadinessState === "generated" ? (
+          <Alert intent="success" title="Generated and available">
+            Artifacts are available and tied to baseline version{" "}
+            <strong>{selectedBaselineVersionId}</strong>.
+          </Alert>
+        ) : null}
       </section>
 
       <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
@@ -1063,6 +1099,9 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-sm text-slate-300">
               Generate a targeted resume based on your selected role, baseline, and job analysis.
+            </p>
+            <p className="text-xs text-slate-400">
+              Baseline version in use: {selectedBaselineVersionId || "Not selected"}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1133,6 +1172,9 @@ export default function StudioPage() {
 
         {resumeState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <Alert intent="success" title="Resume generated">
+              Generated from baseline version {selectedBaselineVersionId || "n/a"}.
+            </Alert>
             {resumeWarningFlags.length ? (
               <p className="text-sm text-amber-200">
                 Verification signals detected. Personalization may be limited. See
@@ -1207,6 +1249,9 @@ export default function StudioPage() {
             <h2 className="text-lg font-semibold text-slate-100">Cover Letter</h2>
             <p className="text-sm text-slate-300">
               Generate a targeted cover letter aligned with the role and your verified experience.
+            </p>
+            <p className="text-xs text-slate-400">
+              Baseline version in use: {selectedBaselineVersionId || "Not selected"}
             </p>
           </div>
           <FormButton onClick={handleCoverDraft} disabled={!readyForDocuments || coverGenerating}>
@@ -1329,6 +1374,9 @@ export default function StudioPage() {
         {!coverLetterComplianceBlocked ? (
           coverState.response ? (
             <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <Alert intent="success" title="Cover letter generated">
+                Generated from baseline version {selectedBaselineVersionId || "n/a"}.
+              </Alert>
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
                 {coverLetterParagraphs.length ? (
                   <div className="mx-auto flex w-full max-w-[760px] flex-col space-y-4 rounded-2xl border border-white/10 bg-slate-950/80 p-6 shadow-inner">

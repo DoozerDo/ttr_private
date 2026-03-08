@@ -222,10 +222,9 @@ html {
 .ttr-nav-item {
   background: var(--nav-item-bg);
   border: 1px solid var(--nav-item-border);
-  border-radius: 14px;
+  border-radius: 12px;
   transition: background 180ms ease, border 180ms ease, color 180ms ease;
   position: relative;
-  overflow: hidden;
   color: var(--text-muted-secondary);
 }
 
@@ -243,18 +242,6 @@ html {
   background: var(--nav-item-selected-bg);
   border-color: var(--nav-item-selected-border);
   color: var(--text-primary);
-}
-
-.ttr-nav-item[data-active="true"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  width: 3px;
-  background: var(--nav-item-selected-accent);
-  opacity: 0.9;
-  pointer-events: none;
 }
 
 .ttr-nav-item .journey-nav-step-label {

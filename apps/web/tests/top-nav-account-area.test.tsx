@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+﻿import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { TopNavAccountArea } from "@/src/components/layout/TopNavAccountArea";
+import { EntitlementsProvider } from "@/src/lib/entitlements";
 import { sanitizeReturnPath } from "@/src/lib/safe-redirect";
 import {
   mockPathname,
@@ -9,13 +10,20 @@ import {
   overrideSearchParams,
   setFetchImplementation,
 } from "@/tests/setup";
-import { settingsRoute } from "@/src/navigation/routes";
 
 const createResponse = (body: unknown, ok = true, status = ok ? 200 : 401) => ({
   ok,
   status,
   json: () => Promise.resolve(body),
 });
+
+function renderTopNav() {
+  return render(
+    <EntitlementsProvider entitlements={null}>
+      <TopNavAccountArea />
+    </EntitlementsProvider>,
+  );
+}
 
 describe("TopNavAccountArea", () => {
   it("shows Sign in when unauthenticated", async () => {
@@ -27,7 +35,7 @@ describe("TopNavAccountArea", () => {
       return createResponse({});
     });
 
-    render(<TopNavAccountArea />);
+    renderTopNav();
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
@@ -37,7 +45,7 @@ describe("TopNavAccountArea", () => {
     expect(screen.queryByLabelText("Account menu")).toBeNull();
   });
 
-  it("shows email, dropdown, and Log out when authenticated", async () => {
+  it("shows a single Settings trigger when authenticated", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.includes("/api/users/me")) {
@@ -46,20 +54,22 @@ describe("TopNavAccountArea", () => {
       return createResponse({});
     });
 
-    render(<TopNavAccountArea />);
+    renderTopNav();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
     });
 
-    const emails = screen.getAllByText("user@example.com");
-    expect(emails).toHaveLength(1);
-    expect(emails[0]).toBeInTheDocument();
-    const menuButton = screen.getByLabelText("Account menu");
+    expect(screen.queryByText("Log out")).toBeNull();
+    expect(screen.queryByLabelText("Account menu")).toBeNull();
+
+    const menuButton = screen.getByRole("button", { name: "Settings" });
     fireEvent.click(menuButton);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: settingsRoute.label })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Logout" })).toBeInTheDocument();
+      expect(screen.getByText("user@example.com")).toBeInTheDocument();
     });
   });
 
@@ -75,7 +85,7 @@ describe("TopNavAccountArea", () => {
       return createResponse({});
     });
 
-    render(<TopNavAccountArea />);
+    renderTopNav();
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
@@ -88,7 +98,7 @@ describe("TopNavAccountArea", () => {
     });
   });
 
-  it("logs out and routes to login when Log out is clicked", async () => {
+  it("logs out and routes to login when Logout is clicked from the menu", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.includes("/api/users/me")) {
@@ -103,13 +113,14 @@ describe("TopNavAccountArea", () => {
     });
     setFetchImplementation(fetchMock);
 
-    render(<TopNavAccountArea />);
+    renderTopNav();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Logout" }));
 
     await waitFor(() => {
       expect(mockRouterPush).toHaveBeenCalledWith("/auth/login");
@@ -120,6 +131,37 @@ describe("TopNavAccountArea", () => {
       return url.includes("/api/auth/logout") && init?.method === "POST";
     });
     expect(hadLogoutCall).toBe(true);
+  });
+
+  it("opens and closes settings modal from the menu", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/api/users/me")) {
+        return createResponse({ email: "user@example.com" }, true, 200);
+      }
+      return createResponse({});
+    });
+
+    renderTopNav();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Close" }).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Auto generate threshold")).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    });
   });
 });
 
@@ -133,3 +175,4 @@ describe("sanitizeReturnPath", () => {
     expect(sanitizeReturnPath("//other-host")).toBeNull();
   });
 });
+

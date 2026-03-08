@@ -1406,6 +1406,17 @@ export default function ResultsPage() {
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                 <h2 className="text-lg font-semibold text-slate-100">Next action</h2>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-900/40 p-3">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Artifact readiness</p>
+                  <p className="mt-1 text-sm text-slate-200">
+                    {readyForDocument
+                      ? "Ready to generate in Studio."
+                      : "Not ready yet. Complete interview promotion to generate artifacts from a promoted baseline version."}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Baseline version in context: {latestBaselineVersionId || "Unavailable"}
+                  </p>
+                </div>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(recommendedActions.length
                     ? recommendedActions

@@ -796,6 +796,17 @@ export default function FitReviewClient() {
                 <p className="text-xs text-slate-400">
                   Next: answer prompts, validate additions, compute expanded fit, and promote your new baseline.
                 </p>
+                <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                    Artifact readiness
+                  </p>
+                  <p className="mt-1 text-sm text-slate-300">
+                    Not ready yet. Documents unlock after interview promotion creates a new baseline version.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Current baseline version: {baselineVersionId ?? "Unavailable"}
+                  </p>
+                </div>
               </div>
           </section>
         </>

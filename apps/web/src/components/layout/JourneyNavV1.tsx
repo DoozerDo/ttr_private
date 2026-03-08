@@ -224,7 +224,7 @@ export function JourneyNavV1({
         .journey-nav-root {
           background-color: transparent;
           background-image: none;
-          border-radius: 1.5rem;
+          border-radius: 1rem;
           border: none;
           border-bottom: 1px solid var(--border-strong, #2a3342);
           padding: 0;
@@ -240,7 +240,7 @@ export function JourneyNavV1({
           overflow: hidden;
           isolation: isolate;
           border-radius: inherit;
-          padding: 1rem;
+          padding: 0.9rem 1rem 0.85rem;
           background-color: var(--surface-secondary, #111827);
           background-image: none;
           border: 1px solid var(--border-subtle, #1f2632);
@@ -256,7 +256,7 @@ export function JourneyNavV1({
           box-shadow: none;
           filter: none;
           backdrop-filter: none;
-          --journey-icon-size: 64px;
+          --journey-icon-size: 52px;
           --journey-padding: 1rem;
           --journey-line-y: calc(var(--journey-padding) + var(--journey-icon-size) / 2);
         }
@@ -289,9 +289,9 @@ export function JourneyNavV1({
         .journey-nav-line {
           background: linear-gradient(
             90deg,
-            rgba(10, 12, 17, 0.9),
-            rgba(43, 47, 57, 0.96),
-            rgba(10, 12, 17, 0.85)
+            rgba(46, 56, 72, 0.75),
+            rgba(63, 75, 96, 0.9),
+            rgba(46, 56, 72, 0.75)
           );
         }
 
@@ -301,9 +301,9 @@ export function JourneyNavV1({
           transform-origin: left center;
           background: linear-gradient(
             90deg,
-            rgba(21, 26, 33, 0.9),
-            rgba(194, 77, 12, 0.9),
-            rgba(14, 17, 24, 0.85)
+            rgba(71, 85, 105, 0.9),
+            rgba(100, 116, 139, 0.95),
+            rgba(71, 85, 105, 0.9)
           );
           box-shadow: none;
         }
@@ -329,11 +329,11 @@ export function JourneyNavV1({
           flex: 1;
           flex-direction: column;
           align-items: center;
-          gap: 0.35rem;
+          gap: 0.45rem;
           color: inherit;
-          font-size: 0.75rem;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
+          font-size: 0.76rem;
+          letter-spacing: 0.02em;
+          text-transform: none;
           min-width: 0;
           padding: 0;
           margin: 0;
@@ -369,17 +369,17 @@ export function JourneyNavV1({
 
         .journey-nav-icon-area {
           position: relative;
-          width: 64px;
-          height: 64px;
-          border-radius: 999px;
+          width: 52px;
+          height: 52px;
+          border-radius: 14px;
           isolation: isolate;
           display: flex;
           align-items: center;
           justify-content: center;
-          background-color: rgba(8, 10, 15, 0.96);
+          background-color: rgba(10, 14, 24, 0.96);
           background-image: none;
           background-blend-mode: normal;
-          border: 2px solid var(--metal-edge-outer, rgba(255, 255, 255, 0.1));
+          border: 1px solid rgba(148, 163, 184, 0.25);
           box-shadow: none;
           overflow: visible;
           --journey-nav-target-translate: 0px;
@@ -398,8 +398,8 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-active .journey-nav-icon-area {
-          border-color: rgba(194, 77, 12, 0.9);
-          box-shadow: none;
+          border-color: rgba(203, 213, 225, 0.6);
+          background-color: rgba(15, 23, 42, 0.94);
           pointer-events: none;
         }
 
@@ -439,7 +439,8 @@ export function JourneyNavV1({
         }
 
         .journey-nav-step-label {
-          font-size: 0.65rem;
+          font-size: 0.7rem;
+          font-weight: 600;
           line-height: 1;
           text-align: center;
           color: var(--text-muted-primary, rgba(226, 232, 240, 0.75));
