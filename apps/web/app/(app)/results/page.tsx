@@ -12,7 +12,6 @@ import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { TextInput } from "@/components/TextInput";
-import type { Achievement } from "@/types/achievement";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -20,6 +19,7 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
+import { buildStrategicBrief } from "@/lib/resultsInsights";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -216,13 +216,6 @@ function mapApplicationConfidenceLabel(value?: number | null): "Very High" | "Hi
   if (value >= 70) return "High";
   if (value >= 55) return "Moderate";
   return "Low";
-}
-
-function mapGapSeverityLabel(gap: string): "Low Risk" | "Moderate Risk" | "High Risk" {
-  const normalized = gap.toLowerCase();
-  if (normalized.includes("missing") || normalized.includes("no ")) return "High Risk";
-  if (normalized.includes("limited") || normalized.includes("exposure")) return "Moderate Risk";
-  return "Low Risk";
 }
 
 type ScoreDriver = {
@@ -774,22 +767,7 @@ export default function ResultsPage() {
 
   const executionMode = typeof activeScore === "number" && activeScore >= 70;
   const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
-  const heroScoreText = `Score: ${activeScore?.toFixed(1) ?? "Pending"}`;
-  const narrativeHeadline = latest?.narrative?.headline ?? null;
-  const narrativeSummary = latest?.narrative?.summary ?? null;
-  const heroHeadingFallback = executionMode ? "You're Clear to Apply" : "Alignment Needs Attention";
-  const heroHeading = narrativeHeadline ?? heroHeadingFallback;
-  const heroSupportTextFallback = executionMode
-    ? "This role aligns with your verified baseline."
-    : "Review gaps and strengthen alignment before applying.";
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
-  const lowScoreHeroText =
-    "Review your score and go to Fit Review to raise it before applying.";
-  const heroSupportText = narrativeSummary
-    ? null
-    : isLowScore
-      ? lowScoreHeroText
-      : heroSupportTextFallback;
   const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
   const dimensionCardClassName = dimensionCardBaseClass;
   const applicationConfidence = useMemo(
@@ -803,43 +781,37 @@ export default function ResultsPage() {
       .filter((item) => typeof item === "string" && item.trim().length > 0)
       .slice(0, 4);
   }, [latest?.narrative?.strengths, latest?.strengths]);
-  const strategicGaps = useMemo(() => {
-    const fromCritical = Array.isArray(latest?.criticalGaps)
-      ? latest.criticalGaps
-          .map((gap) => (typeof gap?.title === "string" ? gap.title : ""))
-          .filter((item) => item.trim().length > 0)
-      : [];
-    const fromNarrative = Array.isArray(latest?.narrative?.gaps) ? latest.narrative.gaps : [];
-    const fromLatest = Array.isArray(latest?.gaps) ? latest.gaps : [];
-    return Array.from(new Set([...fromCritical, ...fromNarrative, ...fromLatest]))
-      .filter((item) => typeof item === "string" && item.trim().length > 0)
-      .slice(0, 5);
-  }, [latest?.criticalGaps, latest?.gaps, latest?.narrative?.gaps]);
+  const criticalGapDetails = useMemo(() => {
+    if (!Array.isArray(latest?.criticalGaps)) return [];
+    return latest.criticalGaps
+      .filter((gap) => gap && typeof gap.title === "string")
+      .map((gap) => ({
+        title: gap.title,
+        requirementEvidence: gap.requirementEvidence,
+        baselineEvidence: gap.baselineEvidence,
+        severityScore: gap.severityScore,
+      }));
+  }, [latest?.criticalGaps]);
   const recommendedActions = useMemo(() => {
     return Array.isArray(latest?.recommendedActions)
       ? latest.recommendedActions.filter((item) => typeof item === "string" && item.trim().length > 0)
       : [];
   }, [latest?.recommendedActions]);
-  const positioningNarrative = useMemo(() => {
-    if (narrativeSummary) return narrativeSummary;
-    if (strategicStrengths.length) {
-      return `Position yourself around ${strategicStrengths.slice(0, 2).join(" and ")}.`;
-    }
-    return "Position yourself as a role-aligned operator with verified baseline evidence and measurable outcomes.";
-  }, [narrativeSummary, strategicStrengths]);
-  const achievementForScore = useMemo<Achievement | null>(() => {
-    if (!executionMode) return null;
-    return {
-      id: "clear_to_apply",
-      title: "Achievement Unlocked",
-      description:
-        "You are clear to apply. You have unlocked personalized document creation.",
-      tier: "",
-      tone: "success",
-      iconKey: "✓",
-    };
-  }, [executionMode]);
-
+  const strategicBrief = useMemo(
+    () =>
+      buildStrategicBrief({
+        verdict: activeVerdictDecision.verdict,
+        verdictExplanation: activeVerdictDecision.verdictExplanation,
+        strengths: strategicStrengths,
+        criticalGaps: criticalGapDetails,
+      }),
+    [
+      activeVerdictDecision.verdict,
+      activeVerdictDecision.verdictExplanation,
+      strategicStrengths,
+      criticalGapDetails,
+    ],
+  );
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -1337,7 +1309,7 @@ export default function ResultsPage() {
                     Verdict
                   </p>
                   <p className="text-3xl font-semibold text-white">{activeVerdictDecision.verdict}</p>
-                  <p className="text-sm text-slate-300">{activeVerdictDecision.verdictExplanation}</p>
+                  <p className="text-sm text-slate-300">{strategicBrief.strategicSummary}</p>
                   <p className="text-sm text-slate-300">
                     Fit Score:{" "}
                     <span className="font-semibold text-white">
@@ -1350,12 +1322,92 @@ export default function ResultsPage() {
                   </p>
                 </div>
               </div>
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Why You Can Win</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(strategicBrief.whyYouCanWin.length
+                    ? strategicBrief.whyYouCanWin
+                    : [
+                        {
+                          id: "win-fallback-1",
+                          title: "Baseline alignment captured in this role",
+                          detail:
+                            "Load a completed analysis to see requirement-level evidence for your strongest win factors.",
+                        },
+                      ]
+                  ).map((item) => (
+                    <li key={item.id} className="space-y-1">
+                      <p className="font-semibold text-slate-100">{item.title}</p>
+                      <p className="text-slate-300">{item.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">What May Hurt You</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(strategicBrief.whatMayHurtYou.length
+                    ? strategicBrief.whatMayHurtYou
+                    : [
+                        {
+                          id: "risk-fallback-1",
+                          title: "Top role risks unavailable",
+                          riskType: "Evidence Gap",
+                          detail:
+                            "Run a fresh analysis to surface role-specific risks and evidence-level gaps.",
+                        },
+                      ]
+                  ).map((risk) => (
+                      <li key={risk.id} className="space-y-1">
+                        <p className="font-semibold text-slate-100">
+                          {risk.title} <span className="text-slate-400">({risk.riskType})</span>
+                        </p>
+                        <p className="text-slate-300">{risk.detail}</p>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Best Next Move</h2>
+                <p className="mt-2 text-sm text-slate-300">{strategicBrief.bestNextMove}</p>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+                <h2 className="text-lg font-semibold text-slate-100">Actions</h2>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {(recommendedActions.length
+                    ? recommendedActions
+                    : [
+                        "Tailor your resume to the most role-critical strengths and risks.",
+                        "Build a cover letter that proactively addresses the top risk.",
+                        "Prepare interview responses for the highest-risk challenge areas.",
+                      ]
+                  ).map((item) => (
+                    <li key={`action-${item}`}>{item}</li>
+                  ))}
+                </ul>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
+                    Improve Resume for This Role
+                  </FormButton>
+                  <FormButton onClick={() => void router.push("/cover-letters")}>
+                    Generate Cover Letter That Addresses Gaps
+                  </FormButton>
+                  <FormButton onClick={() => void router.push(interviewToolkitHref)}>
+                    Prepare for Interview Risks
+                  </FormButton>
+                </div>
+                <p className="mt-3 text-xs text-slate-400">
+                  Each action uses the same fit and gap analysis shown above.
+                </p>
+              </section>
               {scoreBreakdown ? (
-                <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                  <h2 className="text-lg font-semibold text-slate-100">Score Breakdown</h2>
-                  <p className="mt-1 text-sm text-slate-300">
-                    Shows how your Fit Score is built across the five scoring dimensions.
-                  </p>
+                <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                    Supporting score breakdown
+                  </summary>
                   <div className="mt-4 space-y-3">
                     {scoreBreakdown.dimensions.map((dimension) => {
                       const percent =
@@ -1386,115 +1438,8 @@ export default function ResultsPage() {
                       </span>
                     </div>
                   </div>
-                </section>
+                </details>
               ) : null}
-              <div className="rounded-3xl border border-white/10 bg-slate-900/30 p-6">
-                <div className="flex flex-col gap-6 lg:items-start">
-                  <div className="space-y-4 text-center lg:text-left">
-                    <p className="text-3xl font-semibold text-white">{heroHeading}</p>
-                    <p className="text-xl font-semibold text-white">{heroScoreText}</p>
-                    {heroSupportText ? (
-                      <p className="text-sm text-slate-300">{heroSupportText}</p>
-                    ) : null}
-                    {achievementForScore ? (
-                      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-200">
-                        <div>
-                          <div className="flex items-start gap-3">
-                            <span className="text-2xl text-emerald-200">✓</span>
-                            <p className="text-sm text-slate-200">
-                              You are clear to apply. You have unlocked personalized document creation.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="flex flex-wrap justify-center gap-3 lg:justify-start">
-                      {isLowScore ? (
-                        <FormButton onClick={() => void router.push(fitReviewPath)}>
-                          Open Fit Review
-                        </FormButton>
-                      ) : (
-                        <FormButton
-                          className="ttr-btn-primary"
-                          onClick={() => void router.push(studioHref)}
-                          disabled={!canOpenStudio}
-                        >
-                          Prepare Application Materials
-                        </FormButton>
-                      )}
-                    </div>
-                    {isLowScore ? (
-                      <p className="text-xs text-slate-300">
-                        Your next step is Fit Review. Close the primary gaps and recheck your score here.
-                      </p>
-                    ) : null}
-                  </div>
-              </div>
-            </div>
-              {narrativeSummary ? (
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5 text-sm text-slate-300">
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Why this score
-                  </p>
-                  <p className="mt-2 text-sm text-slate-300">{narrativeSummary}</p>
-                </div>
-              ) : null}
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Strengths</h2>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(strategicStrengths.length
-                    ? strategicStrengths
-                    : [
-                        "Operational leadership tied to measurable outcomes",
-                        "Experience scaling support and process execution",
-                        "Cross-functional coordination under pressure",
-                      ]
-                  ).map((item) => (
-                    <li key={`strength-${item}`}>• {item}</li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Critical Gaps</h2>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(strategicGaps.length ? strategicGaps : ["Domain specificity depth"])
-                    .slice(0, 4)
-                    .map((gap) => (
-                      <li key={`gap-${gap}`}>
-                        {gap} - {mapGapSeverityLabel(gap)}
-                      </li>
-                    ))}
-                </ul>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Actions</h2>
-                <p className="mt-2 text-sm text-slate-300">{positioningNarrative}</p>
-                <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {(recommendedActions.length
-                    ? recommendedActions
-                    : [
-                        "Improve resume positioning for the top gap.",
-                        "Generate a targeted cover letter that addresses transferability.",
-                        "Prepare interview responses for likely challenge areas.",
-                      ]
-                  ).map((item) => (
-                    <li key={`action-${item}`}>{item}</li>
-                  ))}
-                </ul>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <FormButton onClick={() => void router.push(studioHref)} disabled={!canOpenStudio}>
-                    Improve Resume
-                  </FormButton>
-                  <FormButton onClick={() => void router.push("/cover-letters")}>
-                    Generate Cover Letter
-                  </FormButton>
-                  <FormButton onClick={() => void router.push(interviewToolkitHref)}>
-                    Prepare for Interview
-                  </FormButton>
-                </div>
-              </section>
               {scoringRubric ? (
                 <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
                   <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
