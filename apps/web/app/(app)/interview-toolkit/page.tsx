@@ -609,9 +609,19 @@ export default function InterviewToolkitPage() {
                     </p>
                     <ul className="space-y-2 text-sm text-slate-200">
                       {packet.interviewRiskBriefing.slice(0, 3).map((risk) => (
-                        <li key={risk.riskId}>
-                          <span className="font-semibold text-white">{risk.topic}:</span>{" "}
-                          {risk.whyTheyMayChallengeYou}
+                        <li key={risk.riskId} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                          <p>
+                            <span className="font-semibold text-white">{risk.topic}:</span>{" "}
+                            {risk.whyTheyMayChallengeYou}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-300">
+                            <span className="font-semibold text-slate-200">Strategy:</span>{" "}
+                            {risk.exampleResponseStrategies?.[0] ?? risk.howToAddressIt}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-300">
+                            <span className="font-semibold text-slate-200">Talking point:</span>{" "}
+                            {risk.suggestedTalkingPoints?.[0] ?? risk.exampleTalkingPoint}
+                          </p>
                         </li>
                       ))}
                     </ul>

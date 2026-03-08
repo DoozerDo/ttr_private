@@ -45,6 +45,8 @@ export type StudyPacket = {
     whyTheyMayChallengeYou: string;
     howToAddressIt: string;
     exampleTalkingPoint: string;
+    suggestedTalkingPoints: string[];
+    exampleResponseStrategies: string[];
   }>;
   recommendedStories: StarStory[];
   recentStories: StarStory[];
@@ -156,10 +158,16 @@ export class InterviewToolkitService {
     const questions =
       this.questionGenerator.generateQuestions(gapsForQuestions);
 
+    const interviewRiskBriefing = (gapInsights?.interviewRisks ?? []).map((risk) => ({
+      ...risk,
+      suggestedTalkingPoints: [risk.exampleTalkingPoint],
+      exampleResponseStrategies: [risk.howToAddressIt],
+    }));
+
     return {
       job: { id: job.id, title: job.title, company: job.company },
       fitSnapshot,
-      interviewRiskBriefing: gapInsights?.interviewRisks ?? [],
+      interviewRiskBriefing,
       recommendedStories,
       recentStories: stories.slice(0, 5),
       questions,

@@ -325,11 +325,29 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       : ' I will confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.';
 
     const gapLine = majorGaps.length
-      ? ` I will also proactively address likely interview risks around ${this.formatList(
-          majorGaps.map((gap) => gap.title),
-        )} by connecting transferable baseline evidence and calling out growth areas directly.`
+      ? ` ${this.composeGapReframing(majorGaps)}`
       : '';
     return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${gapLine}${collaborationLine}`;
+  }
+
+  private composeGapReframing(
+    majorGaps: Array<{
+      title: string;
+      requirementEvidence: string;
+      baselineEvidence: string | null;
+    }>,
+  ): string {
+    const topGaps = majorGaps.slice(0, 2);
+    const sentences = topGaps.map((gap) => {
+      const requirement = this.limitWords(gap.requirementEvidence, 24);
+      if (gap.baselineEvidence) {
+        const baseline = this.limitWords(gap.baselineEvidence, 22);
+        return `For ${gap.title.toLowerCase()}, I will connect baseline experience like "${baseline}" to your expectation around "${requirement}" and define a clear ramp plan.`;
+      }
+      return `For ${gap.title.toLowerCase()}, I will be direct that this is a growth area, connect adjacent verified experience to "${requirement}", and outline how I would close the gap quickly.`;
+    });
+
+    return `I will proactively address likely interview risk areas: ${sentences.join(' ')}`;
   }
 
   private composeSafeExecution(job: NormalizedJob) {

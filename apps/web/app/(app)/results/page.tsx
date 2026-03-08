@@ -19,7 +19,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import { getVerdictDisplayOrDefault } from "@/lib/fit-verdict";
+import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -767,9 +767,9 @@ export default function ResultsPage() {
   const hasAnalysis = Boolean(latest);
   const diagnosticAssessmentId = latest?.assessmentId ?? runIdentifier ?? "N/A";
 
-  const activeVerdictInfo = useMemo(
-    () => getVerdictDisplayOrDefault(latest?.verdict ?? null),
-    [latest?.verdict],
+  const activeVerdictDecision = useMemo(
+    () => getDecisionFromFitScore(activeScore),
+    [activeScore],
   );
 
   const executionMode = typeof activeScore === "number" && activeScore >= 70;
@@ -1332,7 +1332,12 @@ export default function ResultsPage() {
           ) : (
             <div className="space-y-6">
               <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Verdict
+                  </p>
+                  <p className="text-3xl font-semibold text-white">{activeVerdictDecision.verdict}</p>
+                  <p className="text-sm text-slate-300">{activeVerdictDecision.verdictExplanation}</p>
                   <p className="text-sm text-slate-300">
                     Fit Score:{" "}
                     <span className="font-semibold text-white">
@@ -1435,7 +1440,7 @@ export default function ResultsPage() {
                 </div>
               ) : null}
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Why You Are Strong for This Role</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Strengths</h2>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(strategicStrengths.length
                     ? strategicStrengths
@@ -1464,11 +1469,8 @@ export default function ResultsPage() {
               </section>
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Recommended Positioning</h2>
-                <p className="mt-3 text-sm text-slate-300">{positioningNarrative}</p>
-              </section>
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <h2 className="text-lg font-semibold text-slate-100">Recommended Actions</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Actions</h2>
+                <p className="mt-2 text-sm text-slate-300">{positioningNarrative}</p>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {(recommendedActions.length
                     ? recommendedActions

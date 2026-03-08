@@ -35,6 +35,11 @@ export interface ResumeDraftSection {
   rawContent?: string;
 }
 
+type ResumeDraftGapGuidance = {
+  strengthSignals?: string[];
+  gapSignals?: string[];
+};
+
 const ACTION_VERB_PATTERN =
   /\b(led|built|owned|reduced|improved|delivered|implemented|optimized|launched|scaled|managed|drove|created|designed|mentored|automated)\b/i;
 const STOPWORDS = new Set([
@@ -144,6 +149,16 @@ function countKeywordOverlap(text: string, keywords: Set<string>) {
   return overlap;
 }
 
+function countSignalOverlap(text: string, signals: Set<string>) {
+  if (!signals.size) return 0;
+  const tokens = new Set(tokenize(text));
+  let overlap = 0;
+  for (const token of tokens) {
+    if (signals.has(token)) overlap += 1;
+  }
+  return overlap;
+}
+
 export function splitSectionContentToBulletTexts(
   content?: string | null,
 ): Array<{ text: string; sourceIndex: number }> {
@@ -175,14 +190,25 @@ export function buildDraftBulletsForSection(
   section: Pick<BaselineSection, 'id' | 'sectionType' | 'order' | 'content'>,
   options?: {
     keywords?: Set<string>;
+    gapGuidance?: ResumeDraftGapGuidance;
     claimRiskInventory?: BaselineEvidenceTermInventory;
   },
 ): ResumeDraftBullet[] {
   const parsed = splitSectionContentToBulletTexts(section.content);
+  const strengthSignals = options?.gapGuidance?.strengthSignals?.length
+    ? new Set(options.gapGuidance.strengthSignals.map((value) => value.toLowerCase()))
+    : null;
+  const gapSignals = options?.gapGuidance?.gapSignals?.length
+    ? new Set(options.gapGuidance.gapSignals.map((value) => value.toLowerCase()))
+    : null;
   const withScores = parsed.map((entry, index) => {
     const overlap = options?.keywords
       ? countKeywordOverlap(entry.text, options.keywords)
       : 0;
+    const strengthOverlap = strengthSignals
+      ? countSignalOverlap(entry.text, strengthSignals)
+      : 0;
+    const gapOverlap = gapSignals ? countSignalOverlap(entry.text, gapSignals) : 0;
     const claimRisk = options?.claimRiskInventory
       ? detectClaimRiskForBullet(entry.text, options.claimRiskInventory)
       : buildNoClaimRiskResult();
@@ -196,7 +222,7 @@ export function buildDraftBulletsForSection(
         bulletIndex: entry.sourceIndex,
       },
       confidence: inferBulletConfidence(entry.text),
-      keywordOverlapCount: overlap,
+      keywordOverlapCount: overlap + strengthOverlap + gapOverlap,
       claimRisk,
       _stableIndex: index,
     };
@@ -216,6 +242,7 @@ export function buildResumeDraftSections(
   sections: BaselineSection[],
   options?: {
     jobText?: string | null;
+    gapGuidance?: ResumeDraftGapGuidance;
     claimRiskInventory?: BaselineEvidenceTermInventory;
   },
 ): ResumeDraftSection[] {
@@ -225,6 +252,7 @@ export function buildResumeDraftSections(
   return sections.map((section) => {
     const bullets = buildDraftBulletsForSection(section, {
       keywords: keywordSet,
+      gapGuidance: options?.gapGuidance,
       claimRiskInventory: options?.claimRiskInventory,
     });
     return {

@@ -79,9 +79,13 @@ export class ResumeService {
     private readonly gapAnalysisService: GapAnalysisService,
   ) {}
 
-  private async findLatestAssessment(userId: string, jobId: string) {
+  private async findLatestAssessment(
+    userId: string,
+    jobId: string,
+    baselineId?: string,
+  ) {
     return this.fitAssessmentRepository.findOne({
-      where: { userId, jobId },
+      where: baselineId ? { userId, jobId, baselineId } : { userId, jobId },
       order: { createdAt: 'DESC' },
     });
   }
@@ -374,7 +378,7 @@ export class ResumeService {
     });
 
     const latestAssessment = jobId
-      ? await this.findLatestAssessment(userId, jobId)
+      ? await this.findLatestAssessment(userId, jobId, baseline.id)
       : null;
     const gapInsights =
       job && latestAssessment
@@ -395,12 +399,34 @@ export class ResumeService {
           ...gapInsights.criticalGaps.map((gap) => gap.requirementEvidence),
         ].join('\n')
       : '';
+    const gapGuidance = gapInsights
+      ? {
+          strengthSignals: gapInsights.strengths,
+          gapSignals: gapInsights.criticalGaps.flatMap((gap) => [
+            gap.title,
+            gap.requirementEvidence,
+            gap.baselineEvidence ?? '',
+          ]),
+          reframingPriorities: gapInsights.criticalGaps.slice(0, 2).map((gap) => ({
+            title: gap.title,
+            requirementEvidence: gap.requirementEvidence,
+            baselineEvidence: gap.baselineEvidence,
+            reasoning: gap.reasoning,
+          })),
+        }
+      : null;
     const draftJobText = [job?.rawDescription ?? '', gapContextText]
       .filter(Boolean)
       .join('\n');
 
     const sections = buildResumeDraftSections(allowedSections, {
       jobText: draftJobText || null,
+      gapGuidance: gapGuidance
+        ? {
+            strengthSignals: gapGuidance.strengthSignals,
+            gapSignals: gapGuidance.gapSignals,
+          }
+        : undefined,
       claimRiskInventory,
     });
     const claimRiskSummary = summarizeClaimRisk(
@@ -501,6 +527,7 @@ export class ResumeService {
       opportunityId: opportunity?.id ?? null,
       claimRiskSummary,
       gapAnalysis: gapInsights,
+      gapGuidance,
     };
   }
 

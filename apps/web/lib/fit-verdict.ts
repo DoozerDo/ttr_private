@@ -1,8 +1,14 @@
 export type FitScoreVerdictLabel = 'Skip' | 'Consider' | 'Apply';
+export type ResultsDecisionVerdict = 'Apply' | 'Borderline' | 'Skip' | 'Pending';
 
 export type VerdictDefinition = {
   label: string;
   description: string;
+};
+
+export type ScoreDecision = {
+  verdict: ResultsDecisionVerdict;
+  verdictExplanation: string;
 };
 
 const VERDICT_DETAILS: Record<FitScoreVerdictLabel, VerdictDefinition> = {
@@ -33,6 +39,36 @@ const getVerdictDisplay = (value?: string | null): VerdictDefinition | null => {
   const key = verdictLabelFromString(value);
   return key ? VERDICT_DETAILS[key] : null;
 };
+
+export function getDecisionFromFitScore(score?: number | null): ScoreDecision {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return {
+      verdict: 'Pending',
+      verdictExplanation: 'Run analysis to get an apply recommendation.',
+    };
+  }
+
+  if (score >= 75) {
+    return {
+      verdict: 'Apply',
+      verdictExplanation: 'You are a strong match for this role.',
+    };
+  }
+
+  if (score >= 60) {
+    return {
+      verdict: 'Borderline',
+      verdictExplanation:
+        'You meet several key requirements but may face competition.',
+    };
+  }
+
+  return {
+    verdict: 'Skip',
+    verdictExplanation:
+      'This role emphasizes experience that does not appear in your baseline.',
+  };
+}
 
 export function getVerdictDisplayOrDefault(value?: string | null): VerdictDefinition {
   return (

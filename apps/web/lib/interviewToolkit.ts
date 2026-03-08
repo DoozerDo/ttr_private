@@ -28,6 +28,8 @@ export type StudyPacket = {
     whyTheyMayChallengeYou: string;
     howToAddressIt: string;
     exampleTalkingPoint: string;
+    suggestedTalkingPoints: string[];
+    exampleResponseStrategies: string[];
   }>;
   recommendedStories: StarStory[];
   recentStories: StarStory[];

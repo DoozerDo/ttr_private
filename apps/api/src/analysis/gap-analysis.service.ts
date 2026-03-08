@@ -42,7 +42,7 @@ type RequirementAssessment = {
   title: string;
   requirementEvidence: string;
   baselineEvidence: string | null;
-  coverage: number;
+  evidenceScore: number;
   severity: number;
   importance: number;
   reasoning: string;
@@ -113,15 +113,14 @@ export class GapAnalysisService {
     const uniqueStrengths = Array.from(
       new Set(
         evaluated
-          .filter((entry) => entry.coverage >= 0.55 && entry.importance >= 0.65)
-          .sort((a, b) => b.coverage - a.coverage)
+          .filter((entry) => entry.evidenceScore >= 0.62 && entry.importance >= 0.6)
+          .sort((a, b) => b.evidenceScore - a.evidenceScore)
           .map((entry) => entry.title),
       ),
     ).slice(0, 4);
 
     const maxGaps = this.clampMaxGaps(input.maxGaps);
-    const criticalGaps = evaluated
-      .filter((entry) => entry.severity >= 0.35)
+    const criticalGaps = [...evaluated]
       .sort((a, b) => b.severity - a.severity)
       .slice(0, maxGaps)
       .map((entry, index) => {
@@ -226,8 +225,9 @@ export class GapAnalysisService {
     const matchedTokens = tokens.filter((token) =>
       baselineText.includes(token),
     );
-    const coverage = matchedTokens.length / tokens.length;
+    const tokenCoverage = matchedTokens.length / tokens.length;
     const baselineEvidence = this.findBestEvidence(tokens, baselineLines);
+    const evidenceScore = this.estimateEvidenceScore(tokenCoverage, baselineEvidence);
     const dimensionKey = this.inferDimensionKey(req);
 
     const sourceWeight = candidate.source === 'requirement' ? 0.9 : 0.75;
@@ -237,11 +237,14 @@ export class GapAnalysisService {
       0.2,
       Math.min(1, sourceWeight + keywordBoost + dimensionBoost),
     );
-    const severity = Math.max(0, Math.min(1, importance * (1 - coverage)));
+    const severity = Math.max(
+      0,
+      Math.min(1, Number((importance - evidenceScore).toFixed(4))),
+    );
 
     const title = this.inferTitle(req, dimensionKey);
     const reasoning = baselineEvidence
-      ? `The requirement is important for this role, but baseline coverage is partial. Closest evidence: "${this.shorten(
+      ? `The requirement is important for this role, but baseline evidence is partial. Closest evidence: "${this.shorten(
           baselineEvidence,
           120,
         )}".`
@@ -251,11 +254,25 @@ export class GapAnalysisService {
       title,
       requirementEvidence: req,
       baselineEvidence,
-      coverage,
+      evidenceScore,
       severity,
       importance,
       reasoning,
     };
+  }
+
+  private estimateEvidenceScore(tokenCoverage: number, baselineEvidence: string | null): number {
+    const boundedCoverage = Math.max(0, Math.min(1, tokenCoverage));
+    if (!baselineEvidence) {
+      return Number((boundedCoverage * 0.25).toFixed(4));
+    }
+
+    // Presence of a concrete baseline excerpt increases confidence, but does not
+    // fully eliminate the gap unless token overlap is also strong.
+    return Math.max(
+      0,
+      Math.min(1, Number((boundedCoverage * 0.75 + 0.2).toFixed(4))),
+    );
   }
 
   private tokenize(text: string): string[] {

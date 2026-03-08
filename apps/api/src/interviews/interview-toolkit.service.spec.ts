@@ -5,6 +5,8 @@ import { Repository } from 'typeorm';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ComplianceAction } from '../compliance/compliance.types';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
+import { BaselineSection } from '../baseline/baseline-section.entity';
 import { Job } from '../jobs/job.entity';
 import { StarStory } from '../star-stories/star-story.entity';
 import { InterviewQuestionGeneratorService } from './interview-question-generator.service';
@@ -27,12 +29,15 @@ describe('InterviewToolkitService', () => {
   let starStoryRepository: Partial<Repository<StarStory>>;
   let questionGenerator: Partial<InterviewQuestionGeneratorService>;
   let baselineVersionRepository: Partial<Repository<BaselineVersion>>;
+  let baselineSectionRepository: Partial<Repository<BaselineSection>>;
 
   beforeEach(async () => {
     jobRepository = buildRepository();
     fitAssessmentRepository = buildRepository();
     starStoryRepository = buildRepository();
     baselineVersionRepository = buildRepository();
+    baselineSectionRepository = buildRepository();
+    (baselineSectionRepository.find as jest.Mock).mockResolvedValue([]);
     questionGenerator = {
       generateQuestions: jest.fn().mockReturnValue([
         {
@@ -60,14 +65,32 @@ describe('InterviewToolkitService', () => {
           provide: getRepositoryToken(BaselineVersion),
           useValue: baselineVersionRepository,
         },
+        {
+          provide: getRepositoryToken(BaselineSection),
+          useValue: baselineSectionRepository,
+        },
         { provide: getRepositoryToken(Baseline), useValue: buildRepository() },
         {
           provide: InterviewQuestionGeneratorService,
           useValue: questionGenerator,
         },
         {
+          provide: GapAnalysisService,
+          useValue: {
+            analyze: jest.fn().mockReturnValue({
+              strengths: ['Leadership Scope and Seniority'],
+              criticalGaps: [],
+              recommendedActions: [],
+              interviewRisks: [],
+            }),
+          },
+        },
+        {
           provide: ComplianceService,
           useValue: {
+            normalizeText: jest.fn((value: string) => value),
+            enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+            normalizeSectionsForOutput: jest.fn().mockReturnValue([]),
             validateAndAudit: jest.fn().mockResolvedValue({
               blocked: false,
               complianceFlags: [],
@@ -180,6 +203,7 @@ describe('InterviewToolkitService', () => {
 
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
+      fileHash: 'hash-1',
       hash: 'hash-1',
       baseline: {
         id: 'baseline-1',
@@ -220,6 +244,7 @@ describe('InterviewToolkitService', () => {
     (jobRepository.findOne as jest.Mock).mockResolvedValue(job);
     (baselineVersionRepository.findOne as jest.Mock).mockResolvedValue({
       id: 'bv-1',
+      fileHash: 'hash-1',
       hash: 'hash-1',
       baseline: {
         id: 'baseline-1',
