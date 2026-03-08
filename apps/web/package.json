@@ -10,8 +10,7 @@
     "lint:strict": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:compliance": "tsc -p tsconfig.parseComplianceTest.json && node --test .tmp/compliance-test/lib/compliance/parseComplianceError.test.js",
-    "test:smoke": "vitest run",
-    "verify:ui": "node ../../scripts/verify-searchsets-expandedfit.js"
+    "test:smoke": "vitest run"
   },
   "dependencies": {
     "framer-motion": "^12.26.2",

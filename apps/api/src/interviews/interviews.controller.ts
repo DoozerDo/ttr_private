@@ -12,13 +12,16 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
-import { InterviewsService } from './interviews.service';
-import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
+import { InterviewRecordsService } from './interview-records.service';
 
 @Controller('interviews')
 @UseGuards(AuthGuard('jwt'))
 export class InterviewsController {
-  constructor(private readonly interviewsService: InterviewsService) {}
+  // LEGACY COMPATIBILITY: not used by the active beta path.
+  // This controller remains as a wrapper that delegates to InterviewRecordsService.
+  constructor(
+    private readonly interviewRecordsService: InterviewRecordsService,
+  ) {}
 
   @Post()
   async createInterview(
@@ -31,7 +34,7 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.createInterview(userId, body);
+    return this.interviewRecordsService.createInterview(userId, body);
   }
 
   @Get()
@@ -42,7 +45,7 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.listInterviewsForUser(userId);
+    return this.interviewRecordsService.getInterviewsForUser(userId);
   }
 
   @Get(':id')
@@ -56,12 +59,17 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.getInterviewForUser(id, userId);
+    return this.interviewRecordsService.getInterviewById(userId, id);
   }
 
   @Post('start')
   async startInterviewFromFitReview(
-    @Body() body: { jobId?: string; baselineId?: string },
+    @Body()
+    body: {
+      jobId?: string;
+      baselineId?: string;
+      baselineVersionId?: string;
+    },
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
@@ -70,9 +78,10 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.startInterviewFromFitReview(userId, {
+    return this.interviewRecordsService.startInterviewFromFitReview(userId, {
       jobId: body.jobId,
       baselineId: body.baselineId,
+      baselineVersionId: body.baselineVersionId,
     });
   }
 
@@ -88,7 +97,7 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.updateInterview(id, userId, body);
+    return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
   }
 
   @Delete(':id')
@@ -102,13 +111,13 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.interviewsService.deleteInterview(id, userId);
+    return this.interviewRecordsService.deleteInterviewRecord(id, userId);
   }
 
   @Post(':id/responses')
-  async createInterviewResponse(
+  async saveInterviewResponses(
     @Param('id') id: string,
-    @Body() body: { responses?: CreateInterviewResponseDto[] },
+    @Body() body: { responses?: unknown[] },
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
@@ -117,23 +126,8 @@ export class InterviewsController {
       throw new BadRequestException('Invalid user context');
     }
 
-    const responses = (body?.responses?.length ? body.responses : []).filter(
-      (response): response is CreateInterviewResponseDto =>
-        Boolean(response?.question && response?.response),
-    );
-
-    if (responses.length === 0) {
-      throw new BadRequestException('No responses provided');
-    }
-
-    const createdResponses = await Promise.all(
-      responses.map((response) =>
-        this.interviewsService.createInterviewResponse(id, userId, response),
-      ),
-    );
-
-    return createdResponses.length === 1
-      ? createdResponses[0]
-      : createdResponses;
+    return this.interviewRecordsService.saveInterviewResponses(id, userId, {
+      responses: body?.responses,
+    });
   }
 }

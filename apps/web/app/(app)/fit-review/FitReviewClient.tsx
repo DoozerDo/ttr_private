@@ -20,7 +20,6 @@ import {
   fitReviewDimensionLabels,
   fitReviewQuestions,
   SCORING_DIMENSION_ORDER,
-  type FitReviewAdditionPayload,
   type FitReviewDimensionKey,
 } from "@/lib/fitReviewQuestions";
 
@@ -63,7 +62,7 @@ type ScoringV2Result = {
 };
 
 const HERO_MESSAGE =
-  "Let's make sure your resume reflects your full experience. We've highlighted the two areas with the highest impact on your score. Review them and select 'Ask me about this' to see if anything should be added or clarified.";
+  "Review your current fit, validate the top evidence gaps, and launch a qualification interview when you are ready.";
 const ACTIONABLE_DIMENSION_COUNT = 2;
 
 function parseTimestamp(value?: string | null) {
@@ -132,8 +131,20 @@ function isFitAssessment(
   );
 }
 
-function typedEntries<T extends object>(obj: T) {
-  return Object.entries(obj) as Array<[keyof T, T[keyof T]]>;
+function readStringField(
+  source: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | null {
+  if (!source) return null;
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
 export default function FitReviewClient() {
@@ -157,8 +168,8 @@ export default function FitReviewClient() {
   >({});
   const [editingKey, setEditingKey] = useState<FitReviewDimensionKey | null>(null);
   const [editingText, setEditingText] = useState("");
-  const [buildError, setBuildError] = useState<string | null>(null);
-  const [isBuildingResume, setIsBuildingResume] = useState(false);
+  const [startInterviewError, setStartInterviewError] = useState<string | null>(null);
+  const [isStartingInterview, setIsStartingInterview] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -382,8 +393,34 @@ export default function FitReviewClient() {
   }, [resolvedJobId]);
 
   const hasAnalysis = Boolean(displayAssessment || storedAnalysis?.analysis);
-  const baselineId = displayAssessment?.baselineId?.trim() ?? null;
-  const jobIdForClone = displayAssessment?.jobId?.trim() ?? null;
+  const displayRecord =
+    displayAssessment && typeof displayAssessment === "object"
+      ? (displayAssessment as Record<string, unknown>)
+      : null;
+  const storedRecord =
+    storedAnalysis?.analysis && typeof storedAnalysis.analysis === "object"
+      ? (storedAnalysis.analysis as Record<string, unknown>)
+      : null;
+
+  const baselineVersionId =
+    readStringField(displayRecord, ["baselineVersionId", "baseline_version_id"]) ??
+    readStringField(storedRecord, ["baselineVersionId", "baseline_version_id"]) ??
+    (typeof storedAnalysis?.baselineVersionId === "string"
+      ? storedAnalysis.baselineVersionId.trim() || null
+      : null);
+  const baselineId =
+    readStringField(displayRecord, ["baselineId", "baseline_id"]) ??
+    readStringField(storedRecord, ["baselineId", "baseline_id"]) ??
+    (typeof storedAnalysis?.baselineId === "string"
+      ? storedAnalysis.baselineId.trim() || null
+      : null);
+  const startJobId =
+    readStringField(displayRecord, ["jobId", "job_id"]) ??
+    readStringField(storedRecord, ["jobId", "job_id"]) ??
+    (normalizedResolvedJobId || null);
+  const fitAssessmentId =
+    readStringField(displayRecord, ["assessmentId", "fitAssessmentId"]) ??
+    readStringField(storedRecord, ["assessmentId", "fitAssessmentId"]);
 
   const openDimensionDialog = (dimension: FitReviewDimensionKey) => {
     setDialogError(null);
@@ -480,65 +517,63 @@ export default function FitReviewClient() {
     setEditingKey(null);
   };
 
-  const handleBuildUpdatedResume = async () => {
-    if (!baselineId || !jobIdForClone) {
-      setBuildError("Baseline and job context are required.");
+  const handleStartInterview = async () => {
+    if (!startJobId) {
+      setStartInterviewError("Job context is required to start the interview.");
       return;
     }
 
-    const approvedEntries = typedEntries(approvedAdditions).filter(
-      ([, value]) => Boolean(value?.trim().length),
-    );
-    const additions: FitReviewAdditionPayload[] = approvedEntries.map(
-      ([dimensionId, approvedText]) => ({
-        dimensionId,
-        approvedText: approvedText!.trim(),
-      }),
-    );
-
-    if (!additions.length) {
-      setBuildError("At least one approved addition is required.");
+    if (!baselineVersionId && !baselineId) {
+      setStartInterviewError("Baseline context is required to start the interview.");
       return;
     }
 
-    setIsBuildingResume(true);
-    setBuildError(null);
+    setIsStartingInterview(true);
+    setStartInterviewError(null);
 
     try {
-      const response = await fetch(`/api/baselines/${baselineId}/fit-review/clone`, {
+      const response = await fetch("/api/interviews/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId: jobIdForClone,
-          additions,
+          jobId: startJobId,
+          baselineVersionId: baselineVersionId ?? undefined,
+          baselineId: baselineId ?? undefined,
+          fitAssessmentId: fitAssessmentId ?? undefined,
         }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
         const message =
-          payload?.error ?? payload?.message ?? "Unable to build the updated resume.";
+          payload?.error ?? payload?.message ?? "Unable to start interview.";
         throw new Error(message);
       }
 
-      await router.push("/baseline?toast=new_baseline");
+      const payload = (await response.json().catch(() => null)) as
+        | { id?: unknown }
+        | null;
+      const interviewId =
+        payload && typeof payload.id === "string" ? payload.id.trim() : "";
+
+      if (!interviewId) {
+        throw new Error("Interview started but no interview id was returned.");
+      }
+
+      await router.push(`/interviews/${encodeURIComponent(interviewId)}`);
     } catch (buildIssue) {
       const message =
-        buildIssue instanceof Error ? buildIssue.message : "Unable to build the updated resume.";
-      setBuildError(message);
+        buildIssue instanceof Error ? buildIssue.message : "Unable to start interview.";
+      setStartInterviewError(message);
     } finally {
-      setIsBuildingResume(false);
+      setIsStartingInterview(false);
     }
   };
-
-  const approvedCount = Object.values(approvedAdditions).filter(
-    (value) => Boolean(value?.trim().length),
-  ).length;
 
   return (
     <InstrumentShell
       kicker="Fit Review"
-      title="Resume Strengthening"
+      title="Fit Review"
       subtitle={HERO_MESSAGE}
     >
           {!hasAnalysis ? (
@@ -581,8 +616,8 @@ export default function FitReviewClient() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 240 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <span style={ttrTypography.subtleLabel}>Overview</span>
-                    <h2 style={ttrTypography.h2}>Resume Strengthening</h2>
+                    <span style={ttrTypography.subtleLabel}>Result</span>
+                    <h2 style={ttrTypography.h2}>Current fit assessment</h2>
                   </div>
                   <p style={{ margin: 0, color: "rgba(241,245,249,0.92)", fontSize: 15 }}>
                     {displayAssessment?.summary ?? "Capture evidence for the highlighted dimensions to evolve the baseline."}
@@ -611,6 +646,14 @@ export default function FitReviewClient() {
                   </div>
                   {error ? <div style={ttrComponents.dangerBox}>{error}</div> : null}
                   <p className="text-xs text-slate-300">{heroScoreText}</p>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                      Why this score is trustworthy
+                    </p>
+                    <p className="mt-1 text-sm text-slate-300">
+                      The score is tied to rubric dimensions and the exact baseline/job context used in Analyze.
+                    </p>
+                  </div>
                 </div>
               </div>
             </section>
@@ -618,8 +661,8 @@ export default function FitReviewClient() {
 
           <section style={{ ...ttrComponents.basePanel }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={ttrTypography.subtleLabel}>Dimensions</span>
-              <h2 style={ttrTypography.h2}>Scoring focus</h2>
+              <span style={ttrTypography.subtleLabel}>Recovery path</span>
+              <h2 style={ttrTypography.h2}>Top evidence gaps to review</h2>
             </div>
             <div
               style={{
@@ -662,7 +705,7 @@ export default function FitReviewClient() {
                     </p>
                     <p className="mt-2 text-sm text-slate-300">
                       {isActionable
-                        ? "This gap has the highest impact on your score right now."
+                        ? "High-impact gap. Add concrete evidence before re-evaluating fit."
                         : "Informational view of this dimension."}
                     </p>
                     {isActionable && !isReviewed ? (
@@ -726,30 +769,31 @@ export default function FitReviewClient() {
             </div>
           </section>
 
-          {approvedCount ? (
-            <section style={{ ...ttrComponents.basePanel }}>
+          <section style={{ ...ttrComponents.basePanel }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={ttrTypography.subtleLabel}>Baseline evolution</span>
-                <h2 style={ttrTypography.h2}>Build updated resume</h2>
+                <span style={ttrTypography.subtleLabel}>Qualification proof</span>
+                <h2 style={ttrTypography.h2}>Launch baseline expansion interview</h2>
               </div>
               <p className="mt-2 text-sm text-slate-300">
-                Each approved addition will be captured in a new baseline clone. After the clone lands in the Resume Library, re-run compatibility scoring manually.
+                Use this when you believe you are qualified and want to prove it with structured evidence.
               </p>
               <div className="mt-4 space-y-3">
-                {buildError ? (
-                  <Alert intent="error" title="Unable to build updated resume">
-                    {buildError}
+                {startInterviewError ? (
+                  <Alert intent="error" title="Unable to start interview">
+                    {startInterviewError}
                   </Alert>
                 ) : null}
                 <FormButton
-                  onClick={handleBuildUpdatedResume}
-                  disabled={isBuildingResume || !baselineId || !jobIdForClone}
+                  onClick={handleStartInterview}
+                  disabled={isStartingInterview || !startJobId || (!baselineVersionId && !baselineId)}
                 >
-                  {isBuildingResume ? "Building updated resume..." : "Build updated resume"}
+                  {isStartingInterview ? "Starting interview..." : "I think I'm qualified"}
                 </FormButton>
+                <p className="text-xs text-slate-400">
+                  Next: answer interview prompts, review additions, compute expanded fit, and promote a new baseline version.
+                </p>
               </div>
-            </section>
-          ) : null}
+          </section>
         </>
       )}
 

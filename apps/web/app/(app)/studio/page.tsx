@@ -273,7 +273,7 @@ export default function StudioPage() {
   const trackerStatus = readTrackerField(resumeState.response, "trackerStatus");
   const handleOpenTracker = useCallback(() => {
     if (!trackerEntryId) return;
-    void router.push(`/opportunities?focus=${encodeURIComponent(trackerEntryId)}`);
+    void router.push("/job-tracker");
   }, [router, trackerEntryId]);
 
   const { isPro } = useEntitlements();
@@ -1148,7 +1148,7 @@ export default function StudioPage() {
                   Next move
                 </p>
                 <p className="text-sm text-slate-100">
-                  Added to Opportunity Tracker as{' '}
+                  Added to Application Tracker as{' '}
                   <span className="font-semibold text-white">
                     {trackerStatus ?? 'Saved'}
                   </span>
@@ -1156,7 +1156,7 @@ export default function StudioPage() {
                 </p>
                 <div className="mt-3 flex justify-end">
                   <FormButton onClick={handleOpenTracker}>
-                    Open Opportunity Tracker
+                    Open Application Tracker
                   </FormButton>
                 </div>
               </div>

@@ -595,7 +595,7 @@ describe('ComplianceService', () => {
   });
 
   describe('resume export policy behavior', () => {
-    it('downgrades invention/style detections to warnings for resume export', async () => {
+    it('hard-blocks truth violations for resume export', async () => {
       const result = await service.validateAndAudit({
         action: ComplianceAction.RESUME_EXPORT,
         actorId: 'user-export-policy',
@@ -626,10 +626,12 @@ describe('ComplianceService', () => {
         (flag) => flag.code === ComplianceFlagCode.STYLIZED_PUNCTUATION,
       );
 
-      expect(metricFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-      expect(punctuationFlag?.severity).toBe(ComplianceFlagSeverity.WARN);
-      expect(result.blocked).toBe(false);
+      expect(metricFlag?.severity).toBe(ComplianceFlagSeverity.BLOCK);
+      expect(techFlag?.severity).toBe(ComplianceFlagSeverity.BLOCK);
+      if (punctuationFlag) {
+        expect(punctuationFlag.severity).toBe(ComplianceFlagSeverity.WARN);
+      }
+      expect(result.blocked).toBe(true);
     });
   });
 });

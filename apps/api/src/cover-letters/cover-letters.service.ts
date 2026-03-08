@@ -122,6 +122,21 @@ export class CoverLettersService {
   async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
     const draft = await this.buildCoverLetterDraft(userId, input);
 
+    if (draft.complianceResult.blocked) {
+      return {
+        blocked: true,
+        compliance_blocked: true,
+        compliance_flags: draft.complianceResult.complianceFlags,
+        audit_id: draft.complianceResult.audit.id,
+        auditId: draft.complianceResult.audit.id,
+        baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+        baselineId: draft.baseline.id,
+        baselineVersionId: draft.baselineVersion.id,
+        jobId: draft.job.id,
+        message: 'Compliance validation failed.',
+      };
+    }
+
     await this.ensureNoDuplicateCoverLetter(
       userId,
       draft.baseline.id,
@@ -157,6 +172,22 @@ export class CoverLettersService {
     format: 'docx' | 'pdf',
   ) {
     const draft = await this.buildCoverLetterDraft(userId, input);
+
+    if (draft.complianceResult.blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            blocked: true,
+            compliance_flags: draft.complianceResult.complianceFlags,
+            audit_id: draft.complianceResult.audit.id,
+            baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+          },
+        },
+      });
+    }
+
     const text = draft.complianceResult.normalizedContent;
     let buffer: Buffer;
     if (format === 'pdf') {

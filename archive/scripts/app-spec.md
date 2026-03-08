@@ -1,3 +1,5 @@
+Archived: not part of the current beta source of truth.
+
 TARGET THIS ROLE™ — APPLICATION SPECIFICATION v1.0
 
 Last updated: November 2025
@@ -612,3 +614,4 @@ Potential CTOs
 Investors
 
 Development agencies
+

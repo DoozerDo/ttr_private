@@ -744,7 +744,8 @@ export default function InterviewSessionPage() {
     setMessage(null);
 
     try {
-      await saveInterviewResponses(sessionId, trimmedResponses);
+      const updatedSession = await saveInterviewResponses(sessionId, trimmedResponses);
+      applySessionUpdate(updatedSession, { preserveAnswers: true });
       setMessage("Responses saved. You can revisit this page anytime.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save responses.");
@@ -768,6 +769,21 @@ export default function InterviewSessionPage() {
         { additionId: addition.id, decision },
       ]);
       applySessionUpdate(updatedSession, { preserveAnswers: true });
+      setRecommendedAdditionsState((prev) =>
+        prev.map((entry) =>
+          entry.id === addition.id
+            ? {
+                ...entry,
+                status:
+                  decision === "accept"
+                    ? "accepted"
+                    : decision === "reject"
+                      ? "rejected"
+                      : "deferred",
+              }
+            : entry,
+        ),
+      );
       setMessage("Decision saved.");
     } catch (decisionError) {
       setError(decisionError instanceof Error ? decisionError.message : "Unable to save decision.");
@@ -941,14 +957,36 @@ export default function InterviewSessionPage() {
     : allQuestionsAnswered
       ? "All questions now have recorded responses."
       : "Use the actions below to move forward.";
+  const loopSteps = [
+    {
+      key: "responses",
+      label: "1. Save responses",
+      complete: allQuestionsAnswered,
+    },
+    {
+      key: "decisions",
+      label: "2. Validate additions",
+      complete: acceptedAdditionIds.length > 0,
+    },
+    {
+      key: "expandedFit",
+      label: "3. Compute expanded fit",
+      complete: expandedFitComputed,
+    },
+    {
+      key: "promotion",
+      label: "4. Promote baseline",
+      complete: Boolean(promotedBaselineReference),
+    },
+  ] as const;
 
   return (
     <PageShell>
       <div className="space-y-6 pb-10">
         <PageHeader
           kicker="Interview session"
-          title="Fit Review"
-          description="Capture responses tied to each gap, review recommendations, and finish the baseline interview."
+          title="Baseline Expansion Interview"
+          description="Capture evidence, validate additions, compute expanded fit, and promote your next baseline version."
         />
         {baselineMissingForSession ? (
           <Alert intent="warning">
@@ -980,7 +1018,7 @@ export default function InterviewSessionPage() {
               <div className="flex flex-wrap gap-3">
                 <FormButton onClick={() => router.push("/results")}>Back to Results</FormButton>
                 <FormButton variant="secondary" onClick={() => router.push("/job-tracker")}>
-                  Back to Job Tracker
+                  Back to Application Tracker
                 </FormButton>
               </div>
             }
@@ -995,14 +1033,14 @@ export default function InterviewSessionPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   Session details
                 </p>
-                <h2 className="text-lg font-semibold text-slate-100">Interview prompts</h2>
+                <h2 className="text-lg font-semibold text-slate-100">Interview questions and evidence</h2>
               </div>
               <div className="space-y-3">
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                     Recommended additions
                   </p>
-                  <h3 className="text-lg font-semibold text-slate-100">Recommended additions</h3>
+                  <h3 className="text-lg font-semibold text-slate-100">Validated additions to review</h3>
                 </div>
                 {recommendedFetchStatus === "loading" ? (
                   <Alert intent="info">Loading recommended additions...</Alert>
@@ -1157,7 +1195,7 @@ export default function InterviewSessionPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <FormButton onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving..." : "Save responses"}
+                  {saving ? "Saving..." : "Step 1: Save responses"}
                 </FormButton>
                 <span className="text-xs text-slate-400">Session ID: {sessionId}</span>
               </div>
@@ -1165,14 +1203,204 @@ export default function InterviewSessionPage() {
               {error ? <Alert intent="error">{error}</Alert> : null}
             </section>
 
-            {/* RIGHT COLUMN (unchanged from your original) */}
             <section className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
-              {/* ... keep your existing right-column JSX exactly as you had it ... */}
-              {/* I did not touch any of your UI logic below; this replacement only moves saveAcceptedAdditions above handleAcceptAddition. */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Loop progress
+                </p>
+                <h3 className="text-lg font-semibold text-slate-100">Completion status</h3>
+                <p className="text-sm text-slate-300">{completionReason}</p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {loopSteps.map((step) => (
+                    <span
+                      key={step.key}
+                      className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                        step.complete
+                          ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
+                          : "border-white/20 bg-white/5 text-slate-300"
+                      }`}
+                    >
+                      {step.complete ? "Done" : "Next"} • {step.label}
+                    </span>
+                  ))}
+                </div>
+                <ul className="space-y-2 text-xs text-slate-300">
+                  <li>Responses answered: {answeredCount}/{questions.length}</li>
+                  <li>Accepted recommendations: {acceptedAdditionIds.length}</li>
+                  <li>Decision counts: accepted {recommendationStats.accepted}, rejected {recommendationStats.rejected}, deferred {recommendationStats.deferred}</li>
+                  <li>Baseline version: {baselineVersionReference ?? "Unavailable"}</li>
+                </ul>
+              </div>
 
-              {/* NOTE: Paste your existing right column JSX here unchanged.
-                  If you want me to return the entire file with the full right column included verbatim,
-                  say "full file" and I will output it in one shot. */}
+              {reviewMessage ? <Alert intent="success">{reviewMessage}</Alert> : null}
+              {acceptedError ? <Alert intent="error">{acceptedError}</Alert> : null}
+              {expandedComputeError ? <Alert intent="error">{expandedComputeError}</Alert> : null}
+              {promotionError ? <Alert intent="error">{promotionError}</Alert> : null}
+
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Step 2 • Validate additions
+                </p>
+                {recommendedAdditions.length === 0 ? (
+                  <p className="text-sm text-slate-400">
+                    Save responses to generate recommendations before recording decisions.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {recommendedAdditions.slice(0, 5).map((addition) => {
+                      const isSavingDecision = decisionSavingId === addition.id;
+                      const checked = acceptedAdditionSet.has(addition.id);
+                      return (
+                        <div key={addition.id} className="space-y-2 rounded-xl border border-white/10 p-3">
+                          <p className="text-sm text-slate-100">{addition.text}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <FormButton
+                              variant="ghost"
+                              className="px-2 py-1 text-xs"
+                              disabled={isSavingDecision}
+                              onClick={() => handleDecision(addition, "accept")}
+                            >
+                              {isSavingDecision ? "Saving..." : "Accept"}
+                            </FormButton>
+                            <FormButton
+                              variant="ghost"
+                              className="px-2 py-1 text-xs"
+                              disabled={isSavingDecision}
+                              onClick={() => handleDecision(addition, "reject")}
+                            >
+                              Reject
+                            </FormButton>
+                            <FormButton
+                              variant="ghost"
+                              className="px-2 py-1 text-xs"
+                              disabled={isSavingDecision}
+                              onClick={() => handleDecision(addition, "defer")}
+                            >
+                              Defer
+                            </FormButton>
+                            <label className="inline-flex items-center gap-2 rounded-full border border-white/10 px-2 py-1 text-xs text-slate-300">
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3"
+                                checked={checked}
+                                disabled={acceptedSaving}
+                                onChange={() => handleAcceptedToggle(addition.id)}
+                              />
+                              Include for promotion
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {recommendedAdditions.length > 5 ? (
+                      <p className="text-xs text-slate-400">
+                        Showing 5 of {recommendedAdditions.length} additions.
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <FormButton variant="ghost" onClick={handleRejectAll} disabled={acceptedSaving}>
+                    Reject all
+                  </FormButton>
+                  <span className="text-xs text-slate-400">
+                    {acceptedSaving ? "Saving selection..." : "Selection synced to interview record."}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Step 3 • Expanded fit
+                </p>
+                {expandedFitDetails ? (
+                  <div className="space-y-2 text-sm text-slate-200">
+                    <p>Original score: {expandedFitDetails.originalScore ?? "n/a"} ({originalVerdict ?? "n/a"})</p>
+                    <p>Expanded score: {expandedFitDetails.expandedScore ?? "n/a"} ({expandedVerdict ?? "n/a"})</p>
+                    <p>Delta: {expandedFitDetails.delta ?? "n/a"}</p>
+                    {expandedFitMetadata?.computedAt ? (
+                      <p className="text-xs text-slate-400">Computed at: {expandedFitMetadata.computedAt}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400">
+                    Compute expanded fit after accepting validated additions.
+                  </p>
+                )}
+                <FormButton
+                  onClick={handleRecomputeExpandedFit}
+                  disabled={expandedComputing || persistedAcceptedAdditions.length === 0}
+                >
+                  {expandedComputing ? "Computing..." : "Compute expanded fit now"}
+                </FormButton>
+                {expandedDimensionBreakdown?.length ? (
+                  <ul className="space-y-1 text-xs text-slate-300">
+                    {expandedDimensionBreakdown.slice(0, 4).map((entry) => (
+                      <li key={entry.dimension}>
+                        {entry.label}: {entry.value}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p className="text-xs text-slate-400">
+                  Last compute: {lastComputeAt ? formatTimestamp(lastComputeAt) ?? "n/a" : "not run"} ({lastComputeStatus})
+                </p>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Step 4 • Promote baseline
+                </p>
+                <p className="text-sm text-slate-300">
+                  Promote accepted additions into a new baseline version when expanded fit is ready.
+                </p>
+                <FormButton
+                  onClick={handlePromoteAcceptedAdditions}
+                  disabled={promotionSaving || !canPromote}
+                >
+                  {promotionSaving ? "Promoting..." : "Promote accepted additions to baseline"}
+                </FormButton>
+                {promotedBaselineReference ? (
+                  <Alert intent="success" title="Promotion complete">
+                    New baseline version is ready: {promotedBaselineReference}
+                  </Alert>
+                ) : null}
+                {promotedBaselineMetadata ? (
+                  <ul className="space-y-1 text-xs text-slate-300">
+                    <li>Baseline version id: {promotedBaselineMetadata.baselineVersionId ?? "n/a"}</li>
+                    <li>Version number: {promotedBaselineMetadata.versionNumber ?? "n/a"}</li>
+                    <li>Hash: {promotedBaselineMetadata.baselineVersionHash ?? "n/a"}</li>
+                    <li>Updated: {promotedBaselineMetadata.timestamp ?? "n/a"}</li>
+                  </ul>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Link href={analyzeUrl} className="text-xs text-sky-300 underline">
+                    Re-run Fit Review analysis
+                  </Link>
+                  <Link href={fitReviewUrl} className="text-xs text-sky-300 underline">
+                    Back to Fit Review
+                  </Link>
+                  <Link href="/studio" className="text-xs text-sky-300 underline">
+                    Open Studio for documents
+                  </Link>
+                  <Link href="/job-tracker" className="text-xs text-sky-300 underline">
+                    Open Application Tracker
+                  </Link>
+                </div>
+                {interviewComplete ? (
+                  <p className="text-xs text-emerald-300">
+                    Interview completion criteria met. You can now move directly to promotion and refreshed analysis.
+                  </p>
+                ) : null}
+                {hasExpandedFitData ? (
+                  <p className="text-xs text-slate-300">Expanded fit result is available for this interview.</p>
+                ) : null}
+                {acceptedRecommendedAdditions.length > 0 ? (
+                  <p className="text-xs text-slate-400">
+                    Accepted additions selected for promotion: {acceptedRecommendedAdditions.length}
+                  </p>
+                ) : null}
+              </div>
             </section>
           </div>
         ) : null}

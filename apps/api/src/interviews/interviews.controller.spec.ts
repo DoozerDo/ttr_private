@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { InterviewsController } from './interviews.controller';
-import { InterviewsService } from './interviews.service';
+import { InterviewRecordsService } from './interview-records.service';
 
 describe('InterviewsController', () => {
   const createMockRequest = (userId?: string) =>
@@ -11,18 +11,19 @@ describe('InterviewsController', () => {
   const createMockService = () =>
     ({
       createInterview: jest.fn().mockResolvedValue({ id: 'interview-1' }),
-      listInterviewsForUser: jest.fn().mockResolvedValue([]),
-      getInterviewForUser: jest.fn().mockResolvedValue({ id: 'interview-1' }),
+      getInterviewsForUser: jest.fn().mockResolvedValue([]),
+      getInterviewById: jest.fn().mockResolvedValue({ id: 'interview-1' }),
       startInterviewFromFitReview: jest
         .fn()
         .mockResolvedValue({ id: 'interview-1', jobId: 'job-1' }),
-      updateInterview: jest
+      updateInterviewRecord: jest
         .fn()
         .mockResolvedValue({ id: 'interview-1', status: 'scheduled' }),
-      deleteInterview: jest
+      deleteInterviewRecord: jest
         .fn()
         .mockResolvedValue({ deleted: true, id: 'interview-1' }),
-    }) as unknown as InterviewsService;
+      saveInterviewResponses: jest.fn().mockResolvedValue({ id: 'interview-1' }),
+    }) as unknown as InterviewRecordsService;
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -57,9 +58,10 @@ describe('InterviewsController', () => {
     const controller = new InterviewsController(service);
     const request = createMockRequest('user-1');
 
+    const boundList = controller.listInterviews.bind(controller);
     await boundList(request as any);
 
-    expect(service.listInterviewsForUser).toHaveBeenCalledWith('user-1');
+    expect(service.getInterviewsForUser).toHaveBeenCalledWith('user-1');
   });
 
   it('gets interview for user', async () => {
@@ -70,9 +72,9 @@ describe('InterviewsController', () => {
     const boundGet = controller.getInterview.bind(controller);
     await boundGet('interview-1', request as any);
 
-    expect(service.getInterviewForUser).toHaveBeenCalledWith(
-      'interview-1',
+    expect(service.getInterviewById).toHaveBeenCalledWith(
       'user-1',
+      'interview-1',
     );
   });
 
@@ -87,7 +89,7 @@ describe('InterviewsController', () => {
 
     expect(service.startInterviewFromFitReview).toHaveBeenCalledWith(
       'user-1',
-      body,
+      expect.objectContaining(body),
     );
   });
 
@@ -100,7 +102,7 @@ describe('InterviewsController', () => {
     const boundUpdate = controller.updateInterview.bind(controller);
     await boundUpdate('interview-1', update, request as any);
 
-    expect(service.updateInterview).toHaveBeenCalledWith(
+    expect(service.updateInterviewRecord).toHaveBeenCalledWith(
       'interview-1',
       'user-1',
       update,
@@ -115,7 +117,7 @@ describe('InterviewsController', () => {
     const boundDelete = controller.deleteInterview.bind(controller);
     await boundDelete('interview-1', request as any);
 
-    expect(service.deleteInterview).toHaveBeenCalledWith(
+    expect(service.deleteInterviewRecord).toHaveBeenCalledWith(
       'interview-1',
       'user-1',
     );

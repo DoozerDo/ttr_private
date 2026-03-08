@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../../baselines/helpers";
 
+function normalizeResponsesPayload(body: unknown): string[] {
+  const source =
+    body && typeof body === "object" && Array.isArray((body as { responses?: unknown }).responses)
+      ? (body as { responses: unknown[] }).responses
+      : Array.isArray(body)
+        ? body
+        : [];
+
+  return source
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (!entry || typeof entry !== "object") return "";
+      const response = (entry as { response?: unknown }).response;
+      return typeof response === "string" ? response.trim() : "";
+    })
+    .filter((entry) => entry.length > 0);
+}
+
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -22,14 +40,15 @@ export async function POST(
   }
 
   const body = await req.json();
+  const responses = normalizeResponsesPayload(body);
 
-  const response = await fetch(`${baseUrl}/interviews/${id}/responses`, {
-    method: "POST",
+  const response = await fetch(`${baseUrl}/interview-records/${id}`, {
+    method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ responses }),
   });
 
   return relayApiResponse(response);

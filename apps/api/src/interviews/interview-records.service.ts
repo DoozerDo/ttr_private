@@ -174,6 +174,34 @@ export class InterviewRecordsService {
     return normalized;
   }
 
+  private async resolveBaselineVersionIdFromCompatInput(input: {
+    baselineVersionId?: string | null;
+    baselineId?: string | null;
+  }): Promise<string> {
+    const baselineVersionId = input.baselineVersionId?.trim();
+    if (baselineVersionId) return baselineVersionId;
+
+    const baselineId = input.baselineId?.trim();
+    if (!baselineId) {
+      throw new BadRequestException(
+        'baselineVersionId is required when baselineId is not provided',
+      );
+    }
+
+    const latestVersion = await this.baselineVersionRepository.findOne({
+      where: { baselineId },
+      order: { versionNumber: 'DESC' },
+    });
+
+    if (!latestVersion?.id) {
+      throw new BadRequestException(
+        'No baseline version found for the provided baselineId',
+      );
+    }
+
+    return latestVersion.id;
+  }
+
   private hasBlockingCompliance(
     validationResults: Record<string, unknown> | undefined | null,
   ): boolean {
@@ -701,9 +729,20 @@ export class InterviewRecordsService {
 
   async createInterview(
     userId: string,
-    dto: CreateInterviewRecordDto,
+    dto: CreateInterviewRecordDto & {
+      baselineId?: string | null;
+      baselineVersionId?: string | null;
+    },
   ): Promise<Interview> {
-    return this.createInterviewRecord(userId, dto);
+    const baselineVersionId = await this.resolveBaselineVersionIdFromCompatInput(
+      dto,
+    );
+
+    return this.createInterviewRecord(userId, {
+      ...dto,
+      baselineVersionId,
+      baselineId: dto.baselineId?.trim() || undefined,
+    });
   }
 
   async getInterviewsForUser(userId: string): Promise<Interview[]> {
@@ -715,5 +754,65 @@ export class InterviewRecordsService {
     interviewId: string,
   ): Promise<Interview> {
     return this.getInterviewRecordForUser(interviewId, userId);
+  }
+
+  async startInterviewFromFitReview(
+    userId: string,
+    dto: {
+      jobId?: string | null;
+      baselineId?: string | null;
+      baselineVersionId?: string | null;
+    },
+  ): Promise<Interview> {
+    const jobId = this.requireJobId(dto.jobId ?? undefined);
+    const baselineVersionId = await this.resolveBaselineVersionIdFromCompatInput(
+      dto,
+    );
+
+    const existing = await this.interviewsRepo.findOne({
+      where: { userId, jobId, baselineVersionId },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (existing) {
+      return this.buildInterviewResponse(existing);
+    }
+
+    return this.createInterviewRecord(userId, {
+      jobId,
+      baselineId: dto.baselineId?.trim() || undefined,
+      baselineVersionId,
+    });
+  }
+
+  async saveInterviewResponses(
+    id: string,
+    userId: string,
+    body: {
+      responses?: unknown;
+    },
+  ): Promise<Interview> {
+    const source = body?.responses;
+    const responseItems = Array.isArray(source) ? source : [];
+
+    const normalizedResponses = responseItems
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        if (!entry || typeof entry !== 'object') return null;
+
+        const raw = entry as { response?: unknown };
+        return typeof raw.response === 'string' ? raw.response : null;
+      })
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (!normalizedResponses.length) {
+      throw new BadRequestException('No responses provided');
+    }
+
+    return this.updateInterviewRecord(id, userId, {
+      responses: normalizedResponses,
+    });
   }
 }

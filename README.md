@@ -1,24 +1,28 @@
-## Hi there 👋
+# TargetThisRole
 
-<!--
-**targetthisrole/TargetThisRole** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+TargetThisRole is a beta web product centered on one canonical loop:
 
-Here are some ideas to get you started:
+Compatibility Check -> Fit Review -> Baseline Expansion Interview -> Resume/Cover Generation -> Application Tracker
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+## Monorepo Layout
 
-## Email relay (API)
+- `apps/web`: Next.js web app
+- `apps/api`: NestJS API
+- `scripts`: repository utilities and guardrails
+- `archive`: archived docs not part of the current beta source of truth
 
-- Create a `.env.dreamhost` file at the repo root (next to `/apps` and `/infra`). Use `.env.dreamhost.example` as a template.
-- Docker Compose loads it into the API container via `env_file:` in `infra/docker/docker-compose.*.yml`.
-- Required vars: `RELAY_URL`, `API_TOKEN` (optional: `MAIL_REPLY_TO`, defaults to `support@targetthisrole.ai`).
-- Dev-only test endpoint (when `NODE_ENV !== 'production'`, or when `ENABLE_INTERNAL_TEST_ROUTES=true`):
-  - `POST /internal/test-email` with body `{ "to": "declabs@hotmail.com" }`.
+## Current Beta Notes
+
+- Canonical interview flow uses the `interview-records` domain behind `/api/interviews/*`.
+- The canonical tracking surface is `Application Tracker` (`/job-tracker`).
+- Compliance blocking is enforced for beta-critical generation/export paths.
+
+## Common Commands
+
+From repo root:
+
+- `npm run build:api`
+- `npm run build:web`
+- `npm run build:both`
+- `npm run check:beta-scope`
+

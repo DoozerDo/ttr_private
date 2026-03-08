@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
 export default function ApplicationsRedirectPage() {
-  redirect("/opportunities");
+  redirect("/job-tracker");
 }
 

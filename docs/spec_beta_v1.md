@@ -327,9 +327,7 @@ Optional Redis caching.
 
 Storage:
 
-S3 compatible object storage.
-
-DigitalOcean Spaces for hosted beta.
+S3-compatible object storage for hosted beta.
 
 AI Layer:
 

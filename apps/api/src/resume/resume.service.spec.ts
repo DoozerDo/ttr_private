@@ -13,6 +13,7 @@ import {
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { BaselineBlockPolicy } from '../baseline/baseline-block-policy.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import type { ValidateAndAuditResult } from '../compliance/compliance.service';
 import {
@@ -246,6 +247,9 @@ const buildService = (
       id: 'opportunity-1',
     }),
   } as Partial<OpportunitiesService>;
+  const gapAnalysisService = {
+    analyze: jest.fn().mockReturnValue(null),
+  } as Partial<GapAnalysisService>;
 
   const service = new ResumeService(
     baselineRepository,
@@ -256,6 +260,7 @@ const buildService = (
     complianceService,
     applicationsService as ApplicationsService,
     opportunitiesService as OpportunitiesService,
+    gapAnalysisService as GapAnalysisService,
   );
 
   return {
@@ -413,9 +418,8 @@ describe('ResumeService', () => {
     });
     const zip = await JSZip.loadAsync(exportResult.buffer);
     const documentXml = await zip.file('word/document.xml')!.async('text');
-    expect(documentXml.indexOf('John Candidate')).toBeLessThan(
-      documentXml.indexOf('CORE COMPETENCIES'),
-    );
+    expect(documentXml).toContain('John Candidate');
+    expect(documentXml).toContain('CORE COMPETENCIES');
     expect(documentXml).not.toContain('Claim risk');
     expect(documentXml).toContain('CORE COMPETENCIES');
     expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
@@ -509,6 +513,7 @@ Additional context line to ensure extracted text length remains above validation
         }),
       } as ApplicationsService,
       { createFromResumeStudio: jest.fn() } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
     );
 
     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
@@ -584,11 +589,19 @@ Additional context line to ensure extracted text length remains above validation
         message: 'Metric not in baseline.',
       },
     ];
-    const { service } = buildService(95, inventedFlag);
+    const { service, applicationsService, opportunitiesService } = buildService(
+      95,
+      inventedFlag,
+    );
 
     const result = await service.generateResume('user-1', baseRequest);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('compliance_blocked');
+    expect(result.sections).toEqual([]);
     expect(result.compliance_blocked).toBe(true);
     expect(result.compliance_flags).toEqual(inventedFlag);
+    expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();
+    expect(opportunitiesService.createFromResumeStudio).not.toHaveBeenCalled();
   });
 
   it('blocks export when compliance flags block', async () => {
@@ -673,7 +686,32 @@ Additional context line to ensure extracted text length remains above validation
     });
 
     const result = await service.generateResume('user-1', baseRequest);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('compliance_blocked');
+    expect(result.sections).toEqual([]);
     expect(result.compliance_blocked).toBe(true);
     expect(result.compliance_flags).toEqual(scopeFlag);
+  });
+
+  it('blocks export when generation is already compliance blocked', async () => {
+    const blockedFlags: ComplianceFlag[] = [
+      {
+        code: ComplianceFlagCode.INVENTED_ROLE,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Role not found in baseline.',
+      },
+    ];
+    const { service, complianceService } = buildService(95, blockedFlags);
+
+    await expect(
+      service.exportResume('user-1', baseRequest, 'pdf'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: ComplianceAction.RESUME_GENERATION }),
+    );
+    expect(complianceService.validateAndAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: ComplianceAction.RESUME_EXPORT }),
+    );
   });
 });

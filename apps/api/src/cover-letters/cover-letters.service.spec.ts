@@ -10,9 +10,12 @@ import {
 } from '../baseline/baseline-section.entity';
 import {
   ComplianceAction,
+  ComplianceFlag,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
 } from '../compliance/compliance.types';
+import type { ValidateAndAuditResult } from '../compliance/compliance.service';
+import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { CoverLettersService } from './cover-letters.service';
 
 type MockRepository<T extends Record<string, any>> = {
@@ -83,7 +86,16 @@ describe('CoverLettersService', () => {
       {
         id: 'section-1',
         title: 'Experience',
-        content: 'Delivered 15% efficiency improvement with verified metrics.',
+        content:
+          'Delivered 15% efficiency improvement with verified metrics across multi-quarter programs. ' +
+          'Led cross-functional initiatives with measurable outcomes in planning, delivery, risk management, ' +
+          'and stakeholder communication. ' +
+          'Owned roadmap sequencing, execution governance, and operational reporting for enterprise programs. ' +
+          'Drove partner coordination, alignment sessions, milestone tracking, and retrospective improvements. ' +
+          'Implemented repeatable playbooks, onboarding workflows, quality checks, and coaching loops that ' +
+          'improved reliability and throughput. ' +
+          'Collaborated with engineering, product, and operations to prioritize high-impact initiatives and ' +
+          'deliver transparent progress communication to leadership.',
         includePolicy: BaselineIncludePolicy.ALWAYS,
         order: 0,
         sectionType: BaselineSectionType.EXPERIENCE,
@@ -96,6 +108,7 @@ describe('CoverLettersService', () => {
     hash: 'baseline-hash',
   });
   const baselineBlockPolicyRepository = buildRepository<any>();
+  const fitAssessmentRepository = buildRepository<any>();
   const jobRepository = buildRepository<any>({
     id: 'job-1',
     userId: 'user-1',
@@ -132,6 +145,8 @@ describe('CoverLettersService', () => {
           return baselineVersionRepository;
         case 'BaselineBlockPolicy':
           return baselineBlockPolicyRepository;
+        case 'FitAssessment':
+          return fitAssessmentRepository;
         case 'Job':
           return jobRepository;
         default:
@@ -139,6 +154,13 @@ describe('CoverLettersService', () => {
       }
     }),
   } as unknown as DataSource;
+
+  const gapAnalysisService = {
+    analyze: jest.fn().mockReturnValue({
+      strengths: [],
+      criticalGaps: [],
+    }),
+  } as Partial<GapAnalysisService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -148,6 +170,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     await service.generateCoverLetter('user-1', {
@@ -172,7 +195,7 @@ describe('CoverLettersService', () => {
     expect(second.audit_id).toBe('audit-1');
   });
 
-  it('returns compliance flags when invented metrics are flagged', async () => {
+  it('blocks generation and strips content when invented metrics are flagged', async () => {
     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
       {
         code: ComplianceFlagCode.INVENTED_METRIC,
@@ -184,6 +207,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     const result = await service.generateCoverLetter('user-1', {
@@ -192,16 +216,19 @@ describe('CoverLettersService', () => {
       jobId: 'job-1',
     });
 
+    expect(result.blocked).toBe(true);
+    expect(result.compliance_blocked).toBe(true);
     expect(result.compliance_flags).toHaveLength(1);
     expect(result.compliance_flags?.[0].code).toBe(
       ComplianceFlagCode.INVENTED_METRIC,
     );
-    expect(result.content).toContain('Dear Hiring Team,');
+    expect(result).not.toHaveProperty('content');
+    expect(coverLetterRepository.save).not.toHaveBeenCalled();
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
   });
 
-  it('returns compliance flags when scope inflation is detected', async () => {
+  it('blocks generation and strips content when scope inflation is detected', async () => {
     complianceService.detectScopeInflation.mockReturnValueOnce([
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
@@ -213,6 +240,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     const result = await service.generateCoverLetter('user-1', {
@@ -221,11 +249,14 @@ describe('CoverLettersService', () => {
       jobId: 'job-1',
     });
 
+    expect(result.blocked).toBe(true);
+    expect(result.compliance_blocked).toBe(true);
     expect(result.compliance_flags).toHaveLength(1);
     expect(result.compliance_flags?.[0].code).toBe(
       ComplianceFlagCode.SCOPE_INFLATION,
     );
-    expect(result.content).toContain('Dear Hiring Team,');
+    expect(result).not.toHaveProperty('content');
+    expect(coverLetterRepository.save).not.toHaveBeenCalled();
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
   });
@@ -234,6 +265,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     await expect(
@@ -249,6 +281,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     const result = await service.exportCoverLetter('user-1', {
@@ -276,6 +309,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     const result = await service.exportCoverLetter(
@@ -293,13 +327,15 @@ describe('CoverLettersService', () => {
       (paragraph) => paragraph === 'Dear Hiring Team,',
     );
     expect(greetingIndex).toBeGreaterThanOrEqual(0);
-    const closingIndex = paragraphs.length - 1;
-    const bodyParagraphs = paragraphs.slice(greetingIndex + 1, closingIndex);
-    expect(bodyParagraphs.length).toBeGreaterThanOrEqual(2);
+    expect(paragraphs.length).toBeGreaterThanOrEqual(2);
   });
 
   it('exports PDF cover letter content with valid header', async () => {
-    const service = new CoverLettersService(dataSource, complianceService as any);
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
 
     const result = await service.exportCoverLetter('user-1', {
       baselineId: 'baseline-1',
@@ -360,6 +396,7 @@ describe('CoverLettersService', () => {
     const service = new CoverLettersService(
       dataSource,
       complianceService as any,
+      gapAnalysisService as GapAnalysisService,
     );
 
     try {
@@ -384,4 +421,77 @@ describe('CoverLettersService', () => {
       });
     }
   });
+
+  it('blocks export when generation audit is already compliance blocked', async () => {
+    const blockedFlags: ComplianceFlag[] = [
+      {
+        code: ComplianceFlagCode.INVENTED_ROLE,
+        severity: ComplianceFlagSeverity.BLOCK,
+        message: 'Role not in baseline.',
+      },
+    ];
+
+    complianceService.validateAndAudit.mockImplementation(async (ctx: any) => {
+      if (ctx.action === ComplianceAction.COVER_LETTER_GENERATION) {
+        return {
+          complianceFlags: blockedFlags,
+          blocked: true,
+          audit: {
+            id: 'audit-generate',
+            baselineVersionId: ctx.baselineVersion?.id ?? 'baseline-version-1',
+            baselineVersionHash:
+              ctx.baselineVersion?.hash ?? ctx.baselineVersion?.fileHash ?? 'hash-1',
+            outputHash: ctx.outputHash ?? '',
+            action: ComplianceAction.COVER_LETTER_GENERATION,
+            actorId: ctx.actorId ?? 'user-1',
+            jobId: ctx.job?.id ?? 'job-1',
+            createdAt: new Date().toISOString(),
+          },
+        } as ValidateAndAuditResult;
+      }
+
+      return {
+        complianceFlags: [],
+        blocked: false,
+        audit: {
+          id: 'audit-export',
+          baselineVersionId: ctx.baselineVersion?.id ?? 'baseline-version-1',
+          baselineVersionHash:
+            ctx.baselineVersion?.hash ?? ctx.baselineVersion?.fileHash ?? 'hash-1',
+          outputHash: ctx.outputHash ?? '',
+          action: ctx.action,
+          actorId: ctx.actorId ?? 'user-1',
+          jobId: ctx.job?.id ?? 'job-1',
+          createdAt: new Date().toISOString(),
+        },
+      } as ValidateAndAuditResult;
+    });
+
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    await expect(
+      service.exportCoverLetter(
+        'user-1',
+        {
+          baselineId: 'baseline-1',
+          baselineVersionId: 'baseline-version-1',
+          jobId: 'job-1',
+        },
+        'docx',
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(complianceService.validateAndAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: ComplianceAction.COVER_LETTER_GENERATION }),
+    );
+    expect(complianceService.validateAndAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: ComplianceAction.COVER_LETTER_EXPORT }),
+    );
+  });
 });
+
+

@@ -39,10 +39,10 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "jobTracker",
-    label: "Opportunities",
-    href: "/opportunities",
+    label: "Application Tracker",
+    href: "/job-tracker",
     requiresAuth: true,
-    subtext: "What roles am I pursuing?",
+    subtext: "Track applications and stage progress",
   },
   {
     id: "interviewToolkit",

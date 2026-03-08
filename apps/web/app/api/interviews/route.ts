@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!baseUrl) return NextResponse.json({ error: "API base URL is not configured" }, { status: 500 });
   if (!auth.token) return auth.error;
 
-  const response = await fetch(`${baseUrl}/interviews`, {
+  const response = await fetch(`${baseUrl}/interview-records`, {
     method: "GET",
     cache: "no-store",
     headers: { Authorization: `Bearer ${auth.token}` },
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
-  const response = await fetch(`${baseUrl}/interviews`, {
+  const response = await fetch(`${baseUrl}/interview-records`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${auth.token}`,

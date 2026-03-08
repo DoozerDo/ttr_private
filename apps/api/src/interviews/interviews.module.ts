@@ -53,6 +53,8 @@ import { BaselineVersionService } from '../baseline/baseline-version.service';
     InterviewToolkitController,
   ],
   providers: [
+    // LEGACY COMPATIBILITY: not used by the active beta path.
+    // Retained temporarily for compatibility and tests.
     InterviewsService,
     InterviewRecordsService,
     GapDetectionService,

@@ -1,3 +1,5 @@
+Archived: not part of the current beta source of truth.
+
 # SPEC CONTRACT — Frozen Reference
 
 ## 1. Definitions and Scope Boundaries
@@ -147,3 +149,4 @@ Returns CSV artifact metadata `{ "artifact_id": "...", "url": "..." }` for downl
 - **Cover Letter Studio**: Honors locked opening and baseline-scoped content; generates one-page DOCX/PDF; exposes status and download with compliance visibility.
 - **Compliance/Audit**: Every generation/scoring/export action records audit entries with actor, baseline version hash, and flags; retrieval available by action or artifact.
 - **Export/Storage**: Artifacts stored in S3-compatible storage with user- and hash-aware keys; downloads stream binary or return time-limited URLs; headers expose baseline hash.
+

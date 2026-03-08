@@ -476,8 +476,8 @@ export default function OpportunitiesPage() {
     <PageShell>
       <div className="space-y-8">
         <PageHeader
-          title="Opportunities"
-          description="Prioritize and execute your next steps."
+          title="Opportunity Intelligence (Secondary)"
+          description="Use Application Tracker for manual application updates in beta."
           rightSlot={
             <div className="flex flex-wrap gap-2">
               <FormButton variant="ghost" disabled={loading || busy} onClick={() => void load()}>
@@ -519,6 +519,16 @@ export default function OpportunitiesPage() {
             </div>
           }
         />
+        <Alert intent="warning" title="Beta tracking uses Application Tracker">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-slate-100">
+              Manual application tracking now lives in a single place.
+            </span>
+            <Link href="/job-tracker">
+              <FormButton variant="secondary">Go to Application Tracker</FormButton>
+            </Link>
+          </div>
+        </Alert>
         {error || notice ? (
           <div className="space-y-3">
             {error ? (

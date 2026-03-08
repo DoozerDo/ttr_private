@@ -9,6 +9,8 @@ import { InterviewResponse } from './interview-response.entity';
 import { InterviewSession } from './interview-session.entity';
 import { CreateInterviewResponseDto } from './dto/create-interview-response.dto';
 
+// LEGACY COMPATIBILITY: not used by the active beta path.
+// Canonical beta interview flow is implemented in InterviewRecordsService.
 export type CreateInterviewDto = {
   baselineId?: string;
   jobId?: string | null;

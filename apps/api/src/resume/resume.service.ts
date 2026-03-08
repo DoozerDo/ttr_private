@@ -482,18 +482,43 @@ export class ResumeService {
 
     const complianceBlocked = blocked;
 
-    const trackerEntry = await this.applicationsService.upsertPreparedFromResumeGeneration({
-      userId,
-      jobId: job?.id ?? null,
-      companyName: job?.company ?? null,
-      roleTitle: job?.title ?? null,
-      jobUrl: job?.canonicalUrl ?? job?.sourceUrl ?? null,
-      jobText: job?.rawDescription ?? null,
-      baselineVersionId: baselineVersion.id,
-      cxFitScoreSnapshot,
-      resumeArtifactId: audit.id,
-      resumeArtifactType: 'resume',
-    });
+    if (complianceBlocked) {
+      return {
+        ok: false,
+        status: 'compliance_blocked',
+        blocked: true,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? null,
+        sections: [],
+        compliance_flags: complianceFlags,
+        compliance_blocked: true,
+        audit_id: audit.id,
+        auditId: audit.id,
+        baseline_version_hash: audit.baselineVersionHash,
+        quality: 'blocked',
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        claimRiskSummary,
+        gapAnalysis: gapInsights,
+        gapGuidance,
+      };
+    }
+
+    const trackerEntry =
+      await this.applicationsService.upsertPreparedFromResumeGeneration({
+        userId,
+        jobId: job?.id ?? null,
+        companyName: job?.company ?? null,
+        roleTitle: job?.title ?? null,
+        jobUrl: job?.canonicalUrl ?? job?.sourceUrl ?? null,
+        jobText: job?.rawDescription ?? null,
+        baselineVersionId: baselineVersion.id,
+        cxFitScoreSnapshot,
+        resumeArtifactId: audit.id,
+        resumeArtifactType: 'resume',
+      });
     const opportunity = await this.opportunitiesService.createFromResumeStudio(
       userId,
       {
@@ -512,6 +537,8 @@ export class ResumeService {
 
     return {
       ok: true,
+      status: 'ready',
+      blocked: false,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
       jobId: jobId ?? null,
@@ -558,6 +585,22 @@ export class ResumeService {
     const generation = await this.generateResume(userId, request, {
       enforceOneTap: false,
     });
+
+    if (generation.compliance_blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Compliance validation failed.',
+          details: {
+            blocked: true,
+            compliance_flags: generation.compliance_flags ?? [],
+            audit_id: generation.auditId ?? generation.audit_id ?? null,
+            baseline_version_hash: generation.baseline_version_hash ?? null,
+          },
+        },
+      });
+    }
+
     const sectionFragments = generation.sections.map((section) => ({
       title: section.title,
       content: section.content,

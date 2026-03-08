@@ -29,6 +29,13 @@ const CANONICAL_STAGE_OPTIONS = [
   { value: 'Closed', label: 'Closed' },
 ] as const;
 
+const STAGE_MEANINGS: Record<(typeof CANONICAL_STAGE_OPTIONS)[number]['value'], string> = {
+  Applied: 'Application sent; waiting on response.',
+  Interviewing: 'In active interview process.',
+  Offer: 'Offer received or final-stage decision pending.',
+  Closed: 'No longer active (rejected, withdrawn, or archived).',
+};
+
 const VIEW_MODES = [
   { id: 'table', label: 'Table' },
   { id: 'pipeline', label: 'Pipeline' },
@@ -95,11 +102,11 @@ type EntrySummary = {
 
 function getEntrySummary(entry: JobTrackerEntry): EntrySummary {
   return {
-    company: safeString(entry.company) || 'â€”',
-    roleTitle: safeString(entry.roleTitle) || 'â€”',
+    company: safeString(entry.company) || '-',
+    roleTitle: safeString(entry.roleTitle) || '-',
     stage: stageLabel(entry.stage),
     dateApplied: formatDateDisplay(entry.dateApplied),
-    cxFitScore: entry.cxFitScore != null ? entry.cxFitScore : 'â€”',
+    cxFitScore: entry.cxFitScore != null ? entry.cxFitScore : '-',
     createdAt: formatDateDisplay(entry.createdAt),
   };
 }
@@ -341,8 +348,8 @@ export default function JobTrackerPage() {
     <PageShell>
       <div className="space-y-8">
         <PageHeader
-          title="Job Tracker"
-          description="Log your progress, review details, and export your history."
+          title="Application Tracker"
+          description="Your canonical beta surface for tracking application progress."
           rightSlot={
             <div className="flex flex-wrap gap-2">
               <FormButton
@@ -377,12 +384,30 @@ export default function JobTrackerPage() {
           </div>
         )}
 
+        <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Canonical beta tracker</p>
+            <h2 className="text-lg font-semibold text-slate-100">Track every application in one place</h2>
+            <p className="text-sm text-slate-300">
+              Keep stage, fit, source, and notes current so next actions stay obvious.
+            </p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {CANONICAL_STAGE_OPTIONS.map((option) => (
+              <div key={option.value} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">{option.label}</p>
+                <p className="mt-1 text-xs text-slate-400">{STAGE_MEANINGS[option.value]}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-100">Entries</h2>
+              <h2 className="text-lg font-semibold text-slate-100">Tracked applications</h2>
               <p className="text-xs text-slate-400">
-                Sharing the same data as the API list. Click Edit to load a row.
+                Switch between table and pipeline views to update stage quickly.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
@@ -547,7 +572,7 @@ export default function JobTrackerPage() {
                                     Date Applied
                                   </p>
                                   <p className="text-sm font-semibold text-white">
-                                    {summary.dateApplied || "—"}
+                                    {summary.dateApplied || "-"}
                                   </p>
                                 </div>
                                 <div>
@@ -555,7 +580,7 @@ export default function JobTrackerPage() {
                                     Created
                                   </p>
                                   <p className="text-sm font-semibold text-white">
-                                    {summary.createdAt || "—"}
+                                    {summary.createdAt || "-"}
                                   </p>
                                 </div>
                               </div>
@@ -591,15 +616,16 @@ export default function JobTrackerPage() {
               )}
             </div>
           )}
-        </section>\r\n\r\n        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-100">
                 {formMode} Entry
               </h2>
               <p className="text-xs text-slate-400">
-                Stage and notes can be refined without touching the rest of the
-                record.
+                Add a new application or update an existing one from a single form.
               </p>
             </div>
             <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
@@ -722,6 +748,9 @@ export default function JobTrackerPage() {
     </PageShell>
   );
 }
+
+
+
 
 
 

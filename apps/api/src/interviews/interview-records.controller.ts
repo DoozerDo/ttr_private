@@ -40,6 +40,29 @@ export class InterviewRecordsController {
     return this.interviewRecordsService.createInterviewRecord(userId, body);
   }
 
+  @Post('start')
+  async startInterviewFromFitReview(
+    @Body()
+    body: {
+      jobId?: string;
+      baselineId?: string;
+      baselineVersionId?: string;
+    },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.startInterviewFromFitReview(userId, {
+      jobId: body.jobId,
+      baselineId: body.baselineId,
+      baselineVersionId: body.baselineVersionId,
+    });
+  }
+
   @Get()
   async listInterviewRecords(
     @Req() request: Request & { user?: { id?: string } },
@@ -126,6 +149,23 @@ export class InterviewRecordsController {
     }
 
     return this.interviewRecordsService.updateInterviewRecord(id, userId, body);
+  }
+
+  @Post(':id/responses')
+  async saveInterviewResponses(
+    @Param('id') id: string,
+    @Body() body: { responses?: unknown[] },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.interviewRecordsService.saveInterviewResponses(id, userId, {
+      responses: body?.responses,
+    });
   }
 
   @Post(':id/decisions')
