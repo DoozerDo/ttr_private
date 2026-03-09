@@ -20,8 +20,9 @@ type NormalizedBlock = AllowedBaselineBlock & {
 };
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
-  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page (R7 one-page limit).
+  // Enforce a one-page limit: cap output to ~350 words to stay within a standard printed page.
   private readonly hardCap = 350;
+  private readonly minWords = 230;
 
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
     const targetWords = this.resolveTargetWords(input.maxWords);
@@ -36,42 +37,32 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       baselineBlocks,
       constraints,
     );
-    const strategicStrengths = (input.gapAnalysis?.strengths ?? []).slice(0, 2);
-    const majorGaps = (input.gapAnalysis?.criticalGaps ?? []).slice(0, 2);
-    const focusAreas = this.buildFocusAreas(constrainedJob);
-    const tone = input.tone?.trim() || null;
-    const safeMode = Boolean(input.safeMode);
+    const jobSignals = this.buildJobSignals(constrainedJob);
+    const selectedEvidence = this.selectEvidenceStatements(
+      baselineStatements,
+      jobSignals,
+    );
+    const selectedPriorities = this.selectPriorities(constrainedJob);
+    const strategicStrengths = this.cleanList(input.gapAnalysis?.strengths ?? []).slice(0, 2);
 
-    const paragraphs = safeMode
-      ? [
-          this.composeSafeIntro(constrainedJob, tone),
-          this.composeSafeStrengths(baselineStatements, tone, strategicStrengths),
-          this.composeSafeExecution(constrainedJob),
-          this.composeSafeClosing(
-            constrainedJob,
-            tone,
-            input.closingTemplate.text,
-          ),
-        ]
-      : [
-          this.composeIntro(constrainedJob, tone),
-          this.composeStrengths(baselineStatements, tone, strategicStrengths),
-          this.composeExecution(
-            constrainedJob,
-            focusAreas,
-            baselineStatements,
-            majorGaps,
-          ),
-          this.composeClosing(
-            constrainedJob,
-            tone,
-            input.closingTemplate.text,
-          ),
-        ];
+    const paragraphs = [
+      this.composeOpening(constrainedJob, selectedEvidence[0]),
+      this.composeAlignment(
+        constrainedJob,
+        selectedPriorities,
+        strategicStrengths,
+        selectedEvidence[1] ?? selectedEvidence[0],
+      ),
+      this.composeEvidence(selectedEvidence),
+      this.composeClosing(
+        constrainedJob,
+        input.closingTemplate.text,
+      ),
+    ];
 
     const greeting = 'Dear Hiring Team,';
     const trimmedParagraphs = paragraphs
-      .map((paragraph) => paragraph.trim())
+      .map((paragraph) => this.sanitizeSentence(paragraph))
       .filter(Boolean);
     const closingParagraph = trimmedParagraphs.pop() ?? '';
     const bodyParagraphs = [...trimmedParagraphs];
@@ -85,17 +76,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
 
     let wordCount = this.countWords(content);
 
-    if (wordCount > this.hardCap) {
-      content = this.trimToWordLimit(content, this.hardCap);
-      wordCount = this.countWords(content);
-    } else if (wordCount > targetWords) {
+    if (wordCount > targetWords) {
       content = this.trimToWordLimit(content, targetWords);
+      wordCount = this.countWords(content);
+    } else if (wordCount < this.minWords) {
+      content = this.expandWithAdditionalEvidence(
+        content,
+        selectedEvidence,
+        this.minWords,
+      );
       wordCount = this.countWords(content);
     }
 
     const finalParagraphs = this.splitParagraphs(content);
     let finalGreeting = greeting;
-    if (finalParagraphs.length && /^dear\\b/i.test(finalParagraphs[0])) {
+    if (finalParagraphs.length && /^dear\b/i.test(finalParagraphs[0])) {
       finalGreeting = finalParagraphs.shift()!;
     }
     const finalClosing =
@@ -116,7 +111,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       return 320;
     }
 
-    const clamped = Math.min(Math.max(Math.floor(maxWords), 250), this.hardCap);
+    const clamped = Math.min(Math.max(Math.floor(maxWords), this.minWords), this.hardCap);
     return clamped;
   }
 
@@ -208,7 +203,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       });
     });
 
-    return statements.slice(0, 15);
+    return statements.slice(0, 24);
   }
 
   private shouldSkipStatement(
@@ -225,174 +220,116 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     );
   }
 
-  private buildFocusAreas(job: NormalizedJob) {
-    const merged = [...job.responsibilities, ...job.requirements];
-    const unique = Array.from(
-      new Set(merged.map((item) => item.toLowerCase())),
+  private buildJobSignals(job: NormalizedJob) {
+    const weighted = new Map<string, number>();
+    const addText = (text: string, baseWeight: number) => {
+      const tokens = this.tokenize(text);
+      tokens.forEach((token) => {
+        weighted.set(token, (weighted.get(token) ?? 0) + baseWeight);
+      });
+    };
+
+    addText(job.title ?? '', 1.8);
+    addText(job.company ?? '', 0.3);
+    job.responsibilities.forEach((item) => addText(item, 1.4));
+    job.requirements.forEach((item) => addText(item, 1.2));
+
+    return new Set(
+      [...weighted.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 36)
+        .map(([token]) => token),
     );
-
-    return unique
-      .map((key) => merged.find((item) => item.toLowerCase() === key) || key)
-      .slice(0, 10);
   }
 
-  private composeIntro(job: NormalizedJob, tone: string | null) {
-    const roleDescriptor = this.describeRole(job);
-    const toneLine = tone ? ` I will maintain a ${tone} tone throughout.` : '';
-
-    return `I am applying for ${roleDescriptor}. I prepared this cover letter directly from the approved baseline text and the responsibilities you provided, keeping every statement grounded in verified details.${toneLine} I will highlight the portions of my record that align with the description and avoid adding claims that are not supported.`;
-  }
-
-  private composeSafeIntro(job: NormalizedJob, tone: string | null) {
-    const roleDescriptor = this.describeRole(job);
-    const toneLine = tone ? ` I will maintain a ${tone} tone throughout.` : '';
-
-    return `I am applying for ${roleDescriptor}. This letter relies solely on the approved baseline text and the responsibilities you shared, keeping every claim anchored to verified content and avoiding speculation.${toneLine}`;
-  }
-
-  private composeStrengths(
-    statements: string[],
-    tone: string | null,
-    strategicStrengths: string[],
-  ) {
-    const toneLine = tone
-      ? ` The same ${tone} style appears across these examples.`
-      : '';
-
-    if (statements.length === 0) {
-      const strengthsLine = strategicStrengths.length
-        ? ` My strongest alignment areas are ${this.formatList(strategicStrengths)}.`
-        : '';
-      return `The approved baseline focuses on the way I plan work, collaborate with partners, and document outcomes in plain language.${toneLine}${strengthsLine} I will rely solely on that text to describe my strengths and keep the narrative consistent with verified material.`;
+  private selectEvidenceStatements(statements: string[], jobSignals: Set<string>) {
+    if (!statements.length) {
+      return [];
     }
 
-    const highlights = statements.slice(0, 3);
-
-    const strengthsLine = strategicStrengths.length
-      ? ` Strongest alignment for this role includes ${this.formatList(strategicStrengths)}.`
-      : '';
-    return `Documented experience from the baseline includes ${this.formatList(highlights)}.${toneLine}${strengthsLine} These lines come directly from the allowed sections, keeping the narrative factual and consistent. Additional baseline notes reinforce how I organize projects, share progress, and keep commitments modest and clear.`;
-  }
-
-  private composeSafeStrengths(
-    statements: string[],
-    tone: string | null,
-    strategicStrengths: string[],
-  ) {
-    const toneLine = tone
-      ? ` The same ${tone} style appears across these passages.`
-      : '';
-
-    if (statements.length === 0) {
-      const strengthsLine = strategicStrengths.length
-        ? ` Key strengths I can verify include ${this.formatList(strategicStrengths)}.`
-        : '';
-      return `The approved baseline emphasizes how I plan work, collaborate with teammates, and document outcomes in plain language.${toneLine}${strengthsLine} I will stick to that verified material when describing strengths.`;
-    }
-
-    const highlights = statements.slice(0, 2);
-
-    const strengthsLine = strategicStrengths.length
-      ? ` Verified strengths for this role include ${this.formatList(strategicStrengths)}.`
-      : '';
-    return `The allowed baseline highlights ${this.formatList(highlights)}.${toneLine}${strengthsLine} Each sentence comes directly from approved content so every strength remains verifiable.`;
-  }
-
-  private composeExecution(
-    job: NormalizedJob,
-    focusAreas: string[],
-    statements: string[],
-    majorGaps: Array<{
-      title: string;
-      requirementEvidence: string;
-      baselineEvidence: string | null;
-    }>,
-  ) {
-    const priorities =
-      focusAreas.length > 0
-        ? this.formatList(focusAreas)
-        : 'the listed responsibilities and requirements';
-    const references = statements.slice(3, 7);
-    const referenceLine = references.length
-      ? ` When expectations align, I will reference passages such as ${this.formatList(references)} to show direct support.`
-      : ' When expectations align, I will point back to the specific baseline passages that cover the work.';
-
-    const neutralGuardrail =
-      ' If any responsibility sits outside the documented baseline text, I will call out the gap immediately, ask for context, and proceed without implying experience I cannot prove.';
-
-    const collaborationLine = job.company
-      ? ` At ${job.company}, my plan is to confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.`
-      : ' I will confirm scope early, pair each priority with the most relevant baseline evidence, and document decisions so expectations remain clear.';
-
-    const gapLine = majorGaps.length
-      ? ` ${this.composeGapReframing(majorGaps)}`
-      : '';
-    return `For priorities such as ${priorities}, I will map each expectation to the supporting baseline excerpts to keep the work anchored in verified material.${referenceLine}${neutralGuardrail}${gapLine}${collaborationLine}`;
-  }
-
-  private composeGapReframing(
-    majorGaps: Array<{
-      title: string;
-      requirementEvidence: string;
-      baselineEvidence: string | null;
-    }>,
-  ): string {
-    const topGaps = majorGaps.slice(0, 2);
-    const sentences = topGaps.map((gap) => {
-      const requirement = this.limitWords(gap.requirementEvidence, 24);
-      if (gap.baselineEvidence) {
-        const baseline = this.limitWords(gap.baselineEvidence, 22);
-        return `For ${gap.title.toLowerCase()}, I will connect baseline experience like "${baseline}" to your expectation around "${requirement}" and define a clear ramp plan.`;
+    const scored = statements.map((statement, index) => {
+      const tokens = new Set(this.tokenize(statement));
+      let overlap = 0;
+      for (const token of tokens) {
+        if (jobSignals.has(token)) overlap += 1;
       }
-      return `For ${gap.title.toLowerCase()}, I will be direct that this is a growth area, connect adjacent verified experience to "${requirement}", and outline how I would close the gap quickly.`;
+      const score = overlap * 3 + Math.min(tokens.size, 24) * 0.1;
+      return { statement, index, score };
     });
 
-    return `I will proactively address likely interview risk areas: ${sentences.join(' ')}`;
+    return scored
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+      })
+      .slice(0, 5)
+      .map((entry) => this.ensureSentence(entry.statement));
   }
 
-  private composeSafeExecution(job: NormalizedJob) {
-    const priorities =
-      job.responsibilities.length || job.requirements.length
-        ? this.formatList([...job.responsibilities, ...job.requirements].slice(0, 4))
-        : 'the listed responsibilities and requirements';
+  private selectPriorities(job: NormalizedJob) {
+    const combined = this.cleanList([
+      ...job.responsibilities,
+      ...job.requirements,
+    ]);
+    const deduped = Array.from(
+      new Set(combined.map((item) => item.toLowerCase())),
+    ).map((key) => combined.find((item) => item.toLowerCase() === key)!);
+    return deduped.map((item) => this.limitWords(item, 14)).slice(0, 3);
+  }
 
-    const companySentence = job.company
-      ? ` I will use the job posting at ${job.company} as a reference, matching each priority to the verified baseline excerpts before describing how I will proceed.`
-      : ' I will use the job posting as a reference, matching each priority to the verified baseline excerpts before describing how I will proceed.';
+  private composeOpening(job: NormalizedJob, leadEvidence?: string) {
+    const roleDescriptor = this.describeRole(job);
+    const evidenceLine = leadEvidence
+      ? `My background includes ${this.stripTrailingPeriod(leadEvidence).toLowerCase()}.`
+      : 'My background includes verified operational and customer support experience relevant to this role.';
 
-    return `For priorities such as ${priorities}, I will rely on the approved baseline passages to describe how I plan to support the work without introducing claims that are outside those sections.${companySentence}`;
+    return `I am writing to apply for ${roleDescriptor}. ${evidenceLine}`;
+  }
+
+  private composeAlignment(
+    job: NormalizedJob,
+    priorities: string[],
+    strategicStrengths: string[],
+    supportingEvidence?: string,
+  ) {
+    const priorityLine = priorities.length
+      ? `The role emphasizes ${this.formatList(priorities)}.`
+      : 'The role emphasizes operational execution, customer outcomes, and cross functional partnership.';
+    const strengthsLine = strategicStrengths.length
+      ? `My strongest alignment areas include ${this.formatList(strategicStrengths)}.`
+      : '';
+    const evidenceLine = supportingEvidence
+      ? `Relevant verified experience includes ${this.stripTrailingPeriod(supportingEvidence).toLowerCase()}.`
+      : '';
+
+    return `${priorityLine} ${strengthsLine} ${evidenceLine}`;
+  }
+
+  private composeEvidence(statements: string[]) {
+    const examples = statements.slice(0, 3);
+    if (!examples.length) {
+      return 'I can discuss additional verified examples from my background that align with the responsibilities and requirements in this posting.';
+    }
+
+    const lines = examples.map((statement) =>
+      this.ensureSentence(statement),
+    );
+    return `Examples from my verified background include ${this.stripTrailingPeriod(lines[0]).toLowerCase()}. ${lines
+      .slice(1)
+      .join(' ')}`;
   }
 
   private composeClosing(
     job: NormalizedJob,
-    tone: string | null,
     closingTemplate: string,
   ) {
     const roleDescriptor = this.describeRole(job);
-    const toneLine = tone
-      ? ` I will continue to communicate in the same ${tone} style.`
-      : '';
     const companyLine = job.company
-      ? ` I appreciate your consideration and am ready to share any additional approved excerpts that help ${job.company} make a confident decision.`
-      : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
+      ? `I appreciate your consideration and would welcome the opportunity to discuss how my experience can support ${job.company}.`
+      : 'I appreciate your consideration and would welcome the opportunity to discuss this role further.';
+    const normalizedClosingTemplate = this.sanitizeSentence(closingTemplate);
 
-    return `${closingTemplate} Thank you for reviewing how my documented background fits ${roleDescriptor}.${toneLine}${companyLine}`.trim();
-  }
-
-  private composeSafeClosing(
-    job: NormalizedJob,
-    tone: string | null,
-    closingTemplate: string,
-  ) {
-    const roleDescriptor = this.describeRole(job);
-    const toneLine = tone
-      ? ` I will continue to communicate in the same ${tone} style.`
-      : '';
-    const companyLine = job.company
-      ? ` I appreciate your consideration and will gladly share any additional approved excerpts that help ${job.company} understand how the baseline content supports ${roleDescriptor}.`
-      : ' I appreciate your consideration and am ready to share any additional approved excerpts that help your team make a confident decision.';
-
-    return `${closingTemplate} Thank you for reviewing how the verified baseline material supports ${roleDescriptor}.${toneLine}${companyLine}`.trim();
+    return `${normalizedClosingTemplate} Thank you for reviewing my application for ${roleDescriptor}. ${companyLine} Sincerely,`;
   }
 
   private describeRole(job: NormalizedJob) {
@@ -449,6 +386,36 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return trimmed.endsWith('.') ? trimmed : `${trimmed}.`;
   }
 
+  private expandWithAdditionalEvidence(
+    content: string,
+    statements: string[],
+    minWords: number,
+  ) {
+    const paragraphs = this.splitParagraphs(content);
+    if (paragraphs.length < 2 || statements.length < 3) {
+      return content;
+    }
+    const closing = paragraphs.pop()!;
+
+    let expandedParagraphs = [...paragraphs];
+    let currentWordCount = this.countWords(
+      [...expandedParagraphs, closing].join('\n\n'),
+    );
+    const unused = statements.slice(3, 6).map((statement) => this.ensureSentence(statement));
+
+    for (const statement of unused) {
+      if (currentWordCount >= minWords) break;
+      expandedParagraphs.push(
+        `Additional verified context includes ${this.stripTrailingPeriod(statement).toLowerCase()}.`,
+      );
+      currentWordCount = this.countWords(
+        [...expandedParagraphs, closing].join('\n\n'),
+      );
+    }
+
+    return [...expandedParagraphs, closing].join('\n\n');
+  }
+
   private countWords(text: string) {
     return text.split(/\s+/).filter(Boolean).length;
   }
@@ -483,7 +450,11 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       );
       sanitized = sanitized.replace(regex, '');
     }
-    return sanitized.replace(/\s{2,}/g, ' ').trim();
+    return sanitized
+      .replace(/[\u2013\u2014]/g, ',')
+      .replace(/\s+-\s+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   private buildConstraintSummary(
@@ -553,5 +524,38 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return disallowList.some(
       (value) => value && normalized.includes(value.toLowerCase()),
     );
+  }
+
+  private cleanList(items: string[]) {
+    return items
+      .map((item) => this.cleanText(item))
+      .filter(Boolean);
+  }
+
+  private tokenize(text: string) {
+    return text
+      .toLowerCase()
+      .match(/[a-z0-9]+/g)
+      ?.filter((token) => token.length >= 3) ?? [];
+  }
+
+  private stripTrailingPeriod(text: string) {
+    return text.replace(/[.]+$/, '').trim();
+  }
+
+  private ensureSentence(text: string) {
+    const sanitized = this.sanitizeSentence(text);
+    if (!sanitized) {
+      return '';
+    }
+    return /[.!?]$/.test(sanitized) ? sanitized : `${sanitized}.`;
+  }
+
+  private sanitizeSentence(text: string) {
+    return this.cleanText(text)
+      .replace(/[\u2013\u2014]/g, ',')
+      .replace(/\s+-\s+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 }

@@ -12,6 +12,7 @@ const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE_PATTERN = /\+?\d[\d().\-\s]{7,}\d/;
 const LINKEDIN_PATTERN = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s|,]+/i;
 const BULLET_PREFIX = '\u2022';
+const SKILLS_PER_LINE = 4;
 
 function toText(value?: string | null): string {
   return value?.trim() ?? '';
@@ -82,7 +83,11 @@ function pickCoreCompetencies(model: ResumeDocxModel): string {
         (candidate) => candidate.toLowerCase() === line.toLowerCase(),
       ) === index,
   );
-  return deduped.map((line) => `${BULLET_PREFIX} ${line}`).join('\n');
+
+  const grouped = chunkArray(deduped, SKILLS_PER_LINE).map((group) =>
+    group.join('  •  '),
+  );
+  return grouped.map((line) => `${BULLET_PREFIX} ${line}`).join('\n');
 }
 
 function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
@@ -180,6 +185,18 @@ function extractContactFields(contactLines: string[] | undefined) {
     phone,
     linkedin,
   };
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (!items.length || size <= 0) {
+    return [];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 export function mapResumeDocxModelToV2TemplateModel(

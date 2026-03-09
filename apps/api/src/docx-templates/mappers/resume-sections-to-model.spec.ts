@@ -2,6 +2,50 @@ import { BaselineSectionType } from '../../baseline/baseline-section.entity';
 import { mapResumeSectionsToDocxModel } from './resume-sections-to-model';
 
 describe('mapResumeSectionsToDocxModel experience splitting', () => {
+  it('keeps professional section hierarchy and preserves experience chronology', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: `Director of Support | NewCo | 2022 - Present
+â€¢ Led enterprise support operations.
+â€¢ Improved escalation handling.
+
+Support Manager | PriorCo | 2018 - 2022
+â€¢ Managed daily support workflows.
+â€¢ Built KPI reporting rhythm.`,
+      },
+      {
+        type: BaselineSectionType.SKILLS,
+        title: 'Skills',
+        content: 'Support Operations, Incident Response, KPI Reporting',
+      },
+      {
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        content: 'Operations leader focused on support quality and delivery.',
+      },
+      {
+        type: BaselineSectionType.EDUCATION,
+        title: 'Education',
+        content: 'B.S. Business | State University | 2014',
+      },
+    ]);
+
+    expect(model.sections.map((section) => section.key)).toEqual([
+      'summary',
+      'skills',
+      'experience',
+      'education',
+    ]);
+
+    const experienceItems = model.sections.find(
+      (section) => section.key === 'experience',
+    )?.items as Array<{ role: string }> | undefined;
+    expect(experienceItems?.[0]?.role).toContain('Director of Support');
+    expect(experienceItems?.[1]?.role).toContain('Support Manager');
+  });
+
   it('splits multiple jobs in one EXPERIENCE section into separate entries', () => {
     const model = mapResumeSectionsToDocxModel([
       {

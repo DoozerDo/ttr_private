@@ -15,7 +15,7 @@ function countParagraphs(text: string): number {
 }
 
 describe('TemplateCoverLetterGenerator', () => {
-  it('generates deterministic output with 4 paragraphs and <= 400 words', () => {
+  it('generates deterministic output with recruiter-friendly structure and <= 350 words', () => {
     const generator = new TemplateCoverLetterGenerator();
 
     const input = {
@@ -61,8 +61,16 @@ describe('TemplateCoverLetterGenerator', () => {
     expect(output1.content.length).toBeGreaterThan(0);
 
     expect(output1.content.startsWith('Dear Hiring Team,')).toBe(true);
-    expect(countParagraphs(output1.content)).toBe(4);
+    expect(output1.paragraphs.length).toBeGreaterThanOrEqual(3);
+    expect(output1.paragraphs.length).toBeLessThanOrEqual(4);
+    expect(output1.closingParagraphs).toHaveLength(1);
+    expect(output1.closingParagraphs[0]).toContain('Sincerely,');
+    expect(countParagraphs(output1.content)).toBeGreaterThanOrEqual(5);
     expect(countWords(output1.content)).toBeLessThanOrEqual(350);
+    expect(output1.content).not.toContain('undefined');
+    expect(output1.content).not.toContain('null');
+    expect(output1.content).not.toContain('—');
+    expect(output1.content).not.toContain('–');
   });
 
   it('locks the greeting to the approved salutation even when another greeting is present', () => {
@@ -134,8 +142,45 @@ describe('TemplateCoverLetterGenerator', () => {
     const output = generator.generate(input as any);
 
     expect(output.content).not.toContain(disallowed);
-    expect(countParagraphs(output.content)).toBe(4);
+    expect(output.paragraphs).toHaveLength(3);
     expect(countWords(output.content)).toBeLessThanOrEqual(350);
+  });
+
+  it('falls back to clean output when job context is sparse', () => {
+    const generator = new TemplateCoverLetterGenerator();
+
+    const output = generator.generate({
+      job: {
+        id: 'job-1',
+        title: null,
+        company: null,
+        responsibilities: [],
+        requirements: [],
+      },
+      allowedBaselineBlocks: [
+        {
+          title: 'Summary',
+          content:
+            'Led support operations planning and owned weekly service reviews.',
+          includePolicy: 'always',
+          order: 0,
+          sectionType: 'summary',
+          id: 'baseline-block-1',
+        },
+      ],
+      closingTemplate: {
+        key: 'steady',
+        text: 'Thank you for your consideration.',
+      },
+      baselineId: 'baseline-1',
+      jobId: 'job-1',
+    } as any);
+
+    expect(output.content.startsWith('Dear Hiring Team,')).toBe(true);
+    expect(output.paragraphs).toHaveLength(3);
+    expect(output.closingParagraphs[0]).toContain('Sincerely,');
+    expect(output.content).not.toContain('undefined');
+    expect(output.content).not.toContain('null');
   });
 
   it('surfaces constraints summary when strict mode is requested', () => {
