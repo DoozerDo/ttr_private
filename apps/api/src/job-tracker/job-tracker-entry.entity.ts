@@ -23,6 +23,9 @@ export class JobTrackerEntry {
   @Column({ type: 'varchar', length: 255 })
   roleTitle!: string;
 
+  @Column({ type: 'date' })
+  dateAdded!: Date;
+
   @Column({ type: 'date', nullable: true })
   dateApplied!: Date | null;
 

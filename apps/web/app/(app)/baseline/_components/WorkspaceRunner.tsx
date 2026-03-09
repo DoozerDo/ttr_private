@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
+import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -77,6 +78,83 @@ type ResultsUrlArgs = {
   baselineId?: string | null;
 };
 
+type JobDetailsPayload = {
+  company?: string | null;
+  title?: string | null;
+};
+
+type ScoreBandKey = "exceptional" | "strong" | "competitive" | "borderline" | "weak";
+
+type ScoreBandPresentation = {
+  key: ScoreBandKey;
+  label: string;
+  summary: string;
+  ctaLabel: string;
+  ctaTarget: "results" | "fitReview";
+  chipLabel: string;
+  chipClassName: string;
+};
+
+export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
+  if (score >= 95) {
+    return {
+      key: "exceptional",
+      label: "Exceptional Match",
+      summary: "Your experience strongly aligns with this role's scope and expectations.",
+      ctaLabel: "Review your results",
+      ctaTarget: "results",
+      chipLabel: "Exceptional",
+      chipClassName: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+    };
+  }
+
+  if (score >= 85) {
+    return {
+      key: "strong",
+      label: "Strong Match",
+      summary: "You are well positioned to pursue this role with tailored materials.",
+      ctaLabel: "Review your results",
+      ctaTarget: "results",
+      chipLabel: "Prime Opportunity",
+      chipClassName: "border-sky-300/40 bg-sky-300/10 text-sky-100",
+    };
+  }
+
+  if (score >= 70) {
+    return {
+      key: "competitive",
+      label: "Competitive Match",
+      summary: "You have a credible path forward and should refine your materials for this role.",
+      ctaLabel: "Review your results",
+      ctaTarget: "results",
+      chipLabel: "Competitive",
+      chipClassName: "border-slate-300/40 bg-slate-300/10 text-slate-100",
+    };
+  }
+
+  if (score >= 50) {
+    return {
+      key: "borderline",
+      label: "Promising but Incomplete",
+      summary: "Important experience may be underrepresented. Review the fit analysis before applying.",
+      ctaLabel: "Improve Fit",
+      ctaTarget: "fitReview",
+      chipLabel: "Needs Improvement",
+      chipClassName: "border-slate-400/50 bg-slate-400/10 text-slate-200",
+    };
+  }
+
+  return {
+    key: "weak",
+    label: "Not Ready Yet",
+    summary: "This role currently shows substantial gaps. Start with Fit Review to see what can be strengthened.",
+    ctaLabel: "Open Fit Review",
+    ctaTarget: "fitReview",
+    chipLabel: "Action Needed",
+    chipClassName: "border-slate-500/60 bg-slate-500/10 text-slate-200",
+  };
+}
+
 export function buildResultsUrl({
   assessmentId,
   jobId,
@@ -101,6 +179,100 @@ export function buildResultsUrl({
   }
 
   return null;
+}
+
+function buildFitReviewUrl(jobId?: string | null, baselineId?: string | null): string {
+  const normalizedJobId = jobId?.trim();
+  const normalizedBaselineId = baselineId?.trim();
+  const params = new URLSearchParams();
+
+  if (normalizedJobId) {
+    params.set("jobId", normalizedJobId);
+  }
+  if (normalizedBaselineId) {
+    params.set("baselineId", normalizedBaselineId);
+  }
+
+  const query = params.toString();
+  return query ? `/fit-review?${query}` : "/fit-review";
+}
+
+function formatScoreValue(score: number | null): string {
+  if (score === null) return "--";
+  const rounded = Math.round(score * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+const PRE_REVEAL_MESSAGES = [
+  "Analyzing role compatibility...",
+  "Scanning experience signals...",
+  "Evaluating leadership scope...",
+  "Comparing operational depth...",
+] as const;
+const PRE_REVEAL_MIN_MS = 1300;
+const COUNT_UP_MS = 720;
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function extractScoreBreakdown(value: FitResultPayload | null): ScoreBreakdown | null {
+  if (!value) return null;
+  const candidates = [
+    (value as { score_breakdown?: unknown }).score_breakdown,
+    (value as { scoreBreakdown?: unknown }).scoreBreakdown,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const typed = candidate as {
+      total_score?: unknown;
+      dimensions?: Array<{
+        key?: unknown;
+        label?: unknown;
+        score?: unknown;
+        weight?: unknown;
+      }>;
+    };
+    if (typeof typed.total_score !== "number" || !Array.isArray(typed.dimensions)) continue;
+
+    const dimensions = typed.dimensions
+      .map((dimension) => {
+        if (
+          typeof dimension?.key !== "string" ||
+          typeof dimension.label !== "string" ||
+          typeof dimension.score !== "number" ||
+          typeof dimension.weight !== "number"
+        ) {
+          return null;
+        }
+        return {
+          key: dimension.key,
+          label: dimension.label,
+          score: dimension.score,
+          weight: dimension.weight,
+        };
+      })
+      .filter(Boolean) as ScoreBreakdown["dimensions"];
+
+    if (!dimensions.length) continue;
+    return {
+      total_score: typed.total_score,
+      dimensions,
+    } as ScoreBreakdown;
+  }
+
+  return null;
+}
+
+function extractFallbackEvidence(value: FitResultPayload | null): string[] {
+  const strengths = (value as { strengths?: unknown } | null)?.strengths;
+  if (!Array.isArray(strengths)) return [];
+  return strengths
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 const extractErrorMessage = (payload: unknown): string | null => {
@@ -274,6 +446,12 @@ export function WorkspaceRunner({
   const [latestCompletedScore, setLatestCompletedScore] = useState<FitResultPayload | null>(
     null,
   );
+  const [isRevealAnalyzing, setIsRevealAnalyzing] = useState(false);
+  const [revealMessageIndex, setRevealMessageIndex] = useState(0);
+  const [revealedScoreValue, setRevealedScoreValue] = useState<number | null>(null);
+  const [opportunityActionNotice, setOpportunityActionNotice] = useState<string | null>(null);
+  const [isAddingOpportunity, setIsAddingOpportunity] = useState(false);
+  const [addedOpportunityKey, setAddedOpportunityKey] = useState<string | null>(null);
   const journeyNavAppState = useJourneyNavAppState();
   const autoRunCombinationRef = useRef<string | null>(null);
   const autoRunCompletionTimerRef = useRef<number | null>(null);
@@ -281,6 +459,8 @@ export function WorkspaceRunner({
   const pendingCompletionKeyRef = useRef<string | null>(null);
   const autoRunTriggerTimerRef = useRef<number | null>(null);
   const scoreSummaryRef = useRef<HTMLDivElement | null>(null);
+  const revealStartMsRef = useRef<number>(0);
+  const revealRunIdRef = useRef(0);
   const [isPreparingMatch, setIsPreparingMatch] = useState(false);
   const AUTO_RUN_DELAY_MS = 320;
   const reportProgressState = useCallback(
@@ -293,6 +473,19 @@ export function WorkspaceRunner({
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("baselineUploadAgainRequest"));
   }, []);
+
+  useEffect(() => {
+    if (!isRevealAnalyzing) {
+      setRevealMessageIndex(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setRevealMessageIndex((current) => (current + 1) % PRE_REVEAL_MESSAGES.length);
+    }, 320);
+
+    return () => window.clearInterval(timer);
+  }, [isRevealAnalyzing]);
 
   useLayoutEffect(() => {
     setSelectedBaselineId(baselineId);
@@ -320,6 +513,31 @@ export function WorkspaceRunner({
   const showLoadLastRun = Boolean(baselineId) && Boolean(jobId);
   const showResult = Boolean(latestCompletedScore);
   const score = typeof displayResult?.score === "number" ? displayResult.score : null;
+  const scoreBreakdown = extractScoreBreakdown(displayResult);
+  const evidenceLinesFromBreakdown = buildEvidenceLines(scoreBreakdown);
+  const evidenceLines =
+    evidenceLinesFromBreakdown.length > 0
+      ? evidenceLinesFromBreakdown
+      : extractFallbackEvidence(displayResult);
+  const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
+  const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
+  const resultsHref =
+    buildResultsUrl({
+      assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
+      jobId: latestJobId,
+      baselineId: latestBaselineId,
+    }) ?? "/results";
+  const fitReviewHref = buildFitReviewUrl(latestJobId, latestBaselineId);
+  const actionHref =
+    scoreBand?.ctaTarget === "fitReview"
+      ? fitReviewHref
+      : resultsHref;
+  const scoreAboveOpportunityThreshold = typeof score === "number" && score >= 70;
+  const canQuickAddOpportunity =
+    scoreAboveOpportunityThreshold && Boolean(latestJobId) && !isAddingOpportunity;
+  const opportunityKey = latestJobId ? `${latestJobId}:${Math.round(score ?? 0)}` : null;
+  const hasAddedCurrentOpportunity =
+    Boolean(opportunityKey) && opportunityKey === addedOpportunityKey;
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-[13px] text-slate-200",
@@ -346,10 +564,17 @@ export function WorkspaceRunner({
     setIsRunning(true);
     setError(null);
     setCompleteBanner(null);
+    setLatestCompletedScore(null);
     setLatestJobId(null);
     setLatestBaselineId(null);
     setRunState(null);
     setShowUploadAgainCTA(false);
+    setOpportunityActionNotice(null);
+    setRevealedScoreValue(0);
+    setIsRevealAnalyzing(true);
+    revealStartMsRef.current = Date.now();
+    const runId = revealRunIdRef.current + 1;
+    revealRunIdRef.current = runId;
 
     try {
       const response = await fetch("/api/analysis/run", {
@@ -380,6 +605,37 @@ export function WorkspaceRunner({
             : null;
       setLatestJobId(resolvedJobId);
       setLatestBaselineId(resolvedBaselineId);
+      const numericScore =
+        typeof nextResult.score === "number" ? nextResult.score : null;
+
+      if (numericScore !== null && runState !== "compliance_blocked") {
+        const elapsed = Date.now() - revealStartMsRef.current;
+        const waitMs = Math.max(0, PRE_REVEAL_MIN_MS - elapsed);
+        if (waitMs > 0) {
+          await delay(waitMs);
+        }
+
+        if (revealRunIdRef.current !== runId) {
+          return;
+        }
+
+        setIsRevealAnalyzing(false);
+
+        const animationStart = Date.now();
+        let current = 0;
+        while (current < numericScore) {
+          const progress = Math.min(1, (Date.now() - animationStart) / COUNT_UP_MS);
+          current = Math.round(numericScore * progress * 10) / 10;
+          setRevealedScoreValue(current);
+          if (progress >= 1) break;
+          await delay(16);
+        }
+        setRevealedScoreValue(numericScore);
+      } else {
+        setIsRevealAnalyzing(false);
+        setRevealedScoreValue(numericScore);
+      }
+
       setLatestCompletedScore(nextResult);
 
       const completionText =
@@ -401,6 +657,8 @@ export function WorkspaceRunner({
       setLatestBaselineId(null);
       setRunState(null);
       autoRunInitiatedRef.current = false;
+      setIsRevealAnalyzing(false);
+      setRevealedScoreValue(null);
       reportProgressState({
         isScoring: false,
         isCompletionMoment: false,
@@ -425,6 +683,8 @@ export function WorkspaceRunner({
     if (!baselineId || !jobId || isLoadingLastRun) return;
 
     setIsLoadingLastRun(true);
+    setIsRevealAnalyzing(false);
+    setRevealedScoreValue(null);
     setError(null);
     setShowUploadAgainCTA(false);
     setCompleteBanner(null);
@@ -447,6 +707,7 @@ export function WorkspaceRunner({
       const nextResult = payload as FitResultPayload;
       setResult(nextResult);
       setLatestCompletedScore(nextResult);
+      setRevealedScoreValue(typeof nextResult.score === "number" ? nextResult.score : null);
 
       const loadedIsBlocked =
         (nextResult as { status?: string } | null)?.status === "compliance_blocked" ||
@@ -486,6 +747,60 @@ export function WorkspaceRunner({
       setIsLoadingLastRun(false);
     }
   };
+
+  const handleAddToOpportunities = useCallback(async () => {
+    if (!latestJobId || !scoreAboveOpportunityThreshold || !score) return;
+
+    setIsAddingOpportunity(true);
+    setOpportunityActionNotice(null);
+
+    try {
+      const jobResponse = await fetch(`/api/jobs/${encodeURIComponent(latestJobId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      let jobPayload: JobDetailsPayload | null = null;
+      if (jobResponse.ok) {
+        const parsed = (await jobResponse.json().catch(() => null)) as JobDetailsPayload | null;
+        jobPayload = parsed;
+      }
+
+      const roleTitle = jobPayload?.title?.trim() || "Untitled role";
+      const company = jobPayload?.company?.trim() || "Unknown company";
+
+      const response = await fetch("/api/job-tracker", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roleTitle,
+          company,
+          cxFitScore: Math.round(score),
+          stage: "Targeted",
+          notes: "Added from score reveal.",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("We couldn't add this role to Opportunities. Please try again.");
+      }
+
+      if (opportunityKey) {
+        setAddedOpportunityKey(opportunityKey);
+      }
+      setOpportunityActionNotice("Added to Opportunities.");
+    } catch (addError) {
+      setOpportunityActionNotice(
+        addError instanceof Error
+          ? addError.message
+          : "We couldn't add this role to Opportunities. Please try again.",
+      );
+    } finally {
+      setIsAddingOpportunity(false);
+    }
+  }, [latestJobId, opportunityKey, score, scoreAboveOpportunityThreshold]);
 
   const handleAutoRunFinalize = useCallback(() => {
     autoRunCombinationRef.current = null;
@@ -610,9 +925,10 @@ export function WorkspaceRunner({
 
   return (
     <SetupModuleCard label="" title="" description="">
-      {isRunning ? (
+      {isRunning || isRevealAnalyzing ? (
         <div className="rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
-          Scoring compatibility.
+          <p className="font-medium text-slate-100">{PRE_REVEAL_MESSAGES[revealMessageIndex]}</p>
+          <p className="mt-1 text-xs text-slate-400">Preparing your score reveal...</p>
         </div>
       ) : error ? (
         <div className="space-y-3">
@@ -652,16 +968,71 @@ export function WorkspaceRunner({
 
       {showResult ? (
         <div ref={scoreSummaryRef} className={resultCardClasses}>
-          <div className="flex flex-col items-center justify-center gap-6 py-10">
+          <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
+            {scoreBand && (score ?? 0) >= 85 ? (
+              <span
+                className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${scoreBand.chipClassName}`}
+              >
+                {scoreBand.chipLabel}
+              </span>
+            ) : null}
             <div className="text-6xl font-bold tracking-tight text-[var(--text-primary)]">
-              {score ?? "--"}
+              {scoreDisplayValue}
             </div>
+            {scoreBand ? (
+              <>
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-300">
+                  {scoreBand.label}
+                </p>
+                <p className="max-w-xs text-sm text-slate-300/90">{scoreBand.summary}</p>
+              </>
+            ) : null}
+            {evidenceLines.length ? (
+              <div className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/40 p-4 text-left">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-300">
+                  Evidence from your background
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                  {evidenceLines.slice(0, 3).map((line) => (
+                    <li key={line}>• {line}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <a
-              href="/results"
+              href={actionHref}
               className="whitespace-nowrap rounded-xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
             >
-              Review your results
+              {scoreBand?.ctaLabel ?? "Review your results"}
             </a>
+            {scoreAboveOpportunityThreshold ? (
+              <button
+                type="button"
+                className="rounded-xl border border-white/25 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                  void handleAddToOpportunities();
+                }}
+                disabled={!canQuickAddOpportunity || hasAddedCurrentOpportunity}
+              >
+                {hasAddedCurrentOpportunity
+                  ? "Added to Opportunities"
+                  : isAddingOpportunity
+                    ? "Adding..."
+                    : "Add to Opportunities"}
+              </button>
+            ) : null}
+            {opportunityActionNotice ? (
+              <p className="text-xs text-slate-400">{opportunityActionNotice}</p>
+            ) : null}
+            <details className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/30 p-3 text-left">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                Why this score?
+              </summary>
+              <p className="mt-2 text-xs text-slate-300">
+                This score reflects how well your background signals align with the role's core scope,
+                operational demands, and context. Review results for full role-fit detail.
+              </p>
+            </details>
           </div>
         </div>
       ) : null}

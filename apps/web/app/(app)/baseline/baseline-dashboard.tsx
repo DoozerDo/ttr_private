@@ -23,6 +23,7 @@ import { ttrComponents } from "@/app/(app)/ui/ttrStyles";
 import { OverflowMenu } from "./_components/OverflowMenu";
 import { SetupModuleCard } from "./_components/SetupModuleCard";
 import { setBaselineName } from "./_components/selectionStore";
+import { BaselineUnlockProgress } from "@/src/components/baseline/BaselineUnlockProgress";
 
 interface BaselineDashboardProps {
   initialBaselines: BaselineDto[];
@@ -81,6 +82,11 @@ export function BaselineDashboard({
   const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(
     null,
   );
+  const [latestUploadedBaselineId, setLatestUploadedBaselineId] = useState<string | null>(
+    null,
+  );
+  const [selectedBaselineDetails, setSelectedBaselineDetails] = useState<BaselineDto | null>(null);
+  const [loadingSelectedBaselineDetails, setLoadingSelectedBaselineDetails] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -140,6 +146,128 @@ export function BaselineDashboard({
   useEffect(() => {
     setBaselineName(selectedBaselineName);
   }, [selectedBaselineName]);
+
+  const fetchBaselineDetails = useCallback(async (baselineId: string) => {
+    setLoadingSelectedBaselineDetails(true);
+    try {
+      const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        setSelectedBaselineDetails(null);
+        return;
+      }
+      const payload = (await response.json()) as BaselineDto;
+      setSelectedBaselineDetails(payload);
+    } catch {
+      setSelectedBaselineDetails(null);
+    } finally {
+      setLoadingSelectedBaselineDetails(false);
+    }
+  }, []);
+
+  const activeBaselineId = selectedBaselineId ?? latestUploadedBaselineId ?? null;
+
+  useEffect(() => {
+    if (!activeBaselineId) {
+      setSelectedBaselineDetails(null);
+      return;
+    }
+
+    void fetchBaselineDetails(activeBaselineId);
+
+    const timer = window.setInterval(() => {
+      void fetchBaselineDetails(activeBaselineId);
+    }, 15000);
+
+    return () => window.clearInterval(timer);
+  }, [activeBaselineId, fetchBaselineDetails]);
+
+  const baselineUnlockState = useMemo(() => {
+    const baseline = selectedBaselineDetails;
+
+    if (!baseline) {
+      return {
+        progressPercent: activeBaselineId ? 28 : 0,
+        milestoneLabel: "Resume ingested",
+        isBaselineReady: false,
+      };
+    }
+
+    const sections = baseline.sections ?? [];
+    const normalizedSections = sections.map((section) => ({
+      type: section.sectionType?.toUpperCase() ?? "",
+      title: (section.title ?? "").toLowerCase(),
+      content: (section.content ?? "").toLowerCase(),
+    }));
+
+    const hasSectionType = (sectionType: string) =>
+      normalizedSections.some((section) => section.type === sectionType);
+
+    const containsAnySignal = (patterns: RegExp[]) =>
+      normalizedSections.some((section) => {
+        const source = `${section.title} ${section.content}`;
+        return patterns.some((pattern) => pattern.test(source));
+      });
+
+    const hasCareerHistory =
+      hasSectionType("EXPERIENCE") || hasSectionType("PROJECT") || normalizedSections.length >= 2;
+    const hasLeadershipScope = containsAnySignal([
+      /\blead(er(ship)?|managed|manager|director|head|vp|executive)\b/i,
+      /\bscope\b/i,
+      /\breport(s|ing)?\b/i,
+    ]);
+    const hasSystemsContext =
+      hasSectionType("SKILLS") ||
+      containsAnySignal([
+        /\bsystem(s)?\b/i,
+        /\bplatform(s)?\b/i,
+        /\bincident\b/i,
+        /\boperations?\b/i,
+        /\btooling\b/i,
+      ]);
+
+    const hasSummary = hasSectionType("SUMMARY");
+    const hasEducationOrProjects = hasSectionType("EDUCATION") || hasSectionType("PROJECT");
+
+    let progressPercent = 0;
+    progressPercent = Math.max(progressPercent, 28);
+    if (hasCareerHistory) progressPercent = Math.max(progressPercent, 45);
+    if (hasLeadershipScope) progressPercent = Math.max(progressPercent, 65);
+    if (hasSystemsContext) progressPercent = Math.max(progressPercent, 82);
+    if (hasSummary || hasEducationOrProjects) progressPercent = Math.max(progressPercent, 92);
+
+    const isBaselineReady =
+      hasCareerHistory &&
+      hasLeadershipScope &&
+      hasSystemsContext &&
+      hasSummary &&
+      (hasEducationOrProjects || normalizedSections.length >= 4);
+
+    if (isBaselineReady) {
+      progressPercent = 100;
+    }
+
+    const milestoneLabel =
+      progressPercent <= 28
+        ? "Resume ingested"
+        : progressPercent <= 45
+          ? "Career history confirmed"
+          : progressPercent <= 65
+            ? "Leadership and scope clarified"
+            : progressPercent <= 82
+              ? "Systems and operational context added"
+              : progressPercent < 100
+                ? "Final baseline validation"
+                : "Baseline ready";
+
+    return {
+      progressPercent,
+      milestoneLabel,
+      isBaselineReady,
+    };
+  }, [activeBaselineId, selectedBaselineDetails]);
   const uploadBaselineFile = async (fileToUpload: File) => {
     if (isUploading) return;
     setError(null);
@@ -206,6 +334,8 @@ export function BaselineDashboard({
       } catch (refreshError) {
         console.error("Unable to refresh baselines after upload", refreshError);
       }
+      setLatestUploadedBaselineId(baselineRecord.id);
+      setBaselineSelection(baselineRecord.id);
       setFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -278,6 +408,25 @@ export function BaselineDashboard({
         <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
           Selected: {selectedBaselineName}
         </p>
+      ) : null}
+
+      {activeBaselineId ? (
+        <BaselineUnlockProgress
+          progressPercent={baselineUnlockState.progressPercent}
+          milestoneLabel={
+            loadingSelectedBaselineDetails
+              ? "Resume ingested"
+              : baselineUnlockState.milestoneLabel
+          }
+          isBaselineReady={baselineUnlockState.isBaselineReady}
+          onContinue={() => {
+            if (!activeBaselineId) return;
+            router.push(getBaselineDetailsHref(activeBaselineId));
+          }}
+          onRunAnalysis={() => {
+            router.push("/analyze");
+          }}
+        />
       ) : null}
 
       {duplicateErrorDetail ? (

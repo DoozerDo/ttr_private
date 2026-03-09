@@ -63,7 +63,7 @@ export function BaselineBlockPolicyPanel({
         const message =
           fetchError instanceof Error
             ? fetchError.message
-            : "Unable to load baseline blocks.";
+            : "Unable to load resume blocks.";
         setError(message);
         setBlocks([]);
       } finally {
@@ -144,7 +144,7 @@ export function BaselineBlockPolicyPanel({
     <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-white">Content Policy</h2>
+          <h2 className="text-lg font-semibold text-white">Resume Content Control</h2>
           <p className="text-xs text-slate-300">
             Manage how each block is treated during resume and cover generation.
           </p>
@@ -154,7 +154,9 @@ export function BaselineBlockPolicyPanel({
           onClick={handleSave}
           disabled={!canSave || saving}
           className={`rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${
-            !canSave || saving ? "bg-slate-500" : "bg-blue-600 hover:bg-blue-700"
+            !canSave || saving
+              ? "bg-slate-500"
+              : "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)]"
           }`}
         >
           {saving ? "Saving..." : "Save policies"}

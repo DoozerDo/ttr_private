@@ -363,6 +363,79 @@ describe('ResumeService', () => {
     expect(result.sections).toHaveLength(4);
   });
 
+  it('applies role-targeted bullet ordering and keeps export path working', async () => {
+    const baselineWithTargetedBullets: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...baselineSection,
+          content: [
+            'Director, Support Operations | Acme Corp | 2020 - 2023',
+            '- Facilitated cross-team planning sessions.',
+            '- Led incident escalation workflows, SLA recovery, and ServiceNow automation.',
+          ].join('\n'),
+        },
+        summarySection,
+        skillsSection,
+        extraSection,
+      ],
+    };
+
+    const targetedJob: Job = {
+      ...mockJob,
+      rawDescription:
+        'Own incident escalation, support operations excellence, SLA targets, and ServiceNow automation.',
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(baselineWithTargetedBullets),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(targetedJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'fit-targeted-1',
+        overallScore: 92,
+      } as FitAssessment),
+    });
+
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const generated = await service.generateResume('user-1', baseRequest);
+    const experienceSection = generated.sections.find(
+      (section) => section.type === BaselineSectionType.EXPERIENCE,
+    );
+    expect(experienceSection?.bullets?.[0]?.text).toContain(
+      'incident escalation workflows',
+    );
+
+    const exported = await service.exportResume('user-1', baseRequest, 'docx');
+    expect(exported.buffer.byteLength).toBeGreaterThan(1000);
+  });
+
   it('records tracker entry info from resume generation', async () => {
     const { service, applicationsService, opportunitiesService } = buildService(
       AUTO_GENERATE_THRESHOLD,

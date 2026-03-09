@@ -11,7 +11,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { TextInput } from "@/components/TextInput";
+import { AnalyzeAnotherRoleBar } from "./components/AnalyzeAnotherRoleBar";
+import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
+import { CareerGravity } from "./components/CareerGravity";
+import { CareerInsightEmerging } from "./components/CareerInsightEmerging";
+import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
+import { FitVerdictReveal } from "./components/FitVerdictReveal";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -254,15 +259,43 @@ const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
 };
 
 const LOW_EXPERIENCE_THRESHOLD = 70;
+const COMPATIBILITY_ANALYSIS_ERROR =
+  "We couldn't complete the compatibility analysis. Please try running the analysis again.";
 
 const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
 
-function mapApplicationConfidenceLabel(value?: number | null): "Very High" | "High" | "Moderate" | "Low" {
-  if (typeof value !== "number") return "Moderate";
-  if (value >= 85) return "Very High";
-  if (value >= 70) return "High";
-  if (value >= 55) return "Moderate";
+function mapFitClassification(score?: number | null): string {
+  if (typeof score !== "number") return "Assessment Pending";
+  if (score >= 95) return "Elite Match";
+  if (score >= 85) return "Top Tier Candidate";
+  if (score >= 70) return "Competitive Alignment";
+  if (score >= 50) return "Developing Fit";
+  return "Misaligned Role";
+}
+
+function resolveConfidenceLevel(input: {
+  confidenceScore?: number | null;
+  scoreBreakdown?: ScoreBreakdownShape | null;
+  summary?: string | null;
+}): "High" | "Moderate" | "Low" {
+  if (typeof input.confidenceScore === "number") {
+    if (input.confidenceScore >= 80) return "High";
+    if (input.confidenceScore >= 50) return "Moderate";
+    return "Low";
+  }
+
+  const breakdownAverage =
+    input.scoreBreakdown?.dimensions?.length
+      ? input.scoreBreakdown.dimensions.reduce((sum, dimension) => {
+          const percent = dimension.weight > 0 ? (dimension.score / dimension.weight) * 100 : 0;
+          return sum + Math.max(0, Math.min(100, percent));
+        }, 0) / input.scoreBreakdown.dimensions.length
+      : 0;
+  const summaryLength = (input.summary ?? "").trim().length;
+
+  if (breakdownAverage >= 80 && summaryLength >= 80) return "High";
+  if (breakdownAverage >= 50) return "Moderate";
   return "Low";
 }
 
@@ -573,20 +606,6 @@ function normalizeDimensionScores(data?: LatestAnalysis | null): FitDimensionSco
 
 type AnyObject = Record<string, unknown>;
 
-function resolveUnknownMessage(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const candidate = value as { message?: unknown; error?: unknown };
-  if (typeof candidate.message === "string" && candidate.message.length) {
-    return candidate.message;
-  }
-  if (typeof candidate.error === "string" && candidate.error.length) {
-    return candidate.error;
-  }
-  return undefined;
-}
-
 function stripInternalKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripInternalKeys);
 
@@ -799,7 +818,6 @@ export default function ResultsPage() {
     const total_score = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
     return { total_score, dimensions };
   }, [latest?.score_breakdown, latest?.scoring_v2?.rubric]);
-  const evidenceLines = useMemo(() => buildEvidenceLines(scoreBreakdown), [scoreBreakdown]);
 
   const scoringV2 = latest?.scoring_v2 ?? null;
   const resultsAssessmentId = latest?.assessmentId ?? null;
@@ -819,9 +837,15 @@ export default function ResultsPage() {
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
   const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
   const dimensionCardClassName = dimensionCardBaseClass;
-  const applicationConfidence = useMemo(
-    () => mapApplicationConfidenceLabel(latest?.confidenceScore ?? activeScore ?? null),
-    [activeScore, latest?.confidenceScore],
+  const verdictClassification = useMemo(() => mapFitClassification(activeScore), [activeScore]);
+  const confidenceLevel = useMemo(
+    () =>
+      resolveConfidenceLevel({
+        confidenceScore: latest?.confidenceScore ?? null,
+        scoreBreakdown,
+        summary: latest?.summary ?? null,
+      }),
+    [latest?.confidenceScore, latest?.summary, scoreBreakdown],
   );
   const strategicStrengths = useMemo(() => {
     const fromNarrative = Array.isArray(latest?.narrative?.strengths) ? latest.narrative.strengths : [];
@@ -1201,8 +1225,8 @@ export default function ResultsPage() {
         setJobId(data.jobId ?? "");
         setAnalysisSource("latest");
         await persistLastAssessmentId(data.assessmentId ?? assessmentId);
-      } catch (error: unknown) {
-        setError(resolveUnknownMessage(error) ?? "Failed to load analysis");
+      } catch {
+        setError(COMPATIBILITY_ANALYSIS_ERROR);
       } finally {
         setLoadingLatest(false);
       }
@@ -1275,8 +1299,8 @@ export default function ResultsPage() {
       const query = params.toString();
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
-    } catch (error: unknown) {
-      setError(resolveUnknownMessage(error) ?? "Failed to load analysis");
+    } catch {
+      setError(COMPATIBILITY_ANALYSIS_ERROR);
     } finally {
       setLoadingLatest(false);
     }
@@ -1342,85 +1366,78 @@ export default function ResultsPage() {
 
   return (
     <PageShell className="results-page-theme">
-      <div className="space-y-6">
+      <div className="space-y-8">
         <PageHeader
           title="Results"
-          description="Review your fit score and take the next step."
+          description="Review your Compatibility Score and take the next step."
         />
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
           {!latest ? (
             <EmptyState
-              title="No analysis yet"
-              body="Load the latest analysis to reveal the fit score summary."
+              title="No compatibility analysis yet"
+              body={
+                loadingLatest
+                  ? "Preparing compatibility report…"
+                  : "Load the latest Compatibility Analysis to reveal your Fit Verdict and Compatibility Score."
+              }
               cta={
                 <FormButton
                   variant="ghost"
                   onClick={() => void loadLatest()}
                   disabled={!jobId || loading || loadingLatest}
                 >
-                  {loadingLatest ? "Loading latest..." : "Load analysis"}
+                  {loadingLatest ? "Preparing report..." : "Load Compatibility Analysis"}
                 </FormButton>
               }
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-5">
-              <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Fit score</p>
-                <div className="mt-2 space-y-4">
-                  <div className="space-y-2">
-                    <p className="text-5xl font-semibold leading-none text-white">
-                      {typeof activeScore === "number" ? activeScore.toFixed(1) : "Pending"}
-                    </p>
-                    <p className="text-sm font-semibold text-slate-100">{activeVerdictDecision.verdict}</p>
-                    <p className="text-sm text-slate-300">
-                      {executionMode
-                        ? "Strong match. Move forward with role-specific documents."
-                        : strategicBrief.strategicSummary}
-                    </p>
-                  </div>
+            <div className="space-y-8">
+              <FitVerdictReveal
+                score={activeScore}
+                classification={verdictClassification}
+                confidenceLevel={confidenceLevel}
+                analysisLoaded={Boolean(latest)}
+              />
 
-                  {evidenceLines.length ? (
-                    <section className="my-4">
-                      <h3 className="text-sm font-semibold text-slate-200">Evidence from your background</h3>
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
-                        {evidenceLines.map((line) => (
-                          <li key={line}>{line}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  ) : null}
+              <CareerInsightEmerging />
 
-                  <div className="space-y-3">
-                    {executionMode ? (
-                      <>
-                        <FormButton
-                          onClick={() => void router.push(studioHref)}
-                          disabled={!canOpenStudio}
-                          className="w-full sm:w-auto"
-                        >
-                          Open Studio
-                        </FormButton>
-                        <p className="text-xs text-slate-400">
-                          {canOpenStudio
-                            ? "Generate your resume and cover letter for this role."
-                            : "Studio will unlock after baseline promotion is complete."}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <FormButton onClick={() => void router.push(fitReviewPath)} className="w-full sm:w-auto">
-                          Open Fit Review
-                        </FormButton>
-                        <p className="text-xs text-slate-400">
-                          Use Fit Review to close the top gaps, then continue in Studio.
-                        </p>
-                      </>
-                    )}
-                  </div>
+              <CareerGravity />
+
+              <section className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                <h3 className="text-lg font-semibold text-slate-100">Strategic Next Move</h3>
+                <p className="text-sm text-slate-300">{strategicBrief.bestNextMove}</p>
+                <div className="pt-2">
+                  {executionMode ? (
+                    <>
+                      <FormButton
+                        onClick={() => void router.push(studioHref)}
+                        disabled={!canOpenStudio}
+                        className="w-full sm:w-auto"
+                      >
+                        Open Studio
+                      </FormButton>
+                      <p className="mt-2 text-xs text-slate-400">
+                        {canOpenStudio
+                          ? "Generate your resume and cover letter for this role."
+                          : "Studio will unlock after baseline promotion is complete."}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <FormButton onClick={() => void router.push(fitReviewPath)} className="w-full sm:w-auto">
+                        Open Fit Review
+                      </FormButton>
+                      <p className="mt-2 text-xs text-slate-400">
+                        Use Fit Review to close the top gaps, then continue in Studio.
+                      </p>
+                    </>
+                  )}
                 </div>
-              </div>
+              </section>
+
+              <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
 
               {scoreBreakdown ? (
                 <details open className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
@@ -1466,9 +1483,22 @@ export default function ResultsPage() {
             </div>
           )}
         </section>
+
+        <CareerAlignmentProgress />
+        <AnalyzeAnotherRoleBar baselineVersionId={latest?.baselineVersionId ?? null} />
+
         {error ? (
           <Alert intent="error" title="Uh oh">
-            {error}
+            <div className="space-y-2">
+              <p>{error}</p>
+              <FormButton
+                variant="ghost"
+                onClick={() => void loadLatest()}
+                disabled={loadingLatest}
+              >
+                {loadingLatest ? "Preparing report..." : "Retry Compatibility Analysis"}
+              </FormButton>
+            </div>
           </Alert>
         ) : null}
 

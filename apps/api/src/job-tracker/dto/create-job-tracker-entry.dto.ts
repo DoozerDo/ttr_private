@@ -28,8 +28,13 @@ export class CreateJobTrackerEntryDto {
   @Max(100)
   cxFitScore!: number;
 
+  @IsOptional()
   @IsDateString()
-  dateApplied!: string;
+  dateAdded?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateApplied?: string;
 
   @IsOptional()
   @IsString()

@@ -15,11 +15,19 @@ import { AnalysisService } from './analysis.service';
 import type { AnalysisRequest } from './analysis.service';
 import { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import { RunExpandedFitAssessmentDto } from './dto/run-expanded-fit-assessment.dto';
+import { AlignmentHistoryService } from './services/alignment-history.service';
+import { CareerGravityService } from './services/career-gravity.service';
+import { ScoreSimulatorService } from './services/score-simulator.service';
 
 @Controller('analysis')
 @UseGuards(AuthGuard('jwt'))
 export class AnalysisController {
-  constructor(private readonly analysisService: AnalysisService) {}
+  constructor(
+    private readonly analysisService: AnalysisService,
+    private readonly alignmentHistoryService: AlignmentHistoryService,
+    private readonly careerGravityService: CareerGravityService,
+    private readonly scoreSimulatorService: ScoreSimulatorService,
+  ) {}
 
   @Post()
   async analyze(
@@ -143,5 +151,42 @@ export class AnalysisController {
       jobId,
       baselineId,
     );
+  }
+
+  @Get('history')
+  async getAlignmentHistory(
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.alignmentHistoryService.getAlignmentHistory(userId);
+  }
+
+  @Get('career-gravity')
+  async getCareerGravity(
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.careerGravityService.getCareerGravity(userId);
+  }
+
+  @Get(':assessmentId/simulation')
+  async getFitScoreSimulation(
+    @Param('assessmentId') assessmentId: string,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    return this.scoreSimulatorService.getSimulation(userId, assessmentId);
   }
 }

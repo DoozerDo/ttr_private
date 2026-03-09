@@ -362,11 +362,6 @@ export function JourneyNavV1({
         .journey-nav-step-button:not(.journey-nav-step-locked):hover .journey-nav-icon-area {
           box-shadow: none;
         }
-        .journey-nav-step-button:not(.journey-nav-step-locked):hover
-          .journey-progress-icon-layer-next {
-          opacity: 0.32 !important;
-        }
-
         .journey-nav-icon-area {
           position: relative;
           width: 52px;

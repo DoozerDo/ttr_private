@@ -63,13 +63,18 @@ export class JobTrackerService {
   }
 
   async createEntry(userId: string, dto: CreateJobTrackerEntryDto) {
+    const resolvedDateAdded = dto.dateAdded
+      ? new Date(dto.dateAdded)
+      : new Date();
+
     const entry = this.jobTrackerRepository.create({
       userId,
       company: dto.company.trim(),
       roleTitle: dto.roleTitle.trim(),
       stage: dto.stage.trim(),
       cxFitScore: dto.cxFitScore,
-      dateApplied: new Date(dto.dateApplied),
+      dateAdded: resolvedDateAdded,
+      dateApplied: dto.dateApplied ? new Date(dto.dateApplied) : null,
       notes: dto.notes?.trim() || null,
       sourceUrl: dto.sourceUrl?.trim() || null,
     });
@@ -105,6 +110,10 @@ export class JobTrackerService {
 
     if (dto.cxFitScore !== undefined) {
       entry.cxFitScore = dto.cxFitScore;
+    }
+
+    if (dto.dateAdded !== undefined) {
+      entry.dateAdded = new Date(dto.dateAdded);
     }
 
     if (dto.dateApplied !== undefined) {
@@ -157,6 +166,7 @@ export class JobTrackerService {
       this.csvEscape(entry.company),
       this.csvEscape(entry.roleTitle),
       this.csvEscape(canonicalStageLabel(entry.stage)),
+      this.csvEscape(this.formatDate(entry.dateAdded)),
       this.csvEscape(this.formatDate(entry.dateApplied)),
       this.csvEscape(entry.cxFitScore.toString()),
       this.csvEscape(entry.sourceUrl ?? ''),
@@ -170,6 +180,7 @@ export class JobTrackerService {
       'company',
       'roleTitle',
       'stage',
+      'dateAdded',
       'dateApplied',
       'cxFitScore',
       'sourceUrl',

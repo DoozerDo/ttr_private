@@ -43,15 +43,19 @@ type OpportunityActionCard = {
 };
 
 const CANONICAL_STAGE_OPTIONS = [
+  { value: 'Targeted', label: 'Targeted' },
   { value: 'Applied', label: 'Applied' },
-  { value: 'Interviewing', label: 'Interviewing' },
+  { value: 'Recruiter Contact', label: 'Recruiter Contact' },
+  { value: 'Interview', label: 'Interview' },
   { value: 'Offer', label: 'Offer' },
   { value: 'Closed', label: 'Closed' },
 ] as const;
 
 const STAGE_MEANINGS: Record<(typeof CANONICAL_STAGE_OPTIONS)[number]['value'], string> = {
+  Targeted: 'Role selected for pursuit and prep.',
   Applied: 'Application sent; waiting on response.',
-  Interviewing: 'In active interview process.',
+  'Recruiter Contact': 'Recruiter outreach or initial screen underway.',
+  Interview: 'In active interview process.',
   Offer: 'Offer received or final-stage decision pending.',
   Closed: 'No longer active (rejected, withdrawn, or archived).',
 };
@@ -66,7 +70,9 @@ type ViewMode = (typeof VIEW_MODES)[number]['id'];
 
 // Legacy stage values remain stored for backward compatibility but should show the canonical label/output.
 const LEGACY_STAGE_TO_CANONICAL: Record<string, CanonicalStageValue> = {
+  Draft: 'Targeted',
   Prospecting: 'Applied',
+  Interviewing: 'Interview',
   Rejected: 'Closed',
   Archived: 'Closed',
 } as const;
@@ -109,6 +115,38 @@ function stageLabel(value: string | undefined | null) {
   if (canonical) return canonical;
   const trimmed = value.trim();
   return trimmed || 'Unknown';
+}
+
+const STAGE_PROGRESS_ORDER: Record<CanonicalStageValue, number> = {
+  Targeted: 1,
+  Applied: 2,
+  'Recruiter Contact': 3,
+  Interview: 4,
+  Offer: 5,
+  Closed: 6,
+};
+
+type ProgressCheck = {
+  id: string;
+  label: string;
+  complete: boolean;
+};
+
+function getProgressChecks(entry: JobTrackerEntry): ProgressCheck[] {
+  const score = typeof entry.cxFitScore === 'number' ? entry.cxFitScore : 0;
+  const canonicalStage = canonicalStageValue(entry.stage);
+  const stageOrder = canonicalStage ? STAGE_PROGRESS_ORDER[canonicalStage] : 0;
+
+  return [
+    { id: 'resume', label: 'Resume ready', complete: score >= 70 },
+    { id: 'cover', label: 'Cover letter ready', complete: score >= 70 },
+    { id: 'applied', label: 'Applied', complete: stageOrder >= STAGE_PROGRESS_ORDER.Applied },
+    {
+      id: 'prep',
+      label: 'Interview prep started',
+      complete: stageOrder >= STAGE_PROGRESS_ORDER['Recruiter Contact'],
+    },
+  ];
 }
 
 type EntrySummary = {
@@ -174,6 +212,13 @@ export default function JobTrackerPage() {
       return haystack.includes(query);
     });
   }, [entries, search]);
+
+  const strongestOpportunities = useMemo(() => {
+    return [...entries]
+      .filter((entry) => typeof entry.cxFitScore === 'number')
+      .sort((a, b) => (b.cxFitScore ?? 0) - (a.cxFitScore ?? 0))
+      .slice(0, 3);
+  }, [entries]);
 
   const pipelineStageGroups = useMemo(() => {
     const groups = CANONICAL_STAGE_OPTIONS.map((option) => ({
@@ -468,6 +513,35 @@ export default function JobTrackerPage() {
           </div>
         </section>
 
+        <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Prioritization</p>
+            <h2 className="text-lg font-semibold text-slate-100">Your strongest opportunities</h2>
+            <p className="text-sm text-slate-300">
+              Ranked by CX Fit Score so high-potential roles stay visible first.
+            </p>
+          </div>
+          {strongestOpportunities.length ? (
+            <div className="space-y-2">
+              {strongestOpportunities.map((entry) => (
+                <div
+                  key={`strongest-${entry.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2"
+                >
+                  <p className="text-sm font-semibold text-slate-100">
+                    {safeString(entry.company) || 'Unknown company'} - {safeString(entry.roleTitle) || 'Untitled role'}
+                  </p>
+                  <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                    Score {(entry.cxFitScore ?? 0).toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">Run compatibility scoring and add opportunities to rank them here.</p>
+          )}
+        </section>
+
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Opportunity signals</h2>
@@ -560,6 +634,7 @@ export default function JobTrackerPage() {
                       <th className="px-3 py-2">Stage</th>
                       <th className="px-3 py-2">Date Applied</th>
                       <th className="px-3 py-2">CX Fit</th>
+                      <th className="px-3 py-2">Progress</th>
                       <th className="px-3 py-2">Created</th>
                       <th className="px-3 py-2">Actions</th>
                     </tr>
@@ -567,6 +642,7 @@ export default function JobTrackerPage() {
                   <tbody>
                     {filteredEntries.map((entry) => {
                       const summary = getEntrySummary(entry);
+                      const progressChecks = getProgressChecks(entry);
                       return (
                         <tr
                           key={entry.id}
@@ -586,6 +662,16 @@ export default function JobTrackerPage() {
                           </td>
                           <td className="px-3 py-2 text-slate-100">
                             {summary.cxFitScore}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="space-y-1">
+                              {progressChecks.map((check) => (
+                                <p key={`${entry.id}-${check.id}`} className="text-xs text-slate-300">
+                                  <span className="mr-1">{check.complete ? '✓' : '□'}</span>
+                                  {check.label}
+                                </p>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-slate-100">
                             {summary.createdAt}
@@ -638,6 +724,7 @@ export default function JobTrackerPage() {
                       <div className="mt-4 space-y-3">
                         {group.entries.map((entry) => {
                           const summary = getEntrySummary(entry);
+                          const progressChecks = getProgressChecks(entry);
                           return (
                             <div
                               key={entry.id}
@@ -691,6 +778,19 @@ export default function JobTrackerPage() {
                                   <p className="text-sm font-semibold text-white">
                                     {summary.createdAt || "-"}
                                   </p>
+                                </div>
+                              </div>
+                              <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                                  Progress
+                                </p>
+                                <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                                  {progressChecks.map((check) => (
+                                    <p key={`${entry.id}-${check.id}`} className="text-xs text-slate-300">
+                                      <span className="mr-1">{check.complete ? '✓' : '□'}</span>
+                                      {check.label}
+                                    </p>
+                                  ))}
                                 </div>
                               </div>
                               <div className="flex flex-wrap gap-2 pt-3">

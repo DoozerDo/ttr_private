@@ -4,6 +4,8 @@ type JourneyProgressIconProps = {
   active?: boolean;
 };
 
+// Single source of truth for journey-nav icons.
+// Old ring/target variants were intentionally removed to prevent visual regressions.
 export function JourneyProgressIcon({ stage, className, active = false }: JourneyProgressIconProps) {
   const stroke = active ? "currentColor" : "currentColor";
   const commonProps = {

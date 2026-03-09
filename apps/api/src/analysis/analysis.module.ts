@@ -16,6 +16,9 @@ import { FitScoresController } from './fit-scores.controller';
 import { AnalysisService } from './analysis.service';
 import { FitScoringService } from './fit-scoring.service';
 import { GapAnalysisService } from './gap-analysis.service';
+import { AlignmentHistoryService } from './services/alignment-history.service';
+import { CareerGravityService } from './services/career-gravity.service';
+import { ScoreSimulatorService } from './services/score-simulator.service';
 
 @Module({
   imports: [
@@ -33,7 +36,14 @@ import { GapAnalysisService } from './gap-analysis.service';
     ComplianceModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
-  providers: [AnalysisService, FitScoringService, GapAnalysisService],
+  providers: [
+    AnalysisService,
+    FitScoringService,
+    GapAnalysisService,
+    AlignmentHistoryService,
+    CareerGravityService,
+    ScoreSimulatorService,
+  ],
   exports: [GapAnalysisService],
 })
 export class AnalysisModule {}

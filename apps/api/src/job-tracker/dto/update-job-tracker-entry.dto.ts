@@ -30,6 +30,10 @@ export class UpdateJobTrackerEntryDto {
 
   @IsOptional()
   @IsDateString()
+  dateAdded?: string;
+
+  @IsOptional()
+  @IsDateString()
   dateApplied?: string;
 
   @IsOptional()
