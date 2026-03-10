@@ -49,6 +49,10 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
     () => scores.reduce((max, entry) => (entry.score > max.score ? entry : max), scores[0]),
     [scores],
   );
+  const rankedTopThree = useMemo(
+    () => [...scores].sort((a, b) => b.score - a.score).slice(0, 3),
+    [scores],
+  );
 
   const selected = useMemo(() => {
     if (!hoveredIndustry) return strongestOpportunity;
@@ -90,7 +94,21 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+      <div className="mt-4 space-y-3 lg:hidden">
+        {rankedTopThree.map((entry) => (
+          <div key={entry.industry} className="rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+            <div className="flex items-center justify-between text-sm">
+              <p className="font-semibold text-slate-100">{entry.industry}</p>
+              <span className="text-xs font-semibold text-emerald-200">{entry.score}</span>
+            </div>
+            <div className="mt-2 h-1.5 w-full rounded-full bg-slate-800">
+              <div className="h-full rounded-full bg-emerald-400/85" style={{ width: `${entry.score}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 hidden gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_180px]">
         <svg viewBox="0 0 360 340" className="h-auto w-full" role="img" aria-label="Opportunity radar chart">
           {rings.map((ring, ringIndex) => (
             <g key={ring.label}>
@@ -101,7 +119,7 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
                 strokeWidth="1"
                 style={{
                   opacity: revealed ? 1 : 0,
-                  transition: "opacity 220ms ease",
+                  transition: "opacity 180ms ease",
                   transitionDelay: `${ringIndex * 80}ms`,
                 }}
               />
@@ -112,7 +130,7 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
                 fill="rgb(148,163,184)"
                 style={{
                   opacity: revealed ? 1 : 0,
-                  transition: "opacity 220ms ease",
+                  transition: "opacity 180ms ease",
                   transitionDelay: `${ringIndex * 80}ms`,
                 }}
               >
@@ -133,7 +151,7 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
                 strokeDasharray={axis.lineLength}
                 strokeDashoffset={revealed ? 0 : axis.lineLength}
                 style={{
-                  transition: "stroke-dashoffset 260ms ease",
+                  transition: "stroke-dashoffset 220ms ease",
                   transitionDelay: `${180 + axis.index * 45}ms`,
                 }}
               />
@@ -154,7 +172,7 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
               transformOrigin: `${CENTER_X}px ${CENTER_Y}px`,
               transform: revealed ? "scale(1)" : "scale(0.75)",
               opacity: revealed ? 1 : 0,
-              transition: "transform 300ms ease, opacity 260ms ease",
+              transition: "transform 240ms ease, opacity 220ms ease",
               transitionDelay: "420ms",
             }}
           >
@@ -177,7 +195,7 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
                   fill={isSelected ? "rgb(110,231,183)" : "rgb(45,212,191)"}
                   opacity={revealed ? 1 : 0}
                   style={{
-                    transition: "all 180ms ease, opacity 220ms ease",
+                    transition: "r 140ms ease, fill 140ms ease, filter 160ms ease, opacity 200ms ease",
                     transitionDelay: `${460 + axis.index * 35}ms`,
                     filter: isSelected ? "drop-shadow(0 0 8px rgba(16,185,129,0.9))" : "drop-shadow(0 0 4px rgba(45,212,191,0.6))",
                     cursor: "pointer",

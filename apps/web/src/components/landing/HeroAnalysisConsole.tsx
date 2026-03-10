@@ -20,7 +20,9 @@ const sampleRoles = [
 type HeroAnalysisConsoleProps = {
   roleInput: string;
   onRoleInputChange: (nextValue: string) => void;
-  onAnalyzeRole: () => void;
+  onAnalyzeRole: (roleOverride?: string) => void;
+  onExampleChipClick: (role: string) => void;
+  onAnalyzeAnotherRole: () => void;
   placeholder: string;
   activeRole: string;
   scenario: HeroScenario;
@@ -42,6 +44,8 @@ export function HeroAnalysisConsole({
   roleInput,
   onRoleInputChange,
   onAnalyzeRole,
+  onExampleChipClick,
+  onAnalyzeAnotherRole,
   placeholder,
   activeRole,
   scenario,
@@ -135,7 +139,7 @@ export function HeroAnalysisConsole({
           />
           <button
             type="button"
-            onClick={onAnalyzeRole}
+            onClick={() => onAnalyzeRole()}
             className="inline-flex w-full items-center justify-center rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
           >
             Analyze Role
@@ -146,7 +150,7 @@ export function HeroAnalysisConsole({
             <button
               key={role}
               type="button"
-              onClick={() => onRoleInputChange(role)}
+              onClick={() => onExampleChipClick(role)}
               className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
             >
               {role}
@@ -245,26 +249,25 @@ export function HeroAnalysisConsole({
               {isAuthenticated ? (
                 <Link
                   href="/baseline"
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-slate-500"
+                  className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
                 >
                   Go to App
                 </Link>
               ) : (
-                <>
-                  <Link
-                    href="/auth/signup"
-                    className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-slate-500"
-                  >
-                    Get Started
-                  </Link>
-                  <Link
-                    href="/auth/login"
-                    className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-slate-500"
-                  >
-                    Log In
-                  </Link>
-                </>
+                <Link
+                  href="/auth/signup"
+                  className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+                >
+                  Create Free Account
+                </Link>
               )}
+              <button
+                type="button"
+                onClick={onAnalyzeAnotherRole}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-slate-500"
+              >
+                Analyze Another Role
+              </button>
             </div>
           </>
         ) : (
@@ -292,21 +295,21 @@ export function HeroAnalysisConsole({
             <div className="mt-2.5 flex flex-wrap gap-2">
               <a
                 href="#opportunity"
-                className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
+                className="inline-flex items-center justify-center rounded-lg bg-sky-300 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-sky-200"
               >
                 Explore Opportunity Paths
               </a>
               {isAuthenticated ? (
                 <Link
                   href="/baseline"
-                  className="inline-flex items-center justify-center rounded-lg bg-sky-300 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-sky-200"
+                  className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
                 >
                   Go to App
                 </Link>
               ) : (
                 <Link
                   href="/auth/signup"
-                  className="inline-flex items-center justify-center rounded-lg bg-sky-300 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-sky-200"
+                  className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
                 >
                   Create Free Account
                 </Link>
