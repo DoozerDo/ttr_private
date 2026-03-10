@@ -7,7 +7,7 @@ import type { HeroScenario } from "@/src/data/heroPreview";
 
 const stages = [
   "Reviewing role requirements",
-  "Mapping verified experience signals",
+  "Mapping verified signals",
   "Running compatibility model",
 ] as const;
 
@@ -66,7 +66,7 @@ export function HeroAnalysisConsole({
   );
 
   const rightPanelTitle =
-    scenario.score >= 70 ? "Outcome Signals" : "Stronger Opportunity Zones Detected";
+    scenario.score >= 70 ? "Signals" : "Stronger Opportunity Zones";
 
   useEffect(() => {
     let disposed = false;
@@ -121,11 +121,11 @@ export function HeroAnalysisConsole({
   }, [runId, scenario.score]);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_minmax(0,1fr)]">
-      <section className="rounded-2xl border border-slate-700 bg-slate-900/65 p-4">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.24fr)_minmax(0,1fr)]">
+      <section className="rounded-2xl border border-slate-700/90 bg-slate-900/60 p-4 shadow-[0_0_0_1px_rgba(148,163,184,0.08)_inset]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Role Input</p>
-        <p className="mt-2 text-sm text-slate-300">Paste a role to see how the engine evaluates fit.</p>
-        <div className="mt-3 space-y-2">
+        <p className="mt-1.5 text-sm text-slate-300">Paste a role to evaluate fit.</p>
+        <div className="mt-2.5 space-y-2">
           <input
             type="text"
             value={roleInput}
@@ -141,7 +141,7 @@ export function HeroAnalysisConsole({
             Analyze Role
           </button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
           {sampleRoles.map((role) => (
             <button
               key={role}
@@ -153,9 +153,9 @@ export function HeroAnalysisConsole({
             </button>
           ))}
         </div>
-        <div className="mt-4 rounded-xl border border-slate-700/80 bg-slate-950/80 p-3">
+        <div className="mt-3 rounded-xl border border-slate-700/80 bg-slate-950/75 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Analysis Sequence</p>
-          <div className="mt-2 space-y-1.5">
+          <div className="mt-2 space-y-1">
             {stageStates.map(({ stage, complete, active }) => (
               <div key={stage} className="flex items-center gap-2 text-xs">
                 <span
@@ -170,26 +170,26 @@ export function HeroAnalysisConsole({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-[0_0_0_1px_rgba(148,163,184,0.1)_inset]">
+      <section className="rounded-2xl border border-slate-700/95 bg-slate-900/74 p-5 shadow-[0_0_0_1px_rgba(148,163,184,0.12)_inset]">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Compatibility Score</p>
           <p className="text-xs text-slate-500">Role {activeRole || scenario.role}</p>
         </div>
-        <div className="mt-4">
-          <p className="text-7xl font-bold leading-none text-white md:text-8xl">{displayScore}</p>
+        <div className="mt-5">
+          <p className="text-7xl font-bold leading-none text-white md:text-8xl lg:text-9xl">{displayScore}</p>
           {showTier ? (
             <p
-              className={`mt-2 inline-flex rounded-md border border-slate-700 px-2 py-1 text-sm font-semibold uppercase tracking-[0.18em] ${statusTone(
+              className={`mt-3 inline-flex rounded-md border border-slate-700 px-2.5 py-1 text-sm font-semibold uppercase tracking-[0.18em] ${statusTone(
                 scenario.score,
               )}`}
             >
               {scenario.tier}
             </p>
           ) : (
-            <p className="mt-2 text-sm text-slate-500">Evaluating</p>
+            <p className="mt-3 text-sm text-slate-500">Evaluating</p>
           )}
         </div>
-        <div className="mt-4 h-1.5 w-full rounded-full bg-slate-800">
+        <div className="mt-5 h-1.5 w-full rounded-full bg-slate-800">
           <div
             className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-300 to-sky-300 transition-all duration-700"
             style={{ width: `${displayScore}%` }}
@@ -197,12 +197,12 @@ export function HeroAnalysisConsole({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-700 bg-slate-900/65 p-4">
+      <section className="rounded-2xl border border-slate-700/90 bg-slate-900/60 p-4 shadow-[0_0_0_1px_rgba(148,163,184,0.08)_inset]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">{rightPanelTitle}</p>
         {scenario.score >= 70 ? (
           <>
             <div
-              className={`mt-3 rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3 transition-all duration-300 ${
+              className={`mt-2.5 rounded-xl border border-emerald-300/28 bg-emerald-400/10 p-3 transition-all duration-300 ${
                 showStrengths ? "translate-y-0 opacity-100" : "translate-y-1 opacity-35"
               }`}
             >
@@ -214,7 +214,7 @@ export function HeroAnalysisConsole({
               </ul>
             </div>
             <div
-              className={`mt-3 rounded-xl border border-amber-300/30 bg-amber-300/10 p-3 transition-all duration-300 ${
+              className={`mt-2.5 rounded-xl border border-amber-300/28 bg-amber-300/10 p-3 transition-all duration-300 ${
                 showGaps ? "translate-y-0 opacity-100" : "translate-y-1 opacity-35"
               }`}
             >
@@ -225,7 +225,7 @@ export function HeroAnalysisConsole({
                 ))}
               </ul>
             </div>
-            <div className="mt-3 rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+            <div className="mt-2.5 rounded-xl border border-slate-700/90 bg-slate-950/72 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Signal Snapshot</p>
               <div className="mt-2 space-y-2">
                 {scenario.strengths.slice(0, 3).map((signal, index) => {
@@ -241,7 +241,7 @@ export function HeroAnalysisConsole({
                 })}
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               {isAuthenticated ? (
                 <Link
                   href="/baseline"
@@ -269,14 +269,14 @@ export function HeroAnalysisConsole({
           </>
         ) : (
           <>
-            <p className="mt-3 text-xs text-sky-100">Your experience signals stronger alignment in these areas.</p>
+            <p className="mt-2.5 text-xs text-sky-100">Your experience aligns more strongly in these areas.</p>
             <div
-              className={`mt-3 space-y-2 transition-all duration-300 ${
+              className={`mt-2.5 space-y-2 transition-all duration-300 ${
                 showPivot ? "translate-y-0 opacity-100" : "translate-y-1 opacity-35"
               }`}
             >
               {scenario.opportunities?.map((opportunity) => (
-                <div key={opportunity.industry} className="rounded-lg border border-sky-300/30 bg-sky-500/10 px-3 py-2">
+                <div key={opportunity.industry} className="rounded-lg border border-sky-300/30 bg-sky-500/10 px-3 py-2.5">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-slate-100">{opportunity.industry}</span>
                     <span className="rounded-full bg-sky-300/20 px-2 py-0.5 text-xs font-semibold text-sky-100">
@@ -289,7 +289,7 @@ export function HeroAnalysisConsole({
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               <a
                 href="#opportunity"
                 className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
