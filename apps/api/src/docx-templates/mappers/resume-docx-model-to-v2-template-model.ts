@@ -13,6 +13,11 @@ const PHONE_PATTERN = /\+?\d[\d().\-\s]{7,}\d/;
 const LINKEDIN_PATTERN = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s|,]+/i;
 const BULLET_PREFIX = '\u2022';
 const SKILLS_PER_LINE = 4;
+const SUMMARY_MAX_WORDS = 90;
+const SUMMARY_LABEL_PATTERN = /^(?:professional\s+summary|summary)[:\s-]*/i;
+const BULLET_OR_LIST_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*\-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
+const PLACEHOLDER_COMPETENCY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:\-]+$/;
+const MOJIBAKE_BULLET = '\u00e2\u20ac\u00a2';
 
 function toText(value?: string | null): string {
   return value?.trim() ?? '';
@@ -48,7 +53,42 @@ function pickSummary(model: ResumeDocxModel): string {
     }
   }
 
-  return lines.filter((line) => line.length > 0 && !isContactLike(line)).join('\n');
+  const normalized = lines
+    .flatMap((line) => line.split(/\n+/))
+    .map((line) => normalizeSummaryLine(line))
+    .filter((line): line is string => Boolean(line))
+    .filter((line) => !isContactLike(line));
+
+  if (!normalized.length) {
+    return '';
+  }
+
+  const bulletLikeCount = normalized.filter(
+    (line) =>
+      BULLET_OR_LIST_PATTERN.test(line) ||
+      line.includes(BULLET_PREFIX) ||
+      line.includes(MOJIBAKE_BULLET) ||
+      PLACEHOLDER_COMPETENCY_PATTERN.test(line),
+  ).length;
+  if (bulletLikeCount > 0 && bulletLikeCount >= Math.ceil(normalized.length / 2)) {
+    return '';
+  }
+
+  const proseOnly = normalized
+    .filter(
+      (line) =>
+        !BULLET_OR_LIST_PATTERN.test(line) &&
+        !line.includes(BULLET_PREFIX) &&
+        !line.includes(MOJIBAKE_BULLET),
+    )
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (!proseOnly.length) {
+    return '';
+  }
+
+  return limitWords(proseOnly.join(' '), SUMMARY_MAX_WORDS);
 }
 
 function pickCoreCompetencies(model: ResumeDocxModel): string {
@@ -62,7 +102,7 @@ function pickCoreCompetencies(model: ResumeDocxModel): string {
         for (const value of group.values ?? []) {
           const normalized = toText(value);
           if (normalized && !isContactLike(normalized)) {
-            lines.push(normalized);
+            lines.push(...splitCompetencyCandidates(normalized));
           }
         }
       }
@@ -71,21 +111,30 @@ function pickCoreCompetencies(model: ResumeDocxModel): string {
       for (const line of item.lines) {
         const normalized = toText(line);
         if (normalized && !isContactLike(normalized)) {
-          lines.push(normalized);
+          lines.push(...splitCompetencyCandidates(normalized));
         }
       }
     }
   }
 
-  const deduped = lines.filter(
+  const normalizedTokens = lines
+    .map((line) => normalizeCompetencyToken(line))
+    .filter((line): line is string => Boolean(line))
+    .filter((line) => !isContactLike(line))
+    .filter((line) => !PLACEHOLDER_COMPETENCY_PATTERN.test(line));
+
+  const deduped = normalizedTokens.filter(
     (line, index) =>
-      lines.findIndex(
+      normalizedTokens.findIndex(
         (candidate) => candidate.toLowerCase() === line.toLowerCase(),
       ) === index,
   );
+  if (!deduped.length) {
+    return '';
+  }
 
   const grouped = chunkArray(deduped, SKILLS_PER_LINE).map((group) =>
-    group.join('  •  '),
+    group.join(`  ${BULLET_PREFIX}  `),
   );
   return grouped.map((line) => `${BULLET_PREFIX} ${line}`).join('\n');
 }
@@ -100,8 +149,11 @@ function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
     .filter((item): item is ExperienceItem => 'role' in item && 'bullets' in item)
     .map((item) => {
       const bullets = (item.bullets ?? [])
-        .map((bullet) => toText(bullet))
-        .filter((bullet) => Boolean(bullet) && !isContactLike(bullet));
+        .flatMap((bullet) => splitBulletLines(bullet))
+        .map((bullet) => normalizeBulletText(bullet))
+        .filter((bullet): bullet is string =>
+          typeof bullet === 'string' && bullet.length > 0 && !isContactLike(bullet),
+        );
 
       if (!bullets.length && item.description?.trim()) {
         const description = item.description.trim();
@@ -111,10 +163,10 @@ function pickExperience(model: ResumeDocxModel): ResumeV2ExperienceItem[] {
       }
 
       return {
-        title: toText(item.role),
-        company: toText(item.company),
-        dates: toText(item.dateRange),
-        location: toText(item.location),
+        title: normalizeHeaderField(item.role),
+        company: normalizeHeaderField(item.company),
+        dates: normalizeHeaderField(item.dateRange),
+        location: normalizeHeaderField(item.location),
         bullets,
       };
     })
@@ -161,7 +213,107 @@ function pickEducation(model: ResumeDocxModel): ResumeV2EducationItem[] {
       school: toText(entry.school),
       grad_year: toText(entry.grad_year),
     }))
-    .filter((entry) => Boolean(entry.degree || entry.school || entry.grad_year));
+    .filter((entry) => isMeaningfulEducationEntry(entry));
+}
+
+function normalizeSummaryLine(line: string): string | null {
+  const trimmed = toText(line).replace(SUMMARY_LABEL_PATTERN, '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed;
+}
+
+function splitCompetencyCandidates(value: string): string[] {
+  return value
+    .split(/[,\u2022;|]/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function normalizeCompetencyToken(value: string): string | null {
+  const normalized = toText(value)
+    .replace(/^(?:core\s+competencies|competencies|skills|technical\s+skills)[:\s-]*/i, '')
+    .replace(/^[\u2022\u25CF\u25E6*\-]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+  if (PLACEHOLDER_COMPETENCY_PATTERN.test(normalized)) {
+    return null;
+  }
+  if (/^(?:and|or)$/i.test(normalized)) {
+    return null;
+  }
+  if (normalized.length < 2) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function normalizeHeaderField(value?: string | null) {
+  return toText(value)
+    .replace(/\s+/g, ' ')
+    .replace(/^[|,\-]+|[|,\-]+$/g, '')
+    .trim();
+}
+
+function splitBulletLines(value?: string | null): string[] {
+  const text = toText(value);
+  if (!text) {
+    return [];
+  }
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeBulletText(value: string): string | null {
+  const normalized = toText(value)
+    .replace(/^[\u2022\u25CF\u25E6*\-]+\s*/, '')
+    .replace(new RegExp(`^${escapeRegExp(MOJIBAKE_BULLET)}\\s*`), '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+  if (PLACEHOLDER_COMPETENCY_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function isMeaningfulEducationEntry(entry: ResumeV2EducationItem): boolean {
+  const all = [entry.degree, entry.school, entry.grad_year].map((value) =>
+    toText(value),
+  );
+
+  if (!all.some(Boolean)) {
+    return false;
+  }
+
+  return all.some((value) => value.length > 1 && !PLACEHOLDER_COMPETENCY_PATTERN.test(value));
+}
+
+function limitWords(value: string, maxWords: number): string {
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return value;
+  }
+
+  const trimmed = words.slice(0, maxWords).join(' ').trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function extractContactFields(contactLines: string[] | undefined) {

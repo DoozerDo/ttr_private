@@ -60,6 +60,16 @@ export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
 };
 
+export type ResumePreExportSnapshot = {
+  baselineId: string;
+  baselineVersionId: string;
+  jobId: string | null;
+  quality: 'optimized' | 'draft';
+  sections: ResumeExportSection[];
+  sectionFragments: Array<{ title: string | null; content: string }>;
+  docxModel: ResumeDocxModel;
+};
+
 @Injectable()
 export class ResumeService {
   constructor(
@@ -577,6 +587,71 @@ export class ResumeService {
     };
   }
 
+  private async buildDocxModelFromGeneration(
+    userId: string,
+    generation: {
+      baselineId: string;
+      sections: ResumeExportSection[];
+    },
+  ) {
+    const baselineForHeader = await this.baselineRepository.findOne({
+      where: { id: generation.baselineId, userId },
+      relations: ['parsedRecords'],
+      order: { parsedRecords: { createdAt: 'DESC' } },
+    });
+    if (!baselineForHeader) {
+      throw new NotFoundException('Baseline not found');
+    }
+    const identity = resolveBaselineIdentity(baselineForHeader);
+    return mapResumeSectionsToDocxModel(generation.sections, identity);
+  }
+
+  async getPreExportSnapshotForDiagnostics(
+    userId: string,
+    request: GenerateResumeRequest,
+  ): Promise<ResumePreExportSnapshot> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException('Pre-export diagnostics are disabled in production.');
+    }
+
+    const generation = await this.generateResume(userId, request, {
+      enforceOneTap: false,
+    });
+
+    if (generation.compliance_blocked) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'COMPLIANCE_VIOLATION',
+          message: 'Cannot create diagnostic snapshot when generation is compliance blocked.',
+          details: {
+            compliance_flags: generation.compliance_flags ?? [],
+            audit_id: generation.auditId ?? generation.audit_id ?? null,
+          },
+        },
+      });
+    }
+
+    const sectionFragments = generation.sections.map((section) => ({
+      title: section.title,
+      content: section.content,
+    }));
+
+    const docxModel = await this.buildDocxModelFromGeneration(userId, {
+      baselineId: generation.baselineId,
+      sections: generation.sections as ResumeExportSection[],
+    });
+
+    return {
+      baselineId: generation.baselineId,
+      baselineVersionId: generation.baselineVersionId,
+      jobId: generation.jobId,
+      quality: generation.quality === 'optimized' ? 'optimized' : 'draft',
+      sections: generation.sections as ResumeExportSection[],
+      sectionFragments,
+      docxModel,
+    };
+  }
+
   async exportResume(
     userId: string,
     request: GenerateResumeRequest,
@@ -612,19 +687,10 @@ export class ResumeService {
       pdfText = this.buildResumeText(sectionFragments);
       buffer = this.buildPdfBuffer(pdfText);
     } else {
-      const baselineForHeader = await this.baselineRepository.findOne({
-        where: { id: generation.baselineId, userId },
-        relations: ['parsedRecords'],
-        order: { parsedRecords: { createdAt: 'DESC' } },
+      const model = await this.buildDocxModelFromGeneration(userId, {
+        baselineId: generation.baselineId,
+        sections: generation.sections as ResumeExportSection[],
       });
-      if (!baselineForHeader) {
-        throw new NotFoundException('Baseline not found');
-      }
-      const identity = resolveBaselineIdentity(baselineForHeader);
-      const model = mapResumeSectionsToDocxModel(
-        generation.sections as ResumeExportSection[],
-        identity,
-      );
       const template = getDocxTemplate<ResumeDocxModel>(
         'resume',
         DEFAULT_RESUME_TEMPLATE_KEY,

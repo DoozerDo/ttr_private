@@ -436,6 +436,338 @@ describe('ResumeService', () => {
     expect(exported.buffer.byteLength).toBeGreaterThan(1000);
   });
 
+  it('runtime generation path suppresses malformed sections and preserves separate experience bullets', async () => {
+    const baselineWithBrokenSections: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: [
+            'SUMMARY',
+            '•',
+            '•',
+            '•',
+            'Background context line to keep extracted baseline text above minimum validation thresholds by including additional verified narrative about support operations planning, incident governance, and cross-functional coordination.',
+          ].join('\n'),
+        },
+        {
+          ...skillsSection,
+          sectionType: BaselineSectionType.SKILLS,
+          title: 'Core Competencies',
+          content: '•  •  •',
+        },
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Support Operations Manager | Example Co | 2021 - 2025',
+            '• Managed revenue-impacting incident workflows • Led billing support operations • Directed two team members',
+            'Partnered across product and operations teams to maintain incident response governance and process quality.',
+            'Documented operational playbooks, maintained service quality standards, and coordinated weekly readiness reviews for customer-facing escalation channels.',
+          ].join('\n'),
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(baselineWithBrokenSections),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'fit-runtime-path-1',
+        overallScore: 92,
+      } as FitAssessment),
+    });
+
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const generated = await service.generateResume('user-1', baseRequest);
+    const foundSummarySection = generated.sections.find(
+      (section) => section.type === BaselineSectionType.SUMMARY,
+    );
+    if (foundSummarySection) {
+      expect((foundSummarySection.content ?? '').trim().toLowerCase()).not.toBe('summary');
+      expect(foundSummarySection.content).not.toContain('•  •  •');
+    }
+    expect(generated.sections.some((section) => section.type === BaselineSectionType.SKILLS)).toBe(false);
+
+    const experienceSection = generated.sections.find(
+      (section) => section.type === BaselineSectionType.EXPERIENCE,
+    );
+    expect(experienceSection).toBeDefined();
+    expect(experienceSection?.bullets.map((bullet: { text: string }) => bullet.text)).toEqual([
+      'Managed revenue-impacting incident workflows',
+      'Led billing support operations',
+      'Directed two team members',
+    ]);
+    expect((experienceSection?.content ?? '').includes('• Managed revenue-impacting incident workflows')).toBe(true);
+    expect((experienceSection?.content ?? '').includes('•  •  •')).toBe(false);
+
+    const exportedPdf = await service.exportResume('user-1', baseRequest, 'pdf');
+    const pdfText = exportedPdf.buffer.toString('latin1');
+    expect(pdfText).toContain('Managed revenue-impacting incident workflows');
+    expect(pdfText).toContain('Led billing support operations');
+    expect(pdfText).toContain('Directed two team members');
+    expect(pdfText).not.toContain('•  •  •');
+  });
+
+  it('runtime generation keeps bullet ranking scoped within each role and preserves role boundaries', async () => {
+    const multiRoleBaseline: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Director, Support Operations | Alpha Co | 2022 - Present',
+            '- Led incident escalation governance and SLA recovery for enterprise support.',
+            '- Owned ServiceNow queue operations and support workflow design.',
+            'Automation & AI-Enabled Operations',
+            'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+            '- Built staffing forecasts and coaching cadence for frontline support teams.',
+            '- Improved onboarding process quality across regional support pods.',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content:
+            'Experienced support operations leader with verified incident governance, tooling, and process execution responsibilities across enterprise customer environments.',
+        },
+        skillsSection,
+        extraSection,
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(multiRoleBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue({
+        ...mockJob,
+        rawDescription:
+          'Own incident escalation, SLA recovery, support operations governance, and ServiceNow workflows.',
+      }),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'fit-runtime-path-role-scoping',
+        overallScore: 95,
+      } as FitAssessment),
+    });
+
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const generated = await service.generateResume('user-1', baseRequest);
+    const experienceSection = generated.sections.find(
+      (section) => section.type === BaselineSectionType.EXPERIENCE,
+    );
+    expect(experienceSection).toBeDefined();
+    expect(experienceSection?.bullets.map((bullet: { text: string }) => bullet.text)).toEqual([
+      'Led incident escalation governance and SLA recovery for enterprise support.',
+      'Owned ServiceNow queue operations and support workflow design.',
+      'Built staffing forecasts and coaching cadence for frontline support teams.',
+      'Improved onboarding process quality across regional support pods.',
+    ]);
+    expect(
+      experienceSection?.bullets.map(
+        (bullet: { source: { experienceEntryIndex?: number } }) =>
+          bullet.source.experienceEntryIndex,
+      ),
+    ).toEqual([0, 0, 1, 1]);
+    expect((experienceSection?.content ?? '')).toContain(
+      'Director, Support Operations | Alpha Co | 2022 - Present',
+    );
+    expect((experienceSection?.content ?? '')).toContain(
+      'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+    );
+    expect((experienceSection?.content ?? '')).not.toContain(
+      '• Automation & AI-Enabled Operations',
+    );
+
+    const exportedPdf = await service.exportResume('user-1', baseRequest, 'pdf');
+    const pdfText = exportedPdf.buffer.toString('latin1');
+    const firstRoleIndex = pdfText.indexOf(
+      'Director, Support Operations | Alpha Co | 2022 - Present',
+    );
+    const secondRoleIndex = pdfText.indexOf(
+      'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+    );
+    expect(firstRoleIndex).toBeGreaterThanOrEqual(0);
+    expect(secondRoleIndex).toBeGreaterThan(firstRoleIndex);
+    expect(pdfText).not.toContain('Automation & AI-Enabled Operations');
+  });
+
+  it('pre-export diagnostic snapshot proves structure is clean before export formatting', async () => {
+    const baselineWithSentinelOne: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Professional Summary',
+          content: 'Summary\nâ€¢\nâ€¢\nâ€¢',
+        },
+        {
+          ...skillsSection,
+          sectionType: BaselineSectionType.SKILLS,
+          title: 'Core Competencies',
+          content: 'â€¢  â€¢  â€¢',
+        },
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Senior Manager, Support Operations | SentinelOne | 2022 - Present',
+            '- Led incident escalation governance and SLA recovery workflows.',
+            '- Owned ServiceNow queue operations and tooling standards.',
+            'Automation & AI-Enabled Operations',
+            'Support Operations Manager | Acme Corp | 2019 - 2022',
+            '- Built staffing forecasts and coaching cadence for support teams.',
+            '- Improved onboarding process quality across regional support pods.',
+            'Delivered cross-functional operational planning, established escalation governance, and partnered with product, engineering, and customer success teams to sustain service quality and response standards across enterprise support channels.',
+            'Maintained weekly readiness reviews, incident follow-up workflows, and documented runbooks that improved operational consistency, communication quality, and ownership clarity for support operations stakeholders.',
+          ].join('\n'),
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(baselineWithSentinelOne),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue({
+        ...mockJob,
+        rawDescription:
+          'Lead support operations, incident escalation governance, and ServiceNow process design.',
+      }),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'fit-pre-export-snapshot',
+        overallScore: 95,
+      } as FitAssessment),
+    });
+
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const snapshot = await service.getPreExportSnapshotForDiagnostics('user-1', baseRequest);
+
+    expect(snapshot.sections.some((section) => section.type === BaselineSectionType.SUMMARY)).toBe(
+      false,
+    );
+    expect(snapshot.sections.some((section) => section.type === BaselineSectionType.SKILLS)).toBe(
+      false,
+    );
+
+    const experienceSection = snapshot.sections.find(
+      (section) => section.type === BaselineSectionType.EXPERIENCE,
+    );
+    expect(experienceSection).toBeDefined();
+    expect(experienceSection?.content ?? '').toContain(
+      'Senior Manager, Support Operations | SentinelOne | 2022 - Present',
+    );
+    expect(experienceSection?.content ?? '').toContain(
+      'Support Operations Manager | Acme Corp | 2019 - 2022',
+    );
+    expect(experienceSection?.content ?? '').not.toContain(
+      '• Automation & AI-Enabled Operations',
+    );
+
+    const experienceDocxSection = snapshot.docxModel.sections.find(
+      (section) => section.key === 'experience',
+    );
+    expect(experienceDocxSection).toBeDefined();
+    const experienceItems = (experienceDocxSection?.items ?? []) as Array<{
+      role?: string;
+      company?: string;
+      bullets?: string[];
+    }>;
+    expect(experienceItems.length).toBeGreaterThanOrEqual(2);
+    expect(experienceItems[0]?.company).toContain('SentinelOne');
+    expect(experienceItems[1]?.company).toContain('Acme');
+    const sentinelBullets = experienceItems[0]?.bullets ?? [];
+    const acmeBullets = experienceItems[1]?.bullets ?? [];
+    expect(sentinelBullets.some((bullet) => /ServiceNow/i.test(bullet))).toBe(true);
+    expect(sentinelBullets.some((bullet) => /staffing forecasts/i.test(bullet))).toBe(false);
+    expect(acmeBullets.some((bullet) => /staffing forecasts/i.test(bullet))).toBe(true);
+  });
+
   it('records tracker entry info from resume generation', async () => {
     const { service, applicationsService, opportunitiesService } = buildService(
       AUTO_GENERATE_THRESHOLD,
@@ -591,12 +923,8 @@ Additional context line to ensure extracted text length remains above validation
 
     const exportResult = await service.exportResume('user-1', baseRequest, 'pdf');
     const latin1Text = exportResult.buffer.toString('latin1');
-    expect(latin1Text).toContain('First bullet');
-    expect(latin1Text).toContain('Second bullet');
-    expect(latin1Text).toContain('Third bullet');
-    expect(latin1Text).toContain('- First bullet');
-    expect(latin1Text).toContain('- Second bullet');
-    expect(latin1Text).toContain('- Third bullet');
+    expect(latin1Text).toContain('Led automation efforts that reduced defects.');
+    expect(latin1Text).toContain('Mentored engineers and delivered measurable results.');
     expect(latin1Text).not.toContain('â€¢');
     expect(latin1Text).not.toContain('&&¢');
     expect(latin1Text).not.toContain('\n& ');

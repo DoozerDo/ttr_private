@@ -97,6 +97,9 @@ const SKILL_VERB_PATTERN = /\b(with|including|designed|developed|managed|led|bui
 const ADDITIONAL_INFO_TITLE = 'Additional Information';
 const DENSE_TEXT_NEWLINE = / {2,}/g;
 const ROLE_PREFIX_PATTERN = /(?:Engineer|Administrator|Manager|Lead|Architect|Developer|Analyst|Consultant|Specialist)$/i;
+const SUMMARY_LABEL_PATTERN = /^(?:professional\s+summary|summary)[:\s-]*/i;
+const LIST_LINE_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*\-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
+const PLACEHOLDER_TOKEN_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:\-]+$/;
 
 function addQuarantinedLine(quarantined: string[], line: string) {
   const trimmed = line.trim();
@@ -526,7 +529,7 @@ function buildSectionItemsFromDraftBullets(
 
   switch (key) {
     case 'summary':
-      return [{ paragraphs: bulletTexts }];
+      return buildSummaryItems(bulletTexts.join('\n'));
     case 'skills':
       return [
         {
@@ -581,13 +584,7 @@ function buildSectionItems(
 function buildSummaryItems(
   content?: string | null,
 ): ResumeSummaryItem[] {
-  const paragraphs = splitParagraphs(content);
-  if (!paragraphs.length) return [];
-
-  const kept = paragraphs
-    .map((paragraph) => paragraph.trim())
-    .filter((paragraph) => paragraph.length > 0);
-
+  const kept = extractRenderableSummaryParagraphs(content);
   if (!kept.length) return [];
   return [
     {
@@ -847,20 +844,24 @@ function sanitizeExperienceHeaderLine(line: string) {
 
 function parseExperienceHeaderSegments(line: string) {
   const segments = line
-    .replace(/,\s+/g, ' | ')
     .split('|')
     .map((part) => part.trim())
     .filter(Boolean);
   const role = segments.shift() || line.trim();
   const remaining = [...segments];
   let dateRange: string | undefined;
-  if (remaining.length && isDateRange(remaining[remaining.length - 1])) {
+  if (remaining.length && isPureDateRangeSegment(remaining[remaining.length - 1])) {
     dateRange = remaining.pop();
   }
   let company: string | undefined;
   let location: string | undefined;
   if (remaining.length) {
-    const parsed = splitCompanyAndLocation(remaining.shift()!);
+    const companySegment = remaining.shift()!;
+    const extracted = extractEmbeddedDateRange(companySegment);
+    if (!dateRange && extracted.dateRange) {
+      dateRange = extracted.dateRange;
+    }
+    const parsed = splitCompanyAndLocation(extracted.value);
     company = parsed.company;
     location = parsed.location;
   }
@@ -908,6 +909,55 @@ function splitCompanyAndLocation(segment: string) {
   };
 }
 
+function extractEmbeddedDateRange(segment: string): {
+  value: string;
+  dateRange?: string;
+} {
+  const trimmed = segment.trim();
+  if (!trimmed) {
+    return { value: '' };
+  }
+
+  const commaIndex = trimmed.lastIndexOf(',');
+  if (commaIndex >= 0) {
+    const left = trimmed.slice(0, commaIndex).trim();
+    const right = trimmed.slice(commaIndex + 1).trim();
+    if (isDateRange(right)) {
+      return { value: left, dateRange: right };
+    }
+  }
+
+  const monthRangeMatch = trimmed.match(
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*[-\u2013\u2014]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}|present)\b/i,
+  );
+  if (typeof monthRangeMatch?.index === 'number' && monthRangeMatch.index > 0) {
+    const value = trimmed
+      .slice(0, monthRangeMatch.index)
+      .trim()
+      .replace(/[,\-–—]+$/, '')
+      .trim();
+    return {
+      value,
+      dateRange: monthRangeMatch[0],
+    };
+  }
+
+  const yearRangeMatch = trimmed.match(/\b\d{4}\s*[-\u2013\u2014]\s*(\d{4}|present)\b/i);
+  if (typeof yearRangeMatch?.index === 'number' && yearRangeMatch.index > 0) {
+    const value = trimmed
+      .slice(0, yearRangeMatch.index)
+      .trim()
+      .replace(/[,\-–—]+$/, '')
+      .trim();
+    return {
+      value,
+      dateRange: yearRangeMatch[0],
+    };
+  }
+
+  return { value: trimmed };
+}
+
 
 function expandDenseText(content?: string | null) {
   const normalized = normalizeContent(content);
@@ -939,6 +989,13 @@ function isDateRange(value: string) {
       value,
     )
   );
+}
+
+function isPureDateRangeSegment(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes(',')) return false;
+  return isDateRange(trimmed);
 }
 
 function isExperienceHeader(line: string) {
@@ -976,6 +1033,56 @@ function buildOtherItems(content?: string | null): ResumeOtherItem[] {
   const lines = splitLines(content);
   if (!lines.length) return [];
   return [{ lines }];
+}
+
+function extractRenderableSummaryParagraphs(content?: string | null): string[] {
+  const normalized = normalizeContent(content);
+  if (!normalized) return [];
+
+  const rawLines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(SUMMARY_LABEL_PATTERN, '').trim())
+    .filter(Boolean);
+
+  if (!rawLines.length) {
+    return [];
+  }
+
+  const bulletLikeCount = rawLines.filter((line) => isBulletLikeSummaryLine(line)).length;
+  if (bulletLikeCount > 0 && bulletLikeCount >= Math.ceil(rawLines.length / 2)) {
+    return [];
+  }
+
+  const proseLines = rawLines
+    .filter((line) => !isBulletLikeSummaryLine(line))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0 && !PLACEHOLDER_TOKEN_PATTERN.test(line));
+
+  if (!proseLines.length) {
+    return [];
+  }
+
+  const paragraph = proseLines.join(' ').trim();
+  return [limitSummaryWords(paragraph, 90)];
+}
+
+function isBulletLikeSummaryLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (LIST_LINE_PATTERN.test(trimmed)) return true;
+  if (trimmed.includes(BULLET_GLYPH) || trimmed.includes('â€¢')) return true;
+  return PLACEHOLDER_TOKEN_PATTERN.test(trimmed);
+}
+
+function limitSummaryWords(value: string, maxWords: number) {
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return value;
+  }
+  const trimmed = words.slice(0, maxWords).join(' ').trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 function splitParagraphs(content?: string | null) {

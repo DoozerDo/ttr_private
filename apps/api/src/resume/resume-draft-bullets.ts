@@ -12,6 +12,7 @@ export interface ResumeDraftBulletSource {
   baselineSectionType: string;
   baselineSectionOrder: number;
   bulletIndex: number;
+  experienceEntryIndex?: number;
 }
 
 export interface ResumeDraftBullet {
@@ -66,6 +67,11 @@ type JobSignalSet = {
 
 const ACTION_VERB_PATTERN =
   /\b(led|built|owned|reduced|improved|delivered|implemented|optimized|launched|scaled|managed|drove|created|designed|mentored|automated)\b/i;
+const BULLET_GLYPH = '\u2022';
+const MOJIBAKE_BULLET = '\u00e2\u20ac\u00a2';
+const SECTION_HEADING_PATTERN =
+  /^(?:summary|professional summary|skills|technical skills|core competencies|experience|professional experience|education|certifications)\s*:?\s*$/i;
+const PLACEHOLDER_ONLY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:\-]+$/;
 const STOPWORDS = new Set([
   'a',
   'an',
@@ -293,8 +299,75 @@ export function splitSectionContentToBulletTexts(
   return bullets;
 }
 
+function extractSummaryBullets(content?: string | null) {
+  const lines = (content ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => normalizeLine(line))
+    .filter(Boolean)
+    .map((line) => line.replace(/^(?:professional\s+summary|summary)\s*:\s*/i, '').trim())
+    .map((line) =>
+      line
+        .replace(new RegExp(`^(?:${MOJIBAKE_BULLET}|&&¢|&¢|${BULLET_GLYPH}|[-*])\\s*`), '')
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const normalizedLines = lines.filter((line) => !SECTION_HEADING_PATTERN.test(line));
+
+  if (!normalizedLines.length) {
+    return [];
+  }
+
+  const bulletLikeCount = normalizedLines.filter(
+    (line) =>
+      BULLET_LINE_PATTERN.test(line) ||
+      line.includes(BULLET_GLYPH) ||
+      line.includes(MOJIBAKE_BULLET),
+  ).length;
+  if (bulletLikeCount > 0 && bulletLikeCount >= Math.ceil(normalizedLines.length / 2)) {
+    return [];
+  }
+
+  const prose = normalizedLines
+    .filter((line) => !BULLET_LINE_PATTERN.test(line))
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0 && !PLACEHOLDER_ONLY_PATTERN.test(line));
+
+  if (!prose.length) {
+    return [];
+  }
+
+  return [{
+    text: prose.join(' '),
+    sourceIndex: 0,
+  }];
+}
+
+function extractSkillBullets(content?: string | null) {
+  const normalized = (content ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(new RegExp(MOJIBAKE_BULLET, 'g'), BULLET_GLYPH)
+    .replace(/&&+Â¢|&Â¢/g, BULLET_GLYPH);
+  if (!normalized.trim()) return [];
+
+  const tokens = normalized
+    .split(/\n|,|;|\||\u2022/)
+    .map((token) => normalizeLine(token))
+    .map((token) =>
+      token.replace(/^(?:skills|technical skills|core competencies)\s*:?\s*/i, '').trim(),
+    )
+    .filter(Boolean)
+    .filter((token) => !SECTION_HEADING_PATTERN.test(token))
+    .filter((token) => !PLACEHOLDER_ONLY_PATTERN.test(token))
+    .filter((token) => token.length > 1);
+
+  return tokens.map((text, sourceIndex) => ({ text, sourceIndex }));
+}
+
 type ExperienceEntry = {
   entryIndex: number;
+  headerLines: string[];
   bullets: Array<{ text: string; sourceIndex: number }>;
 };
 
@@ -310,6 +383,18 @@ function looksLikeExperienceHeader(line: string) {
   );
 }
 
+function isValidExperienceBulletText(text: string) {
+  const normalized = normalizeLine(text);
+  if (!normalized) return false;
+  if (PLACEHOLDER_ONLY_PATTERN.test(normalized)) return false;
+  if (SECTION_HEADING_PATTERN.test(normalized)) return false;
+  if (looksLikeExperienceHeader(normalized)) return false;
+  if (lineLooksLikeHeaderFragment(normalized) && !ACTION_VERB_PATTERN.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
 function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
   const normalized = (content ?? '').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n').map((line) => normalizeLine(line));
@@ -318,45 +403,72 @@ function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
   }
 
   const entries: ExperienceEntry[] = [];
-  let active: ExperienceEntry = { entryIndex: 0, bullets: [] };
+  let active: ExperienceEntry = { entryIndex: 0, headerLines: [], bullets: [] };
+  let sawHeader = false;
+
+  const flushActive = () => {
+    if (!active.bullets.length) return;
+    entries.push(active);
+    active = {
+      entryIndex: entries.length,
+      headerLines: [],
+      bullets: [],
+    };
+    sawHeader = false;
+  };
 
   lines.forEach((line, index) => {
     const bulletMatch = line.match(BULLET_LINE_PATTERN);
     if (bulletMatch) {
       const text = normalizeLine(bulletMatch[1] ?? '');
       if (text) {
-        active.bullets.push({ text, sourceIndex: index });
+        const inlinePieces = text
+          .split(new RegExp(`(?:${BULLET_GLYPH}|${MOJIBAKE_BULLET})`))
+          .map((segment) => normalizeLine(segment))
+          .filter((segment) => isValidExperienceBulletText(segment));
+
+        if (inlinePieces.length > 1) {
+          inlinePieces.forEach((piece) => {
+            active.bullets.push({ text: piece, sourceIndex: index });
+          });
+        } else if (isValidExperienceBulletText(text)) {
+          active.bullets.push({ text, sourceIndex: index });
+        }
       }
       return;
     }
 
-    if (line.includes('â€¢')) {
+    if (line.includes(BULLET_GLYPH) || line.includes(MOJIBAKE_BULLET)) {
       const inlineBullets = line
-        .split('â€¢')
+        .split(new RegExp(`(?:${BULLET_GLYPH}|${MOJIBAKE_BULLET})`))
         .map((segment) => normalizeLine(segment))
         .filter(Boolean);
       if (inlineBullets.length >= 2) {
         inlineBullets.slice(1).forEach((text) => {
-          active.bullets.push({ text, sourceIndex: index });
+          if (isValidExperienceBulletText(text)) {
+            active.bullets.push({ text, sourceIndex: index });
+          }
         });
         return;
       }
     }
 
     if (looksLikeExperienceHeader(line)) {
-      if (active.bullets.length) {
-        entries.push(active);
+      flushActive();
+      active.headerLines.push(line);
+      sawHeader = true;
+      return;
+    }
+
+    if (sawHeader && !active.bullets.length) {
+      // Preserve short role metadata continuation lines (company/date/location).
+      if (line.length <= 140 && !SECTION_HEADING_PATTERN.test(line)) {
+        active.headerLines.push(line);
       }
-      active = {
-        entryIndex: entries.length,
-        bullets: [],
-      };
     }
   });
 
-  if (active.bullets.length) {
-    entries.push(active);
-  }
+  flushActive();
 
   return entries;
 }
@@ -446,6 +558,11 @@ function orderBulletsByRelevance<T extends { stableIndex: number; relevanceScore
   });
 }
 
+type ScoredDraftBullet = ResumeDraftBullet & {
+  relevanceScore: number;
+  stableIndex: number;
+};
+
 type DraftBulletBuildOptions =
   | {
       keywords?: Set<string>;
@@ -479,7 +596,13 @@ export function buildDraftBulletsForSection(
   options?: DraftBulletBuildOptions,
 ): ResumeDraftBullet[] {
   const normalizedOptions = normalizeBuildOptions(options);
-  const parsed = splitSectionContentToBulletTexts(section.content);
+  const sectionType = (section.sectionType ?? '').toUpperCase();
+  const parsed =
+    sectionType === 'SUMMARY'
+      ? extractSummaryBullets(section.content)
+      : sectionType === 'SKILLS'
+      ? extractSkillBullets(section.content)
+      : splitSectionContentToBulletTexts(section.content);
   const strengthSignals = normalizedOptions.gapGuidance?.strengthSignals?.length
     ? new Set(normalizedOptions.gapGuidance.strengthSignals.map((value) => value.toLowerCase()))
     : null;
@@ -496,6 +619,7 @@ export function buildDraftBulletsForSection(
   const buildBullet = (
     entry: { text: string; sourceIndex: number },
     stableIndex: number,
+    experienceEntryIndex?: number,
   ) => {
     const scoreResult = scoreBulletRelevance(
       entry.text,
@@ -517,13 +641,16 @@ export function buildDraftBulletsForSection(
       : buildNoClaimRiskResult();
 
     return {
-      id: `${section.id}:${entry.sourceIndex}`,
+      id: `${section.id}:${experienceEntryIndex ?? 'section'}:${entry.sourceIndex}:${stableIndex}`,
       text: entry.text,
       source: {
         baselineSectionId: section.id,
         baselineSectionType: section.sectionType,
         baselineSectionOrder: section.order,
         bulletIndex: entry.sourceIndex,
+        ...(typeof experienceEntryIndex === 'number'
+          ? { experienceEntryIndex }
+          : {}),
       },
       confidence: inferBulletConfidence(entry.text),
       keywordOverlapCount: overlapCount,
@@ -542,10 +669,17 @@ export function buildDraftBulletsForSection(
   if (section.sectionType === 'EXPERIENCE') {
     const entries = parseExperienceEntries(section.content);
     if (entries.length) {
+      let stableCounter = 0;
       const ordered = entries.flatMap((experienceEntry) => {
-        const withScores = experienceEntry.bullets.map((entry, index) =>
-          buildBullet(entry, index),
-        );
+        const withScores: ScoredDraftBullet[] = experienceEntry.bullets.map((entry) => {
+          const scored = buildBullet(
+            entry,
+            stableCounter,
+            experienceEntry.entryIndex,
+          ) as ScoredDraftBullet;
+          stableCounter += 1;
+          return scored;
+        });
         return orderBulletsByRelevance(withScores, shouldRank);
       });
       return ordered.map(({ relevanceScore, stableIndex, ...bullet }) => bullet);
@@ -556,6 +690,77 @@ export function buildDraftBulletsForSection(
   return orderBulletsByRelevance(withScores, shouldRank).map(
     ({ relevanceScore, stableIndex, ...bullet }) => bullet,
   );
+}
+
+function formatDraftSectionContent(
+  sectionType: string,
+  bullets: ResumeDraftBullet[],
+  fallbackRawContent?: string,
+) {
+  const bulletTexts = bullets
+    .map((bullet) => normalizeLine(bullet.text))
+    .filter((text) => text.length > 0)
+    .filter((text) => !PLACEHOLDER_ONLY_PATTERN.test(text));
+
+  if (!bulletTexts.length) {
+    return '';
+  }
+
+  const upperType = sectionType.toUpperCase();
+  if (upperType === 'SUMMARY') {
+    return bulletTexts.join('\n\n');
+  }
+  if (upperType === 'SKILLS') {
+    return bulletTexts.join(', ');
+  }
+  if (upperType === 'EXPERIENCE') {
+    const entries = parseExperienceEntries(fallbackRawContent);
+    if (entries.length) {
+      const renderedLines: string[] = [];
+
+      entries.forEach((entry, idx) => {
+        const entryBullets = bullets
+          .filter((bullet) => bullet.source.experienceEntryIndex === entry.entryIndex)
+          .map((bullet) => normalizeLine(bullet.text))
+          .filter((text) => text.length > 0)
+          .filter((text) => !PLACEHOLDER_ONLY_PATTERN.test(text));
+
+        if (!entryBullets.length) {
+          return;
+        }
+
+        const headerLines = entry.headerLines
+          .map((line) => normalizeLine(line))
+          .filter((line) => line.length > 0)
+          .filter((line) => !SECTION_HEADING_PATTERN.test(line))
+          .slice(0, 2);
+
+        renderedLines.push(...headerLines);
+        renderedLines.push(...entryBullets.map((text) => `${BULLET_GLYPH} ${text}`));
+        if (idx < entries.length - 1) {
+          renderedLines.push('');
+        }
+      });
+
+      const scopedContent = renderedLines.join('\n').trim();
+      if (scopedContent.length > 0) {
+        return scopedContent;
+      }
+    }
+  }
+
+  const rawLines = (fallbackRawContent ?? '')
+    .split(/\r?\n/)
+    .map((line) => normalizeLine(line))
+    .filter(Boolean)
+    .filter((line) => !BULLET_LINE_PATTERN.test(line))
+    .filter((line) => !line.includes(BULLET_GLYPH))
+    .filter((line) => !line.includes(MOJIBAKE_BULLET))
+    .filter((line) => !SECTION_HEADING_PATTERN.test(line));
+
+  const headerLines = upperType === 'EXPERIENCE' ? rawLines.slice(0, 2) : [];
+  const bulletLines = bulletTexts.map((text) => `${BULLET_GLYPH} ${text}`);
+  return [...headerLines, ...bulletLines].join('\n');
 }
 
 export function buildResumeDraftSections(
@@ -570,23 +775,30 @@ export function buildResumeDraftSections(
   const keywordSet = keywords.length ? new Set(keywords) : undefined;
   const jobSignals = extractJobSignals(options?.jobText);
 
-  return sections.map((section) => {
+  return sections
+    .map<ResumeDraftSection>((section) => {
     const bullets = buildDraftBulletsForSection(section, {
       keywords: keywordSet,
       gapGuidance: options?.gapGuidance,
       claimRiskInventory: options?.claimRiskInventory,
       jobSignals,
     });
+    const content = formatDraftSectionContent(
+      section.sectionType,
+      bullets,
+      section.content ?? '',
+    );
     return {
       id: section.id,
       type: section.sectionType,
       title: section.title,
       order: section.order,
       includePolicy: section.includePolicy ?? BaselineIncludePolicy.OPTIONAL,
-      source: 'baseline',
+      source: 'baseline' as const,
       bullets,
-      content: section.content ?? '',
+      content,
       rawContent: section.content ?? '',
     };
-  });
+    })
+    .filter((section) => section.bullets.length > 0 && section.content.length > 0);
 }

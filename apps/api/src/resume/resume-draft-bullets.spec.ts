@@ -217,4 +217,114 @@ describe('resume draft bullets', () => {
       'Led team planning',
     ]);
   });
+
+  it('suppresses malformed summary and empty competency placeholders in draft sections', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-summary-bad',
+          sectionType: BaselineSectionType.SUMMARY,
+          order: 0,
+          title: 'Summary',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: 'Summary\n•\n•\n•',
+        } as never,
+        {
+          id: 'section-skills-bad',
+          sectionType: BaselineSectionType.SKILLS,
+          order: 1,
+          title: 'Skills',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: '•  •  •',
+        } as never,
+      ],
+      { jobText: 'support operations leadership' },
+    );
+
+    expect(draft).toHaveLength(0);
+  });
+
+  it('splits inline experience bullets into separate preserved bullet items', () => {
+    const section = {
+      id: 'section-inline-bullets',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Support Operations Manager | Example Co | 2021 - 2025',
+        '• Managed incident workflows • Led billing support operations • Directed two team members',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('incident billing support operations leadership')),
+    });
+
+    expect(bullets.map((bullet) => bullet.text)).toEqual([
+      'Led billing support operations',
+      'Managed incident workflows',
+      'Directed two team members',
+    ]);
+  });
+
+  it('keeps bullets scoped to each role and excludes heading fragments from experience bullets', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-role-scope',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          order: 0,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: [
+            'Director, Support Operations | Alpha Co | 2022 - Present',
+            '- Led incident escalation governance and SLA recovery for enterprise support.',
+            '- Owned ServiceNow queue operations and support workflow design.',
+            'Automation & AI-Enabled Operations',
+            'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+            '- Built staffing forecasts and coaching cadence for frontline support teams.',
+            '- Improved onboarding process quality across regional support pods.',
+          ].join('\n'),
+        } as never,
+      ],
+      { jobText: 'incident escalation support operations servicenow leadership' },
+    );
+
+    expect(draft).toHaveLength(1);
+    const [experience] = draft;
+    expect(experience.type).toBe(BaselineSectionType.EXPERIENCE);
+
+    const entryIndexes = experience.bullets.map(
+      (bullet) => bullet.source.experienceEntryIndex,
+    );
+    expect(entryIndexes).toEqual([0, 0, 1, 1]);
+
+    expect(experience.bullets.map((bullet) => bullet.text)).not.toContain(
+      'Automation & AI-Enabled Operations',
+    );
+
+    expect(experience.content).toContain(
+      'Director, Support Operations | Alpha Co | 2022 - Present',
+    );
+    expect(experience.content).toContain(
+      'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+    );
+
+    const directorHeaderIndex = experience.content.indexOf(
+      'Director, Support Operations | Alpha Co | 2022 - Present',
+    );
+    const seniorHeaderIndex = experience.content.indexOf(
+      'Senior Manager, Customer Support | Beta Co | 2018 - 2022',
+    );
+    expect(directorHeaderIndex).toBeGreaterThanOrEqual(0);
+    expect(seniorHeaderIndex).toBeGreaterThan(directorHeaderIndex);
+
+    const directorBulletIndex = experience.content.indexOf(
+      '• Owned ServiceNow queue operations and support workflow design.',
+    );
+    const seniorBulletIndex = experience.content.indexOf(
+      '• Built staffing forecasts and coaching cadence for frontline support teams.',
+    );
+    expect(directorBulletIndex).toBeGreaterThan(directorHeaderIndex);
+    expect(seniorBulletIndex).toBeGreaterThan(seniorHeaderIndex);
+  });
 });

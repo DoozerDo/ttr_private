@@ -87,4 +87,111 @@ describe('mapResumeDocxModelToV2TemplateModel', () => {
       { degree: 'B.S. Management', school: 'State U', grad_year: '2016' },
     ]);
   });
+
+  it('suppresses malformed summary and empty competency placeholders', () => {
+    const model: ResumeDocxModel = {
+      header: {
+        name: 'Casey Candidate',
+      },
+      sections: [
+        {
+          key: 'summary',
+          title: 'Summary',
+          items: [
+            {
+              paragraphs: [
+                'Summary',
+                '•',
+                '•',
+                '•',
+              ],
+            },
+          ],
+        },
+        {
+          key: 'skills',
+          title: 'Skills',
+          items: [
+            {
+              groups: [{ values: ['•', ' ', ' - ', '|'] }],
+            },
+          ],
+        },
+        {
+          key: 'experience',
+          title: 'Experience',
+          items: [
+            {
+              role: 'Director, Support Operations',
+              company: 'Acme Corp',
+              dateRange: '2020 - 2024',
+              location: 'Remote',
+              bullets: ['Led support operations cadence.'],
+            },
+          ],
+        },
+      ],
+    };
+
+    const mapped = mapResumeDocxModelToV2TemplateModel(model);
+    expect(mapped.summary).toBe('');
+    expect(mapped.core_competencies).toBe('');
+    expect(mapped.experience[0]?.title).toBe('Director, Support Operations');
+    expect(mapped.experience[0]?.company).toBe('Acme Corp');
+  });
+
+  it('keeps clean prose summary and trims to readable length', () => {
+    const model: ResumeDocxModel = {
+      header: { name: 'Taylor Candidate' },
+      sections: [
+        {
+          key: 'summary',
+          title: 'Summary',
+          items: [
+            {
+              paragraphs: [
+                'Professional Summary: Operations leader with deep support experience across incident response, process design, and service delivery governance.',
+                'Built cross-functional operating rhythms that improved team reliability and customer outcomes without over-claiming scope.',
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const mapped = mapResumeDocxModelToV2TemplateModel(model);
+    expect(mapped.summary).toContain('Operations leader');
+    expect(mapped.summary).not.toContain('•');
+    expect(mapped.summary.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(90);
+  });
+  it('renders multiline experience bullets as separate bullet items and keeps ordering', () => {
+    const model: ResumeDocxModel = {
+      header: { name: 'Jordan Candidate' },
+      sections: [
+        {
+          key: 'experience',
+          title: 'Experience',
+          items: [
+            {
+              role: 'Support Operations Manager',
+              company: 'Contoso',
+              dateRange: '2022 - 2025',
+              location: 'Remote',
+              bullets: [
+                'â€¢ Managed revenue-impacting incident workflows\nâ€¢ Led billing support operations\nâ€¢ Directed two team members',
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const mapped = mapResumeDocxModelToV2TemplateModel(model);
+    expect(mapped.experience).toHaveLength(1);
+    expect(mapped.experience[0]?.bullets).toEqual([
+      'Managed revenue-impacting incident workflows',
+      'Led billing support operations',
+      'Directed two team members',
+    ]);
+  });
 });

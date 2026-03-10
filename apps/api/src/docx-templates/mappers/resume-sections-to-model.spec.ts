@@ -226,4 +226,46 @@ IT professional with nearly 20 years of experience, starting in IT support befor
     expect(model.sections.find((section) => section.key === 'experience')).toBeDefined();
     expect(model.sections.find((section) => section.key === 'education')).toBeDefined();
   });
+
+  it('suppresses summary section when summary content is malformed bullet list text', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.SUMMARY,
+        title: 'Summary',
+        content: `Summary
+• Led support operations.
+• Owned incident workflows.
+• Improved reporting cadence.`,
+      },
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: `Support Manager | Acme | 2021 - 2024
+• Led team operations.`,
+      },
+    ]);
+
+    expect(model.sections.find((section) => section.key === 'summary')).toBeUndefined();
+    expect(model.sections.find((section) => section.key === 'experience')).toBeDefined();
+  });
+
+  it('keeps role titles with commas intact and extracts company/date cleanly', () => {
+    const model = mapResumeSectionsToDocxModel([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Professional Experience',
+        content: `Director, Support Operations | Acme Corp, August 2019 - March 2025
+• Led support operations and escalation governance.`,
+      },
+    ]);
+
+    const expSection = model.sections.find((section) => section.key === 'experience');
+    const first = expSection?.items[0] as
+      | { role?: string; company?: string; dateRange?: string }
+      | undefined;
+
+    expect(first?.role).toBe('Director, Support Operations');
+    expect(first?.company).toBe('Acme Corp');
+    expect(first?.dateRange).toBe('August 2019 - March 2025');
+  });
 });
