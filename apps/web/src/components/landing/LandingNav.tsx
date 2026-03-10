@@ -1,0 +1,40 @@
+import Link from "next/link";
+
+export function LandingNav() {
+  return (
+    <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-3">
+        <Link href="/" className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-100">
+          Target This Role
+        </Link>
+
+        <nav aria-label="Primary" className="hidden items-center gap-6 text-sm text-slate-300 md:flex">
+          <a href="#product" className="transition-colors hover:text-white">
+            Product
+          </a>
+          <a href="#how-it-works" className="transition-colors hover:text-white">
+            How It Works
+          </a>
+          <a href="#opportunity" className="transition-colors hover:text-white">
+            Opportunity
+          </a>
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/auth/login"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
+          >
+            Log In
+          </Link>
+          <Link
+            href="/auth/signup"
+            className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+          >
+            Get Started
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
+}
