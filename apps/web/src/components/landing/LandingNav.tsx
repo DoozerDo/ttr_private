@@ -1,6 +1,10 @@
 import Link from "next/link";
 
-export function LandingNav() {
+type LandingNavProps = {
+  isAuthenticated: boolean;
+};
+
+export function LandingNav({ isAuthenticated }: LandingNavProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-3">
@@ -21,18 +25,29 @@ export function LandingNav() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link
-            href="/auth/login"
-            className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
-          >
-            Log In
-          </Link>
-          <Link
-            href="/auth/signup"
-            className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
-          >
-            Get Started
-          </Link>
+          {isAuthenticated ? (
+            <Link
+              href="/baseline"
+              className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+            >
+              Go to App
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/auth/login"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Log In
+              </Link>
+              <Link
+                href="/auth/signup"
+                className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+              >
+                Get Started
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

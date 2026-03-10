@@ -8,22 +8,24 @@ import { OpportunityPreviewSection } from "@/src/components/landing/OpportunityP
 import { TruthFirstSection } from "@/src/components/landing/TruthFirstSection";
 
 type LandingPageProps = {
-  analyzeHref: string;
+  isAuthenticated: boolean;
 };
 
-export function LandingPage({ analyzeHref }: LandingPageProps) {
+export function LandingPage({ isAuthenticated }: LandingPageProps) {
+  const analyzeHref = isAuthenticated ? "/analyze" : "/auth/signup";
+
   return (
     <div className="min-h-screen bg-[#06090f] text-slate-100">
-      <LandingNav />
+      <LandingNav isAuthenticated={isAuthenticated} />
       <main>
-        <LandingHero analyzeHref={analyzeHref} />
+        <LandingHero analyzeHref={analyzeHref} isAuthenticated={isAuthenticated} />
         <CompatibilityPrestigeSection />
         <HowItWorksSection />
         <section id="opportunity" className="mx-auto w-full max-w-7xl px-4 py-14">
-          <OpportunityPreviewSection />
+          <OpportunityPreviewSection isAuthenticated={isAuthenticated} />
         </section>
         <TruthFirstSection />
-        <LandingFinalCta />
+        <LandingFinalCta isAuthenticated={isAuthenticated} />
       </main>
       <LandingFooter />
     </div>

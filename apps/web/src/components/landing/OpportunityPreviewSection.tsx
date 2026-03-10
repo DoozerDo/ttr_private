@@ -14,7 +14,11 @@ const analysisSteps = [
   "Evaluating opportunity zones",
 ] as const;
 
-export function OpportunityPreviewSection() {
+type OpportunityPreviewSectionProps = {
+  isAuthenticated?: boolean;
+};
+
+export function OpportunityPreviewSection({ isAuthenticated = false }: OpportunityPreviewSectionProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [activeStep, setActiveStep] = useState<number>(-1);
   const [revealed, setRevealed] = useState(false);
@@ -98,18 +102,29 @@ export function OpportunityPreviewSection() {
           >
             <p className="text-sm font-semibold text-amber-100">Unlock your full opportunity landscape</p>
             <div className="mt-3 flex flex-wrap gap-3">
-              <Link
-                href="/auth/signup"
-                className="inline-flex items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200"
-              >
-                Create Free Account
-              </Link>
-              <Link
-                href="/auth/login"
-                className="inline-flex items-center justify-center rounded-xl border border-amber-200/50 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-100 hover:text-amber-50"
-              >
-                Log In
-              </Link>
+              {isAuthenticated ? (
+                <Link
+                  href="/baseline"
+                  className="inline-flex items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200"
+                >
+                  Go to App
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/auth/signup"
+                    className="inline-flex items-center justify-center rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200"
+                  >
+                    Create Free Account
+                  </Link>
+                  <Link
+                    href="/auth/login"
+                    className="inline-flex items-center justify-center rounded-xl border border-amber-200/50 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-100 hover:text-amber-50"
+                  >
+                    Log In
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>

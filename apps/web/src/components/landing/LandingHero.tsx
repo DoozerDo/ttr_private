@@ -4,9 +4,10 @@ import { HeroAnalysisConsole } from "@/src/components/landing/HeroAnalysisConsol
 
 type LandingHeroProps = {
   analyzeHref: string;
+  isAuthenticated: boolean;
 };
 
-export function LandingHero({ analyzeHref }: LandingHeroProps) {
+export function LandingHero({ analyzeHref, isAuthenticated }: LandingHeroProps) {
   return (
     <section id="product" className="border-b border-slate-800/70">
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
@@ -26,12 +27,21 @@ export function LandingHero({ analyzeHref }: LandingHeroProps) {
             >
               Analyze a Role
             </Link>
-            <Link
-              href="/auth/login"
-              className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
-            >
-              Log In
-            </Link>
+            {isAuthenticated ? (
+              <Link
+                href="/baseline"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Go to App
+              </Link>
+            ) : (
+              <Link
+                href="/auth/login"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white"
+              >
+                Log In
+              </Link>
+            )}
           </div>
         </div>
         <HeroAnalysisConsole />
