@@ -21,6 +21,7 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
   const [runId, setRunId] = useState(0);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [analysisActive, setAnalysisActive] = useState(false);
+  const [hasUserTriggeredAnalysis, setHasUserTriggeredAnalysis] = useState(false);
   const consoleRef = useRef<HTMLDivElement | null>(null);
   const hasTrackedInputStartedRef = useRef(false);
   const hasTrackedAnalyzeClickedRef = useRef(false);
@@ -66,6 +67,7 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
       setRoleInput(nextRole);
       setActiveRole(nextRole);
       setRunId((previous) => previous + 1);
+      setHasUserTriggeredAnalysis(true);
       setPlaceholderIndex((previous) => (previous + 1) % rolePlaceholders.length);
 
       if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) {
@@ -128,11 +130,10 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
           <div className={`mb-5 space-y-2.5 transition-opacity duration-200 lg:mb-7 ${analysisActive ? "opacity-60" : "opacity-100"}`}>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Career Intelligence</p>
             <h1 className="max-w-4xl text-4xl font-semibold leading-tight text-white md:text-5xl lg:text-6xl">
-              Know your chances before you apply
+              Know your chances before you apply.
             </h1>
             <p className="max-w-4xl text-base leading-relaxed text-slate-300 lg:text-[1.05rem]">
-              Target This Role compares verified experience to role requirements so you can see competitiveness before
-              you apply.
+              Evaluate a role against verified experience signals. No guesswork. No inflated resumes.
             </p>
           </div>
 
@@ -148,6 +149,7 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
               scenario={scenario}
               runId={runId}
               isAuthenticated={isAuthenticated}
+              hasUserTriggeredAnalysis={hasUserTriggeredAnalysis}
             />
           </div>
 

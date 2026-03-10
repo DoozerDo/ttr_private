@@ -34,6 +34,7 @@ type HeroAnalysisConsoleProps = {
   scenario: HeroScenario;
   runId: number;
   isAuthenticated: boolean;
+  hasUserTriggeredAnalysis: boolean;
 };
 
 function clamp(value: number, min = 0, max = 100) {
@@ -57,6 +58,7 @@ export function HeroAnalysisConsole({
   scenario,
   runId,
   isAuthenticated,
+  hasUserTriggeredAnalysis,
 }: HeroAnalysisConsoleProps) {
   const [activeStage, setActiveStage] = useState<number>(-1);
   const [displayScore, setDisplayScore] = useState(0);
@@ -65,6 +67,8 @@ export function HeroAnalysisConsole({
   const [showStrengths, setShowStrengths] = useState(false);
   const [showGaps, setShowGaps] = useState(false);
   const [showPivot, setShowPivot] = useState(false);
+  const [hintIndex, setHintIndex] = useState(0);
+  const [showHint, setShowHint] = useState(true);
 
   const stageStates = useMemo(
     () =>
@@ -78,6 +82,18 @@ export function HeroAnalysisConsole({
 
   const rightPanelTitle =
     scenario.score >= 70 ? "Signals" : "Stronger Opportunity Zones";
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setShowHint(false);
+      window.setTimeout(() => {
+        setHintIndex((previous) => (previous + 1) % sampleRoles.length);
+        setShowHint(true);
+      }, 220);
+    }, 3400);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -156,6 +172,15 @@ export function HeroAnalysisConsole({
             Analyze Role
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => onRoleInputChange(sampleRoles[hintIndex])}
+          className={`mt-1.5 text-left text-xs text-slate-400 transition-opacity duration-200 hover:text-slate-200 ${
+            showHint ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          Try: {sampleRoles[hintIndex]}
+        </button>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {sampleRoles.map((role) => (
             <button
@@ -340,6 +365,13 @@ export function HeroAnalysisConsole({
           </>
         )}
       </section>
+
+      {hasUserTriggeredAnalysis && showTier ? (
+        <div className="lg:col-span-3 rounded-xl border border-slate-700/70 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
+          Demo result using a sample baseline profile. Create a free account to run the model against your real
+          experience.
+        </div>
+      ) : null}
     </div>
   );
 }
