@@ -27,7 +27,7 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
 
   const scenario = useMemo(() => getHeroScenarioForRole(activeRole), [activeRole]);
 
-  const trackHeroEvent = useCallback((eventName: "hero_role_input_started" | "hero_analyze_clicked") => {
+  const trackHeroEvent = useCallback((eventName: "hero_role_input_started" | "hero_analyze_started") => {
     if (typeof window === "undefined") return;
     const analyticsWindow = window as Window & {
       dataLayer?: Array<Record<string, unknown>>;
@@ -58,10 +58,11 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
     (roleOverride?: string) => {
       if (!hasTrackedAnalyzeClickedRef.current) {
         hasTrackedAnalyzeClickedRef.current = true;
-        trackHeroEvent("hero_analyze_clicked");
+        trackHeroEvent("hero_analyze_started");
       }
 
       const nextRole = (roleOverride ?? roleInput).trim() || defaultHeroRole;
+      const nextScenario = getHeroScenarioForRole(nextRole);
       setRoleInput(nextRole);
       setActiveRole(nextRole);
       setRunId((previous) => previous + 1);
@@ -74,7 +75,7 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
         }, 60);
         window.setTimeout(() => {
           setAnalysisActive(false);
-        }, 2200);
+        }, nextScenario.score < 70 ? 3400 : 3000);
       }
     },
     [roleInput, trackHeroEvent],
@@ -150,7 +151,25 @@ export function LandingHero({ isAuthenticated }: LandingHeroProps) {
             />
           </div>
 
-          <div className={`mt-5 grid gap-2 rounded-2xl border border-slate-700/80 bg-slate-900/45 p-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300 transition-opacity duration-200 sm:grid-cols-3 ${analysisActive ? "opacity-55" : "opacity-100"}`}>
+          <div className={`mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-700/80 bg-slate-900/45 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 transition-opacity duration-200 ${analysisActive ? "opacity-70" : "opacity-100"}`}>
+            {(analysisActive
+              ? ["Role parsed", "Signals mapped", "Score resolved", "Opportunity paths ready"]
+              : ["Verified baseline required", "Compatibility engine", "Opportunity model", "Truth guard"]
+            ).map((label) => (
+              <span
+                key={label}
+                className={`rounded-full border px-2.5 py-1 ${
+                  analysisActive
+                    ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-200"
+                    : "border-slate-700/80 bg-slate-950/45 text-slate-300"
+                }`}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+
+          <div className={`mt-3 grid gap-2 rounded-2xl border border-slate-700/80 bg-slate-900/45 p-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300 transition-opacity duration-200 sm:grid-cols-3 ${analysisActive ? "opacity-55" : "opacity-100"}`}>
             <p className="rounded-lg border border-slate-700/80 bg-slate-950/45 px-3 py-2 text-center">Verified experience only</p>
             <p className="rounded-lg border border-slate-700/80 bg-slate-950/45 px-3 py-2 text-center">No fabricated metrics</p>
             <p className="rounded-lg border border-slate-700/80 bg-slate-950/45 px-3 py-2 text-center">No inflated scope</p>

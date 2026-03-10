@@ -10,6 +10,12 @@ const stages = [
   "Mapping verified signals",
   "Running compatibility model",
 ] as const;
+const convergenceRows = [
+  { label: "Leadership Scope", width: 88 },
+  { label: "Operational Rigor", width: 81 },
+  { label: "Domain Alignment", width: 72 },
+  { label: "Customer Complexity", width: 76 },
+] as const;
 
 const sampleRoles = [
   "Director of Customer Support",
@@ -55,6 +61,7 @@ export function HeroAnalysisConsole({
   const [activeStage, setActiveStage] = useState<number>(-1);
   const [displayScore, setDisplayScore] = useState(0);
   const [showTier, setShowTier] = useState(false);
+  const [showConvergence, setShowConvergence] = useState(false);
   const [showStrengths, setShowStrengths] = useState(false);
   const [showGaps, setShowGaps] = useState(false);
   const [showPivot, setShowPivot] = useState(false);
@@ -80,12 +87,16 @@ export function HeroAnalysisConsole({
     setActiveStage(0);
     setDisplayScore(0);
     setShowTier(false);
+    setShowConvergence(false);
     setShowStrengths(false);
     setShowGaps(false);
     setShowPivot(false);
 
     timers.push(window.setTimeout(() => !disposed && setActiveStage(1), 520));
     timers.push(window.setTimeout(() => !disposed && setActiveStage(2), 1020));
+
+    timers.push(window.setTimeout(() => !disposed && setShowConvergence(true), 1260));
+    timers.push(window.setTimeout(() => !disposed && setShowConvergence(false), 1600));
 
     timers.push(
       window.setTimeout(() => {
@@ -107,14 +118,14 @@ export function HeroAnalysisConsole({
           }
         };
         animationFrame = window.requestAnimationFrame(tick);
-      }, 1260),
+      }, 1640),
     );
 
-    timers.push(window.setTimeout(() => !disposed && setShowStrengths(true), 2200));
-    timers.push(window.setTimeout(() => !disposed && setShowGaps(true), 2460));
+    timers.push(window.setTimeout(() => !disposed && setShowStrengths(true), 2520));
+    timers.push(window.setTimeout(() => !disposed && setShowGaps(true), 2780));
 
     if (scenario.score < 70) {
-      timers.push(window.setTimeout(() => !disposed && setShowPivot(true), 2780));
+      timers.push(window.setTimeout(() => !disposed && setShowPivot(true), 3080));
     }
 
     return () => {
@@ -179,7 +190,7 @@ export function HeroAnalysisConsole({
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">Compatibility Score</p>
           <p className="text-xs text-slate-500">Role {activeRole || scenario.role}</p>
         </div>
-        <div className="mt-5">
+        <div className={`mt-5 transition-opacity duration-200 ${showConvergence ? "opacity-20" : "opacity-100"}`}>
           <p className="text-7xl font-bold leading-none text-white md:text-8xl lg:text-9xl">{displayScore}</p>
           {showTier ? (
             <p
@@ -198,6 +209,26 @@ export function HeroAnalysisConsole({
             className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-300 to-sky-300 transition-all duration-700"
             style={{ width: `${displayScore}%` }}
           />
+        </div>
+
+        <div
+          className={`mt-3 rounded-lg border border-slate-700/80 bg-slate-950/70 p-2.5 transition-all duration-200 ${
+            showConvergence ? "max-h-28 opacity-100" : "max-h-0 overflow-hidden opacity-0"
+          }`}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Signal convergence</p>
+          <div className="mt-2 space-y-1.5">
+            {convergenceRows.map((row) => (
+              <div key={row.label}>
+                <div className="flex items-center justify-between text-[10px] text-slate-300">
+                  <span>{row.label}</span>
+                </div>
+                <div className="mt-1 h-1 w-full rounded-full bg-slate-800">
+                  <div className="h-full rounded-full bg-sky-300/80 transition-all duration-200" style={{ width: showConvergence ? `${row.width}%` : "0%" }} />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -299,21 +330,12 @@ export function HeroAnalysisConsole({
               >
                 Explore Opportunity Paths
               </a>
-              {isAuthenticated ? (
-                <Link
-                  href="/baseline"
-                  className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
-                >
-                  Go to App
-                </Link>
-              ) : (
-                <Link
-                  href="/auth/signup"
-                  className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
-                >
-                  Create Free Account
-                </Link>
-              )}
+              <Link
+                href="/auth/signup"
+                className="inline-flex items-center justify-center rounded-lg border border-sky-300/60 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:border-sky-200 hover:text-sky-50"
+              >
+                Create Free Account
+              </Link>
             </div>
           </>
         )}
