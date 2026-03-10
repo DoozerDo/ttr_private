@@ -3,6 +3,10 @@ export type OpportunityEntry = {
   score: number;
 };
 
+export type RadarOpportunityEntry = OpportunityEntry & {
+  signals: string[];
+};
+
 export const signals = [
   "Customer Operations Leadership",
   "Support Infrastructure",
@@ -30,12 +34,68 @@ export const opportunities: {
   ],
 };
 
-export const radarScores: OpportunityEntry[] = [
-  { industry: "Enterprise SaaS", score: 93 },
-  { industry: "Fintech", score: 90 },
-  { industry: "Cybersecurity", score: 86 },
-  { industry: "Healthcare Tech", score: 78 },
-  { industry: "Logistics Tech", score: 74 },
-  { industry: "Travel Platforms", score: 49 },
-  { industry: "Retail Platforms", score: 52 },
+export const radarScores: RadarOpportunityEntry[] = [
+  {
+    industry: "Enterprise SaaS",
+    score: 93,
+    signals: [
+      "Customer operations leadership",
+      "Operational process rigor",
+      "Escalation management",
+    ],
+  },
+  {
+    industry: "Fintech",
+    score: 90,
+    signals: [
+      "Incident management discipline",
+      "Regulated support cadence",
+      "Cross team escalation workflow",
+    ],
+  },
+  {
+    industry: "Cybersecurity",
+    score: 86,
+    signals: [
+      "Critical issue ownership",
+      "High urgency support patterns",
+      "Operational resilience mindset",
+    ],
+  },
+  {
+    industry: "Healthcare Tech",
+    score: 78,
+    signals: [
+      "Process governance",
+      "Cross functional coordination",
+      "Customer lifecycle oversight",
+    ],
+  },
+  {
+    industry: "Logistics Tech",
+    score: 74,
+    signals: [
+      "Operational throughput focus",
+      "Service queue management",
+      "Complex support orchestration",
+    ],
+  },
+  {
+    industry: "Travel Platforms",
+    score: 49,
+    signals: [
+      "Consumer demand variance",
+      "Seasonal support constraints",
+      "Domain context gap",
+    ],
+  },
+  {
+    industry: "Retail Platforms",
+    score: 52,
+    signals: [
+      "Consumer journey mismatch",
+      "Platform commerce depth gap",
+      "Pricing and merchandising context",
+    ],
+  },
 ];

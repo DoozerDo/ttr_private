@@ -1,3 +1,4 @@
+import { CareerIntelligenceEngineSection } from "@/src/components/landing/CareerIntelligenceEngineSection";
 import { CompatibilityPrestigeSection } from "@/src/components/landing/CompatibilityPrestigeSection";
 import { HowItWorksSection } from "@/src/components/landing/HowItWorksSection";
 import { LandingFinalCta } from "@/src/components/landing/LandingFinalCta";
@@ -12,15 +13,14 @@ type LandingPageProps = {
 };
 
 export function LandingPage({ isAuthenticated }: LandingPageProps) {
-  const analyzeHref = isAuthenticated ? "/analyze" : "/auth/signup";
-
   return (
     <div className="min-h-screen bg-[#06090f] text-slate-100">
       <LandingNav isAuthenticated={isAuthenticated} />
       <main>
-        <LandingHero analyzeHref={analyzeHref} isAuthenticated={isAuthenticated} />
+        <LandingHero isAuthenticated={isAuthenticated} />
         <CompatibilityPrestigeSection />
         <HowItWorksSection />
+        <CareerIntelligenceEngineSection />
         <section id="opportunity" className="mx-auto w-full max-w-7xl px-4 py-14">
           <OpportunityPreviewSection isAuthenticated={isAuthenticated} />
         </section>
