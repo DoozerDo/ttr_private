@@ -10,6 +10,7 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import type { BaselineDto } from "@/lib/baselines";
 import type { JobDto } from "@/lib/jobs";
 import type { AnalysisResult, JobSourceType, StoredAnalysisRecord } from "../lib/session";
+import { OpportunityPreviewSection } from "@/src/components/landing/OpportunityPreviewSection";
 import {
   normalizeAnalysisResult,
   readLastAnalysis as readStoredAnalysis,
@@ -793,6 +794,7 @@ export default function AnalyzePage() {
           error={error}
           onAssess={handleAnalyze}
         />
+        <OpportunityPreviewSection />
         {resultScore !== null ? (
           <OutputsSection
             score={resultScore}
