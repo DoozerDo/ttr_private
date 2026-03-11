@@ -24,6 +24,8 @@ import { UsersModule } from './users/users.module';
 import { AccessCodesModule } from './access-codes/access-codes.module';
 import { AccessGuard } from './auth/guards/access.guard';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { PreviewModule } from './preview/preview.module';
 
 @Module({
   imports: [
@@ -62,6 +64,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     CoverLettersModule,
     EmailModule,
     StarStoriesModule,
+    AnalyticsModule,
+    PreviewModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,7 +1,7 @@
 const engineCards = [
   {
     title: "Role Compatibility",
-    subtitle: "Know your chances before applying.",
+    subtitle: "Compare verified resume evidence against job requirements.",
     evaluates: [
       "Leadership scope",
       "Operational experience",
@@ -12,7 +12,7 @@ const engineCards = [
   },
   {
     title: "Opportunity Discovery",
-    subtitle: "Find where your experience creates opportunity.",
+    subtitle: "Find roles where your verified background has stronger odds.",
     evaluates: [
       "Transferable leadership",
       "Operational signals",
@@ -36,18 +36,18 @@ const engineCards = [
 export function CareerIntelligenceEngineSection() {
   return (
     <section className="border-y border-slate-800/70 bg-slate-900/10">
-      <div className="mx-auto w-full max-w-7xl px-4 py-14">
-        <div className="mb-6 space-y-2">
+      <div className="mx-auto w-full max-w-7xl px-4 py-10 lg:py-11">
+        <div className="mb-5 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Platform Systems</p>
-          <h2 className="text-3xl font-semibold text-white">The Career Intelligence Engine</h2>
+          <h2 className="text-3xl font-semibold text-white">Why this compatibility analysis is credible</h2>
           <p className="max-w-3xl text-sm text-slate-300">
-            Target This Role evaluates your verified experience across three analytical systems.
+            Target This Role evaluates your verified resume against real job expectations across three systems.
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           {engineCards.map((card) => (
-            <article key={card.title} className="rounded-2xl border border-slate-700 bg-slate-950/60 p-5">
+            <article key={card.title} className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
               <h3 className="text-lg font-semibold text-white">{card.title}</h3>
               <p className="mt-1 text-sm text-slate-300">{card.subtitle}</p>
 

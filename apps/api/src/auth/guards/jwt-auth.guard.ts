@@ -25,7 +25,9 @@ function isPublicRoute(context: ExecutionContext): boolean {
     url === '/auth/redeem-access-code-and-login' ||
     url === '/auth/confirm' ||
     url === '/auth/resend-confirmation' ||
-    url === '/auth/logout'
+    url === '/auth/logout' ||
+    url === '/analytics/event' ||
+    url === '/preview/compatibility-score'
   );
 }
 

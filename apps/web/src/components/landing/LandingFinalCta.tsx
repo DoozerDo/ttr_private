@@ -10,8 +10,8 @@ export function LandingFinalCta({ isAuthenticated }: LandingFinalCtaProps) {
       <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-8">
         <h2 className="text-3xl font-semibold text-white">Stop applying blindly</h2>
         <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-300">
-          Create your baseline, analyze roles with confidence, and discover where your experience creates real
-          opportunity.
+          Upload your resume, compare it against real job descriptions, and target roles with honest compatibility
+          evidence.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           {isAuthenticated ? (

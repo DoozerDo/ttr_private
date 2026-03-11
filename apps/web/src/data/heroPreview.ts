@@ -7,7 +7,7 @@ export type HeroOpportunity = {
 
 export type HeroScenario = {
   id: "high" | "mid" | "low";
-  role: string;
+  jobTitle: string;
   score: number;
   tier: HeroTier;
   strengths: string[];
@@ -18,39 +18,39 @@ export type HeroScenario = {
 const scenarioCatalog: HeroScenario[] = [
   {
     id: "high",
-    role: "Director of Customer Support",
+    jobTitle: "Director of Customer Support",
     score: 92,
     tier: "STRONG FIT",
     strengths: [
-      "Customer operations leadership",
-      "Support infrastructure experience",
-      "Escalation management",
+      "Experience alignment in multi-site support operations",
+      "Leadership level matches team ownership requirements",
+      "Tooling fit across CRM and help desk systems",
     ],
-    gaps: ["Payments platform exposure", "Industry context"],
+    gaps: ["Limited payments workflow ownership", "Less direct fintech context"],
   },
   {
     id: "mid",
-    role: "VP Customer Experience",
+    jobTitle: "VP Customer Experience",
     score: 78,
     tier: "COMPETITIVE",
     strengths: [
-      "Customer journey ownership",
-      "Multi channel support orchestration",
-      "Operational process leadership",
+      "Strong customer journey ownership",
+      "Leadership coverage for support and onboarding",
+      "Operational rigor in cross-functional programs",
     ],
-    gaps: ["Enterprise buyer depth", "Regulated sector context"],
+    gaps: ["Enterprise account depth", "Regulated environment exposure"],
   },
   {
     id: "low",
-    role: "Head of Customer Operations",
+    jobTitle: "Head of Customer Operations",
     score: 64,
     tier: "EMERGING FIT",
     strengths: [
       "Operational process ownership",
-      "Team coordination discipline",
-      "Escalation triage",
+      "Escalation and incident triage discipline",
+      "Customer-facing leadership foundation",
     ],
-    gaps: ["Deep platform domain specialization", "Industry adjacent leadership history"],
+    gaps: ["Platform depth for the target stack", "Domain context for the current role"],
     opportunities: [
       { industry: "Enterprise SaaS", score: 91 },
       { industry: "Cybersecurity Platforms", score: 87 },
@@ -59,17 +59,47 @@ const scenarioCatalog: HeroScenario[] = [
   },
 ];
 
-export const defaultHeroRole = "Director of Customer Support";
+export const defaultHeroJobDescription =
+  "Director of Customer Support. Own global support operations, improve SLA performance, and lead tooling strategy across Zendesk, Salesforce, and analytics workflows.";
 
-export function getHeroScenarioForRole(rawRole: string): HeroScenario {
-  const normalized = rawRole.trim().toLowerCase();
-  if (!normalized) return scenarioCatalog[0];
+export function getHeroScenarioForComparison(input: {
+  jobDescription: string;
+  hasResume: boolean;
+  scoreOverride?: number | null;
+}): HeroScenario {
+  const scenario = (() => {
+    if (!input.hasResume) return scenarioCatalog[2];
+    const normalized = input.jobDescription.trim().toLowerCase();
+    if (!normalized) return scenarioCatalog[1];
 
-  if (normalized.includes("head")) return scenarioCatalog[2];
-  if (normalized.includes("vp")) return scenarioCatalog[1];
-  if (normalized.includes("director")) return scenarioCatalog[0];
-  if (normalized.includes("support")) return scenarioCatalog[0];
-  if (normalized.includes("operations")) return scenarioCatalog[2];
-  if (normalized.includes("experience")) return scenarioCatalog[1];
-  return scenarioCatalog[1];
+    if (normalized.includes("director")) return scenarioCatalog[0];
+    if (normalized.includes("vp")) return scenarioCatalog[1];
+    if (normalized.includes("head")) return scenarioCatalog[2];
+    if (normalized.includes("zendesk") || normalized.includes("salesforce")) return scenarioCatalog[0];
+    if (normalized.includes("journey") || normalized.includes("experience")) return scenarioCatalog[1];
+    if (normalized.includes("operations") || normalized.includes("incident")) return scenarioCatalog[2];
+    return scenarioCatalog[1];
+  })();
+
+  const score =
+    typeof input.scoreOverride === "number" && Number.isFinite(input.scoreOverride)
+      ? Math.max(25, Math.min(92, Math.round(input.scoreOverride)))
+      : scenario.score;
+
+  const tier: HeroTier =
+    score >= 90
+      ? "ELITE FIT"
+      : score >= 85
+        ? "STRONG FIT"
+        : score >= 70
+          ? "COMPETITIVE"
+          : score >= 55
+            ? "EMERGING FIT"
+            : "MISALIGNED";
+
+  return {
+    ...scenario,
+    score,
+    tier,
+  };
 }

@@ -26,6 +26,7 @@ import {
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import type { RiskFactor } from "@/lib/resultsInsights";
+import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -728,6 +729,7 @@ export default function ResultsPage() {
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   const lastAssessmentHydrationAttempted = useRef(false);
+  const trackedCompletionKeysRef = useRef<Set<string>>(new Set());
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -926,8 +928,13 @@ export default function ResultsPage() {
     if (latestBaselineVersionId) {
       params.set("baselineVersionId", latestBaselineVersionId);
     }
+    params.set("entrySource", "results");
     return `/studio?${params.toString()}`;
   }, [latest?.jobId, latestBaselineVersionId]);
+
+  const navigateToStudio = useCallback(() => {
+    void router.push(studioHref);
+  }, [router, studioHref]);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -1053,7 +1060,13 @@ export default function ResultsPage() {
             {cta ? (
               <div>
                 <FormButton
-                  onClick={() => void router.push(cta.href)}
+                  onClick={() => {
+                    if (cta.href.startsWith("/studio")) {
+                      navigateToStudio();
+                      return;
+                    }
+                    void router.push(cta.href);
+                  }}
                   disabled={!!driver.ctaDisabled}
                 >
                   {cta.label}
@@ -1364,6 +1377,29 @@ export default function ResultsPage() {
     void hydrateLastAssessment();
   }, [runIdentifier, router]);
 
+  useEffect(() => {
+    if (!latest || typeof activeScore !== "number") {
+      return;
+    }
+
+    const completionKey =
+      latest.assessmentId?.trim() ||
+      `${latest.jobId ?? "job"}:${latest.baselineId ?? "baseline"}:${activeScore}`;
+
+    if (trackedCompletionKeysRef.current.has(completionKey)) {
+      return;
+    }
+
+    trackedCompletionKeysRef.current.add(completionKey);
+    trackEvent("role_analysis_completed", {
+      source: "results",
+      score: activeScore,
+      scoreBucket: resolveScoreBucket(activeScore),
+      jobId: latest.jobId ?? undefined,
+      baselineId: latest.baselineId ?? undefined,
+    });
+  }, [activeScore, latest]);
+
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-8">
@@ -1412,7 +1448,7 @@ export default function ResultsPage() {
                   {executionMode ? (
                     <>
                       <FormButton
-                        onClick={() => void router.push(studioHref)}
+                        onClick={() => navigateToStudio()}
                         disabled={!canOpenStudio}
                         className="w-full sm:w-auto"
                       >

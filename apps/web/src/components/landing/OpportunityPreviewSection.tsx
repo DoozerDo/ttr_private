@@ -66,10 +66,9 @@ export function OpportunityPreviewSection({ isAuthenticated = false }: Opportuni
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
               Opportunity Evaluation Preview
             </p>
-            <h2 className="text-3xl font-semibold text-white">Transferable signals reveal where you can win next.</h2>
+            <h2 className="text-3xl font-semibold text-white">After compatibility, see where your profile wins next.</h2>
             <p className="text-sm leading-relaxed text-slate-300">
-              This demo preview shows how baseline signals can open opportunities across industries before a full
-              account analysis.
+              This preview shows how resume-to-job analysis can expand into realistic opportunity targeting.
             </p>
           </div>
 

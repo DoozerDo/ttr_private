@@ -8,6 +8,7 @@ import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
+import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 type ProgressState = {
   isScoring: boolean;
@@ -790,6 +791,13 @@ export function WorkspaceRunner({
       if (opportunityKey) {
         setAddedOpportunityKey(opportunityKey);
       }
+      trackEvent("opportunity_saved", {
+        source: "workspace",
+        score,
+        scoreBucket: resolveScoreBucket(score),
+        jobId: latestJobId ?? undefined,
+        baselineId: latestBaselineId ?? undefined,
+      });
       setOpportunityActionNotice("Added to Opportunities.");
     } catch (addError) {
       setOpportunityActionNotice(

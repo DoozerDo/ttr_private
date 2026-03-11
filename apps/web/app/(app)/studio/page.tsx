@@ -33,6 +33,7 @@ import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { ResumePreview } from "./ResumePreview";
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
+import { trackEvent } from "@/src/lib/analytics";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
@@ -197,6 +198,7 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
 export default function StudioPage() {
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
+  const trackedStudioOpenRef = useRef(false);
   const requestedJobId = useMemo(
     () => searchParams.get("jobId")?.trim() ?? "",
     [searchParamValue],
@@ -205,6 +207,38 @@ export default function StudioPage() {
     () => searchParams.get("baselineVersionId")?.trim() ?? "",
     [searchParamValue],
   );
+
+  useEffect(() => {
+    if (trackedStudioOpenRef.current) {
+      return;
+    }
+    trackedStudioOpenRef.current = true;
+
+    const explicitEntry = (searchParams.get("entrySource") ?? "").trim().toLowerCase();
+    const allowed = new Set(["results", "nav", "direct", "unknown"]);
+    const baselineIdFromQuery = searchParams.get("baselineId")?.trim() || undefined;
+
+    let entrySource: "results" | "nav" | "direct" | "unknown" = "unknown";
+    if (allowed.has(explicitEntry)) {
+      entrySource = explicitEntry as "results" | "nav" | "direct" | "unknown";
+    } else if (!document.referrer) {
+      entrySource = "direct";
+    } else {
+      try {
+        const referrerUrl = new URL(document.referrer);
+        if (referrerUrl.origin === window.location.origin && referrerUrl.pathname === "/results") {
+          entrySource = "results";
+        }
+      } catch {
+        entrySource = "unknown";
+      }
+    }
+
+    trackEvent("resume_studio_opened", {
+      entrySource,
+      baselineId: baselineIdFromQuery,
+    });
+  }, [searchParams]);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
