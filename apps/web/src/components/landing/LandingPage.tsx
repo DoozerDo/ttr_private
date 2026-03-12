@@ -1,4 +1,3 @@
-import { DemoAnalysisCta } from "@/src/components/landing/DemoAnalysisCta";
 import { DemoAnalysisPreviewSection } from "@/src/components/landing/DemoAnalysisPreviewSection";
 import { HowItWorksSection } from "@/src/components/landing/HowItWorksSection";
 import { LandingCompatibilityInputSection } from "@/src/components/landing/LandingCompatibilityInputSection";
@@ -20,7 +19,6 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       <main>
         <LandingHero />
         <DemoAnalysisPreviewSection />
-        <DemoAnalysisCta />
         <LandingCompatibilityInputSection />
         <HowItWorksSection />
         <TruthFirstSection />

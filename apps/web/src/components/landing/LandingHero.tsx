@@ -14,12 +14,12 @@ export function LandingHero() {
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-12 pt-12 md:px-10 lg:px-16">
+      <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-8 pt-10 md:px-10 md:pb-10 md:pt-12 lg:px-16">
         <div className="max-w-[860px]">
-          <h1 className="text-3xl font-semibold leading-tight text-white lg:text-4xl xl:text-[2.5rem]">
+          <h1 className="text-3xl font-semibold leading-tight text-white md:text-4xl lg:text-[38px]">
             Know that you qualify before you apply.
           </h1>
-          <p className="mt-3 max-w-[760px] text-base leading-relaxed text-slate-300 lg:text-lg">
+          <p className="mt-2.5 max-w-[760px] text-base leading-relaxed text-slate-300 lg:text-lg">
             Target This Role compares your resume to real job descriptions and shows whether you actually qualify.
           </p>
         </div>

@@ -83,7 +83,7 @@ export function DemoAnalysisPreviewSection() {
 
   return (
     <section id="demo-analysis-preview" ref={sectionRef} className="border-b border-slate-800/70 bg-slate-900/35">
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-12 md:px-10 lg:px-16">
+      <div className="mx-auto w-full max-w-[1200px] px-4 pb-10 pt-7 md:px-10 lg:px-16">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold text-white lg:text-[1.75rem]">
             See a compatibility analysis in action
@@ -137,6 +137,11 @@ export function DemoAnalysisPreviewSection() {
             />
           </div>
         </div>
+
+        <p className="mt-4 text-sm text-slate-300">
+          Example analysis based on anonymized member data. Upload your resume to generate your own score and
+          opportunity map.
+        </p>
       </div>
     </section>
   );
