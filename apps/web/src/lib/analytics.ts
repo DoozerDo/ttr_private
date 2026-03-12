@@ -38,6 +38,7 @@ export type AnalyticsEventMap = {
     source: "landing" | "app" | "unknown";
     jobDescriptionLength: number;
     hasResume: boolean;
+    analysisNumber: number;
   };
   compatibility_analysis_completed: {
     source: "landing";

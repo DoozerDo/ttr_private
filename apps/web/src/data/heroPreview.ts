@@ -68,9 +68,9 @@ export function getHeroScenarioForComparison(input: {
   scoreOverride?: number | null;
 }): HeroScenario {
   const scenario = (() => {
-    if (!input.hasResume) return scenarioCatalog[2];
     const normalized = input.jobDescription.trim().toLowerCase();
     if (!normalized) return scenarioCatalog[1];
+    if (!input.hasResume) return scenarioCatalog[2];
 
     if (normalized.includes("director")) return scenarioCatalog[0];
     if (normalized.includes("vp")) return scenarioCatalog[1];

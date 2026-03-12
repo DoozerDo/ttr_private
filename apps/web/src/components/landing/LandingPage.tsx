@@ -1,13 +1,10 @@
-import { CareerIntelligenceEngineSection } from "@/src/components/landing/CareerIntelligenceEngineSection";
-import { CompatibilityPrestigeSection } from "@/src/components/landing/CompatibilityPrestigeSection";
+import { DemoAnalysisCta } from "@/src/components/landing/DemoAnalysisCta";
+import { DemoAnalysisPreviewSection } from "@/src/components/landing/DemoAnalysisPreviewSection";
 import { HowItWorksSection } from "@/src/components/landing/HowItWorksSection";
-import { LandingFinalCta } from "@/src/components/landing/LandingFinalCta";
+import { LandingCompatibilityInputSection } from "@/src/components/landing/LandingCompatibilityInputSection";
 import { LandingFooter } from "@/src/components/landing/LandingFooter";
 import { LandingHero } from "@/src/components/landing/LandingHero";
 import { LandingNav } from "@/src/components/landing/LandingNav";
-import { OpportunitySnapshotSection } from "@/src/components/landing/OpportunitySnapshotSection";
-import { DecisionIntelligenceSection } from "@/src/components/landing/DecisionIntelligenceSection";
-import { OpportunityPreviewSection } from "@/src/components/landing/OpportunityPreviewSection";
 import { TruthFirstSection } from "@/src/components/landing/TruthFirstSection";
 import { LandingAnalyticsTracker } from "@/src/components/landing/LandingAnalyticsTracker";
 
@@ -21,17 +18,12 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       <LandingAnalyticsTracker />
       <LandingNav isAuthenticated={isAuthenticated} />
       <main>
-        <LandingHero isAuthenticated={isAuthenticated} />
-        <OpportunitySnapshotSection />
-        <DecisionIntelligenceSection />
-        <CompatibilityPrestigeSection />
+        <LandingHero />
+        <DemoAnalysisPreviewSection />
+        <DemoAnalysisCta />
+        <LandingCompatibilityInputSection />
         <HowItWorksSection />
-        <CareerIntelligenceEngineSection />
-        <section id="opportunity" className="mx-auto w-full max-w-7xl px-4 py-14">
-          <OpportunityPreviewSection isAuthenticated={isAuthenticated} />
-        </section>
         <TruthFirstSection />
-        <LandingFinalCta isAuthenticated={isAuthenticated} />
       </main>
       <LandingFooter />
     </div>

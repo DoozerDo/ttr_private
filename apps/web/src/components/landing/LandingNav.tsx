@@ -7,7 +7,7 @@ type LandingNavProps = {
 export function LandingNav({ isAuthenticated }: LandingNavProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-3">
+      <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between px-4 py-3 md:px-10 lg:px-16">
         <Link href="/" className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-100">
           Target This Role
         </Link>
@@ -16,11 +16,14 @@ export function LandingNav({ isAuthenticated }: LandingNavProps) {
           <a href="#product" className="transition-colors hover:text-white">
             Product
           </a>
+          <a href="#check-compatibility" className="transition-colors hover:text-white">
+            Check Compatibility
+          </a>
           <a href="#how-it-works" className="transition-colors hover:text-white">
             How It Works
           </a>
-          <a href="#opportunity" className="transition-colors hover:text-white">
-            Opportunity
+          <a href="#truth-first" className="transition-colors hover:text-white">
+            Trust
           </a>
         </nav>
 

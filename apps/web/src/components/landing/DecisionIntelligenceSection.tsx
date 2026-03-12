@@ -16,7 +16,7 @@ const decisionPanels = [
 export function DecisionIntelligenceSection() {
   return (
     <section className="border-y border-slate-800/70 bg-slate-900/20">
-      <div className="mx-auto w-full max-w-7xl px-4 py-9 lg:py-10">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-24 md:px-10 lg:px-16">
         <div className="mb-4 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Decision Intelligence</p>
           <h2 className="text-3xl font-semibold text-white">Stop guessing which jobs you qualify for</h2>

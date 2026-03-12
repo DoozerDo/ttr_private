@@ -6,6 +6,7 @@ type AdminLayoutProps = {
 };
 
 const NAV_LINKS = [
+  { href: "/admin/metrics", label: "Metrics" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/jobs", label: "Jobs" },
   { href: "/admin/baselines", label: "Baselines" },

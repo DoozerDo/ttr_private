@@ -60,14 +60,14 @@ export function OpportunityPreviewSection({ isAuthenticated = false }: Opportuni
 
   return (
     <section className="rounded-3xl border border-slate-700 bg-slate-900/30 p-6">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="space-y-5">
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-              Opportunity Evaluation Preview
+              Opportunity Engine
             </p>
-            <h2 className="text-3xl font-semibold text-white">After compatibility, see where your profile wins next.</h2>
-            <p className="text-sm leading-relaxed text-slate-300">
+            <h2 className="text-2xl font-semibold text-white lg:text-[1.75rem]">After compatibility, see where your profile wins next.</h2>
+            <p className="text-base leading-relaxed text-slate-300">
               This preview shows how resume-to-job analysis can expand into realistic opportunity targeting.
             </p>
           </div>

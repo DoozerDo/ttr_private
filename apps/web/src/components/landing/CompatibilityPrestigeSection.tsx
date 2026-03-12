@@ -1,45 +1,35 @@
 const tiers = [
   {
-    label: "Elite Fit",
-    score: "95 to 100",
-    interpretation: "Your verified resume evidence strongly matches the role requirements and level.",
-  },
-  {
-    label: "Strong Fit",
-    score: "85 to 94",
-    interpretation: "You are competitive with only minor resume-to-role gaps to address.",
+    label: "Strong Target",
+    score: "85+",
+    interpretation: "Role is aligned. Apply with confidence after a final pass.",
   },
   {
     label: "Competitive",
     score: "70 to 84",
-    interpretation: "You have credible alignment and should target the strongest supporting evidence.",
+    interpretation: "Good potential. Tighten your strongest supporting evidence first.",
   },
   {
-    label: "Emerging Fit",
-    score: "55 to 69",
-    interpretation: "You are in range but need clearer alignment before applying broadly.",
-  },
-  {
-    label: "Misaligned",
-    score: "Below 55",
-    interpretation: "Current role requirements and your verified background are materially apart.",
+    label: "Needs Work",
+    score: "Below 70",
+    interpretation: "Build missing evidence before prioritizing this role.",
   },
 ] as const;
 
 export function CompatibilityPrestigeSection() {
   return (
-    <section className="mx-auto w-full max-w-7xl px-4 py-10 lg:py-11">
-      <div className="mb-5 space-y-2">
+    <section id="score-framework" className="mx-auto w-full max-w-[1200px] px-4 py-24 md:px-10 lg:px-16">
+      <div className="mb-3 space-y-1.5">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Score Framework</p>
-        <h2 className="text-3xl font-semibold text-white">Resume-to-job compatibility with clear decision signals</h2>
+        <h2 className="text-2xl font-semibold text-white">Use the score to decide your next move</h2>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2 md:grid-cols-3">
         {tiers.map((tier) => (
-          <article key={tier.label} className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4">
+          <article key={tier.label} className="rounded-xl border border-slate-700/80 bg-slate-900/35 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{tier.score}</p>
-            <p className="mt-2 text-lg font-semibold text-white">{tier.label}</p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-300">{tier.interpretation}</p>
+            <p className="mt-1.5 text-base font-semibold text-white">{tier.label}</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-300">{tier.interpretation}</p>
           </article>
         ))}
       </div>

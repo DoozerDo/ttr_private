@@ -12,6 +12,7 @@ import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { AnalyzeAnotherRoleBar } from "./components/AnalyzeAnotherRoleBar";
+import { OpportunityRadarChart } from "./components/OpportunityRadarChart";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
 import { CareerGravity } from "./components/CareerGravity";
 import { CareerInsightEmerging } from "./components/CareerInsightEmerging";
@@ -273,6 +274,49 @@ function mapFitClassification(score?: number | null): string {
   if (score >= 70) return "Competitive Alignment";
   if (score >= 50) return "Developing Fit";
   return "Misaligned Role";
+}
+
+function getScoreTierLabel(score?: number | null): string {
+  if (typeof score !== "number") return "Pending";
+  if (score >= 85) return "Strong Target";
+  if (score >= 70) return "Competitive";
+  return "Needs Work";
+}
+
+function getScoreInterpretation(score?: number | null): string {
+  if (typeof score !== "number") return "Run an analysis to see where you stand.";
+  if (score >= 85) {
+    return "You have strong alignment for this role based on the experience reflected in your resume.";
+  }
+  if (score >= 70) {
+    return "You are a plausible candidate, but there are visible gaps that may weaken your competitiveness.";
+  }
+  return "This role appears to stretch beyond your current fit. The strongest opportunity may be nearby roles where your experience aligns better.";
+}
+
+function getRecommendedNextStep(score?: number | null): { title: string; body: string } {
+  if (typeof score !== "number") {
+    return {
+      title: "Run analysis",
+      body: "Complete an analysis first so you can act on clear strengths and gaps.",
+    };
+  }
+  if (score >= 85) {
+    return {
+      title: "Apply with confidence",
+      body: "This role appears well aligned with your background. Save this analysis and move into tailored materials.",
+    };
+  }
+  if (score >= 70) {
+    return {
+      title: "Apply strategically",
+      body: "You may still be competitive, but your application should address visible gaps with stronger positioning.",
+    };
+  }
+  return {
+    title: "Explore stronger-fit roles",
+    body: "You may have better odds targeting adjacent roles where your experience is more directly aligned.",
+  };
 }
 
 function resolveConfidenceLevel(input: {
@@ -901,6 +945,10 @@ export default function ResultsPage() {
             impactLine: undefined,
           },
         ];
+  const scoreTierLabel = useMemo(() => getScoreTierLabel(activeScore), [activeScore]);
+  const scoreInterpretation = useMemo(() => getScoreInterpretation(activeScore), [activeScore]);
+  const recommendedNextStep = useMemo(() => getRecommendedNextStep(activeScore), [activeScore]);
+  const isAuthenticatedContext = Boolean(latest?.baselineId);
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -966,6 +1014,62 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
+  const compatibilityMapSignals = useMemo(() => {
+    const strengthCorpus = strategicStrengths.join(" ").toLowerCase();
+    const gapCorpus = riskItems
+      .map((item) => `${item.title} ${item.detail ?? ""}`)
+      .join(" ")
+      .toLowerCase();
+
+    const base = typeof activeScore === "number" ? activeScore : 60;
+
+    const areas = [
+      {
+        id: "customer_support_leadership",
+        label: "Customer Support Leadership",
+        keywords: ["support", "leadership", "team", "manager", "director"],
+      },
+      {
+        id: "customer_operations",
+        label: "Customer Operations",
+        keywords: ["operations", "process", "workflow", "onboarding", "sla"],
+      },
+      {
+        id: "incident_management",
+        label: "Incident Management",
+        keywords: ["incident", "outage", "triage", "response", "reliability"],
+      },
+      {
+        id: "escalation_management",
+        label: "Escalation Management",
+        keywords: ["escalation", "severity", "complex", "risk", "critical"],
+      },
+      {
+        id: "support_programs",
+        label: "Support Programs",
+        keywords: ["program", "enablement", "kpi", "quality", "coaching"],
+      },
+      {
+        id: "cx_service_delivery",
+        label: "CX / Service Delivery",
+        keywords: ["customer experience", "cx", "service", "journey", "delivery"],
+      },
+    ] as const;
+
+    return areas.map((area) => {
+      const positiveMatches = area.keywords.filter((keyword) => strengthCorpus.includes(keyword)).length;
+      const negativeMatches = area.keywords.filter((keyword) => gapCorpus.includes(keyword)).length;
+      const estimatedScore = Math.max(
+        25,
+        Math.min(95, Math.round(base + positiveMatches * 7 - negativeMatches * 5)),
+      );
+      return {
+        id: area.id,
+        label: area.label,
+        score: estimatedScore,
+      };
+    });
+  }, [activeScore, riskItems, strategicStrengths]);
 
   const canOpenStudio = Boolean(latest?.jobId && latestBaselineVersionId);
   const formatDriverValue = (value?: number | null) =>
@@ -1429,93 +1533,158 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-8">
-              <FitVerdictReveal
-                score={activeScore}
-                classification={verdictClassification}
-                confidenceLevel={confidenceLevel}
-                analysisLoaded={Boolean(latest)}
-              />
-
-              <CareerInsightEmerging />
-
-              <CareerGravity />
-
-              <section className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                <h3 className="text-lg font-semibold text-slate-100">Strategic Next Move</h3>
-                <p className="text-sm text-slate-300">{strategicBrief.bestNextMove}</p>
-                <div className="pt-2">
-                  {executionMode ? (
-                    <>
-                      <FormButton
-                        onClick={() => navigateToStudio()}
-                        disabled={!canOpenStudio}
-                        className="w-full sm:w-auto"
-                      >
-                        Open Studio
-                      </FormButton>
-                      <p className="mt-2 text-xs text-slate-400">
-                        {canOpenStudio
-                          ? "Generate your resume and cover letter for this role."
-                          : "Studio will unlock after baseline promotion is complete."}
+            <div className="space-y-6">
+              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
+                  <div className="lg:col-span-5">
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Compatibility Score</p>
+                    <p className="mt-2 text-[56px] font-bold leading-none text-white lg:text-[64px]">
+                      {typeof activeScore === "number" ? Math.round(activeScore) : "--"}
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-100">{scoreTierLabel}</p>
+                    <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-slate-300">
+                      {scoreInterpretation}
+                    </p>
+                  </div>
+                  <div className="lg:col-span-7">
+                    <div className="mb-3">
+                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Opportunity Radar</p>
+                      <p className="mt-1 text-sm text-slate-300">
+                        Shows where your background appears most viable across adjacent areas.
                       </p>
-                    </>
-                  ) : (
-                    <>
-                      <FormButton onClick={() => void router.push(fitReviewPath)} className="w-full sm:w-auto">
-                        Open Fit Review
-                      </FormButton>
-                      <p className="mt-2 text-xs text-slate-400">
-                        Use Fit Review to close the top gaps, then continue in Studio.
-                      </p>
-                    </>
-                  )}
+                    </div>
+                    <OpportunityRadarChart areas={compatibilityMapSignals} />
+                  </div>
                 </div>
               </section>
 
-              <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
+              <section className="grid gap-4 lg:grid-cols-2">
+                <article className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                  <h3 className="text-xl font-semibold text-slate-100">Strengths</h3>
+                  <ul className="mt-3 space-y-2 text-[15px] text-slate-300">
+                    {strategicStrengths.length ? (
+                      strategicStrengths.map((strength) => <li key={strength}>- {strength}</li>)
+                    ) : (
+                      <li>No strengths are available for this analysis yet.</li>
+                    )}
+                  </ul>
+                </article>
+                <article className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                  <h3 className="text-xl font-semibold text-slate-100">Gaps</h3>
+                  <ul className="mt-3 space-y-2 text-[15px] text-slate-300">
+                    {riskItems.length ? (
+                      riskItems.slice(0, 4).map((gap) => <li key={gap.id}>- {gap.title}</li>)
+                    ) : (
+                      <li>No critical gaps are available for this analysis yet.</li>
+                    )}
+                  </ul>
+                </article>
+              </section>
 
-              {scoreBreakdown ? (
-                <details open className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                  <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-                    Supporting score breakdown
-                  </summary>
-                  <div className="mt-4 space-y-3">
-                    {scoreBreakdown.dimensions.map((dimension) => {
-                      const percent =
-                        dimension.weight > 0
-                          ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
-                          : 0;
-                      return (
-                        <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
-                          <div className="flex items-center justify-between gap-3 text-sm">
-                            <span className="text-slate-200">{dimension.label}</span>
-                            <span className="font-semibold text-white">
-                              {dimension.score.toFixed(1)} / {dimension.weight}
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full rounded bg-white/10">
-                            <div
-                              className="h-1.5 rounded bg-white/40"
-                              style={{ width: `${percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
-                      <span className="font-semibold text-slate-200">Total</span>
-                      <span className="font-semibold text-white">
-                        {scoreBreakdown.total_score.toFixed(1)} / 100
-                      </span>
-                    </div>
-                  </div>
-                </details>
-              ) : (
-                <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-300">
-                  Supporting score breakdown is unavailable for this run.
+              <section className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                <h3 className="text-2xl font-semibold text-slate-100">Recommended next step</h3>
+                <p className="mt-2 text-xl font-semibold text-white">{recommendedNextStep.title}</p>
+                <p className="mt-2 text-[15px] leading-relaxed text-slate-300">{recommendedNextStep.body}</p>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-slate-900/45 p-6">
+                <h3 className="text-2xl font-semibold text-slate-100">
+                  {isAuthenticatedContext ? "Continue your workflow" : "Save this analysis and keep building"}
+                </h3>
+                <p className="mt-2 text-[15px] leading-relaxed text-slate-300">
+                  {isAuthenticatedContext
+                    ? "Save this analysis, revisit comparisons, and move directly into tailored materials."
+                    : "Create a free account to save your compatibility results, revisit role comparisons, and continue into tailored materials."}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {isAuthenticatedContext ? (
+                    executionMode ? (
+                      <FormButton onClick={() => navigateToStudio()} disabled={!canOpenStudio}>
+                        Continue in Studio
+                      </FormButton>
+                    ) : (
+                      <FormButton onClick={() => void router.push(fitReviewPath)}>Open Fit Review</FormButton>
+                    )
+                  ) : (
+                    <Link
+                      href="/auth/signup"
+                      className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
+                    >
+                      Create Free Account
+                    </Link>
+                  )}
+                  <Link
+                    href="/opportunities"
+                    className="inline-flex items-center justify-center rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/40 hover:text-white"
+                  >
+                    Continue Exploring
+                  </Link>
                 </div>
-              )}
+
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <article className="rounded-xl bg-slate-950/60 p-4">
+                    <p className="text-base font-semibold text-slate-100">Save analysis history</p>
+                    <p className="mt-1 text-sm text-slate-400">Keep your role comparisons in one place.</p>
+                  </article>
+                  <article className="rounded-xl bg-slate-950/60 p-4">
+                    <p className="text-base font-semibold text-slate-100">Build tailored materials</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Turn strong fit roles into grounded resumes and cover letters.
+                    </p>
+                  </article>
+                  <article className="rounded-xl bg-slate-950/60 p-4">
+                    <p className="text-base font-semibold text-slate-100">Find better fit roles faster</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Use your results to focus where your profile is strongest.
+                    </p>
+                  </article>
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <CareerInsightEmerging />
+                <CareerGravity />
+                <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
+
+                {scoreBreakdown ? (
+                  <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                      Supporting score breakdown
+                    </summary>
+                    <div className="mt-4 space-y-3">
+                      {scoreBreakdown.dimensions.map((dimension) => {
+                        const percent =
+                          dimension.weight > 0
+                            ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
+                            : 0;
+                        return (
+                          <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
+                            <div className="flex items-center justify-between gap-3 text-sm">
+                              <span className="text-slate-200">{dimension.label}</span>
+                              <span className="font-semibold text-white">
+                                {dimension.score.toFixed(1)} / {dimension.weight}
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full rounded bg-white/10">
+                              <div className="h-1.5 rounded bg-white/40" style={{ width: `${percent}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+                        <span className="font-semibold text-slate-200">Total</span>
+                        <span className="font-semibold text-white">
+                          {scoreBreakdown.total_score.toFixed(1)} / 100
+                        </span>
+                      </div>
+                    </div>
+                  </details>
+                ) : (
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-300">
+                    Supporting score breakdown is unavailable for this run.
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </section>

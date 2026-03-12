@@ -7,6 +7,7 @@ import type { RadarOpportunityEntry } from "@/src/data/opportunityPreview";
 type OpportunityRadarChartProps = {
   scores: RadarOpportunityEntry[];
   revealed: boolean;
+  strongestHighlightVisible?: boolean;
 };
 
 const MAX_SCORE = 100;
@@ -42,7 +43,11 @@ function buildDataPoints(scores: RadarOpportunityEntry[]) {
   return points.join(" ");
 }
 
-export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChartProps) {
+export function OpportunityRadarChart({
+  scores,
+  revealed,
+  strongestHighlightVisible = true,
+}: OpportunityRadarChartProps) {
   const [hoveredIndustry, setHoveredIndustry] = useState<string | null>(null);
 
   const strongestOpportunity = useMemo(
@@ -87,7 +92,11 @@ export function OpportunityRadarChart({ scores, revealed }: OpportunityRadarChar
     <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Opportunity Radar</p>
-        <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-right">
+        <div
+          className={`rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-right transition-all duration-300 ${
+            strongestHighlightVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+          }`}
+        >
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Strongest Opportunity</p>
           <p className="text-sm font-semibold text-emerald-100">{strongestOpportunity.industry}</p>
           <p className="text-xs text-emerald-200">{strongestOpportunity.score}</p>

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { User } from '../users/user.entity';
 import { AnalyticsEvent } from './analytics-event.entity';
 import type { TrackAnalyticsEventDto } from './dto/track-analytics-event.dto';
 import {
@@ -30,6 +31,71 @@ type AnalyticsSummaryResponse = {
   resumeOpenRate: number;
   scoreDistribution: Record<AnalyticsScoreBucket, number>;
   funnel: Array<{ eventName: AnalyticsSummaryStep; count: number }>;
+};
+
+type FounderFunnelStage = {
+  label: 'Visitors' | 'Analyses Started' | 'Analyses Completed' | 'Accounts Created';
+  count: number;
+  conversionFromPrevious: number | null;
+};
+
+type FounderMetricsResponse = {
+  range: {
+    key: '7d' | '14d' | '30d' | 'all';
+    days: number | null;
+    granularity: 'day' | 'week';
+    startAt: string;
+    endAt: string;
+  };
+  lastUpdatedAt: string;
+  funnel: FounderFunnelStage[];
+  metrics: {
+    visitorToAnalysisConversion: number;
+    analysisCompletionRate: number;
+    resultToAccountConversion: number;
+    secondAnalysisRate: number;
+    visitors: number;
+    analysesStarted: number;
+    analysesCompleted: number;
+    accountsCreated: number;
+    usersWithAtLeastOneAnalysis: number;
+    usersWithTwoOrMoreAnalyses: number;
+    averageAnalysesPerActiveUser: number;
+  };
+  previousPeriod: {
+    visitorToAnalysisConversion: number;
+    analysisCompletionRate: number;
+    resultToAccountConversion: number;
+    secondAnalysisRate: number;
+    visitors: number;
+    analysesStarted: number;
+    analysesCompleted: number;
+    accountsCreated: number;
+  } | null;
+  trends: {
+    volume: Array<{
+      bucketStart: string;
+      bucketLabel: string;
+      visitors: number;
+      analysesStarted: number;
+      analysesCompleted: number;
+      accountsCreated: number;
+    }>;
+    conversion: Array<{
+      bucketStart: string;
+      bucketLabel: string;
+      visitorToAnalysisConversion: number;
+      analysisCompletionRate: number;
+      resultToAccountConversion: number;
+      secondAnalysisRate: number;
+    }>;
+  };
+  supportingSignals: {
+    resumeUploadRate: number;
+    resumeUploads: number;
+    sampleRoleUsage: number;
+    averageTimeToFirstAnalysisSeconds: number;
+  };
 };
 
 function toFiniteNumber(value: unknown): number | null {
@@ -69,11 +135,39 @@ function normalizeAllowedString(
   return allowed.includes(normalized) ? normalized : null;
 }
 
+type FounderEventRow = {
+  sessionId: string;
+  userId: string | null;
+  eventName: string;
+  createdAtMs: number;
+  analysisNumber: number | null;
+};
+
+type FounderWindowMetrics = {
+  visitors: number;
+  analysesStarted: number;
+  analysesCompleted: number;
+  accountsCreated: number;
+  resumeUploads: number;
+  sampleRoleUsage: number;
+  averageTimeToFirstAnalysisSeconds: number;
+  resumeUploadRate: number;
+  usersWithAtLeastOneAnalysis: number;
+  usersWithTwoOrMoreAnalyses: number;
+  visitorToAnalysisConversion: number;
+  analysisCompletionRate: number;
+  resultToAccountConversion: number;
+  secondAnalysisRate: number;
+  averageAnalysesPerActiveUser: number;
+};
+
 @Injectable()
 export class AnalyticsService {
   constructor(
     @InjectRepository(AnalyticsEvent)
     private readonly analyticsEventRepository: Repository<AnalyticsEvent>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
   ) {}
 
   async ingestEvent(dto: TrackAnalyticsEventDto) {
@@ -245,6 +339,425 @@ export class AnalyticsService {
     };
   }
 
+  async getFounderMetrics(input?: {
+    rangeKey?: '7d' | '14d' | '30d' | 'all';
+  }): Promise<FounderMetricsResponse> {
+    const now = new Date();
+    const rangeKey = input?.rangeKey ?? '7d';
+    const daysByRange: Record<'7d' | '14d' | '30d', number> = {
+      '7d': 7,
+      '14d': 14,
+      '30d': 30,
+    };
+
+    let startAt: Date;
+    if (rangeKey === 'all') {
+      const [eventMinRow, userMinRow] = await Promise.all([
+        this.analyticsEventRepository
+          .createQueryBuilder('event')
+          .select('MIN(event.createdAt)', 'minCreatedAt')
+          .getRawOne<{ minCreatedAt: Date | string | null }>(),
+        this.usersRepository
+          .createQueryBuilder('user')
+          .select('MIN(user.createdAt)', 'minCreatedAt')
+          .getRawOne<{ minCreatedAt: Date | string | null }>(),
+      ]);
+      const minEventDate = eventMinRow?.minCreatedAt
+        ? new Date(eventMinRow.minCreatedAt)
+        : null;
+      const minUserDate = userMinRow?.minCreatedAt
+        ? new Date(userMinRow.minCreatedAt)
+        : null;
+      if (minEventDate && minUserDate) {
+        startAt =
+          minEventDate.getTime() <= minUserDate.getTime() ? minEventDate : minUserDate;
+      } else if (minEventDate) {
+        startAt = minEventDate;
+      } else if (minUserDate) {
+        startAt = minUserDate;
+      } else {
+        startAt = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      }
+    } else {
+      const days = daysByRange[rangeKey];
+      startAt = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    }
+
+    const previousStartAt =
+      rangeKey === 'all'
+        ? null
+        : new Date(startAt.getTime() - (now.getTime() - startAt.getTime()));
+
+    const analyticsSince = previousStartAt ?? startAt;
+
+    const trackedEventNames = [
+      'landing_viewed',
+      'landing_page_view',
+      'compatibility_analysis_started',
+      'role_analysis_started',
+      'analysis_started',
+      'compatibility_analysis_completed',
+      'role_analysis_completed',
+      'analysis_completed',
+      'resume_upload_completed',
+      'sample_role_clicked',
+      'hero_example_chip_clicked',
+    ] as const;
+
+    const rawEvents = await this.analyticsEventRepository
+      .createQueryBuilder('event')
+      .select('event.sessionId', 'sessionId')
+      .addSelect('event.userId', 'userId')
+      .addSelect('event.eventName', 'eventName')
+      .addSelect('event.createdAt', 'createdAt')
+      .addSelect('event.properties', 'properties')
+      .where('event.createdAt >= :since', { since: analyticsSince })
+      .andWhere('event.eventName IN (:...eventNames)', {
+        eventNames: trackedEventNames,
+      })
+      .getRawMany<{
+        sessionId: string;
+        userId: string | null;
+        eventName: string;
+        createdAt: Date | string;
+        properties: Record<string, unknown> | string | null;
+      }>();
+
+    const normalizedEvents: FounderEventRow[] = [];
+    for (const row of rawEvents) {
+      const sessionId = row.sessionId?.trim();
+      if (!sessionId) continue;
+
+      const createdAtMs =
+        row.createdAt instanceof Date
+          ? row.createdAt.getTime()
+          : new Date(row.createdAt).getTime();
+      if (!Number.isFinite(createdAtMs)) continue;
+
+      let analysisNumber: number | null = null;
+      if (row.properties && typeof row.properties === 'object') {
+        const maybeAnalysisNumber = toFiniteNumber(
+          (row.properties as Record<string, unknown>).analysisNumber,
+        );
+        analysisNumber = maybeAnalysisNumber !== null ? Math.floor(maybeAnalysisNumber) : null;
+      } else if (typeof row.properties === 'string') {
+        try {
+          const parsed = JSON.parse(row.properties) as Record<string, unknown>;
+          const maybeAnalysisNumber = toFiniteNumber(parsed.analysisNumber);
+          analysisNumber = maybeAnalysisNumber !== null ? Math.floor(maybeAnalysisNumber) : null;
+        } catch {
+          analysisNumber = null;
+        }
+      }
+
+      normalizedEvents.push({
+        sessionId,
+        userId: row.userId?.trim() || null,
+        eventName: row.eventName,
+        createdAtMs,
+        analysisNumber,
+      });
+    }
+
+    const rawUsers = await this.usersRepository
+      .createQueryBuilder('user')
+      .select('user.createdAt', 'createdAt')
+      .where('user.createdAt >= :since', { since: analyticsSince })
+      .getRawMany<{ createdAt: Date | string }>();
+
+    const userCreatedAtMs = rawUsers
+      .map((row) =>
+        row.createdAt instanceof Date
+          ? row.createdAt.getTime()
+          : new Date(row.createdAt).getTime(),
+      )
+      .filter((value) => Number.isFinite(value));
+
+    const currentMetrics = this.computeFounderWindowMetrics(
+      normalizedEvents,
+      userCreatedAtMs,
+      startAt.getTime(),
+      now.getTime(),
+    );
+
+    const previousMetrics =
+      previousStartAt !== null
+        ? this.computeFounderWindowMetrics(
+            normalizedEvents,
+            userCreatedAtMs,
+            previousStartAt.getTime(),
+            startAt.getTime(),
+          )
+        : null;
+
+    const granularity: 'day' | 'week' = rangeKey === 'all' ? 'week' : 'day';
+    const trendWindows = this.buildTrendWindows(
+      startAt.getTime(),
+      now.getTime(),
+      granularity,
+    );
+
+    const volumeTrend = trendWindows.map((window) => {
+      const metrics = this.computeFounderWindowMetrics(
+        normalizedEvents,
+        userCreatedAtMs,
+        window.startMs,
+        window.endMs,
+      );
+      return {
+        bucketStart: new Date(window.startMs).toISOString(),
+        bucketLabel: window.label,
+        visitors: metrics.visitors,
+        analysesStarted: metrics.analysesStarted,
+        analysesCompleted: metrics.analysesCompleted,
+        accountsCreated: metrics.accountsCreated,
+      };
+    });
+
+    const conversionTrend = trendWindows.map((window) => {
+      const metrics = this.computeFounderWindowMetrics(
+        normalizedEvents,
+        userCreatedAtMs,
+        window.startMs,
+        window.endMs,
+      );
+      return {
+        bucketStart: new Date(window.startMs).toISOString(),
+        bucketLabel: window.label,
+        visitorToAnalysisConversion: metrics.visitorToAnalysisConversion,
+        analysisCompletionRate: metrics.analysisCompletionRate,
+        resultToAccountConversion: metrics.resultToAccountConversion,
+        secondAnalysisRate: metrics.secondAnalysisRate,
+      };
+    });
+
+    const funnel: FounderFunnelStage[] = [
+      {
+        label: 'Visitors',
+        count: currentMetrics.visitors,
+        conversionFromPrevious: null,
+      },
+      {
+        label: 'Analyses Started',
+        count: currentMetrics.analysesStarted,
+        conversionFromPrevious: currentMetrics.visitorToAnalysisConversion,
+      },
+      {
+        label: 'Analyses Completed',
+        count: currentMetrics.analysesCompleted,
+        conversionFromPrevious: currentMetrics.analysisCompletionRate,
+      },
+      {
+        label: 'Accounts Created',
+        count: currentMetrics.accountsCreated,
+        conversionFromPrevious: currentMetrics.resultToAccountConversion,
+      },
+    ];
+
+    return {
+      range: {
+        key: rangeKey,
+        days: rangeKey === 'all' ? null : daysByRange[rangeKey],
+        granularity,
+        startAt: startAt.toISOString(),
+        endAt: now.toISOString(),
+      },
+      lastUpdatedAt: now.toISOString(),
+      funnel,
+      metrics: {
+        visitorToAnalysisConversion: currentMetrics.visitorToAnalysisConversion,
+        analysisCompletionRate: currentMetrics.analysisCompletionRate,
+        resultToAccountConversion: currentMetrics.resultToAccountConversion,
+        secondAnalysisRate: currentMetrics.secondAnalysisRate,
+        visitors: currentMetrics.visitors,
+        analysesStarted: currentMetrics.analysesStarted,
+        analysesCompleted: currentMetrics.analysesCompleted,
+        accountsCreated: currentMetrics.accountsCreated,
+        usersWithAtLeastOneAnalysis: currentMetrics.usersWithAtLeastOneAnalysis,
+        usersWithTwoOrMoreAnalyses: currentMetrics.usersWithTwoOrMoreAnalyses,
+        averageAnalysesPerActiveUser: currentMetrics.averageAnalysesPerActiveUser,
+      },
+      previousPeriod:
+        previousMetrics === null
+          ? null
+          : {
+              visitorToAnalysisConversion: previousMetrics.visitorToAnalysisConversion,
+              analysisCompletionRate: previousMetrics.analysisCompletionRate,
+              resultToAccountConversion: previousMetrics.resultToAccountConversion,
+              secondAnalysisRate: previousMetrics.secondAnalysisRate,
+              visitors: previousMetrics.visitors,
+              analysesStarted: previousMetrics.analysesStarted,
+              analysesCompleted: previousMetrics.analysesCompleted,
+              accountsCreated: previousMetrics.accountsCreated,
+            },
+      trends: {
+        volume: volumeTrend,
+        conversion: conversionTrend,
+      },
+      supportingSignals: {
+        resumeUploadRate: currentMetrics.resumeUploadRate,
+        resumeUploads: currentMetrics.resumeUploads,
+        sampleRoleUsage: currentMetrics.sampleRoleUsage,
+        averageTimeToFirstAnalysisSeconds:
+          currentMetrics.averageTimeToFirstAnalysisSeconds,
+      },
+    };
+  }
+
+  private computeFounderWindowMetrics(
+    events: FounderEventRow[],
+    userCreatedAtMs: number[],
+    startMs: number,
+    endMs: number,
+  ): FounderWindowMetrics {
+    const landingEventNames = new Set(['landing_viewed', 'landing_page_view']);
+    const analysisStartedEventNames = new Set([
+      'compatibility_analysis_started',
+      'role_analysis_started',
+      'analysis_started',
+    ]);
+    const analysisCompletedEventNames = new Set([
+      'compatibility_analysis_completed',
+      'role_analysis_completed',
+      'analysis_completed',
+    ]);
+
+    const visitorSessions = new Set<string>();
+    const analysisStartedSessions = new Set<string>();
+    const analysisCompletedSessions = new Set<string>();
+    const resumeUploadSessions = new Set<string>();
+    const analysisCountByActor = new Map<string, number>();
+
+    const firstLandingAtBySession = new Map<string, number>();
+    const firstAnalysisStartAtBySession = new Map<string, number>();
+    let sampleRoleUsage = 0;
+
+    for (const row of events) {
+      if (row.createdAtMs < startMs || row.createdAtMs >= endMs) {
+        continue;
+      }
+      if (landingEventNames.has(row.eventName)) {
+        visitorSessions.add(row.sessionId);
+        const previous = firstLandingAtBySession.get(row.sessionId);
+        if (previous === undefined || row.createdAtMs < previous) {
+          firstLandingAtBySession.set(row.sessionId, row.createdAtMs);
+        }
+      }
+      if (analysisStartedEventNames.has(row.eventName)) {
+        analysisStartedSessions.add(row.sessionId);
+        const previous = firstAnalysisStartAtBySession.get(row.sessionId);
+        if (previous === undefined || row.createdAtMs < previous) {
+          firstAnalysisStartAtBySession.set(row.sessionId, row.createdAtMs);
+        }
+        const actorId = row.userId || row.sessionId;
+        analysisCountByActor.set(actorId, (analysisCountByActor.get(actorId) ?? 0) + 1);
+      }
+      if (analysisCompletedEventNames.has(row.eventName)) {
+        analysisCompletedSessions.add(row.sessionId);
+      }
+      if (row.eventName === 'resume_upload_completed') {
+        resumeUploadSessions.add(row.sessionId);
+      }
+      if (
+        row.eventName === 'sample_role_clicked' ||
+        row.eventName === 'hero_example_chip_clicked'
+      ) {
+        sampleRoleUsage += 1;
+      }
+      if (
+        row.eventName === 'compatibility_analysis_started' &&
+        (row.analysisNumber ?? 0) > 1
+      ) {
+        sampleRoleUsage += 1;
+      }
+    }
+
+    let totalTimeToFirstAnalysisSeconds = 0;
+    let sessionsWithTiming = 0;
+    for (const [sessionId, landingMs] of firstLandingAtBySession.entries()) {
+      const analysisMs = firstAnalysisStartAtBySession.get(sessionId);
+      if (analysisMs === undefined || analysisMs < landingMs) {
+        continue;
+      }
+      totalTimeToFirstAnalysisSeconds += (analysisMs - landingMs) / 1000;
+      sessionsWithTiming += 1;
+    }
+
+    const accountsCreated = userCreatedAtMs.filter(
+      (value) => value >= startMs && value < endMs,
+    ).length;
+    const visitors = visitorSessions.size;
+    const analysesStarted = analysisStartedSessions.size;
+    const analysesCompleted = analysisCompletedSessions.size;
+    const resumeUploads = resumeUploadSessions.size;
+    const usersWithAtLeastOneAnalysis = analysisCountByActor.size;
+    const usersWithTwoOrMoreAnalyses = Array.from(
+      analysisCountByActor.values(),
+    ).filter((count) => count >= 2).length;
+
+    const visitorToAnalysisConversion = toRate(analysesStarted, visitors);
+    const analysisCompletionRate = toRate(analysesCompleted, analysesStarted);
+    const resultToAccountConversion = toRate(accountsCreated, analysesCompleted);
+    const resumeUploadRate = toRate(resumeUploads, analysesStarted);
+    const secondAnalysisRate = toRate(
+      usersWithTwoOrMoreAnalyses,
+      usersWithAtLeastOneAnalysis,
+    );
+    const averageAnalysesPerActiveUser =
+      usersWithAtLeastOneAnalysis > 0
+        ? Array.from(analysisCountByActor.values()).reduce(
+            (sum, count) => sum + count,
+            0,
+          ) / usersWithAtLeastOneAnalysis
+        : 0;
+
+    return {
+      visitors,
+      analysesStarted,
+      analysesCompleted,
+      accountsCreated,
+      resumeUploads,
+      sampleRoleUsage,
+      averageTimeToFirstAnalysisSeconds:
+        sessionsWithTiming > 0
+          ? totalTimeToFirstAnalysisSeconds / sessionsWithTiming
+          : 0,
+      resumeUploadRate,
+      usersWithAtLeastOneAnalysis,
+      usersWithTwoOrMoreAnalyses,
+      visitorToAnalysisConversion,
+      analysisCompletionRate,
+      resultToAccountConversion,
+      secondAnalysisRate,
+      averageAnalysesPerActiveUser,
+    };
+  }
+
+  private buildTrendWindows(
+    startMs: number,
+    endMs: number,
+    granularity: 'day' | 'week',
+  ): Array<{ startMs: number; endMs: number; label: string }> {
+    const windows: Array<{ startMs: number; endMs: number; label: string }> = [];
+    const stepMs = granularity === 'day'
+      ? 24 * 60 * 60 * 1000
+      : 7 * 24 * 60 * 60 * 1000;
+
+    let cursor = startMs;
+    while (cursor < endMs) {
+      const next = Math.min(endMs, cursor + stepMs);
+      const date = new Date(cursor);
+      const label =
+        granularity === 'day'
+          ? date.toISOString().slice(5, 10)
+          : `${date.toISOString().slice(5, 10)} wk`;
+      windows.push({ startMs: cursor, endMs: next, label });
+      cursor = next;
+    }
+
+    return windows;
+  }
+
   private resolveCreatedAt(value?: string): Date | undefined {
     if (!value) {
       return undefined;
@@ -304,6 +817,15 @@ export class AnalyticsService {
         );
       }
       properties.source = source;
+      if (eventName === 'compatibility_analysis_started') {
+        const analysisNumber = toFiniteNumber(properties.analysisNumber);
+        if (analysisNumber === null || analysisNumber < 1) {
+          throw new BadRequestException(
+            'compatibility_analysis_started requires numeric analysisNumber >= 1',
+          );
+        }
+        properties.analysisNumber = Math.floor(analysisNumber);
+      }
     }
 
     if (eventName === 'compatibility_analysis_completed') {

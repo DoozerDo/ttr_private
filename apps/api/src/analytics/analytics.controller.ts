@@ -42,4 +42,19 @@ export class AnalyticsController {
     }
     return this.analyticsService.getSummary(days);
   }
+
+  @Get('metrics')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async metrics(@Query('range') rangeRaw?: string) {
+    const normalizedRange =
+      typeof rangeRaw === 'string' && rangeRaw.trim()
+        ? rangeRaw.trim().toLowerCase()
+        : '7d';
+    if (!['7d', '14d', '30d', 'all'].includes(normalizedRange)) {
+      throw new BadRequestException('range must be one of 7d, 14d, 30d, all');
+    }
+    return this.analyticsService.getFounderMetrics({
+      rangeKey: normalizedRange as '7d' | '14d' | '30d' | 'all',
+    });
+  }
 }
