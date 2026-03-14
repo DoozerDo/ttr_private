@@ -26,6 +26,7 @@ export type CoverLetterClosingTemplate = {
 };
 
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
+import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
 
 export type CoverLetterGenerationInput = {
   baselineId: string;
@@ -49,6 +50,7 @@ export type CoverLetterGenerationInput = {
 };
 
 export type CoverLetterGenerationResult = {
+  document: NormalizedCoverLetterDocument;
   content: string;
   wordCount: number;
   greeting: string;

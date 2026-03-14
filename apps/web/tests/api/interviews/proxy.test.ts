@@ -257,10 +257,27 @@ describe("interviews proxy routes", () => {
 
         return new Response(
           JSON.stringify({
-            blocked: false,
-            ready: payload?.baselineVersionId === promotedBaselineVersionId,
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
             baselineVersionId: payload?.baselineVersionId,
-            sections: [{ key: "summary", text: "Generated from promoted baseline." }],
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: {
+                  name: "Test Candidate",
+                  contactLine: "test@example.com | (555) 555-0100",
+                },
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    bullets: ["Led game operations and live-ops delivery cadence."],
+                  },
+                ],
+                education: [],
+              },
+            },
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -342,8 +359,9 @@ describe("interviews proxy routes", () => {
       }),
     );
     const resumePayload = await resumeResponse.json();
-    expect(resumePayload.ready).toBe(true);
+    expect(resumePayload.status).toBe("success");
     expect(resumePayload.baselineVersionId).toBe(promotedBaselineVersionId);
+    expect(resumePayload.preview?.resume?.experience?.[0]?.company).toBe("Cat Daddy Games");
 
     const calledUrls = fetchMock.mock.calls.map(([input]) =>
       typeof input === "string" ? input : input?.url ?? "",
@@ -360,5 +378,37 @@ describe("interviews proxy routes", () => {
     );
     expect(calledUrls).toContain(`${apiBaseUrl}/resume/generate`);
     expect(calledUrls.some((url) => /\/interviews(\/|$)/.test(url))).toBe(false);
+  });
+
+  it("returns 502 when resume route receives a non-resume payload", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url === `${apiBaseUrl}/resume/generate` && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            overallScore: 77,
+            gapAnalysis: { criticalGaps: ["Needs leadership examples"] },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: "unexpected fetch target" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await postResumeGenerate(
+      request("/api/resume", "POST", {
+        jobId: "job-1",
+        baselineId: "base-1",
+        baselineVersionId: "base-version-1",
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body?.error?.code).toBe("RESUME_GENERATION_CONTRACT_MISMATCH");
   });
 });

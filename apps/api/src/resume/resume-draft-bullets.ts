@@ -115,6 +115,13 @@ const STOPWORDS = new Set([
 
 const BULLET_LINE_PATTERN =
   /^\s*(?:[-*•●◦▪▹►‣]\s+|(?:\(?\d{1,3}\)?[.)])\s+|(?:[a-zA-Z][.)])\s+)(.+)$/;
+const PAGE_MARKER_PATTERN =
+  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|\d+\s*[\/|]\s*\d+|p\.?\s*\d+)$/i;
+const SENTENCE_END_PATTERN = /[.!?;:]$/;
+const CONTINUATION_LINE_START_PATTERN =
+  /^(?:[a-z]|and\b|or\b|to\b|for\b|with\b|in\b|on\b|of\b|by\b|from\b|that\b|which\b|who\b|where\b|when\b|while\b|as\b|at\b)/;
+const BULLET_CONTINUATION_END_PATTERN =
+  /(?:,\s*$|\b(?:and|with|including|across)\s*$)/i;
 
 function buildNoClaimRiskResult(): ClaimRiskResult {
   return {
@@ -125,6 +132,10 @@ function buildNoClaimRiskResult(): ClaimRiskResult {
 
 function normalizeLine(line: string) {
   return line.replace(/\u00a0/g, ' ').trim();
+}
+
+function isPaginationArtifact(value: string) {
+  return PAGE_MARKER_PATTERN.test(normalizeLine(value));
 }
 
 function lineLooksLikeHeaderFragment(line: string) {
@@ -283,6 +294,7 @@ export function splitSectionContentToBulletTexts(
 
   const bullets: Array<{ text: string; sourceIndex: number }> = [];
   lines.forEach((line, index) => {
+    if (isPaginationArtifact(line)) return;
     const match = line.match(BULLET_LINE_PATTERN);
     if (!match) return;
     const text = normalizeLine(match[1] ?? '');
@@ -292,7 +304,7 @@ export function splitSectionContentToBulletTexts(
 
   if (!bullets.length) {
     const text = normalized.trim();
-    if (!text) return [];
+    if (!text || isPaginationArtifact(text)) return [];
     return [{ text, sourceIndex: 0 }];
   }
 
@@ -304,6 +316,7 @@ function extractSummaryBullets(content?: string | null) {
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map((line) => normalizeLine(line))
+    .filter((line) => !isPaginationArtifact(line))
     .filter(Boolean)
     .map((line) => line.replace(/^(?:professional\s+summary|summary)\s*:\s*/i, '').trim())
     .map((line) =>
@@ -360,7 +373,8 @@ function extractSkillBullets(content?: string | null) {
     .filter(Boolean)
     .filter((token) => !SECTION_HEADING_PATTERN.test(token))
     .filter((token) => !PLACEHOLDER_ONLY_PATTERN.test(token))
-    .filter((token) => token.length > 1);
+    .filter((token) => token.length > 1)
+    .filter((token) => !isPaginationArtifact(token));
 
   return tokens.map((text, sourceIndex) => ({ text, sourceIndex }));
 }
@@ -397,7 +411,11 @@ function isValidExperienceBulletText(text: string) {
 
 function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
   const normalized = (content ?? '').replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n').map((line) => normalizeLine(line));
+  const rawLines = normalized
+    .split('\n')
+    .map((line) => normalizeLine(line))
+    .filter((line) => !isPaginationArtifact(line));
+  const lines = reconstructWrappedExperienceLines(rawLines);
   if (!lines.some((line) => BULLET_LINE_PATTERN.test(line))) {
     return [];
   }
@@ -407,8 +425,12 @@ function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
   let sawHeader = false;
 
   const flushActive = () => {
-    if (!active.bullets.length) return;
-    entries.push(active);
+    const dedupedBullets = dedupeExperienceBullets(active.bullets);
+    if (!dedupedBullets.length) return;
+    entries.push({
+      ...active,
+      bullets: dedupedBullets,
+    });
     active = {
       entryIndex: entries.length,
       headerLines: [],
@@ -471,6 +493,55 @@ function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
   flushActive();
 
   return entries;
+}
+
+function reconstructWrappedExperienceLines(lines: string[]): string[] {
+  const merged: string[] = [];
+
+  for (const line of lines) {
+    if (!line) continue;
+
+    const previous = merged[merged.length - 1];
+    const previousBulletMatch = previous?.match(BULLET_LINE_PATTERN);
+    const currentIsBullet = BULLET_LINE_PATTERN.test(line);
+    const currentLine = normalizeLine(line);
+
+    const previousBulletText = normalizeLine(previousBulletMatch?.[1] ?? '');
+    const previousEndsWithContinuation = BULLET_CONTINUATION_END_PATTERN.test(
+      previousBulletText,
+    );
+    const shouldMergeContinuation =
+      Boolean(previousBulletText) &&
+      !currentIsBullet &&
+      CONTINUATION_LINE_START_PATTERN.test(currentLine) &&
+      (previousEndsWithContinuation || !SENTENCE_END_PATTERN.test(previousBulletText));
+
+    if (shouldMergeContinuation && previous) {
+      merged[merged.length - 1] = normalizeLine(`${previous} ${currentLine}`);
+      continue;
+    }
+
+    merged.push(currentLine);
+  }
+
+  return merged;
+}
+
+function dedupeExperienceBullets(
+  bullets: Array<{ text: string; sourceIndex: number }>,
+): Array<{ text: string; sourceIndex: number }> {
+  const seen = new Set<string>();
+  const deduped: Array<{ text: string; sourceIndex: number }> = [];
+
+  for (const bullet of bullets) {
+    const normalized = normalizeLine(bullet.text).toLowerCase();
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(bullet);
+  }
+
+  return deduped;
 }
 
 type BulletScoreResult = {

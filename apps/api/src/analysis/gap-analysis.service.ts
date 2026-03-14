@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 
 export type CriticalGap = {
   gapId: string;
@@ -83,6 +83,21 @@ const STOP_WORDS = new Set([
   'years',
   'experience',
 ]);
+const COMPENSATION_PATTERNS = [
+  /\b(?:salary|compensation|pay|wage|bonus|equity|benefits)\b/i,
+  /\$\s?\d/i,
+  /\b(?:usd|eur|gbp)\b\s*\d/i,
+  /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\s*(?:-|to)\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\b/i,
+];
+const GENERIC_COMPANY_BOILERPLATE_PATTERNS = [
+  /\bglobal offices?\b/i,
+  /\boffices?\s+across\b/i,
+  /\bworldwide presence\b/i,
+  /\bwe have offices\b/i,
+  /\b(?:multi|cross)-region footprint\b/i,
+  /\bdistributed across (?:countries|regions|continents)\b/i,
+];
+const MAX_EVIDENCE_LENGTH = 180;
 
 @Injectable()
 export class GapAnalysisService {
@@ -109,6 +124,7 @@ export class GapAnalysisService {
         ),
       )
       .filter((entry): entry is RequirementAssessment => Boolean(entry));
+    const dedupedEvaluated = this.dedupeAssessments(evaluated);
 
     const uniqueStrengths = Array.from(
       new Set(
@@ -120,7 +136,7 @@ export class GapAnalysisService {
     ).slice(0, 4);
 
     const maxGaps = this.clampMaxGaps(input.maxGaps);
-    const criticalGaps = [...evaluated]
+    const criticalGaps = [...dedupedEvaluated]
       .sort((a, b) => b.severity - a.severity)
       .slice(0, maxGaps)
       .map((entry, index) => {
@@ -166,6 +182,28 @@ export class GapAnalysisService {
     };
   }
 
+  private dedupeAssessments(
+    assessments: RequirementAssessment[],
+  ): RequirementAssessment[] {
+    const unique: RequirementAssessment[] = [];
+    const seen = new Set<string>();
+
+    for (const assessment of assessments) {
+      const key = [
+        assessment.title.toLowerCase(),
+        assessment.requirementEvidence.toLowerCase(),
+        (assessment.baselineEvidence ?? '').toLowerCase(),
+      ].join('|');
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      unique.push(assessment);
+    }
+
+    return unique;
+  }
+
   private clampMaxGaps(value?: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 5;
     return Math.max(3, Math.min(5, Math.floor(value)));
@@ -177,12 +215,14 @@ export class GapAnalysisService {
     for (const entry of input.jobRequirements ?? []) {
       const text = this.clean(entry);
       if (!text) continue;
+      if (this.isCompensationText(text)) continue;
       raw.push({ text, source: 'requirement' });
     }
 
     for (const entry of input.jobResponsibilities ?? []) {
       const text = this.clean(entry);
       if (!text) continue;
+      if (this.isCompensationText(text)) continue;
       raw.push({ text, source: 'responsibility' });
     }
 
@@ -219,6 +259,7 @@ export class GapAnalysisService {
     dimensionPercents?: Record<string, number | undefined>,
   ): RequirementAssessment | null {
     const req = candidate.text;
+    if (this.isCompensationText(req)) return null;
     const tokens = this.tokenize(req).slice(0, 20);
     if (!tokens.length) return null;
 
@@ -233,9 +274,10 @@ export class GapAnalysisService {
     const sourceWeight = candidate.source === 'requirement' ? 0.9 : 0.75;
     const keywordBoost = this.keywordBoost(req);
     const dimensionBoost = this.dimensionBoost(dimensionKey, dimensionPercents);
+    const boilerplatePenalty = this.isGenericCompanyBoilerplate(req) ? 0.25 : 0;
     const importance = Math.max(
       0.2,
-      Math.min(1, sourceWeight + keywordBoost + dimensionBoost),
+      Math.min(1, sourceWeight + keywordBoost + dimensionBoost - boilerplatePenalty),
     );
     const severity = Math.max(
       0,
@@ -243,17 +285,24 @@ export class GapAnalysisService {
     );
 
     const title = this.inferTitle(req, dimensionKey);
-    const reasoning = baselineEvidence
+    const compactRequirementEvidence = this.toCompactEvidence(
+      req,
+      MAX_EVIDENCE_LENGTH,
+    );
+    const compactBaselineEvidence = baselineEvidence
+      ? this.toCompactEvidence(baselineEvidence, MAX_EVIDENCE_LENGTH)
+      : null;
+    const reasoning = compactBaselineEvidence
       ? `The requirement is important for this role, but baseline evidence is partial. Closest evidence: "${this.shorten(
-          baselineEvidence,
+          compactBaselineEvidence,
           120,
         )}".`
       : 'The requirement is emphasized by the role but no direct baseline evidence was found.';
 
     return {
       title,
-      requirementEvidence: req,
-      baselineEvidence,
+      requirementEvidence: compactRequirementEvidence,
+      baselineEvidence: compactBaselineEvidence,
       evidenceScore,
       severity,
       importance,
@@ -386,9 +435,39 @@ export class GapAnalysisService {
     return (value ?? '').replace(/\s+/g, ' ').trim();
   }
 
+  private isCompensationText(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return false;
+    return COMPENSATION_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
+  private isGenericCompanyBoilerplate(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return false;
+    return GENERIC_COMPANY_BOILERPLATE_PATTERNS.some((pattern) =>
+      pattern.test(text),
+    );
+  }
+
+  private toCompactEvidence(value: string, max: number): string {
+    const compact = this.clean(value);
+    if (!compact) return '';
+    const sentences = compact
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+    const firstSentence = sentences[0] ?? compact;
+    if (firstSentence.length <= max) {
+      return firstSentence;
+    }
+    return this.shorten(firstSentence, max);
+  }
+
   private shorten(value: string, max: number): string {
     const trimmed = this.clean(value);
     if (trimmed.length <= max) return trimmed;
     return `${trimmed.slice(0, max - 3).trim()}...`;
   }
 }
+
+

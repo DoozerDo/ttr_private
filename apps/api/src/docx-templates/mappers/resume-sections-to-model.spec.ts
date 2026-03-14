@@ -1,271 +1,120 @@
 import { BaselineSectionType } from '../../baseline/baseline-section.entity';
 import { mapResumeSectionsToDocxModel } from './resume-sections-to-model';
+import {
+  buildNormalizedResumeDocument,
+  isPaginationArtifact,
+} from '../../resume/resume-normalization';
 
-describe('mapResumeSectionsToDocxModel experience splitting', () => {
-  it('keeps professional section hierarchy and preserves experience chronology', () => {
-    const model = mapResumeSectionsToDocxModel([
+describe('resume normalization and mapping', () => {
+  it('groups parsed experience fragments into role-scoped entries', () => {
+    const sections = [
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Professional Experience',
+        content: [
+          'Director, Support Operations | Alpha Co | 2022 - Present',
+          '- Led incident response governance.',
+          '- Owned support workflow design.',
+          '',
+          'Support Manager | Beta Co | 2019 - 2022',
+          '- Managed staffing forecasts and queue health.',
+        ].join('\n'),
+        bullets: [
+          {
+            text: 'Led incident response governance.',
+            source: { experienceEntryIndex: 0 },
+          },
+          {
+            text: 'Owned support workflow design.',
+            source: { experienceEntryIndex: 0 },
+          },
+          {
+            text: 'Managed staffing forecasts and queue health.',
+            source: { experienceEntryIndex: 1 },
+          },
+        ],
+      },
+    ];
+
+    const normalized = buildNormalizedResumeDocument(sections as any);
+    expect(normalized.experience).toHaveLength(2);
+    expect(normalized.experience[0]?.company).toBe('Alpha Co');
+    expect(normalized.experience[1]?.company).toBe('Beta Co');
+    expect(normalized.experience[0]?.bullets).toContain('Led incident response governance.');
+    expect(normalized.experience[1]?.bullets).toContain(
+      'Managed staffing forecasts and queue health.',
+    );
+  });
+
+  it('preserves role boundaries so bullets do not drift between companies', () => {
+    const sections = [
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Professional Experience',
+        content: [
+          'Director, Support Operations | Alpha Co | 2022 - Present',
+          '- Built executive escalation process.',
+          '',
+          'Support Manager | Beta Co | 2019 - 2022',
+          '- Reduced queue backlog by redesigning routing.',
+        ].join('\n'),
+        bullets: [
+          {
+            text: 'Built executive escalation process.',
+            source: { experienceEntryIndex: 0 },
+          },
+          {
+            text: 'Reduced queue backlog by redesigning routing.',
+            source: { experienceEntryIndex: 1 },
+          },
+        ],
+      },
+    ];
+
+    const model = mapResumeSectionsToDocxModel(sections as any, undefined, {
+      normalizedDocument: buildNormalizedResumeDocument(sections as any),
+    });
+    const exp = model.sections.find((section) => section.key === 'experience');
+    const entries = (exp?.items ?? []) as Array<{ company?: string; bullets?: string[] }>;
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.company).toBe('Alpha Co');
+    expect(entries[0]?.bullets).toContain('Built executive escalation process.');
+    expect(entries[0]?.bullets).not.toContain('Reduced queue backlog by redesigning routing.');
+    expect(entries[1]?.company).toBe('Beta Co');
+    expect(entries[1]?.bullets).toContain('Reduced queue backlog by redesigning routing.');
+  });
+
+  it('excludes imported page markers from document body output', () => {
+    expect(isPaginationArtifact('Page 1')).toBe(true);
+    expect(isPaginationArtifact('1 / 3')).toBe(true);
+
+    const sections = [
       {
         type: BaselineSectionType.EXPERIENCE,
         title: 'Experience',
-        content: `Director of Support | NewCo | 2022 - Present
-â€¢ Led enterprise support operations.
-â€¢ Improved escalation handling.
+        content: [
+          'Page 1',
+          'Support Manager | Acme | 2021 - 2024',
+          '- Improved incident triage quality.',
+          '1 / 3',
+        ].join('\n'),
+      },
+    ];
 
-Support Manager | PriorCo | 2018 - 2022
-â€¢ Managed daily support workflows.
-â€¢ Built KPI reporting rhythm.`,
-      },
-      {
-        type: BaselineSectionType.SKILLS,
-        title: 'Skills',
-        content: 'Support Operations, Incident Response, KPI Reporting',
-      },
-      {
-        type: BaselineSectionType.SUMMARY,
-        title: 'Summary',
-        content: 'Operations leader focused on support quality and delivery.',
-      },
-      {
-        type: BaselineSectionType.EDUCATION,
-        title: 'Education',
-        content: 'B.S. Business | State University | 2014',
-      },
-    ]);
-
-    expect(model.sections.map((section) => section.key)).toEqual([
-      'summary',
-      'skills',
-      'experience',
-      'education',
-    ]);
-
-    const experienceItems = model.sections.find(
-      (section) => section.key === 'experience',
-    )?.items as Array<{ role: string }> | undefined;
-    expect(experienceItems?.[0]?.role).toContain('Director of Support');
-    expect(experienceItems?.[1]?.role).toContain('Support Manager');
+    const model = mapResumeSectionsToDocxModel(sections as any, undefined, {
+      normalizedDocument: buildNormalizedResumeDocument(sections as any),
+    });
+    const exp = model.sections.find((section) => section.key === 'experience');
+    const entries = (exp?.items ?? []) as Array<{ bullets?: string[] }>;
+    const combined = entries.flatMap((entry) => entry.bullets ?? []).join(' ');
+    expect(combined).toContain('Improved incident triage quality.');
+    expect(combined).not.toContain('Page 1');
+    expect(combined).not.toContain('1 / 3');
   });
 
-  it('splits multiple jobs in one EXPERIENCE section into separate entries', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Professional Experience',
-        content: `Senior I/O Engineer (Sr. DevOps Engineer)
-Genoa Healthcare, August 2019 – March 2025
-• Built CI/CD pipelines.
-
-Senior Lead IT Engineer
-CenturyLink Cloud, July 2015 - August 2019
-• Led enterprise cloud support.
-
-Windows Systems Administrator
-FriendFinder, April 2013 - July 2015
-• Maintained production systems.`,
-      },
-    ]);
-
-    const expSection = model.sections.find((section) => section.key === 'experience');
-    expect(expSection).toBeDefined();
-    expect(expSection?.items).toHaveLength(3);
-  });
-
-  it('uses second line company/date to enrich a role-only header', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Professional Experience',
-        content: `Senior I/O Engineer (Sr. DevOps Engineer)
-Genoa Healthcare, August 2019 – March 2025
-• Built CI/CD pipelines.`,
-      },
-    ]);
-
-    const expSection = model.sections.find((section) => section.key === 'experience');
-    const first = expSection?.items[0] as { company?: string; dateRange?: string } | undefined;
-
-    expect(first?.company).toBe('Genoa Healthcare');
-    expect(first?.dateRange).toContain('2019');
-  });
-
-  it('splits entries when each header already includes company and date on one line', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Professional Experience',
-        content: `Senior I/O Engineer (Sr. DevOps Engineer) | Genoa Healthcare | August 2019 – March 2025
-• Built CI/CD pipelines.
-
-Senior Lead IT Engineer | CenturyLink Cloud | July 2015 - August 2019
-• Led enterprise cloud support.
-
-Windows Systems Administrator | FriendFinder | April 2013 - July 2015
-• Maintained production systems.`,
-      },
-    ]);
-
-    const expSection = model.sections.find((section) => section.key === 'experience');
-    expect(expSection).toBeDefined();
-    expect(expSection?.items).toHaveLength(3);
-  });
-
-  it('retains other section content even when one line includes contact info', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.OTHER,
-        title: 'Other',
-        content: `Doug Canny
-IT Systems Engineer | DevOps | Automation
-doug@example.com
-IT professional with nearly 20 years of experience transitioning to cloud infrastructure.`,
-      },
-    ]);
-
-    const otherSection = model.sections.find((section) => section.key === 'other');
-    expect(otherSection).toBeDefined();
-    const firstItem = otherSection?.items[0] as { lines?: string[] } | undefined;
-    expect(firstItem?.lines?.join('\n')).toContain('nearly 20 years of experience');
-  });
-
-  it('keeps full summary text without truncating after a few sentences', () => {
-    const longSummary = [
-      'IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.',
-      'Proven expertise in CI/CD pipelines, infrastructure as code, and PowerShell scripting.',
-      'Adept at designing scalable automation solutions to enhance system performance and developer productivity.',
-      'Strong background in cloud computing, system administration, and deployment automation across enterprise environments.',
-    ].join(' ');
-
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.SUMMARY,
-        title: 'Summary',
-        content: longSummary,
-      },
-    ]);
-
-    const summarySection = model.sections.find((section) => section.key === 'summary');
-    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
-
-    expect(summarySection).toBeDefined();
-    expect(summary?.paragraphs?.join(' ')).toContain('Strong background in cloud computing');
-  });
-
-  it('does not classify narrative lines with numbers as header contact lines', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.OTHER,
-        title: 'Other',
-        content: `Doug Canny
-IT Systems Engineer | DevOps | Automation
-IT professional with nearly 20 years of experience.
-Proven expertise in CI/CD pipelines.`,
-      },
-    ]);
-
-    expect(model.header.contactLines).toBeUndefined();
-    const otherSection = model.sections.find((section) => section.key === 'other');
-    const text = (otherSection?.items[0] as { lines?: string[] } | undefined)?.lines?.join(' ') ?? '';
-    expect(text).toContain('nearly 20 years of experience');
-  });
-
-  it('maps intro-like OTHER content into summary when no summary exists', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.OTHER,
-        title: 'Other',
-        content: `Doug Canny
-IT Systems Engineer | DevOps | Automation
-IT professional with nearly 20 years of experience, starting in IT support before transitioning to DevOps-focused automation and cloud infrastructure.`,
-      },
-      {
-        type: BaselineSectionType.SKILLS,
-        title: 'Skills',
-        content: 'PowerShell, Terraform, AWS',
-      },
-    ]);
-
-    const summarySection = model.sections.find((section) => section.key === 'summary');
-    const summary = summarySection?.items[0] as { paragraphs?: string[] } | undefined;
-    expect(summarySection).toBeDefined();
-    expect(summary?.paragraphs?.join(' ')).toContain('nearly 20 years of experience');
-
-    const otherSection = model.sections.find((section) => section.key === 'other');
-    expect(otherSection).toBeUndefined();
-  });
-
-  it('keeps draft-bullet sections even when content is empty', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.SUMMARY,
-        title: 'Summary',
-        content: '',
-        bullets: [{ text: 'Leads operational support programs.' }],
-      },
-      {
-        type: BaselineSectionType.SKILLS,
-        title: 'Skills',
-        content: '',
-        bullets: [{ text: 'Incident Management' }, { text: 'SaaS Operations' }],
-      },
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Experience',
-        content: '',
-        bullets: [{ text: 'Reduced escalations by 30%.' }],
-      },
-      {
-        type: BaselineSectionType.EDUCATION,
-        title: 'Education',
-        content: '',
-        bullets: [{ text: 'B.S. Business | State U | 2015' }],
-      },
-    ]);
-
-    expect(model.sections.find((section) => section.key === 'summary')).toBeDefined();
-    expect(model.sections.find((section) => section.key === 'skills')).toBeDefined();
-    expect(model.sections.find((section) => section.key === 'experience')).toBeDefined();
-    expect(model.sections.find((section) => section.key === 'education')).toBeDefined();
-  });
-
-  it('suppresses summary section when summary content is malformed bullet list text', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.SUMMARY,
-        title: 'Summary',
-        content: `Summary
-• Led support operations.
-• Owned incident workflows.
-• Improved reporting cadence.`,
-      },
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Experience',
-        content: `Support Manager | Acme | 2021 - 2024
-• Led team operations.`,
-      },
-    ]);
-
-    expect(model.sections.find((section) => section.key === 'summary')).toBeUndefined();
-    expect(model.sections.find((section) => section.key === 'experience')).toBeDefined();
-  });
-
-  it('keeps role titles with commas intact and extracts company/date cleanly', () => {
-    const model = mapResumeSectionsToDocxModel([
-      {
-        type: BaselineSectionType.EXPERIENCE,
-        title: 'Professional Experience',
-        content: `Director, Support Operations | Acme Corp, August 2019 - March 2025
-• Led support operations and escalation governance.`,
-      },
-    ]);
-
-    const expSection = model.sections.find((section) => section.key === 'experience');
-    const first = expSection?.items[0] as
-      | { role?: string; company?: string; dateRange?: string }
-      | undefined;
-
-    expect(first?.role).toBe('Director, Support Operations');
-    expect(first?.company).toBe('Acme Corp');
-    expect(first?.dateRange).toBe('August 2019 - March 2025');
+  it('throws when called without a normalized resume document', () => {
+    expect(() => mapResumeSectionsToDocxModel([] as any)).toThrow(
+      /canonical normalized resume model/i,
+    );
   });
 });

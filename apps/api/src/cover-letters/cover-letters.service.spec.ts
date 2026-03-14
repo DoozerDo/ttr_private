@@ -191,6 +191,14 @@ describe('CoverLettersService', () => {
       jobId: 'job-1',
     });
 
+    expect(second.status).toBe('success');
+    expect(second.generationStatus).toBe('success');
+    expect(second.exportReady).toBe(true);
+    expect(second.exports).toEqual({ docx: true, pdf: true });
+    expect(second.preview?.coverLetter?.salutation).toBe('Dear Hiring Team,');
+    expect(second.safeDisplay).toMatchObject({
+      title: 'Cover letter generated successfully',
+    });
     expect(second.closingTemplateKey).toBe('collaborative');
     expect(second.audit_id).toBe('audit-1');
   });
@@ -217,11 +225,22 @@ describe('CoverLettersService', () => {
     });
 
     expect(result.blocked).toBe(true);
+    expect(result.status).toBe('blocked');
+    expect(result.generationStatus).toBe('blocked');
+    expect(result.exportReady).toBe(false);
     expect(result.compliance_blocked).toBe(true);
+    expect(result.exports).toEqual({ docx: false, pdf: false });
+    expect(result.preview).toEqual({ coverLetter: null });
     expect(result.compliance_flags).toHaveLength(1);
     expect(result.compliance_flags?.[0].code).toBe(
       ComplianceFlagCode.INVENTED_METRIC,
     );
+    expect(result.safeDisplay).toMatchObject({
+      title: 'Cover letter blocked by compliance',
+    });
+    expect(result.internal).toMatchObject({
+      auditId: 'audit-1',
+    });
     expect(result).not.toHaveProperty('content');
     expect(coverLetterRepository.save).not.toHaveBeenCalled();
 

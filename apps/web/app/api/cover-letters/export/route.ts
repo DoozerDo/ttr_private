@@ -4,7 +4,7 @@ import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../../baselin
 export const runtime = "nodejs";
 
 function shouldBypassTier() {
-  return process.env.NODE_ENV === "development" || process.env.TTR_BETA_BYPASS === "true";
+  return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
 }
 
 const ALLOWED_FORMATS = new Set(["docx", "pdf"]);

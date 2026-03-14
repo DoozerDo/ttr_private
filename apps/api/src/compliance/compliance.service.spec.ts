@@ -381,6 +381,69 @@ describe('ComplianceService', () => {
       );
     });
 
+    it('does not block reward phrases such as real world merchandise', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-reward-phrases',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-reward-phrases',
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Recognized top performers with real world merchandise and customer rewards.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
+    it('does not block gift card references as invented companies', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-gift-cards',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-gift-cards',
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Operated customer recovery programs that included gift cards and electronics.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
+    it('does not treat salary text as fabricated employer evidence', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-salary-text',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-salary-text',
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Compensation range was $110,000 - $145,000 plus bonus and equity.',
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
+      );
+    });
+
     it('recognizes seniority modifiers in baseline summaries so case-insensitive matches are allowed', async () => {
       const result = await service.validateAndAudit({
         action: ComplianceAction.RESUME_GENERATION,

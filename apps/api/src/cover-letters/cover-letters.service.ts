@@ -59,6 +59,10 @@ import {
   DocxRenderContextBase,
 } from '../docx-templates/docx-template.types';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
+import type {
+  DocumentGenerationExports,
+  UserSafeDisplayPayload,
+} from '../documents/normalized-document.models';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -102,6 +106,15 @@ export class CoverLettersService {
   private readonly jobRepository: Repository<Job>;
   private readonly generator: CoverLetterGenerator;
   private readonly fitAssessmentRepository: Repository<FitAssessment>;
+  private readonly complianceReasonLabels: Record<string, string> = {
+    invented_company: 'Company reference needs verification',
+    invented_role: 'Role or title needs verification',
+    invented_metric: 'Metric or outcome needs verification',
+    scope_inflation: 'Scope statement needs verification',
+    missing_baseline_support: 'Evidence is missing from your baseline',
+    fictional_technology: 'Technology claim needs verification',
+    stylized_punctuation: 'Formatting is not compliant yet',
+  };
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -123,7 +136,14 @@ export class CoverLettersService {
     const draft = await this.buildCoverLetterDraft(userId, input);
 
     if (draft.complianceResult.blocked) {
+      const display = this.buildBlockedDisplayPayload(
+        draft.complianceResult.complianceFlags,
+      );
+      const exports: DocumentGenerationExports = { docx: false, pdf: false };
       return {
+        status: 'blocked',
+        generationStatus: 'blocked',
+        exportReady: false,
         blocked: true,
         compliance_blocked: true,
         compliance_flags: draft.complianceResult.complianceFlags,
@@ -134,6 +154,17 @@ export class CoverLettersService {
         baselineVersionId: draft.baselineVersion.id,
         jobId: draft.job.id,
         message: 'Compliance validation failed.',
+        exports,
+        preview: {
+          coverLetter: null,
+        },
+        display,
+        safeDisplay: display,
+        internal: {
+          auditId: draft.complianceResult.audit.id,
+          baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
+          complianceFlags: draft.complianceResult.complianceFlags,
+        },
       };
     }
 
@@ -157,12 +188,28 @@ export class CoverLettersService {
 
     const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
 
+    const display = this.buildSuccessDisplayPayload();
+    const exports: DocumentGenerationExports = { docx: true, pdf: true };
     return {
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
       ...savedCoverLetter,
+      exports,
+      preview: {
+        coverLetter: draft.generation.document,
+      },
       compliance_flags: draft.complianceResult.complianceFlags,
       audit_id: draft.complianceResult.audit.id,
       auditId: draft.complianceResult.audit.id,
       baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
+      display,
+      safeDisplay: display,
+      internal: {
+        auditId: draft.complianceResult.audit.id,
+        baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
+        complianceFlags: draft.complianceResult.complianceFlags,
+      },
     };
   }
 
@@ -188,7 +235,7 @@ export class CoverLettersService {
       });
     }
 
-    const text = draft.complianceResult.normalizedContent;
+    const text = this.buildNormalizedCoverLetterText(draft.generation);
     let buffer: Buffer;
     if (format === 'pdf') {
       buffer = this.buildPdfBuffer(text);
@@ -417,7 +464,7 @@ export class CoverLettersService {
     );
 
     let complianceResult = await this.evaluateCompliance(
-      generation.content,
+      this.buildNormalizedCoverLetterText(generation),
       allowedBlocks,
       complianceBaselineSections,
       job,
@@ -445,7 +492,7 @@ export class CoverLettersService {
       });
 
       complianceResult = await this.evaluateCompliance(
-        generation.content,
+        this.buildNormalizedCoverLetterText(generation),
         allowedBlocks,
         complianceBaselineSections,
         job,
@@ -532,6 +579,55 @@ export class CoverLettersService {
       .sort((a, b) => a.order - b.order);
   }
 
+  private normalizeDisplayText(value: string, max = 160): string {
+    const normalized = this.cleanText(value);
+    if (!normalized) return '';
+    if (normalized.length <= max) return normalized;
+    return `${normalized.slice(0, max - 3).trim()}...`;
+  }
+
+  private buildSafeComplianceReasons(flags: ComplianceFlag[]): string[] {
+    const seen = new Set<string>();
+    const reasons: string[] = [];
+    for (const flag of flags) {
+      const code = this.cleanText(flag.code).toLowerCase();
+      const label = this.complianceReasonLabels[code] ?? 'Content needs verification';
+      const message = this.normalizeDisplayText(String(flag.message ?? ''), 130);
+      const reason = message ? `${label}: ${message}` : label;
+      const key = reason.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      reasons.push(reason);
+      if (reasons.length >= 4) break;
+    }
+    return reasons;
+  }
+
+  private buildBlockedDisplayPayload(flags: ComplianceFlag[]): UserSafeDisplayPayload {
+    return {
+      title: 'Cover letter blocked by compliance',
+      description:
+        'Some generated statements could not be verified against your baseline.',
+      reasons: this.buildSafeComplianceReasons(flags),
+      cta: {
+        label: 'Review compliance in Results',
+        href: '/results',
+      },
+    };
+  }
+
+  private buildSuccessDisplayPayload(): UserSafeDisplayPayload {
+    return {
+      title: 'Cover letter generated successfully',
+      description: 'Your cover letter draft is ready for preview and export.',
+      reasons: [],
+      cta: {
+        label: 'Review results',
+        href: '/results',
+      },
+    };
+  }
+
   private mapToAllowedBlocks(
     sections: BaselineSection[],
   ): AllowedBaselineBlock[] {
@@ -591,6 +687,27 @@ export class CoverLettersService {
     ];
 
     return Buffer.from(pdfParts.join('\n'));
+  }
+
+  private buildNormalizedCoverLetterText(
+    generation: CoverLetterGenerationResult,
+  ) {
+    if (!generation.document) {
+      return this.complianceService.normalizeText(generation.content);
+    }
+
+    return [
+      generation.document.salutation,
+      generation.document.opening,
+      ...generation.document.bodyParagraphs,
+      generation.document.closingParagraph,
+      generation.document.signoff,
+      generation.document.signatureName,
+    ]
+      .map((line) => this.cleanText(line))
+      .filter((line) => line.length > 0)
+      .join('\n\n')
+      .trim();
   }
 
   private normalizeRequestedJobContext(

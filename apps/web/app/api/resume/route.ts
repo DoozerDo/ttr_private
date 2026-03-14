@@ -1,10 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getApiBaseUrl, relayApiResponse, requireAuthToken } from "../baselines/helpers";
+import { getApiBaseUrl, requireAuthToken } from "../baselines/helpers";
 
 export const runtime = "nodejs";
 
 function shouldBypassTier() {
-  return process.env.NODE_ENV === "development" || process.env.TTR_BETA_BYPASS === "true";
+  return process.env.NODE_ENV !== "production" || process.env.TTR_BETA_BYPASS === "true";
+}
+
+function readStatus(payload: Record<string, unknown>): string {
+  const status =
+    (typeof payload.status === "string" ? payload.status : "").trim().toLowerCase() ||
+    (typeof payload.generationStatus === "string" ? payload.generationStatus : "")
+      .trim()
+      .toLowerCase();
+  return status;
+}
+
+function hasPreviewResume(payload: Record<string, unknown>): boolean {
+  const preview = payload.preview;
+  if (!preview || typeof preview !== "object") {
+    return false;
+  }
+  const resume = (preview as Record<string, unknown>).resume;
+  return Boolean(resume && typeof resume === "object");
+}
+
+function isValidResumeGenerationPayload(payload: unknown): payload is Record<string, unknown> {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  const status = readStatus(record);
+
+  if (status === "success") {
+    return hasPreviewResume(record) && record.exportReady === true;
+  }
+
+  if (status === "blocked" || status === "compliance_blocked") {
+    return record.exportReady === false;
+  }
+
+  if (status === "error") {
+    return record.exportReady === false;
+  }
+
+  return false;
 }
 
 export async function POST(req: NextRequest) {
@@ -33,11 +73,57 @@ export async function POST(req: NextRequest) {
     headers["X-TTR-Beta-Bypass"] = "true";
   }
 
-  const response = await fetch(`${baseUrl}/resume/generate`, {
+  const upstreamResponse = await fetch(`${baseUrl}/resume/generate`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
   });
 
-  return relayApiResponse(response);
+  const contentType = upstreamResponse.headers.get("content-type") ?? "";
+  const responseHeaders = new Headers();
+  upstreamResponse.headers.forEach((value, key) => responseHeaders.set(key, value));
+  responseHeaders.delete("content-length");
+
+  if (!contentType.toLowerCase().includes("json")) {
+    const bodyText = await upstreamResponse.text().catch(() => "");
+    return new NextResponse(bodyText, {
+      status: upstreamResponse.status,
+      headers: responseHeaders,
+    });
+  }
+
+  const raw = await upstreamResponse.text().catch(() => "");
+  let payload: unknown = null;
+  if (raw.trim().length) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: "RESUME_GENERATION_CONTRACT_MISMATCH",
+            message: "Resume generation returned invalid JSON.",
+          },
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  if (upstreamResponse.ok && !isValidResumeGenerationPayload(payload)) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "RESUME_GENERATION_CONTRACT_MISMATCH",
+          message: "Resume generation returned an unexpected payload shape.",
+        },
+      },
+      { status: 502 },
+    );
+  }
+
+  return NextResponse.json(payload, {
+    status: upstreamResponse.status,
+    headers: responseHeaders,
+  });
 }

@@ -301,10 +301,9 @@ async function assertValidDocxZip(
       expect(documentXml).toContain('<w:b');
     }
     if (options?.expectSectionHeaders) {
-      expect(documentXml).toContain('PROFESSIONAL SUMMARY');
-      expect(documentXml).toContain('CORE COMPETENCIES');
+      expect(documentXml).toContain('SUMMARY');
+      expect(documentXml).toContain('TECHNICAL SKILLS');
       expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
-      expect(documentXml).toContain('EDUCATION');
     }
     if (options?.expectExperienceHeader) {
       expect(documentXml).toContain('Senior Program Manager');
@@ -315,8 +314,7 @@ async function assertValidDocxZip(
       expect(documentXml).toContain('w:after="120"');
     }
     if (options?.expectBullets) {
-      expect(documentXml).toContain('ListBullet');
-      expect(documentXml).toContain('• ');
+      expect(documentXml).toContain('<w:numPr>');
     }
   }
 }
@@ -355,11 +353,72 @@ describe('ResumeService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('fails export safely when generation does not produce a valid normalized resume model', async () => {
+    const { service } = buildService(95);
+    jest.spyOn(service, 'generateResume').mockResolvedValue({
+      ok: false,
+      status: 'error',
+      generationStatus: 'error',
+      exportReady: false,
+      blocked: false,
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      sections: [],
+      compliance_flags: [],
+      compliance_blocked: false,
+      audit_id: null,
+      auditId: null,
+      baseline_version_hash: 'hash-1',
+      quality: 'draft',
+      exports: { docx: false, pdf: false },
+      preview: { resume: null },
+      trackerEntryId: null,
+      trackerStatus: null,
+      opportunityId: null,
+      claimRiskSummary: { high: 0, medium: 0, low: 0 },
+      gapAnalysis: null,
+      gapGuidance: null,
+      display: {
+        title: 'Resume generation failed',
+        description: 'Unable to generate',
+        reasons: [],
+        cta: { label: 'Review', href: '/results' },
+      },
+      safeDisplay: {
+        title: 'Resume generation failed',
+        description: 'Unable to generate',
+        reasons: [],
+        cta: { label: 'Review', href: '/results' },
+      },
+      internal: { complianceFlags: [] },
+    } as any);
+
+    await expect(service.exportResume('user-1', baseRequest, 'docx')).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'NORMALIZATION_FAILED',
+        },
+      },
+    });
+  });
+
   it('allows one-tap generation when score meets threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD);
 
-    const result = await service.generateResume('user-1', baseRequest);
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
     expect(result.ok).toBe(true);
+    expect(result.status).toBe('success');
+    expect(result.generationStatus).toBe('success');
+    expect(result.exportReady).toBe(true);
+    expect(result.exports).toEqual({ docx: true, pdf: true });
+    expect(result.preview?.resume?.experience?.length ?? 0).toBeGreaterThan(0);
+    expect(result.safeDisplay).toMatchObject({
+      title: 'Resume generated successfully',
+    });
     expect(result.sections).toHaveLength(4);
   });
 
@@ -824,9 +883,9 @@ describe('ResumeService', () => {
     const zip = await JSZip.loadAsync(exportResult.buffer);
     const documentXml = await zip.file('word/document.xml')!.async('text');
     expect(documentXml).toContain('John Candidate');
-    expect(documentXml).toContain('CORE COMPETENCIES');
+    expect(documentXml).toContain('TECHNICAL SKILLS');
     expect(documentXml).not.toContain('Claim risk');
-    expect(documentXml).toContain('CORE COMPETENCIES');
+    expect(documentXml).toContain('TECHNICAL SKILLS');
     expect(documentXml).toContain('PROFESSIONAL EXPERIENCE');
     expect(exportResult.filename).toMatch(/^Example-Co-\d{2}-\d{2}-\d{4}\.docx$/);
     expect(exportResult.auditId).toBe('audit-1');
@@ -845,14 +904,634 @@ describe('ResumeService', () => {
     const zip = await JSZip.loadAsync(exportResult.buffer);
     const documentXml = await zip.file('word/document.xml')!.async('text');
 
-    const skillMatches = documentXml.match(/CORE COMPETENCIES/g) ?? [];
+    const skillMatches = documentXml.match(/TECHNICAL SKILLS/g) ?? [];
     const experienceMatches = documentXml.match(/PROFESSIONAL EXPERIENCE/g) ?? [];
     const headerMatches = documentXml.match(/John Candidate/g) ?? [];
 
     expect(skillMatches).toHaveLength(1);
     expect(experienceMatches).toHaveLength(1);
     expect(headerMatches).toHaveLength(1);
-    expect(documentXml).toContain('ListBullet');
+    expect(documentXml).toContain('<w:numPr>');
+  });
+
+  it('renders experience bullets as discrete bullet paragraphs in DOCX', async () => {
+    const { service } = buildService(95, []);
+    const exportResult = await service.exportResume('user-1', baseRequest, 'docx');
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+
+    expect(documentXml).toContain('Led automation efforts that reduced defects.');
+    expect(documentXml).toContain('Mentored engineers and delivered measurable results.');
+    const bulletParagraphs = documentXml.match(/<w:numPr>/g) ?? [];
+    expect(bulletParagraphs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('exports gaming baseline as coherent role blocks without pagination artifacts or duplicated education', async () => {
+    const gamingBaseline: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Cat Daddy Games | Kirkland, WA | 2020 - 2025',
+            'Senior Producer | 2K',
+            '- Led live operations roadmap delivery across multiple game releases.',
+            '- Led live operations roadmap delivery across multiple game releases.',
+            'Page 1 3',
+            '',
+            'MobilityWare | Irvine, CA | 2016 - 2020',
+            'Producer',
+            '- Drove roadmap execution for multiple mobile titles.',
+            'Page 2 3',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.EDUCATION,
+          title: 'Education',
+          content: [
+            'B.A. Media Arts | University of Washington | Seattle, WA',
+            'B.A. Media Arts | University of Washington | Seattle, WA',
+          ].join('\n'),
+        },
+        {
+          ...skillsSection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content:
+            'Production leader with verified cross-functional delivery across live operations, roadmap execution, release quality, and collaboration with engineering, product, and analytics partners.',
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(gamingBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const generation = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+    expect(generation.preview?.resume?.education).toHaveLength(1);
+
+    const exportResult = await service.exportResume('user-1', baseRequest, 'docx');
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+
+    expect(documentXml).toContain('Cat Daddy Games');
+    expect(documentXml).toContain('Senior Producer');
+    expect(documentXml).toContain('MobilityWare');
+    expect(documentXml).not.toContain('Page 1 3');
+    expect(documentXml).not.toContain('Page 2 3');
+
+    const duplicateBulletCount =
+      documentXml.match(/Led live operations roadmap delivery across multiple game releases\./g)
+        ?.length ?? 0;
+    expect(duplicateBulletCount).toBe(1);
+
+    expect(documentXml).toContain('B.A. Media Arts');
+    expect(documentXml).toContain('University of Washington');
+  });
+
+  it('renders Greg-style companies as separate non-bullet paragraphs and dedupes MS/BA education rows', async () => {
+    const gregBaseline: Baseline = {
+      ...mockBaseline,
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Cat Daddy Games | Kirkland, WA | 2020 - 2025',
+            'Senior Game Designer',
+            '- Built economy tuning systems for seasonal live events.',
+            '',
+            'Monopoly Solitaire | Irvine, CA | 2019 - 2020',
+            'Game Designer',
+            '- Shipped progression updates for Monopoly Solitaire live content.',
+            '',
+            'PlayStudios | Las Vegas, NV | 2017 - 2019',
+            'Game Designer',
+            '- Led social casino release planning and content operations.',
+            '',
+            'Max Axe | Remote | 2015 - 2017',
+            'Designer',
+            '- Implemented gameplay tuning dashboards for early stage titles.',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.EDUCATION,
+          title: 'Education',
+          content: [
+            'Master of Science in Interactive Entertainment Design & Production | Master of Science in Interactive Entertainment Design & Production | University of Central Florida, Orlando, FL | University of Central Florida, Orlando, FL',
+            'Bachelor of Arts in Art & Visual Technology | Bachelor of Arts in Art & Visual Technology | George Mason University, Fairfax, VA | George Mason University, Fairfax, VA',
+          ].join('\n'),
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(gregBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const exportResult = await service.exportResume('user-1', baseRequest, 'docx');
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+
+    const companies = ['Cat Daddy Games', 'Monopoly Solitaire', 'PlayStudios', 'Max Axe'];
+    const paragraphs = documentXml.match(/<w:p>[\s\S]*?<\/w:p>/g) ?? [];
+    for (const company of companies) {
+      const paragraph = paragraphs.find((p) => p.includes(company));
+      expect(paragraph).toBeDefined();
+      expect(paragraph).not.toContain('<w:numPr>');
+    }
+
+    const msMatches =
+      documentXml.match(/Master of Science in Interactive Entertainment Design &amp; Production/g) ?? [];
+    const baMatches = documentXml.match(/Bachelor of Arts in Art &amp; Visual Technology/g) ?? [];
+    expect(msMatches).toHaveLength(1);
+    expect(baMatches).toHaveLength(1);
+  });
+
+  it('produces a clean preview.resume model for problematic gaming baseline runtime shape', async () => {
+    const gamingBaseline: Baseline = {
+      ...mockBaseline,
+      parsedRecords: [
+        {
+          createdAt: new Date(),
+          parsedJson: {
+            identity: {
+              full_name: 'Alex Candidate',
+              location: 'Kirkland, WA | (703) 850-7289',
+            },
+          },
+        } as any,
+      ],
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Cat Daddy Games | Kirkland, WA | 2020 - 2025',
+            'Senior Producer | 2K',
+            '- Led live operations roadmap delivery across multiple game releases.',
+            '- Led live operations roadmap delivery across multiple game releases.',
+            'mathematical',
+            'deployment timelines',
+            'Page 1',
+            'Page 2',
+            '3',
+            '',
+            'MobilityWare | Irvine, CA | 2016 - 2020',
+            'Producer',
+            '- Drove roadmap execution for multiple mobile titles.',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.EDUCATION,
+          title: 'Education',
+          content: [
+            'B.A. Media Arts | University of Washington | Seattle, WA',
+            '• B.A. Media Arts | University of Washington | Seattle, WA',
+          ].join('\n'),
+        },
+        {
+          ...skillsSection,
+          sectionType: BaselineSectionType.RAW,
+          title: 'Header',
+          content: ['Alex Candidate', 'alex@example.com', '(703) 850-7289'].join('\n'),
+        } as any,
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content:
+            'Operations leader with verified delivery across cross-functional game production, release management, quality programs, and stakeholder communication over multi-year roadmaps.',
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(gamingBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.preview?.resume).toBeDefined();
+    const model = result.preview!.resume!;
+    const phoneMatches = model.heading.contactLine.match(/\(703\)\s850-7289/g) ?? [];
+    expect(phoneMatches).toHaveLength(1);
+    expect(model.experience[0]).toMatchObject({
+      company: 'Cat Daddy Games',
+      roleTitle: 'Senior Producer',
+    });
+    const serialized = JSON.stringify(model);
+    expect(serialized).not.toContain('mathematical');
+    expect(serialized).not.toContain('deployment timelines');
+    expect(serialized).not.toContain('"2K"');
+    expect(serialized).not.toContain('Page 1');
+    expect(serialized).not.toContain('Page 2');
+    expect(serialized).not.toContain('"3"');
+    expect(model.education).toHaveLength(1);
+  });
+
+  it('generates preview.resume when experience lines are parsed as location then company then date', async () => {
+    const parsedShapeBaseline: Baseline = {
+      ...mockBaseline,
+      parsedRecords: [
+        {
+          createdAt: new Date(),
+          parsedJson: {
+            identity: {
+              full_name: 'Alex Candidate',
+              location: 'Kirkland, WA | (703) 850-7289',
+            },
+          },
+        } as any,
+      ],
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Kirkland, WA',
+            'Cat Daddy Games',
+            '2020 - 2025',
+            '- Led live operations roadmap delivery across multiple game releases.',
+            '2K',
+            'mathematical',
+            'deployment timelines',
+            'Page 1',
+            '',
+            'Irvine, CA',
+            'MobilityWare',
+            '2016 - 2020',
+            '- Drove roadmap execution for multiple mobile titles.',
+            'Page 2',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.EDUCATION,
+          title: 'Education',
+          content: [
+            'B.A. Media Arts | University of Washington | Seattle, WA',
+            'B.A. Media Arts | University of Washington | Seattle, WA',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: Array.from({ length: 8 })
+            .map(
+              () =>
+                'Production leader with verified cross-functional delivery across live operations, release management, roadmap planning, stakeholder communication, and execution quality in game development programs.',
+            )
+            .join(' '),
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(parsedShapeBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.preview?.resume?.experience).toHaveLength(2);
+    expect(result.preview?.resume?.experience[0]).toMatchObject({
+      company: 'Cat Daddy Games',
+      location: 'Kirkland, WA',
+    });
+    expect(result.preview?.resume?.experience[1]).toMatchObject({
+      company: 'MobilityWare',
+      location: 'Irvine, CA',
+    });
+    const serialized = JSON.stringify(result.preview?.resume);
+    expect(serialized).not.toContain('Page 1');
+    expect(serialized).not.toContain('Page 2');
+    expect(serialized).not.toContain('mathematical');
+    expect(serialized).not.toContain('deployment timelines');
+    expect(serialized).not.toContain('"2K"');
+    expect(result.preview?.resume?.education).toHaveLength(1);
+  });
+
+  it('returns success with preview.resume when pagination artifacts are the only blocker', async () => {
+    const paginationHeavyBaseline: Baseline = {
+      ...mockBaseline,
+      parsedRecords: [
+        {
+          createdAt: new Date(),
+          parsedJson: {
+            identity: {
+              full_name: 'Greg Armstrong',
+              location: 'Kirkland, WA | Page 1 | (703) 850-7289 | 3',
+            },
+          },
+        } as any,
+      ],
+      sections: [
+        {
+          ...baselineSection,
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: [
+            'Cat Daddy Games | Page 1 3 | 2020 - 2025',
+            'Senior Producer | Page 2',
+            '- Led live operations roadmap delivery across multiple game releases. Page 3',
+            '- Improved release quality through test automation and telemetry instrumentation.',
+            '',
+            'MobilityWare | Irvine, CA | 2016 - 2020',
+            'Producer',
+            '- Drove roadmap execution for multiple mobile titles. Page 2 3',
+          ].join('\n'),
+        },
+        {
+          ...summarySection,
+          sectionType: BaselineSectionType.SUMMARY,
+          title: 'Summary',
+          content: Array.from({ length: 8 })
+            .map(
+              () =>
+                'Production leader with verified cross-functional delivery across live operations, release management, roadmap planning, stakeholder communication, and execution quality in game development programs.',
+            )
+            .join(' '),
+        },
+      ],
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(paginationHeavyBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue(mockJob),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({ overallScore: 95 } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      { analyze: jest.fn().mockReturnValue(null) } as GapAnalysisService,
+    );
+
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.preview?.resume).toBeDefined();
+    const serialized = JSON.stringify(result.preview?.resume);
+    expect(serialized).not.toMatch(/\bPage\s+\d/i);
+    expect(serialized).not.toContain('"3"');
+  });
+
+  it('uses canonical preview.resume model for DOCX export instead of section fragments', async () => {
+    const { service } = buildService(95, []);
+
+    jest.spyOn(service, 'generateResume').mockResolvedValue({
+      ok: true,
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
+      blocked: false,
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      sections: [
+        {
+          id: 'fragment-section',
+          type: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Page 1 3\nCompany\nmathematical\nfragmented text',
+          bullets: [],
+        },
+      ] as any,
+      compliance_flags: [],
+      compliance_blocked: false,
+      audit_id: 'audit-1',
+      auditId: 'audit-1',
+      baseline_version_hash: 'hash-1',
+      quality: 'optimized',
+      exports: { docx: true, pdf: true },
+      preview: {
+        resume: {
+          heading: {
+            name: 'Alex Candidate',
+            contactLine: 'alex@example.com | (703) 850-7289',
+          },
+          experience: [
+            {
+              company: 'Cat Daddy Games',
+              roleTitle: 'Senior Producer',
+              location: 'Kirkland, WA',
+              dateRange: '2020 - 2025',
+              bullets: [
+                'Led live operations roadmap delivery across multiple game releases.',
+                'Partnered across product and engineering to improve release quality.',
+              ],
+            },
+          ],
+          education: [
+            {
+              degree: 'B.A. Media Arts',
+              institution: 'University of Washington',
+              location: 'Seattle, WA',
+            },
+          ],
+        },
+      },
+      trackerEntryId: 'tracker-entry',
+      trackerStatus: 'Prepared',
+      opportunityId: 'opportunity-1',
+      claimRiskSummary: { high: 0, medium: 0, low: 0 },
+      gapAnalysis: null,
+      gapGuidance: null,
+      display: {
+        title: 'Resume generated successfully',
+        description: 'Ready for export.',
+        reasons: [],
+        cta: { label: 'Review results', href: '/results' },
+      },
+      safeDisplay: {
+        title: 'Resume generated successfully',
+        description: 'Ready for export.',
+        reasons: [],
+        cta: { label: 'Review results', href: '/results' },
+      },
+      internal: {
+        auditId: 'audit-1',
+        baselineVersionHash: 'hash-1',
+        complianceFlags: [],
+      },
+    } as any);
+
+    const exportResult = await service.exportResume('user-1', baseRequest, 'docx');
+    const zip = await JSZip.loadAsync(exportResult.buffer);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+
+    expect(documentXml).toContain('Cat Daddy Games');
+    expect(documentXml).toContain('Senior Producer');
+    expect(documentXml).toContain('Led live operations roadmap delivery across multiple game releases.');
+    expect(documentXml).toContain('Partnered across product and engineering to improve release quality.');
+    expect(documentXml).not.toContain('Page 1 3');
+    expect(documentXml).not.toContain('fragmented text');
+    expect(documentXml).not.toContain('mathematical');
   });
 
   it('exports PDF content with valid header', async () => {
@@ -997,10 +1676,20 @@ Additional context line to ensure extracted text length remains above validation
 
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(false);
-    expect(result.status).toBe('compliance_blocked');
+    expect(result.status).toBe('blocked');
+    expect(result.generationStatus).toBe('blocked');
+    expect(result.exportReady).toBe(false);
     expect(result.sections).toEqual([]);
     expect(result.compliance_blocked).toBe(true);
+    expect(result.exports).toEqual({ docx: false, pdf: false });
+    expect(result.preview).toEqual({ resume: null });
     expect(result.compliance_flags).toEqual(inventedFlag);
+    expect(result.safeDisplay).toMatchObject({
+      title: 'Resume blocked by compliance',
+    });
+    expect(result.internal).toMatchObject({
+      auditId: 'audit-1',
+    });
     expect(applicationsService.upsertPreparedFromResumeGeneration).not.toHaveBeenCalled();
     expect(opportunitiesService.createFromResumeStudio).not.toHaveBeenCalled();
   });
@@ -1088,7 +1777,8 @@ Additional context line to ensure extracted text length remains above validation
 
     const result = await service.generateResume('user-1', baseRequest);
     expect(result.ok).toBe(false);
-    expect(result.status).toBe('compliance_blocked');
+    expect(result.status).toBe('blocked');
+    expect(result.exportReady).toBe(false);
     expect(result.sections).toEqual([]);
     expect(result.compliance_blocked).toBe(true);
     expect(result.compliance_flags).toEqual(scopeFlag);
@@ -1114,5 +1804,79 @@ Additional context line to ensure extracted text length remains above validation
     expect(complianceService.validateAndAudit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: ComplianceAction.RESUME_EXPORT }),
     );
+  });
+
+  it('returns compact deduplicated gap guidance for Studio payloads', async () => {
+    const longEvidence =
+      'Global offices across multiple continents and regions with baseline operating detail '.repeat(
+        12,
+      );
+    const duplicateGap = {
+      gapId: 'gap-1',
+      title: 'Operations Leadership',
+      description: 'Gap',
+      severityScore: 0.8,
+      requirementEvidence: 'Own incident command and governance for executive escalations.',
+      baselineEvidence: longEvidence,
+      reasoning: longEvidence,
+    };
+
+    const baselineRepository = buildRepository<Baseline>({
+      findOne: jest.fn().mockResolvedValue(mockBaseline),
+    });
+    const baselineVersionRepository = buildRepository<BaselineVersion>({
+      findOne: jest.fn().mockResolvedValue(mockBaselineVersion),
+    });
+    const baselineBlockPolicyRepository = buildRepository<BaselineBlockPolicy>({
+      find: jest.fn().mockResolvedValue([]),
+    });
+    const jobsRepository = buildRepository<Job>({
+      findOne: jest.fn().mockResolvedValue({
+        ...mockJob,
+        normalizedRequirements: ['Salary range is $120,000 - $140,000.'],
+        normalizedResponsibilities: ['Own incident command and governance.'],
+      }),
+    });
+    const fitAssessmentRepository = buildRepository<FitAssessment>({
+      findOne: jest.fn().mockResolvedValue({
+        id: 'fit-1',
+        overallScore: 91,
+      } as FitAssessment),
+    });
+    const complianceService = createComplianceServiceMock([], mockBaselineVersion);
+    const gapAnalysisService = {
+      analyze: jest.fn().mockReturnValue({
+        strengths: ['Incident management', 'Incident management'],
+        criticalGaps: [duplicateGap, duplicateGap],
+        recommendedActions: [],
+        interviewRisks: [],
+      }),
+    } as Partial<GapAnalysisService>;
+
+    const service = new ResumeService(
+      baselineRepository,
+      baselineVersionRepository,
+      baselineBlockPolicyRepository,
+      jobsRepository,
+      fitAssessmentRepository,
+      complianceService,
+      {
+        upsertPreparedFromResumeGeneration: jest.fn().mockResolvedValue({
+          id: 'tracker-entry',
+          status: 'Prepared',
+        }),
+      } as ApplicationsService,
+      { createFromResumeStudio: jest.fn().mockResolvedValue({ id: 'opportunity-1' }) } as OpportunitiesService,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    const result = await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(result.gapGuidance?.strengthSignals).toEqual(['Incident management']);
+    expect(result.gapGuidance?.gapSignals.some((signal) => /salary/i.test(signal))).toBe(false);
+    expect(result.gapGuidance?.reframingPriorities[0]?.baselineEvidence?.length ?? 0).toBeLessThanOrEqual(180);
   });
 });

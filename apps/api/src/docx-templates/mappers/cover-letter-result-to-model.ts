@@ -19,6 +19,29 @@ export function mapCoverLetterResultToModel(
       typeof line === 'string' && line.trim().length > 0,
   );
 
+  if (generation.document) {
+    return {
+      dateLine: generation.document.dateLine ?? options?.dateLine,
+      addresseeLines:
+        generation.document.recipientLine?.length
+          ? generation.document.recipientLine
+          : addresseeLines.length
+            ? addresseeLines
+            : undefined,
+      greeting: generation.document.salutation,
+      paragraphs: [
+        generation.document.opening,
+        ...generation.document.bodyParagraphs,
+        generation.document.closingParagraph,
+      ].filter((paragraph) => paragraph.trim().length > 0),
+      closingLines: [generation.document.signoff].filter(Boolean),
+      signatureName:
+        generation.document.signatureName?.trim() ||
+        identity?.fullName?.trim() ||
+        undefined,
+    };
+  }
+
   return {
     dateLine: options?.dateLine,
     addresseeLines: addresseeLines.length ? addresseeLines : undefined,

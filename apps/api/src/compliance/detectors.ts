@@ -113,6 +113,55 @@ const LOCATION_ALLOWLIST = new Set([
   'chicago',
   'hybrid',
 ]);
+const NON_COMPANY_EXACT_ALLOWLIST = new Set([
+  'real world merchandise',
+  'gift card',
+  'gift cards',
+  'electronics',
+  'consumer electronics',
+  'compensation',
+  'compensation range',
+  'salary',
+  'salary range',
+  'pay range',
+  'base salary',
+  'annual salary',
+  'hourly pay',
+  'total compensation',
+  'bonus',
+  'equity',
+  'benefits',
+  'package',
+  'platform',
+  'platform label',
+  'reward',
+  'rewards',
+]);
+const NON_COMPANY_TOKEN_ALLOWLIST = new Set([
+  'salary',
+  'compensation',
+  'wage',
+  'wages',
+  'hourly',
+  'bonus',
+  'equity',
+  'benefits',
+  'pay',
+  'range',
+  'gift',
+  'gifts',
+  'cards',
+  'electronics',
+  'merchandise',
+  'reward',
+  'rewards',
+]);
+const NON_COMPANY_PATTERNS = [
+  /\b(?:salary|compensation|pay|wage|bonus|equity|benefits)\b/i,
+  /[$€£]\s?\d/i,
+  /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\s*(?:-|to)\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\b/i,
+  /\b(?:gift\s*cards?|real\s*world\s*merchandise|electronics?)\b/i,
+];
 const ROLE_ALLOWLIST = new Set([
   'hiring manager',
   'recruiter',
@@ -411,6 +460,7 @@ export function collectCandidates(
 function looksLikeCompanyName(value: string): boolean {
   const normalized = normalizeTokenForComparison(value);
   if (!normalized) return false;
+  if (isNonCompanyReference(normalized, value)) return false;
   if (COMPANY_ALLOWLIST.has(normalized)) return false;
   if (LOCATION_ALLOWLIST.has(normalized)) return false;
   if (MONTHS.has(normalized)) return false;
@@ -969,12 +1019,29 @@ function containsRoleKeyword(value: string): boolean {
 }
 
 function isCompanyAllowlisted(normalized: string, original: string): boolean {
+  if (isNonCompanyReference(normalized, original)) return true;
   if (COMPANY_ALLOWLIST.has(normalized)) return true;
   if (LOCATION_ALLOWLIST.has(normalized)) return true;
   if (MONTHS.has(normalized)) return true;
   if (/\b(?:com|org|net|io|co|us|uk|edu|gov)\b/i.test(original)) return true;
   if (original.includes('@') || original.includes('.')) return true;
   return false;
+}
+
+function isNonCompanyReference(normalized: string, original: string): boolean {
+  if (!normalized) return true;
+  if (NON_COMPANY_EXACT_ALLOWLIST.has(normalized)) return true;
+
+  const tokenList = normalized.split(/\s+/).filter(Boolean);
+  if (
+    tokenList.length > 0 &&
+    tokenList.every((token) => NON_COMPANY_TOKEN_ALLOWLIST.has(token))
+  ) {
+    return true;
+  }
+
+  const value = `${normalized} ${original}`.trim();
+  return NON_COMPANY_PATTERNS.some((pattern) => pattern.test(value));
 }
 
 function buildRoleAllowlist(

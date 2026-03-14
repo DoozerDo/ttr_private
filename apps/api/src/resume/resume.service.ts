@@ -31,7 +31,6 @@ import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import '../docx-templates/templates';
 import {
-  mapResumeSectionsToDocxModel,
   ResumeExportSection,
 } from '../docx-templates/mappers/resume-sections-to-model';
 import {
@@ -45,9 +44,20 @@ import {
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
 import { buildResumeDraftSections } from './resume-draft-bullets';
 import {
+  buildNormalizedResumeDocument,
+  buildResumePlainText,
+  mapNormalizedResumeToDocxModel,
+  validateNormalizedResumeDocument,
+} from './resume-normalization';
+import {
   buildBaselineEvidenceTermInventory,
   summarizeClaimRisk,
 } from './claim-risk';
+import type {
+  DocumentGenerationExports,
+  NormalizedResumeDocument,
+  UserSafeDisplayPayload,
+} from '../documents/normalized-document.models';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -68,6 +78,7 @@ export type ResumePreExportSnapshot = {
   sections: ResumeExportSection[];
   sectionFragments: Array<{ title: string | null; content: string }>;
   docxModel: ResumeDocxModel;
+  normalizedDocument: NormalizedResumeDocument;
 };
 
 @Injectable()
@@ -110,17 +121,6 @@ export class ResumeService {
         },
       });
     }
-  }
-
-  private buildResumeText(
-    sections: Array<{ title: string | null; content: string }>,
-  ) {
-    return sections
-      .map((section) => {
-        const title = section.title ? `${section.title}\n` : '';
-        return `${title}${section.content}`.trim();
-      })
-      .join('\n\n');
   }
 
   private buildPdfBuffer(content: string) {
@@ -298,6 +298,149 @@ export class ResumeService {
       .sort((a, b) => a.order - b.order);
   }
 
+  private readonly complianceReasonLabels: Record<string, string> = {
+    invented_company: 'Company reference needs verification',
+    invented_role: 'Role or title needs verification',
+    invented_metric: 'Metric or outcome needs verification',
+    scope_inflation: 'Scope statement needs verification',
+    missing_baseline_support: 'Evidence is missing from your baseline',
+    fictional_technology: 'Technology claim needs verification',
+    stylized_punctuation: 'Formatting is not compliant yet',
+  };
+
+  private normalizeEvidenceForDisplay(value: string, max = 180): string {
+    const normalized = String(value ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+    const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
+    if (firstSentence.length <= max) return firstSentence;
+    return `${firstSentence.slice(0, max - 3).trim()}...`;
+  }
+
+  private dedupeDisplayStrings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const raw of values) {
+      const value = this.normalizeEvidenceForDisplay(raw);
+      if (!value) continue;
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(value);
+    }
+    return result;
+  }
+
+  private buildSafeComplianceReasons(
+    complianceFlags: Array<{ code?: string; message?: string }>,
+  ): string[] {
+    const reasons = this.dedupeDisplayStrings(
+      complianceFlags.map((flag) => {
+        const code = String(flag.code ?? '')
+          .trim()
+          .toLowerCase();
+        const label = this.complianceReasonLabels[code] ?? 'Content needs verification';
+        const message = this.normalizeEvidenceForDisplay(String(flag.message ?? ''), 140);
+        return message ? `${label}: ${message}` : label;
+      }),
+    );
+    return reasons.slice(0, 4);
+  }
+
+  private buildBlockedDisplayPayload(
+    complianceFlags: Array<{ code?: string; message?: string }>,
+  ): UserSafeDisplayPayload {
+    return {
+      title: 'Resume blocked by compliance',
+      description:
+        'Some generated statements could not be verified against your baseline.',
+      reasons: this.buildSafeComplianceReasons(complianceFlags),
+      cta: {
+        label: 'Review compliance in Results',
+        href: '/results',
+      },
+    };
+  }
+
+  private buildSuccessDisplayPayload(): UserSafeDisplayPayload {
+    return {
+      title: 'Resume generated successfully',
+      description: 'Your resume draft is ready for preview and export.',
+      reasons: [],
+      cta: {
+        label: 'Review results',
+        href: '/results',
+      },
+    };
+  }
+
+  private sanitizeGapGuidance(gapInsights: ReturnType<GapAnalysisService['analyze']> | null) {
+    if (!gapInsights) return null;
+
+    const strengthSignals = this.dedupeDisplayStrings(gapInsights.strengths).slice(0, 6);
+    const gapSignals = this.dedupeDisplayStrings(
+      gapInsights.criticalGaps.flatMap((gap) => [
+        gap.title,
+        gap.requirementEvidence,
+        gap.baselineEvidence ?? '',
+      ]),
+    ).slice(0, 8);
+    const reframingPriorities = gapInsights.criticalGaps.slice(0, 2).map((gap) => ({
+      title: this.normalizeEvidenceForDisplay(gap.title, 90),
+      requirementEvidence: this.normalizeEvidenceForDisplay(gap.requirementEvidence, 180),
+      baselineEvidence: gap.baselineEvidence
+        ? this.normalizeEvidenceForDisplay(gap.baselineEvidence, 180)
+        : null,
+      reasoning: this.normalizeEvidenceForDisplay(gap.reasoning, 180),
+    }));
+
+    return {
+      strengthSignals,
+      gapSignals,
+      reframingPriorities,
+    };
+  }
+
+  private logNormalizationDiagnostics(payload: {
+    baselineId: string;
+    sectionCount: number;
+    sections: Array<{ type?: string | null; title?: string | null; content?: string | null }>;
+    normalized: NormalizedResumeDocument;
+  }) {
+    if (process.env.DEBUG_RESUME_NORMALIZATION !== 'true') return;
+    const snapshot = {
+      baselineId: payload.baselineId,
+      sectionCount: payload.sectionCount,
+      sections: payload.sections.map((section) => ({
+        type: section.type ?? null,
+        title: section.title ?? null,
+        contentPreview: String(section.content ?? '').slice(0, 220),
+      })),
+      normalized: {
+        heading: payload.normalized.heading,
+        summary: payload.normalized.summary ?? null,
+        competencies:
+          payload.normalized.competencies ??
+          payload.normalized.coreCompetencies ??
+          [],
+        experience: payload.normalized.experience.map((entry) => ({
+          company: entry.company,
+          roleTitle: entry.roleTitle,
+          location: entry.location ?? null,
+          dateRange:
+            entry.dateRange ??
+            [entry.startDate, entry.endDate].filter(Boolean).join(' - ') ??
+            null,
+          bullets: entry.bullets,
+        })),
+        education: payload.normalized.education ?? [],
+      },
+    };
+    // eslint-disable-next-line no-console
+    console.log('[resume-normalization]', JSON.stringify(snapshot, null, 2));
+  }
+
   async generateResume(
     userId: string,
     request: GenerateResumeRequest,
@@ -316,8 +459,8 @@ export class ResumeService {
 
     const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
-      relations: ['sections'],
-      order: { sections: { order: 'ASC' } },
+      relations: ['sections', 'parsedRecords'],
+      order: { sections: { order: 'ASC' }, parsedRecords: { createdAt: 'DESC' } },
     });
 
     if (!baseline) {
@@ -409,22 +552,7 @@ export class ResumeService {
           ...gapInsights.criticalGaps.map((gap) => gap.requirementEvidence),
         ].join('\n')
       : '';
-    const gapGuidance = gapInsights
-      ? {
-          strengthSignals: gapInsights.strengths,
-          gapSignals: gapInsights.criticalGaps.flatMap((gap) => [
-            gap.title,
-            gap.requirementEvidence,
-            gap.baselineEvidence ?? '',
-          ]),
-          reframingPriorities: gapInsights.criticalGaps.slice(0, 2).map((gap) => ({
-            title: gap.title,
-            requirementEvidence: gap.requirementEvidence,
-            baselineEvidence: gap.baselineEvidence,
-            reasoning: gap.reasoning,
-          })),
-        }
-      : null;
+    const gapGuidance = this.sanitizeGapGuidance(gapInsights);
     const draftJobText = [job?.rawDescription ?? '', gapContextText]
       .filter(Boolean)
       .join('\n');
@@ -442,6 +570,68 @@ export class ResumeService {
     const claimRiskSummary = summarizeClaimRisk(
       sections.flatMap((section) => section.bullets.map((bullet) => bullet.claimRisk)),
     );
+    const identity = resolveBaselineIdentity(baseline);
+    const normalizedDocument = buildNormalizedResumeDocument(
+      sections as ResumeExportSection[],
+      identity,
+    );
+    this.logNormalizationDiagnostics({
+      baselineId: baseline.id,
+      sectionCount: sections.length,
+      sections: sections.map((section) => ({
+        type: section.type,
+        title: section.title,
+        content: section.content,
+      })),
+      normalized: normalizedDocument,
+    });
+    const normalizedValidation = validateNormalizedResumeDocument(
+      normalizedDocument,
+    );
+    if (!normalizedValidation.valid) {
+      const display: UserSafeDisplayPayload = {
+        title: 'Resume generation failed',
+        description:
+          'We could not build a valid resume structure from the available data.',
+        reasons: normalizedValidation.reasons.slice(0, 4),
+        cta: {
+          label: 'Review source resume in Results',
+          href: '/results',
+        },
+      };
+      return {
+        ok: false,
+        status: 'error',
+        generationStatus: 'error',
+        exportReady: false,
+        blocked: false,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? null,
+        sections: [],
+        compliance_flags: [],
+        compliance_blocked: false,
+        audit_id: null,
+        auditId: null,
+        baseline_version_hash: baselineVersion.hash,
+        quality: 'blocked',
+        exports: { docx: false, pdf: false } as DocumentGenerationExports,
+        preview: {
+          resume: null,
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        claimRiskSummary,
+        gapAnalysis: gapInsights,
+        gapGuidance,
+        display,
+        safeDisplay: display,
+        internal: {
+          complianceFlags: [],
+        },
+      };
+    }
 
     const normalizedBaselineSections =
       this.complianceService.normalizeSectionsForOutput(
@@ -493,9 +683,13 @@ export class ResumeService {
     const complianceBlocked = blocked;
 
     if (complianceBlocked) {
+      const display = this.buildBlockedDisplayPayload(complianceFlags);
+      const exports: DocumentGenerationExports = { docx: false, pdf: false };
       return {
         ok: false,
-        status: 'compliance_blocked',
+        status: 'blocked',
+        generationStatus: 'blocked',
+        exportReady: false,
         blocked: true,
         baselineId: baseline.id,
         baselineVersionId: baselineVersion.id,
@@ -507,12 +701,23 @@ export class ResumeService {
         auditId: audit.id,
         baseline_version_hash: audit.baselineVersionHash,
         quality: 'blocked',
+        exports,
+        preview: {
+          resume: null,
+        },
         trackerEntryId: null,
         trackerStatus: null,
         opportunityId: null,
         claimRiskSummary,
         gapAnalysis: gapInsights,
         gapGuidance,
+        display,
+        safeDisplay: display,
+        internal: {
+          auditId: audit.id,
+          baselineVersionHash: audit.baselineVersionHash,
+          complianceFlags,
+        },
       };
     }
 
@@ -545,9 +750,13 @@ export class ResumeService {
           ? 'optimized'
           : 'draft';
 
+    const display = this.buildSuccessDisplayPayload();
+    const exports: DocumentGenerationExports = { docx: true, pdf: true };
     return {
       ok: true,
-      status: 'ready',
+      status: 'success',
+      generationStatus: 'success',
+      exportReady: true,
       blocked: false,
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
@@ -559,12 +768,23 @@ export class ResumeService {
       auditId: audit.id,
       baseline_version_hash: audit.baselineVersionHash,
       quality,
+      exports,
+      preview: {
+        resume: normalizedDocument,
+      },
       trackerEntryId: trackerEntry.id,
       trackerStatus: trackerEntry.status,
       opportunityId: opportunity?.id ?? null,
       claimRiskSummary,
       gapAnalysis: gapInsights,
       gapGuidance,
+      display,
+      safeDisplay: display,
+      internal: {
+        auditId: audit.id,
+        baselineVersionHash: audit.baselineVersionHash,
+        complianceFlags,
+      },
     };
   }
 
@@ -588,22 +808,20 @@ export class ResumeService {
   }
 
   private async buildDocxModelFromGeneration(
-    userId: string,
     generation: {
-      baselineId: string;
-      sections: ResumeExportSection[];
+      normalizedDocument?: NormalizedResumeDocument | null;
     },
   ) {
-    const baselineForHeader = await this.baselineRepository.findOne({
-      where: { id: generation.baselineId, userId },
-      relations: ['parsedRecords'],
-      order: { parsedRecords: { createdAt: 'DESC' } },
-    });
-    if (!baselineForHeader) {
-      throw new NotFoundException('Baseline not found');
+    const normalizedDocument = generation.normalizedDocument;
+    if (!normalizedDocument) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Resume model is unavailable for rendering.',
+        },
+      });
     }
-    const identity = resolveBaselineIdentity(baselineForHeader);
-    return mapResumeSectionsToDocxModel(generation.sections, identity);
+    return mapNormalizedResumeToDocxModel(normalizedDocument);
   }
 
   async getPreExportSnapshotForDiagnostics(
@@ -630,15 +848,35 @@ export class ResumeService {
         },
       });
     }
+    if (generation.status !== 'success' || generation.exportReady !== true) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export resume because generation did not produce a valid model.',
+          details: {
+            status: generation.status,
+          },
+        },
+      });
+    }
+    const normalizedDocument = generation.preview?.resume ?? null;
+    if (!normalizedDocument) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message:
+            'Cannot create diagnostic snapshot without a normalized resume model.',
+        },
+      });
+    }
 
     const sectionFragments = generation.sections.map((section) => ({
       title: section.title,
       content: section.content,
     }));
 
-    const docxModel = await this.buildDocxModelFromGeneration(userId, {
-      baselineId: generation.baselineId,
-      sections: generation.sections as ResumeExportSection[],
+    const docxModel = await this.buildDocxModelFromGeneration({
+      normalizedDocument,
     });
 
     return {
@@ -649,6 +887,7 @@ export class ResumeService {
       sections: generation.sections as ResumeExportSection[],
       sectionFragments,
       docxModel,
+      normalizedDocument,
     };
   }
 
@@ -675,21 +914,36 @@ export class ResumeService {
         },
       });
     }
-
-    const sectionFragments = generation.sections.map((section) => ({
-      title: section.title,
-      content: section.content,
-    }));
+    if (generation.status !== 'success' || generation.exportReady !== true) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message:
+            'Cannot export resume because generation did not produce a valid model.',
+          details: {
+            status: generation.status,
+          },
+        },
+      });
+    }
+    const normalizedDocument = generation.preview?.resume ?? null;
+    if (!normalizedDocument) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export resume because the normalized model is missing.',
+        },
+      });
+    }
 
     let buffer: Buffer;
     let pdfText: string | undefined;
     if (format === 'pdf') {
-      pdfText = this.buildResumeText(sectionFragments);
+      pdfText = buildResumePlainText(normalizedDocument);
       buffer = this.buildPdfBuffer(pdfText);
     } else {
-      const model = await this.buildDocxModelFromGeneration(userId, {
-        baselineId: generation.baselineId,
-        sections: generation.sections as ResumeExportSection[],
+      const model = await this.buildDocxModelFromGeneration({
+        normalizedDocument,
       });
       const template = getDocxTemplate<ResumeDocxModel>(
         'resume',
@@ -740,7 +994,7 @@ export class ResumeService {
             `${format}:${
               format === 'pdf'
                 ? pdfText ?? ''
-                : JSON.stringify(sectionFragments)
+                : JSON.stringify(normalizedDocument)
             }`,
           )
           .digest('hex'),

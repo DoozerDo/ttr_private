@@ -36,9 +36,11 @@ const sectionHeaderSpacingBefore = 180;
 const sectionHeaderSpacingAfter = 90;
 const skillLineSpacingAfter = 60;
 const skillTabStopPosition = 9000;
-const experienceRoleLineSpacingAfter = 40;
+const experienceEntrySpacingBefore = 220;
+const experienceHeaderLineSpacingAfter = 40;
+const experienceRoleMetaSpacingAfter = 84;
 const bulletIndent = 720;
-const bulletSpacingAfter = 60;
+const bulletSpacingAfter = 50;
 const descriptionSpacingAfter = 60;
 const sectionSpacerSize = 120;
 
@@ -105,59 +107,57 @@ function createSummaryParagraph(text: string) {
   });
 }
 
-function createExperienceRoleParagraph(role: string, dateRange?: string) {
-  const children: TextRun[] = [
-    new TextRun({ text: role, bold: true, size: headerTitleSize, font: 'Calibri' }),
-  ];
-  if (dateRange) {
-    children.push(new TextRun({ text: '\t', size: headerTitleSize }));
-    children.push(
-      new TextRun({
-        text: dateRange,
-        size: 22,
-        italics: true,
-        font: 'Calibri',
-      }),
-    );
-  }
-  return new Paragraph({
-    spacing: { after: experienceRoleLineSpacingAfter, line: defaultLineSpacing },
-    tabStops: [
-      {
-        type: TabStopType.RIGHT,
-        position: 9100,
-      },
-    ],
-    children,
-  });
-}
-
-function createCompanyParagraph(company?: string) {
-  const content = [company].filter(Boolean).join(' | ');
-  if (!content) {
+function createExperienceCompanyParagraph(
+  company: string,
+  options?: { spacingBefore?: number; showTopDivider?: boolean },
+) {
+  const normalized = company.trim();
+  if (!normalized) {
     return null;
   }
+
   return new Paragraph({
-    spacing: { after: 50, line: defaultLineSpacing },
+    spacing: {
+      before: options?.spacingBefore ?? 0,
+      after: experienceHeaderLineSpacingAfter,
+      line: defaultLineSpacing,
+    },
+    ...(options?.showTopDivider
+      ? {
+          border: {
+            top: {
+              style: BorderStyle.SINGLE,
+              size: 2,
+              color: 'E2E8F0',
+            },
+          },
+        }
+      : {}),
     children: [
       new TextRun({
-        text: content,
-        italics: true,
-        size: 22,
+        text: normalized,
+        bold: true,
+        size: headerTitleSize,
         font: 'Calibri',
       }),
     ],
   });
 }
 
-function createLocationParagraph(location: string) {
+function createExperienceRoleMetaParagraph(role?: string, dateRange?: string, location?: string) {
+  const meta = [role?.trim(), dateRange?.trim(), location?.trim()].filter(Boolean).join(' | ');
+  if (!meta) {
+    return null;
+  }
+
   return new Paragraph({
-    spacing: { after: 50, line: defaultLineSpacing },
+    spacing: { after: experienceRoleMetaSpacingAfter, line: defaultLineSpacing },
     children: [
       new TextRun({
-        text: location,
+        text: meta,
         italics: true,
-        size: 22,
+        size: 20,
+        color: '4B5563',
         font: 'Calibri',
       }),
     ],
@@ -183,6 +183,15 @@ function createExperienceBullet(text: string) {
   });
 }
 
+function splitBulletParagraphs(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^[\u2022\u25CF\u25E6*\-]+\s*/, '').trim())
+    .filter(Boolean);
+}
+
 function createEducationParagraph(entry: string) {
   return new Paragraph({
     spacing: { after: 60, line: 276 },
@@ -192,7 +201,7 @@ function createEducationParagraph(entry: string) {
 
 function createParagraphSpacer() {
   return new Paragraph({
-    spacing: { after: sectionSpacerSize, line: defaultLineSpacing },
+    spacing: { before: sectionSpacerSize, line: defaultLineSpacing },
     children: [],
   });
 }
@@ -219,7 +228,9 @@ function renderSummarySection(items: ResumeSectionItem[]) {
   const children: Paragraph[] = [];
   items.filter(isSummaryItem).forEach((item) => {
     item.paragraphs.forEach((paragraph) => {
-      children.push(createSummaryParagraph(paragraph));
+      const normalized = paragraph.trim();
+      if (!normalized) return;
+      children.push(createSummaryParagraph(normalized));
     });
   });
   return children;
@@ -247,32 +258,57 @@ function renderSkillsSection(items: ResumeSectionItem[]) {
 function renderExperienceSection(items: ResumeSectionItem[]) {
   const experiences = items.filter(isExperienceItem);
   const children: Paragraph[] = [];
-  experiences.forEach((experience) => {
-    children.push(createExperienceRoleParagraph(experience.role, experience.dateRange));
-    const companyParagraph = createCompanyParagraph(experience.company);
+  experiences.forEach((experience, index) => {
+    const companyParagraph = createExperienceCompanyParagraph(experience.company ?? '', {
+      spacingBefore: index > 0 ? experienceEntrySpacingBefore : 0,
+      showTopDivider: index > 0,
+    });
     if (companyParagraph) {
       children.push(companyParagraph);
     }
-    if (experience.location) {
-      children.push(createLocationParagraph(experience.location));
+
+    const roleMetaParagraph = createExperienceRoleMetaParagraph(
+      experience.role,
+      experience.dateRange,
+      experience.location,
+    );
+    if (roleMetaParagraph) {
+      children.push(roleMetaParagraph);
     }
+
     if (experience.description) {
-      children.push(createDescriptionParagraph(experience.description));
+      const description = experience.description.trim();
+      if (description) {
+        children.push(createDescriptionParagraph(description));
+      }
     }
-    experience.bullets.forEach((bullet) => {
+
+    experience.bullets.flatMap(splitBulletParagraphs).forEach((bullet) => {
       children.push(createExperienceBullet(bullet));
     });
-    children.push(createParagraphSpacer());
+
   });
   return children;
 }
 
 function renderEducationSection(items: ResumeSectionItem[]) {
   const educationItems = items.filter(isEducationItem);
-  const educationLines = educationItems
-    .map((entry) => formatEducationLine(entry))
-    .filter((line): line is string => typeof line === 'string' && line.trim().length > 0);
-  return educationLines.map((line) => createEducationParagraph(line));
+  const normalized = dedupeNormalizedEducationRows(
+    educationItems.map((entry) => normalizeEducationEntryForRender(entry)),
+  );
+  const children: Paragraph[] = [];
+  normalized.forEach((entry, index) => {
+    if (entry.primary) {
+      children.push(createEducationDegreeParagraph(entry.primary));
+    }
+    if (entry.secondary) {
+      children.push(createEducationParagraph(entry.secondary));
+    }
+    if (index < normalized.length - 1) {
+      children.push(createParagraphSpacer());
+    }
+  });
+  return children;
 }
 
 function renderCertificationSection(items: ResumeSectionItem[]) {
@@ -298,19 +334,145 @@ function renderOtherSection(items: ResumeSectionItem[]) {
   return children;
 }
 
-function formatEducationLine(entry: ResumeEducationItem) {
-  const parts = [
-    entry.degree,
-    entry.institution,
-    entry.dateRange,
-    ...(entry.details ?? []),
-  ]
-    .filter((part): part is string => Boolean(part))
-    .map((part) => part.trim());
-  if (parts.length) {
-    return parts.join(' | ');
+function normalizeEducationTokenSet(value?: string | null): string[] {
+  return String(value ?? '')
+    .split(/[|¦｜]/)
+    .map((token) => token.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((token, index, list) => {
+      const key = canonicalizeEducationToken(token);
+      if (!key) return false;
+      return list.findIndex((item) => canonicalizeEducationToken(item) === key) === index;
+    });
+}
+
+function canonicalizeEducationToken(token: string): string {
+  return token
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:|./()[\]{}'"`-]+|[\s,;:|./()[\]{}'"`-]+$/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function createEducationDegreeParagraph(entry: string) {
+  return new Paragraph({
+    spacing: { after: 36, line: 276 },
+    children: [new TextRun({ text: entry, bold: true, size: 22, font: 'Calibri' })],
+  });
+}
+
+function normalizeEducationEntryForRender(entry: ResumeEducationItem): {
+  degree: string;
+  institution: string;
+  location: string;
+  extra: string;
+  primary: string;
+  secondary: string;
+} {
+  const degreeTokens = normalizeEducationTokenSet(entry.degree);
+  const degreeTokenSet = new Set(degreeTokens.map(canonicalizeEducationToken));
+
+  const institutionTokens = normalizeEducationTokenSet(entry.institution).filter((token) => {
+    const key = canonicalizeEducationToken(token);
+    return key.length > 0 && !degreeTokenSet.has(key);
+  });
+  const institutionTokenSet = new Set(institutionTokens.map(canonicalizeEducationToken));
+
+  const detailTokens = (entry.details ?? [])
+    .flatMap((detail) => normalizeEducationTokenSet(detail))
+    .filter((token) => {
+      const key = canonicalizeEducationToken(token);
+      return (
+        key.length > 0 &&
+        !degreeTokenSet.has(key) &&
+        !institutionTokenSet.has(key)
+      );
+    });
+  const detailTokenSet = new Set(detailTokens.map(canonicalizeEducationToken));
+
+  const dateTokens = normalizeEducationTokenSet(entry.dateRange).filter((token) => {
+    const key = canonicalizeEducationToken(token);
+    return (
+      key.length > 0 &&
+      !degreeTokenSet.has(key) &&
+      !institutionTokenSet.has(key) &&
+      !detailTokenSet.has(key)
+    );
+  });
+
+  const degree = degreeTokens.join(' | ').trim();
+  const institutionRaw = institutionTokens.join(' | ').trim();
+  const location = detailTokens.join(' | ').trim();
+  const extra = dateTokens.join(' | ').trim();
+  const institution =
+    institutionRaw && institutionRaw.toLowerCase() === degree.toLowerCase()
+      ? ''
+      : institutionRaw;
+
+  const primary = degree;
+  const secondaryParts = [institution, location, extra]
+    .filter(Boolean)
+    .filter(
+      (token, index, list) =>
+        list.findIndex((item) => item.toLowerCase() === token.toLowerCase()) === index,
+    );
+  const secondary = secondaryParts.join(' | ').trim();
+
+  if (primary || secondary) {
+    return { degree, institution, location, extra, primary, secondary };
   }
-  return entry.raw;
+
+  const rawTokens = normalizeEducationTokenSet(entry.raw);
+  const fallbackDegree = rawTokens[0]?.trim() ?? '';
+  const fallbackInstitution = rawTokens[1]?.trim() ?? '';
+  const fallbackLocation = rawTokens.slice(2).join(' | ').trim();
+  const fallbackPrimary = fallbackDegree || rawTokens.join(' | ').trim();
+  const fallbackSecondary = [fallbackInstitution, fallbackLocation]
+    .filter(Boolean)
+    .join(' | ')
+    .trim();
+  return {
+    degree: fallbackDegree || fallbackPrimary,
+    institution: fallbackInstitution,
+    location: fallbackLocation,
+    extra: '',
+    primary: fallbackPrimary,
+    secondary: fallbackSecondary,
+  };
+}
+
+function dedupeNormalizedEducationRows(
+  rows: Array<{
+    degree: string;
+    institution: string;
+    location: string;
+    extra: string;
+    primary: string;
+    secondary: string;
+  }>,
+): Array<{
+  degree: string;
+  institution: string;
+  location: string;
+  extra: string;
+  primary: string;
+  secondary: string;
+}> {
+  const canonicalizeField = (value: string): string =>
+    normalizeEducationTokenSet(value)
+      .map((token) => token.toLowerCase())
+      .join('|');
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = [row.degree, row.institution, row.location, row.extra]
+      .map((token) => canonicalizeField(token))
+      .join('|');
+    if (!key.replace(/\|/g, '').trim()) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function formatCertificationLine(entry: ResumeCertificationItem) {

@@ -266,6 +266,71 @@ describe('resume draft bullets', () => {
     ]);
   });
 
+  it('reconstructs wrapped PDF bullet lines before bullet extraction', () => {
+    const section = {
+      id: 'section-pdf-wrapped-bullets',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Senior Game Designer | Cat Daddy Games | 2020 - 2025',
+        '- Launched signature interactive features including SuperStar Spinner, Alt. Positions,',
+        'courtside pass, and',
+        'reward-track improvements that increased engagement.',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('game design live operations engagement')),
+    });
+
+    expect(bullets.map((bullet) => bullet.text)).toEqual([
+      'Launched signature interactive features including SuperStar Spinner, Alt. Positions, courtside pass, and reward-track improvements that increased engagement.',
+    ]);
+  });
+
+  it('deduplicates repeated experience bullets within the same entry', () => {
+    const section = {
+      id: 'section-duplicate-bullets',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Senior Game Designer | Cat Daddy Games | 2020 - 2025',
+        '- Improved progression balance across player cohorts.',
+        '- Improved progression balance across player cohorts.',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('progression balance design')),
+    });
+
+    expect(bullets.map((bullet) => bullet.text)).toEqual([
+      'Improved progression balance across player cohorts.',
+    ]);
+  });
+
+  it('merges continuation bullets that end with including and across', () => {
+    const section = {
+      id: 'section-continuation-terms',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Senior Game Designer | Cat Daddy Games | 2020 - 2025',
+        '- Built progression systems including',
+        'economy tuning across',
+        'multiple player cohorts and event schedules.',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('progression systems economy tuning')),
+    });
+
+    expect(bullets.map((bullet) => bullet.text)).toEqual([
+      'Built progression systems including economy tuning across multiple player cohorts and event schedules.',
+    ]);
+  });
+
   it('keeps bullets scoped to each role and excludes heading fragments from experience bullets', () => {
     const draft = buildResumeDraftSections(
       [

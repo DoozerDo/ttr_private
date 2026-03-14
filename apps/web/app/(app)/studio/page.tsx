@@ -24,9 +24,12 @@ import {
   formatPreview,
   getFilenameFromContentDisposition,
   normalizeAuditId,
+  presentCoverLetterGeneration,
+  presentResumeGeneration,
   readDuplicateCoverLetterId,
   readTrackerField,
   trimToString,
+  type StudioCardStatus,
   type ResumeFocusOption,
 } from "@/src/lib/studio/helpers";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
@@ -114,8 +117,11 @@ type CoverLetterComplianceFlag = {
 type CoverLetterComplianceBlocked = {
   title: string;
   body: string;
-  flags: { label: string; message?: string }[];
-  auditId?: string;
+  reasons: string[];
+  cta?: {
+    label: string;
+    href: string;
+  };
 };
 
 const complianceFlagLabelMap: Record<string, string> = {
@@ -153,6 +159,18 @@ function normalizeComplianceFlagEntry(value: unknown): CoverLetterComplianceFlag
 }
 
 function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplianceBlocked | null {
+  if (payload && typeof payload === "object") {
+    const presented = presentCoverLetterGeneration(payload);
+    if (presented.status === "blocked" && presented.display) {
+      return {
+        title: presented.display.title,
+        body: presented.display.description,
+        reasons: presented.display.reasons,
+        cta: presented.display.cta,
+      };
+    }
+  }
+
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -183,19 +201,25 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
       label: mapComplianceFlagLabel(flag.code),
       message: flag.message,
     }));
-  if (!flags.length) {
+  const reasons = flags
+    .map((flag) => trimToString(flag.message) || flag.label)
+    .filter((reason) => reason.length > 0);
+  if (!reasons.length) {
     return null;
   }
-  const auditId = trimToString(detailRecord.audit_id ?? detailRecord.auditId);
   return {
     title: "Draft needs verification",
     body: "Some content is not supported by your verified resume yet.",
-    flags,
-    auditId,
+    reasons,
+    cta: {
+      label: "Review compliance in Results",
+      href: "/results",
+    },
   };
 }
 
 export default function StudioPage() {
+  const isNonProduction = process.env.NODE_ENV !== "production";
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
   const trackedStudioOpenRef = useRef(false);
@@ -279,24 +303,22 @@ export default function StudioPage() {
   const [resumeExportFormat, setResumeExportFormat] =
     useState<"docx" | "pdf" | null>(null);
   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
-  const [resumeAuditId, setResumeAuditId] = useState<string | undefined>();
+  const [, setResumeAuditId] = useState<string | undefined>();
   const [resumeFocus, setResumeFocus] = useState<ResumeFocusOption>("Auto (recommended)");
 
   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [coverExportFormat, setCoverExportFormat] = useState<"docx" | "pdf" | null>(null);
   const [coverWarningFlags, setCoverWarningFlags] = useState<ComplianceFlag[]>([]);
-  const [coverAuditId, setCoverAuditId] = useState<string | undefined>();
+  const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
-  const [showComplianceDetails, setShowComplianceDetails] = useState(false);
 
   function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
     setCoverLetterComplianceBlocked(blocked);
     setCoverState(createDocumentState());
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
-    setShowComplianceDetails(false);
   }
 
   const router = useRouter();
@@ -333,7 +355,6 @@ export default function StudioPage() {
 
   useEffect(() => {
     setCoverLetterComplianceBlocked(null);
-    setShowComplianceDetails(false);
   }, [selectedJobId, selectedBaselineId, selectedBaselineVersionId]);
 
   const handleBlockPolicyVersionAdvance = useCallback(
@@ -402,17 +423,37 @@ export default function StudioPage() {
   const readyForDocuments =
     Boolean(selectedJobId && selectedBaselineId && selectedBaselineVersionId) &&
     analysisScore !== null;
+  const canGenerateDocuments =
+    Boolean(selectedJobId && selectedBaselineId) &&
+    analysisScore !== null &&
+    (Boolean(selectedBaselineVersionId) || isNonProduction);
 
-  const hasResumeArtifact = Boolean(resumeState.response);
+  const resumePresenter = useMemo(
+    () => presentResumeGeneration(resumeState.response),
+    [resumeState.response],
+  );
+  const hasResumeArtifact = resumePresenter.hasExportableContent;
   const canExportDocuments = readyForDocuments && isPro;
-  const canExportResume = canExportDocuments && hasResumeArtifact;
+  const canExportResume =
+    canExportDocuments &&
+    resumePresenter.status === "success" &&
+    hasResumeArtifact;
   const isResumeDownloadLocked = !isPro;
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
   const coverLetterParagraphs = useMemo(
     () => buildCoverLetterParagraphs(coverState.response),
     [coverState.response],
   );
-  const hasCoverLetterArtifact = Boolean(coverState.response);
+  const coverPresenter = useMemo(
+    () => presentCoverLetterGeneration(coverState.response),
+    [coverState.response],
+  );
+  const hasCoverLetterArtifact = coverPresenter.hasExportableContent;
+  const canExportCover =
+    canExportDocuments &&
+    coverPresenter.status === "success" &&
+    hasCoverLetterArtifact &&
+    !coverLetterComplianceBlocked;
   const positioningNarrative = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return analysis.summary.trim();
@@ -472,27 +513,59 @@ export default function StudioPage() {
   );
   const readinessChecks = useMemo(
     () => ({
-      resumeAligned: Boolean(resumeState.response),
-      coverLetterGenerated: Boolean(coverState.response),
+      resumeAligned: hasResumeArtifact,
+      coverLetterGenerated: hasCoverLetterArtifact,
       fitScoreAboveThreshold: typeof analysisScore === "number" && analysisScore >= 70,
     }),
-    [analysisScore, coverState.response, resumeState.response],
+    [analysisScore, hasCoverLetterArtifact, hasResumeArtifact],
   );
-  const hasComplianceBlockedDetails = Boolean(
-    coverLetterComplianceBlocked &&
-      (coverLetterComplianceBlocked.flags.some((flag) => Boolean(flag.message)) ||
-        coverLetterComplianceBlocked.auditId),
-  );
+
+  const resumeCardStatus: StudioCardStatus = useMemo(() => {
+    if (resumeGenerating) return "generating";
+    if (resumePresenter.status === "blocked") return "blocked_by_compliance";
+    if (resumeState.error) return "failed_due_to_system_error";
+    if (resumePresenter.status === "success" && hasResumeArtifact) {
+      return "generated_successfully";
+    }
+    return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
+  }, [
+    canGenerateDocuments,
+    hasResumeArtifact,
+    resumeGenerating,
+    resumePresenter.status,
+    resumeState.error,
+  ]);
+
+  const coverCardStatus: StudioCardStatus = useMemo(() => {
+    if (coverGenerating) return "generating";
+    if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
+      return "blocked_by_compliance";
+    }
+    if (coverState.error) return "failed_due_to_system_error";
+    if (coverPresenter.status === "success" && hasCoverLetterArtifact) {
+      return "generated_successfully";
+    }
+    return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
+  }, [
+    canGenerateDocuments,
+    coverGenerating,
+    coverLetterComplianceBlocked,
+    coverPresenter.status,
+    coverState.error,
+    hasCoverLetterArtifact,
+  ]);
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
     const payload: CoverLetterPayload = {
       jobId: selectedJobId,
       baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
       closingTemplateKey: defaultClosingTemplateKey,
       documentType: "cover_letter",
       oneTap,
     };
+    if (selectedBaselineVersionId) {
+      payload.baselineVersionId = selectedBaselineVersionId;
+    }
     if (coverLetterJobContext) {
       payload.jobContext = coverLetterJobContext;
     }
@@ -503,9 +576,11 @@ export default function StudioPage() {
     const payload: Record<string, unknown> = {
       jobId: selectedJobId,
       baselineId: selectedBaselineId,
-      baselineVersionId: selectedBaselineVersionId,
       oneTap,
     };
+    if (selectedBaselineVersionId) {
+      payload.baselineVersionId = selectedBaselineVersionId;
+    }
     if (resumeFocus !== "Auto (recommended)") {
       payload.resumeFocus = resumeFocus;
     }
@@ -703,7 +778,7 @@ export default function StudioPage() {
   }, [analysis?.baselineVersionId, versions]);
 
   const handleResumeDraft = async () => {
-    if (!readyForDocuments) {
+    if (!canGenerateDocuments) {
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -730,6 +805,28 @@ export default function StudioPage() {
         }
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
+      const presenter = presentResumeGeneration(responsePayload);
+      if (presenter.status === "blocked" && presenter.display) {
+        setResumeState((current) => ({ ...current, response: responsePayload }));
+        setResumeWarningFlags([]);
+        setResumeAuditId(undefined);
+        return;
+      }
+      if (presenter.status === "error") {
+        setResumeState((current) => ({
+          ...current,
+          response: responsePayload,
+          error:
+            presenter.display?.description ??
+            "Resume generation failed. Please review your baseline and try again.",
+        }));
+        setResumeWarningFlags([]);
+        setResumeAuditId(undefined);
+        return;
+      }
+      if (presenter.status === "unknown") {
+        throw new Error("Resume generation returned an unexpected response. Please try again.");
+      }
       setResumeState((current) => ({ ...current, response: responsePayload }));
       setResumeWarningFlags(extractComplianceWarnings(responsePayload));
       setResumeAuditId(normalizeAuditId(responsePayload));
@@ -742,7 +839,7 @@ export default function StudioPage() {
   };
 
   const exportResume = async (format: "docx" | "pdf") => {
-    if (!readyForDocuments) {
+    if (!canGenerateDocuments) {
       setResumeState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a resume.",
@@ -794,7 +891,6 @@ export default function StudioPage() {
 
   async function loadCoverLetterById(coverLetterId: string) {
     setCoverLetterComplianceBlocked(null);
-    setShowComplianceDetails(false);
     try {
       const response = await fetch(
         `/api/cover-letters/${encodeURIComponent(coverLetterId)}`,
@@ -812,11 +908,20 @@ export default function StudioPage() {
         }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter unavailable."));
       }
+      const presenter = presentCoverLetterGeneration(responsePayload);
+      if (presenter.status === "blocked" && presenter.display) {
+        applyCoverLetterComplianceBlocked({
+          title: presenter.display.title,
+          body: presenter.display.description,
+          reasons: presenter.display.reasons,
+          cta: presenter.display.cta,
+        });
+        return;
+      }
       setCoverState((current) => ({ ...current, response: responsePayload }));
       setCoverWarningFlags(extractComplianceWarnings(responsePayload));
       setCoverAuditId(normalizeAuditId(responsePayload));
       setCoverLetterComplianceBlocked(null);
-      setShowComplianceDetails(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cover letter unavailable.";
       setCoverState((current) => ({ ...current, error: message }));
@@ -824,7 +929,7 @@ export default function StudioPage() {
   }
 
   const handleCoverDraft = async () => {
-    if (!readyForDocuments) {
+    if (!canGenerateDocuments) {
       setCoverState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
@@ -836,7 +941,6 @@ export default function StudioPage() {
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
     setCoverLetterComplianceBlocked(null);
-    setShowComplianceDetails(false);
     const payload = buildCoverLetterPayload(false);
     try {
       const response = await fetch("/api/cover-letters", {
@@ -879,7 +983,7 @@ export default function StudioPage() {
   };
 
   const exportCoverLetter = async (format: "docx" | "pdf") => {
-    if (!readyForDocuments) {
+    if (!canGenerateDocuments) {
       setCoverState((current) => ({
         ...current,
         error: generationMessage ?? "Review prerequisites before generating a cover letter.",
@@ -893,10 +997,15 @@ export default function StudioPage() {
       }));
       return;
     }
+    if (!hasCoverLetterArtifact || coverPresenter.status !== "success") {
+      setCoverState((current) => ({
+        ...current,
+        error: "Generate Cover Letter before downloading.",
+      }));
+      return;
+    }
     setCoverExportFormat(format);
-    setCoverState(createDocumentState());
-    setCoverWarningFlags([]);
-    setCoverAuditId(undefined);
+    setCoverState((current) => ({ ...current, error: null, tierGateError: null }));
     const payload = buildCoverLetterPayload(true);
     try {
       const response = await fetch(
@@ -934,6 +1043,25 @@ export default function StudioPage() {
       setCoverExportFormat(null);
     }
   };
+
+  function renderCardStatus(status: StudioCardStatus, documentName: string) {
+    switch (status) {
+      case "not_generated_yet":
+        return `${documentName} not generated yet`;
+      case "ready_to_generate":
+        return `Ready to generate ${documentName.toLowerCase()}`;
+      case "generating":
+        return `Generating ${documentName.toLowerCase()}`;
+      case "generated_successfully":
+        return `${documentName} generated successfully`;
+      case "blocked_by_compliance":
+        return `${documentName} blocked by compliance`;
+      case "failed_due_to_system_error":
+        return `${documentName} failed due to system error`;
+      default:
+        return `${documentName} status unavailable`;
+    }
+  }
 
   return (
     <PageShell className="space-y-6">
@@ -1039,9 +1167,12 @@ export default function StudioPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Generate Resume</h2>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              {renderCardStatus(resumeCardStatus, "Resume")}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleResumeDraft} disabled={!readyForDocuments || resumeGenerating}>
+            <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
               {resumeGenerating ? "Generating..." : "Generate Resume"}
             </FormButton>
             <FormButton
@@ -1103,14 +1234,39 @@ export default function StudioPage() {
               </Link>
             </div>
           </Alert>
-        ) : isPro ? (
+        ) : canExportResume ? (
           <p className="text-sm text-slate-300">Downloads are available.</p>
         ) : null}
 
-        {resumeState.response ? (
+        {resumePresenter.status === "blocked" ? (
+          <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
+            <p className="text-sm font-semibold text-amber-100">
+              {resumePresenter.display?.title ?? "Resume blocked by compliance"}
+            </p>
+            <p className="text-sm text-slate-200">
+              {resumePresenter.display?.description ??
+                "Some generated statements could not be verified against your baseline."}
+            </p>
+            {resumePresenter.display?.reasons?.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-200">
+                {resumePresenter.display.reasons.map((reason, index) => (
+                  <li key={`resume-block-reason-${index}`}>{reason}</li>
+                ))}
+              </ul>
+            ) : null}
+            {resumePresenter.display?.cta ? (
+              <Link
+                href={resumePresenter.display.cta.href}
+                className="text-sm font-semibold text-slate-100 underline decoration-slate-300/70 underline-offset-4 transition hover:text-white"
+              >
+                {resumePresenter.display.cta.label}
+              </Link>
+            ) : null}
+          </div>
+        ) : resumePresenter.status === "success" && resumeState.response ? (
           <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
             {resumeWarningFlags.length ? (
-              <p className="text-sm text-amber-200">
+              <p className="text-xs text-amber-200">
                 Verification signals detected. Personalization may be limited. See
                 Results for details.
               </p>
@@ -1148,22 +1304,25 @@ export default function StudioPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Generate Cover Letter</h2>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              {renderCardStatus(coverCardStatus, "Cover letter")}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleCoverDraft} disabled={!readyForDocuments || coverGenerating}>
+            <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
               {coverGenerating ? "Generating..." : "Generate Cover Letter"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("docx")}
-              disabled={!canExportDocuments || coverExportFormat === "docx" || !!coverLetterComplianceBlocked}
+              disabled={!canExportCover || coverExportFormat === "docx"}
             >
               {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
             </FormButton>
             <FormButton
               variant="secondary"
               onClick={() => void exportCoverLetter("pdf")}
-              disabled={!canExportDocuments || coverExportFormat === "pdf" || !!coverLetterComplianceBlocked}
+              disabled={!canExportCover || coverExportFormat === "pdf"}
             >
               {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
             </FormButton>
@@ -1191,52 +1350,26 @@ export default function StudioPage() {
                 Regenerate safely to keep every claim anchored to verified content.
               </p>
             </div>
-            {coverLetterComplianceBlocked.flags.length ? (
+            {coverLetterComplianceBlocked.reasons.length ? (
               <ul className="space-y-2 pl-4 text-slate-100">
-                {(() => {
-                  const seen = new Set<string>();
-                  const uniqueFlags: typeof coverLetterComplianceBlocked.flags = [];
-                  for (const flag of coverLetterComplianceBlocked.flags) {
-                    if (seen.has(flag.label)) continue;
-                    seen.add(flag.label);
-                    uniqueFlags.push(flag);
-                  }
-                  return uniqueFlags.map((flag, index) => (
-                    <li key={`blocked-flag-${index}`}>{flag.label}</li>
-                  ));
-                })()}
+                {coverLetterComplianceBlocked.reasons.map((reason, index) => (
+                  <li key={`blocked-flag-${index}`}>{reason}</li>
+                ))}
               </ul>
             ) : null}
             <div className="flex flex-wrap items-center gap-3">
               <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
                 Regenerate safely
               </FormButton>
-              {hasComplianceBlockedDetails ? (
-                <button
-                  type="button"
+              {coverLetterComplianceBlocked.cta ? (
+                <Link
+                  href={coverLetterComplianceBlocked.cta.href}
                   className="text-sm font-medium text-slate-300 underline-offset-4 transition hover:text-white"
-                  onClick={() => setShowComplianceDetails((prev) => !prev)}
                 >
-                  {showComplianceDetails ? "Hide details" : "See details"}
-                </button>
+                  {coverLetterComplianceBlocked.cta.label}
+                </Link>
               ) : null}
             </div>
-            {showComplianceDetails && hasComplianceBlockedDetails ? (
-              <div className="space-y-1 text-xs text-slate-400">
-                {coverLetterComplianceBlocked.flags.map(
-                  (flag, index) =>
-                    flag.message ? (
-                      <p key={`blocked-detail-${index}`}>
-                        <span className="font-semibold text-slate-100">{flag.label}:</span>{" "}
-                        {flag.message}
-                      </p>
-                    ) : null,
-                )}
-                {coverLetterComplianceBlocked.auditId ? (
-                  <p>Audit ID: {coverLetterComplianceBlocked.auditId}</p>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -1259,10 +1392,12 @@ export default function StudioPage() {
 
         {!isPro ? (
           <p className="text-sm text-slate-300">Upgrade to Pro to download documents.</p>
+        ) : canExportCover ? (
+          <p className="text-sm text-slate-300">Downloads are available.</p>
         ) : null}
 
         {!coverLetterComplianceBlocked ? (
-          coverState.response ? (
+          coverPresenter.status === "success" && coverState.response ? (
             <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
               <div className="max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-950/40 p-3">
                 {coverLetterParagraphs.length ? (
