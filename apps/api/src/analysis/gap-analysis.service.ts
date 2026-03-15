@@ -147,9 +147,15 @@ export class GapAnalysisService {
     const uniqueStrengths = Array.from(
       new Set(
         evaluated
-          .filter((entry) => entry.evidenceScore >= 0.62 && entry.importance >= 0.6)
+          .filter(
+            (entry) =>
+              entry.evidenceScore >= 0.62 &&
+              entry.importance >= 0.6 &&
+              typeof entry.baselineEvidence === 'string' &&
+              entry.baselineEvidence.trim().length > 0,
+          )
           .sort((a, b) => b.evidenceScore - a.evidenceScore)
-          .map((entry) => entry.title),
+          .map((entry) => entry.baselineEvidence!.trim()),
       ),
     ).slice(0, 4);
 
@@ -396,20 +402,38 @@ export class GapAnalysisService {
   }
 
   private inferTitle(requirement: string, dimensionKey: string | null): string {
-    switch (dimensionKey) {
-      case 'role_scope_and_seniority':
-        return 'Leadership Scope and Seniority';
-      case 'support_operations_and_process_rigor':
-        return 'Support Operations and Process Rigor';
-      case 'tooling_and_platform_experience':
-        return 'Tooling and Platform Experience';
-      case 'domain_and_business_context':
-        return 'Domain and Business Context';
-      case 'change_leadership_and_customer_advocacy':
-        return 'Change Leadership and Customer Advocacy';
-      default:
-        return this.toTitleFromRequirement(requirement);
+    const phraseTitle = this.extractRequirementSignal(requirement);
+    if (phraseTitle) {
+      return phraseTitle;
     }
+    return this.toTitleFromRequirement(requirement);
+  }
+
+  private extractRequirementSignal(text: string): string {
+    const compact = this.clean(text);
+    if (!compact) return '';
+
+    const normalized = compact
+      .replace(/^[•\-]\s*/, '')
+      .replace(
+        /^(?:must\s+have|required|preferred|experience\s+with|experience\s+in|ability\s+to|proven\s+ability\s+to|demonstrated\s+ability\s+to|track\s+record\s+of|strong)\s+/i,
+        '',
+      )
+      .replace(
+        /^(?:own|lead|build|design|develop|drive|manage|support|oversee|deliver|partner\s+with|collaborate\s+with)\s+/i,
+        '',
+      )
+      .replace(/\b(?:in|with|across|for)\b.*$/i, '')
+      .trim();
+
+    if (!normalized) {
+      return this.toTitleFromRequirement(compact);
+    }
+
+    const words = normalized.split(/\s+/).slice(0, 6);
+    return words
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   }
 
   private toTitleFromRequirement(text: string): string {

@@ -99,5 +99,44 @@ describe('GapAnalysisService', () => {
     expect(flattened).not.toContain('background check');
     expect(flattened).toContain('executive incident review');
   });
+
+  it('returns baseline evidence snippets as strengths instead of taxonomy labels', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Led global support operations at SentinelOne.\nBuilt escalation and incident management workflows.\nDrove cross-functional CX systems.',
+        },
+      ],
+      jobRequirements: [
+        'Lead global support operations for enterprise customers.',
+        'Build escalation and incident management workflows.',
+        'Direct firmware engineering experience.',
+      ],
+      jobResponsibilities: ['Drive cross-functional CX systems.'],
+    });
+
+    expect(result.strengths).toContain('Led global support operations at SentinelOne.');
+    expect(result.strengths.length).toBeGreaterThan(0);
+    expect(result.strengths).not.toContain('Tooling and Platform Experience');
+    expect(result.strengths).not.toContain('Support Operations and Process Rigor');
+  });
+
+  it('returns requirement-derived gap titles instead of taxonomy labels', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and customer escalations.' }],
+      jobRequirements: [
+        'Direct firmware engineering experience in pre-silicon environments.',
+        'Embedded systems development exposure.',
+      ],
+      jobResponsibilities: [],
+    });
+
+    const gapTitles = result.criticalGaps.map((gap) => gap.title);
+    expect(gapTitles).toContain('Direct Firmware Engineering Experience');
+    expect(gapTitles).toContain('Embedded Systems Development Exposure.');
+    expect(gapTitles).not.toContain('Tooling and Platform Experience');
+    expect(gapTitles).not.toContain('Domain and Business Context');
+  });
 });
 

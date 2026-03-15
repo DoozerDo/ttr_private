@@ -522,10 +522,11 @@ export function WorkspaceRunner({
   const score = typeof displayResult?.score === "number" ? displayResult.score : null;
   const scoreBreakdown = extractScoreBreakdown(displayResult);
   const evidenceLinesFromBreakdown = buildEvidenceLines(scoreBreakdown);
+  const baselineStrengthLines = extractFallbackEvidence(displayResult);
   const evidenceLines =
-    evidenceLinesFromBreakdown.length > 0
-      ? evidenceLinesFromBreakdown
-      : extractFallbackEvidence(displayResult);
+    baselineStrengthLines.length > 0
+      ? baselineStrengthLines
+      : evidenceLinesFromBreakdown;
   const strengthSignals = evidenceLines
     .map((line) => normalizeDiagnosticLine(line))
     .filter(Boolean)
@@ -939,7 +940,7 @@ export function WorkspaceRunner({
                 <h3 className="text-base font-semibold text-white">Why this role fits you</h3>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
                   {strengthSignals.map((line) => (
-                    <li key={line}>• {line}</li>
+                    <li key={line}>&bull; {line}</li>
                   ))}
                 </ul>
               </div>
@@ -956,7 +957,9 @@ export function WorkspaceRunner({
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
                         {resolveGapSeverityLabel(gap.severityScore)}
                       </p>
-                      <p className="mt-1 text-sm text-slate-200">• {normalizeDiagnosticLine(gap.title)}</p>
+                      <p className="mt-1 text-sm text-slate-200">
+                        &bull; {normalizeDiagnosticLine(gap.title)}
+                      </p>
                     </div>
                   ))}
                 </div>
