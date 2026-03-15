@@ -273,43 +273,11 @@ function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[
     .slice(0, 3);
 }
 
-function extractRecommendedActions(value: FitResultPayload | null): string[] {
-  const recommendedActions = (value as { recommendedActions?: unknown } | null)?.recommendedActions;
-  if (!Array.isArray(recommendedActions)) return [];
-  return recommendedActions
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-}
-
 function resolveGapSeverityLabel(severityScore?: number | null): string {
   if (typeof severityScore !== "number") return "Moderate gap";
   if (severityScore >= 0.75) return "Major gap";
   if (severityScore >= 0.5) return "Moderate gap";
   return "Minor gap";
-}
-
-function buildImprovementSuggestions(
-  recommendedActions: string[],
-  gaps: CriticalGapSignal[],
-): string[] {
-  if (recommendedActions.length > 0) {
-    return recommendedActions.map((item) => normalizeDiagnosticLine(item));
-  }
-
-  if (gaps.length > 0) {
-    return gaps.map((gap) => {
-      const subject = normalizeDiagnosticLine(gap.requirementEvidence ?? gap.title).toLowerCase();
-      return `Add clearer evidence of ${subject}`;
-    });
-  }
-
-  return [
-    "Quantify the impact behind your closest matching experience",
-    "Mirror the job language in your strongest baseline evidence",
-    "Highlight cross-functional outcomes that prove role readiness",
-  ];
 }
 
 function getCompetitiveContext(score: number | null): string | null {
@@ -563,8 +531,6 @@ export function WorkspaceRunner({
     .filter(Boolean)
     .slice(0, 3);
   const gapSignals = extractCriticalGaps(displayResult);
-  const recommendedActions = extractRecommendedActions(displayResult);
-  const improvementSuggestions = buildImprovementSuggestions(recommendedActions, gapSignals);
   const competitiveContext = getCompetitiveContext(score);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
@@ -1002,43 +968,6 @@ export function WorkspaceRunner({
             >
               Review Detailed Results
             </a>
-            <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-left">
-              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-                Why this score?
-              </summary>
-              <div className="mt-4 grid gap-4">
-                <section>
-                  <h4 className="text-sm font-semibold text-white">Strength signals</h4>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
-                    {strengthSignals.length ? (
-                      strengthSignals.map((line) => <li key={`strength-${line}`}>• {line}</li>)
-                    ) : (
-                      <li>• No baseline strength signals are available yet.</li>
-                    )}
-                  </ul>
-                </section>
-                <section>
-                  <h4 className="text-sm font-semibold text-white">Gap signals</h4>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
-                    {gapSignals.length ? (
-                      gapSignals.map((gap) => (
-                        <li key={`gap-${gap.title}`}>• {normalizeDiagnosticLine(gap.title)}</li>
-                      ))
-                    ) : (
-                      <li>• No major gap signals are available yet.</li>
-                    )}
-                  </ul>
-                </section>
-                <section>
-                  <h4 className="text-sm font-semibold text-white">Ways to increase this score</h4>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
-                    {improvementSuggestions.map((item) => (
-                      <li key={`improve-${item}`}>• {item}</li>
-                    ))}
-                  </ul>
-                </section>
-              </div>
-            </details>
           </div>
         </div>
       ) : null}
