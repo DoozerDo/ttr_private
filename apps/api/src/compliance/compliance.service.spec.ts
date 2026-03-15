@@ -3,6 +3,7 @@ import {
   ComplianceAction,
   ComplianceFlagCode,
   ComplianceFlagSeverity,
+  GeneratedTextSourceType,
 } from './compliance.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 
@@ -19,12 +20,16 @@ const buildAuditRepo = () => {
 
 describe('ComplianceService', () => {
   const repoMock = buildAuditRepo();
+  const embeddingServiceMock = {
+    embed: jest.fn().mockResolvedValue(null),
+  };
   const job = { id: 'job-1', title: 'Support Manager', company: 'Acme' };
   const baselineVersionWithHash = { id: 'baseline-v2', hash: 'hash-2' };
   const service = new ComplianceService(
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore: manual repository injection
     repoMock,
+    embeddingServiceMock as any,
   );
 
   beforeEach(() => {
@@ -214,6 +219,43 @@ describe('ComplianceService', () => {
       expect(result.blocked).toBe(true);
       expect(result.complianceFlags.map((flag) => flag.code)).toContain(
         ComplianceFlagCode.INVENTED_ROLE,
+      );
+    });
+
+    it('skips invented detectors for non-baseline source types', async () => {
+      const result = await service.validateAndAudit({
+        action: ComplianceAction.RESUME_GENERATION,
+        actorId: 'user-source-gate',
+        baselineVersion: baselineVersionWithHash,
+        outputHash: 'out-source-gate',
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Served as Software Engineer.',
+          },
+        ],
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content:
+              'Your posting for a Senior Network Infrastructure Engineer requires deep systems expertise.',
+            sourceType: GeneratedTextSourceType.JD_REFERENCE,
+            sentenceSources: [
+              {
+                text: 'Your posting for a Senior Network Infrastructure Engineer requires deep systems expertise.',
+                sourceType: GeneratedTextSourceType.JD_REFERENCE,
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_ROLE,
+      );
+      expect(result.complianceFlags.map((flag) => flag.code)).not.toContain(
+        ComplianceFlagCode.INVENTED_COMPANY,
       );
     });
 

@@ -66,5 +66,38 @@ describe('GapAnalysisService', () => {
     const topGap = result.criticalGaps[0];
     expect((topGap?.requirementEvidence ?? '').toLowerCase()).not.toContain('global offices');
   });
+
+  it('excludes legal, EEO, accommodation, and application-process boilerplate from gaps and interview risks', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and executive incident reviews.' }],
+      jobRequirements: [
+        'We are an equal opportunity employer and consider all qualified applicants without regard to protected characteristics.',
+        'If you require reasonable accommodation during the application process, contact recruiting.',
+        'Own executive incident review and operational governance.',
+      ],
+      jobResponsibilities: [
+        'Background check required for employment.',
+        'Lead weekly executive operational reviews.',
+      ],
+    });
+
+    const flattened = [
+      ...result.strengths,
+      ...result.criticalGaps.map((gap) => `${gap.title} ${gap.requirementEvidence}`),
+      ...result.recommendedActions,
+      ...result.interviewRisks.map(
+        (risk) => `${risk.topic} ${risk.whyTheyMayChallengeYou} ${risk.howToAddressIt}`,
+      ),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    expect(flattened).not.toContain('equal opportunity');
+    expect(flattened).not.toContain('all qualified applicants');
+    expect(flattened).not.toContain('reasonable accommodation');
+    expect(flattened).not.toContain('application process');
+    expect(flattened).not.toContain('background check');
+    expect(flattened).toContain('executive incident review');
+  });
 });
 

@@ -33,6 +33,7 @@ export type CoverLetterGenerationInput = {
   jobId: string;
   allowedBaselineBlocks: AllowedBaselineBlock[];
   job: CoverLetterJobContext;
+  candidateName?: string | null;
   closingTemplate: CoverLetterClosingTemplate;
   maxWords?: number;
   tone?: string;
@@ -57,6 +58,11 @@ export type CoverLetterGenerationResult = {
   paragraphs: string[];
   closingParagraphs: string[];
   constraintSummary?: string | null;
+  paragraphEvidence?: Array<{
+    paragraphKey: 'opening' | 'body_1' | 'body_2' | 'body_3' | 'closing';
+    sourceEvidenceIds: string[];
+    anchorTexts?: string[];
+  }>;
 };
 
 export interface CoverLetterGenerator {

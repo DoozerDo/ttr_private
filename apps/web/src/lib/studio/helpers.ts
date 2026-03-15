@@ -240,6 +240,21 @@ function hasExports(payload: Record<string, unknown>): boolean {
   return Boolean(record.docx || record.pdf);
 }
 
+function looksLikeNoEvidenceState(payload: Record<string, unknown>): boolean {
+  const status = trimToString(payload.status).toLowerCase();
+  const generationStatus = trimToString(payload.generationStatus).toLowerCase();
+  const message = formatPreview(payload).toLowerCase();
+  const safe = readSafeDisplay(payload);
+  const safeText = `${safe?.title ?? ""} ${safe?.description ?? ""}`.toLowerCase();
+  if (status === "no_evidence" || generationStatus === "no_evidence") return true;
+  return (
+    message.includes("no evidence") ||
+    safeText.includes("no evidence") ||
+    message.includes("no verified baseline evidence") ||
+    safeText.includes("no verified baseline evidence")
+  );
+}
+
 export function presentResumeGeneration(payload: unknown): StudioGenerationPresenter {
   if (!payload || typeof payload !== "object") {
     return { status: "unknown", hasExportableContent: false, display: null };
@@ -260,6 +275,19 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
         title: "Resume blocked by compliance",
         description:
           "Some generated statements could not be verified against your baseline.",
+        reasons: ["Review flagged items in Results and adjust baseline evidence."],
+      }),
+    };
+  }
+
+  if (looksLikeNoEvidenceState(record)) {
+    return {
+      status: "error",
+      hasExportableContent: false,
+      display: mapSafeDisplay(readSafeDisplay(payload), {
+        title: "No evidence available",
+        description: "Resume generation needs more verified baseline evidence.",
+        reasons: ["Add or promote baseline evidence, then regenerate."],
       }),
     };
   }
@@ -269,8 +297,9 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
       status: "success",
       hasExportableContent: hasExports(record) && Boolean(previewResume),
       display: mapSafeDisplay(readSafeDisplay(payload), {
-        title: "Resume generated successfully",
-        description: "Your resume draft is ready for preview and export.",
+        title: "Resume generated",
+        description: "Verified baseline evidence was assembled into a draft.",
+        reasons: ["Review the draft and export DOCX or PDF."],
       }),
     };
   }
@@ -282,8 +311,9 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
       status: "error",
       hasExportableContent: false,
       display: mapSafeDisplay(readSafeDisplay(payload), {
-        title: "Resume generation failed",
+        title: "Resume failed to generate",
         description: "We could not generate a resume from your current inputs.",
+        reasons: ["Retry after confirming baseline and role targeting inputs."],
       }),
     };
   }
@@ -298,12 +328,12 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
   const record = payload as Record<string, unknown>;
   const blocked = isBlockedPayload(record);
   const success = isSuccessPayload(record);
-  const previewCover =
-    record.preview &&
-    typeof record.preview === "object" &&
-    (record.preview as Record<string, unknown>).coverLetter &&
-    typeof (record.preview as Record<string, unknown>).coverLetter === "object";
-  const hasContent = typeof record.content === "string" && record.content.trim().length > 0;
+  const coverParagraphs = buildCoverLetterParagraphs(payload);
+  const hasPreviewCover = coverParagraphs.length > 0;
+  const hasWarnings = extractComplianceWarnings(payload).some((flag) => {
+    const severity = trimToString(flag.severity).toLowerCase();
+    return severity === "warn" || severity === "warning";
+  });
 
   if (blocked) {
     return {
@@ -313,28 +343,51 @@ export function presentCoverLetterGeneration(payload: unknown): StudioGeneration
         title: "Cover letter blocked by compliance",
         description:
           "Some generated statements could not be verified against your baseline.",
+        reasons: ["Review flagged items in Results and adjust baseline evidence."],
       }),
     };
   }
 
-  if (success && hasContent) {
+  if (looksLikeNoEvidenceState(record)) {
     return {
-      status: "success",
-      hasExportableContent: hasExports(record) || hasContent,
+      status: "error",
+      hasExportableContent: false,
       display: mapSafeDisplay(readSafeDisplay(payload), {
-        title: "Cover letter generated successfully",
-        description: "Your cover letter draft is ready for preview and export.",
+        title: "No evidence available",
+        description: "Cover letter generation needs more verified baseline evidence.",
+        reasons: ["Add or promote baseline evidence, then regenerate."],
       }),
     };
   }
 
-  if (success && previewCover) {
+  if (success && hasPreviewCover) {
+    const defaultDescription = hasWarnings
+      ? "Verification signals detected. Personalization may be limited."
+      : "Your cover letter draft is ready for preview and export.";
+    const defaultReason = hasWarnings
+      ? "Review the draft before exporting."
+      : "Review the generated draft and download DOCX or PDF.";
     return {
       status: "success",
       hasExportableContent: hasExports(record),
       display: mapSafeDisplay(readSafeDisplay(payload), {
         title: "Cover letter generated successfully",
-        description: "Your cover letter draft is ready for preview and export.",
+        description: defaultDescription,
+        reasons: [defaultReason],
+      }),
+    };
+  }
+
+  const status = trimToString(record.status).toLowerCase();
+  const generationStatus = trimToString(record.generationStatus).toLowerCase();
+  if (status === "error" || generationStatus === "error") {
+    return {
+      status: "error",
+      hasExportableContent: false,
+      display: mapSafeDisplay(readSafeDisplay(payload), {
+        title: "Cover letter failed to generate",
+        description: "We could not generate a cover letter from your current inputs.",
+        reasons: ["Retry after confirming baseline and role targeting inputs."],
       }),
     };
   }
@@ -381,69 +434,143 @@ export function formatPreview(payload: unknown): string {
   return "";
 }
 
-function readContentValue(value: unknown): string | undefined {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed.length ? trimmed : undefined;
-  }
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const candidate = record.content;
-  if (typeof candidate === "string") {
-    const trimmed = candidate.trim();
-    return trimmed.length ? trimmed : undefined;
-  }
-  return undefined;
+function normalizeCoverLetterParagraph(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[.,;:!?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function extractCoverLetterText(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
+const COVER_LETTER_BULLET_PREFIX = /^(?:[•*\-]\s+|\d{1,2}[.)]\s+)/;
+const RESUME_HEADING_PATTERN =
+  /^(?:employment history|professional experience|work experience|education|skills|summary|experience)$/i;
+const RESUME_DATE_RANGE_PATTERN =
+  /\b(?:19|20)\d{2}\s*[-–]\s*(?:present|current|(?:19|20)\d{2})\b/i;
+const RESUME_EMPLOYMENT_BLOCK_PATTERN =
+  /\b[A-Za-z][A-Za-z0-9&.'\-/\s]+(?:\||,)\s*[A-Za-z][A-Za-z0-9&.'\-/\s]+(?:\||,)\s*(?:19|20)\d{2}\b/i;
+
+function isLikelyResumeLeakParagraph(paragraph: string): boolean {
+  const value = paragraph.trim();
+  if (!value) return true;
+  if (RESUME_HEADING_PATTERN.test(value)) return true;
+  if (COVER_LETTER_BULLET_PREFIX.test(value)) return true;
+  if (RESUME_EMPLOYMENT_BLOCK_PATTERN.test(value)) return true;
+  if (
+    RESUME_DATE_RANGE_PATTERN.test(value) &&
+    /\b(?:location|remote|onsite|hybrid|san|new york|seattle|austin|ca|ny|tx)\b/i.test(value)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function stripBulletPrefix(value: string): string {
+  return value.replace(COVER_LETTER_BULLET_PREFIX, "").trim();
+}
+
+function removeInlineGreeting(value: string): string {
+  return value.replace(/^dear hiring team[,]?\s*/i, "").trim();
+}
+
+function splitInlineClosing(value: string): { content: string; hasSignoff: boolean } {
+  const match = value.match(/\bsincerely[,]?/i);
+  if (!match || typeof match.index !== "number") {
+    return { content: value.trim(), hasSignoff: false };
+  }
+  return {
+    content: value.slice(0, match.index).trim(),
+    hasSignoff: true,
+  };
+}
+
+function isSignatureLine(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return /^[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z'.-]+){0,3}$/.test(normalized);
+}
+
+export function normalizeCoverLetterParagraphs(paragraphs: string[]): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  let salutationSeen = false;
+  let signoffSeen = false;
+  let signatureLine = "";
+  const body: string[] = [];
+
+  for (const raw of paragraphs) {
+    const cleaned = stripBulletPrefix(trimToString(raw));
+    if (!cleaned) continue;
+    if (isLikelyResumeLeakParagraph(cleaned)) continue;
+
+    const normalized = normalizeCoverLetterParagraph(cleaned);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    if (/^dear hiring team[,]?$/i.test(cleaned)) {
+      salutationSeen = true;
+      continue;
+    }
+
+    const withoutGreeting = removeInlineGreeting(cleaned);
+    if (!withoutGreeting) {
+      salutationSeen = true;
+      continue;
+    }
+
+    if (/^sincerely[,]?$/i.test(withoutGreeting)) {
+      signoffSeen = true;
+      continue;
+    }
+
+    const { content, hasSignoff } = splitInlineClosing(withoutGreeting);
+    if (hasSignoff) {
+      signoffSeen = true;
+    }
+    if (!content) continue;
+
+    if (isSignatureLine(content) && signoffSeen) {
+      signatureLine = signatureLine || content;
+      continue;
+    }
+
+    body.push(content);
+  }
+
+  if (!body.length && !salutationSeen) return [];
+
+  const finalSalutation = "Dear Hiring Team,";
+  const normalizedBody = body.filter(Boolean);
+  const closing = normalizedBody.length ? normalizedBody[normalizedBody.length - 1] : "";
+  const middleParagraphs = closing ? normalizedBody.slice(0, -1) : normalizedBody;
+
+  deduped.push(finalSalutation);
+  deduped.push(...middleParagraphs);
+  if (closing) deduped.push(closing);
+  deduped.push("Sincerely,");
+  if (signatureLine) {
+    deduped.push(signatureLine);
+  }
+
+  return deduped;
+}
+
+function readCoverLetterParagraphSource(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object") return [];
   const record = payload as Record<string, unknown>;
   const preview = record.preview;
-  if (preview && typeof preview === "object") {
-    const cover = (preview as Record<string, unknown>).coverLetter;
-    if (cover && typeof cover === "object") {
-      const document = cover as Record<string, unknown>;
-      const salutation = trimToString(document.salutation);
-      const opening = trimToString(document.opening);
-      const bodyParagraphs = Array.isArray(document.bodyParagraphs)
-        ? document.bodyParagraphs.map((value) => trimToString(value)).filter(Boolean)
-        : [];
-      const closingParagraph = trimToString(document.closingParagraph);
-      const signoff = trimToString(document.signoff);
-      const signatureName = trimToString(document.signatureName);
-      const assembled = [salutation, opening, ...bodyParagraphs, closingParagraph, signoff, signatureName]
-        .filter((value): value is string => Boolean(value))
-        .join("\n\n")
-        .trim();
-      if (assembled) return assembled;
-    }
-  }
-  const candidateFields: unknown[] = [
-    record.content,
-    record.letter,
-    record.coverLetter,
-    record.draft,
-    record.generated,
-  ];
-  for (const candidate of candidateFields) {
-    const value = readContentValue(candidate);
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
+  if (!preview || typeof preview !== "object") return [];
+  const cover = (preview as Record<string, unknown>).coverLetter;
+  if (!cover || typeof cover !== "object") return [];
+  const paragraphs = (cover as Record<string, unknown>).paragraphs;
+  if (!Array.isArray(paragraphs)) return [];
+  return paragraphs.map((value) => trimToString(value)).filter(Boolean);
 }
 
 export function buildCoverLetterParagraphs(payload: unknown): string[] {
-  const text = extractCoverLetterText(payload);
-  if (!text) return [];
-  return text
-    .split(/\r?\n\s*\r?\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
+  const paragraphs = readCoverLetterParagraphSource(payload);
+  if (!paragraphs.length) return [];
+  return normalizeCoverLetterParagraphs(paragraphs);
 }
 
 export function getFilenameFromContentDisposition(headerValue: string | null): string | null {

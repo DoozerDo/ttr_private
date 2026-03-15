@@ -29,6 +29,12 @@ export enum ComplianceFlagSeverity {
   WARN = 'warn',
 }
 
+export enum GeneratedTextSourceType {
+  BASELINE_EVIDENCE = 'BASELINE_EVIDENCE',
+  JD_REFERENCE = 'JD_REFERENCE',
+  CONNECTIVE_LANGUAGE = 'CONNECTIVE_LANGUAGE',
+}
+
 export type ComplianceFlag = {
   code: ComplianceFlagCode;
   severity: ComplianceFlagSeverity;
@@ -41,6 +47,11 @@ export type ComplianceTextSection = {
   title?: string | null;
   content?: string | null;
   sectionType?: string | null;
+  sourceType?: GeneratedTextSourceType | null;
+  sentenceSources?: Array<{
+    text?: string | null;
+    sourceType?: GeneratedTextSourceType | null;
+  }>;
 };
 
 export enum DocumentType {

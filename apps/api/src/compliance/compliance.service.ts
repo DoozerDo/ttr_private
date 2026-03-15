@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { BaselineVersion } from '../baseline/baseline-version.entity';
 import type { Job } from '../jobs/job.entity';
+import { EmbeddingService } from '../ai/embedding.service';
 import {
   ComplianceAction,
   ComplianceFlagCode,
@@ -10,6 +11,7 @@ import {
   ComplianceFlagSeverity,
   ComplianceTextSection,
   DocumentType,
+  GeneratedTextSourceType,
   JobApplicationContext,
 } from './compliance.types';
 import { ComplianceAudit } from './compliance-audit.entity';
@@ -71,6 +73,7 @@ export class ComplianceService {
   constructor(
     @InjectRepository(ComplianceAudit)
     private readonly auditsRepository: Repository<ComplianceAudit>,
+    private readonly embeddingService: EmbeddingService,
   ) {}
 
   public normalizeText(input: string): string {
@@ -138,26 +141,29 @@ export class ComplianceService {
     return flags;
   }
 
-  public detectScopeInflation(payload: {
+  public async detectScopeInflation(payload: {
     baselineSections?: Array<{
       content?: string | null;
       title?: string | null;
       sectionType?: string;
     }> | null;
-    generatedSections?: Array<{
-      content?: string | null;
-      title?: string | null;
-    }> | null;
+    generatedSections?: ComplianceTextSection[] | null;
     jobContext?: JobApplicationContext | null;
     documentType?: DocumentType;
-  }): ComplianceFlag[] {
+  }): Promise<ComplianceFlag[]> {
     const baselineSections = payload.baselineSections ?? [];
-    const generatedSections = payload.generatedSections ?? [];
+    const generatedSections = this.selectBaselineClaimSections(
+      payload.generatedSections ?? [],
+    );
     return this.scopeInflationDetector.detect(
       baselineSections,
       generatedSections,
       payload.jobContext ?? undefined,
       payload.documentType,
+      {
+        embeddingProvider: (text: string) =>
+          this.embeddingService.embed(text),
+      },
     );
   }
 
@@ -354,10 +360,17 @@ export class ComplianceService {
     jobContext?: JobApplicationContext;
     documentType?: DocumentType;
   }): ComplianceFlag[] {
+    const generatedClaimSections = this.normalizeGeneratedSectionsForClaimValidation(
+      payload.generatedSections ?? [],
+    );
+    if (!generatedClaimSections.length) {
+      return [];
+    }
+
     return [
       ...detectInventedCompany({
         baselineSections: payload.baselineSections,
-        generatedSections: payload.generatedSections,
+        generatedSections: generatedClaimSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
@@ -365,7 +378,7 @@ export class ComplianceService {
       }),
       ...detectInventedRole({
         baselineSections: payload.baselineSections,
-        generatedSections: payload.generatedSections,
+        generatedSections: generatedClaimSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
@@ -373,13 +386,13 @@ export class ComplianceService {
       }),
       ...detectInventedMetric({
         baselineSections: payload.baselineSections,
-        generatedSections: payload.generatedSections,
+        generatedSections: generatedClaimSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
       }),
       ...detectFictionalTechnology({
         baselineSections: payload.baselineSections,
-        generatedSections: payload.generatedSections,
+        generatedSections: generatedClaimSections,
         job: payload.job,
         baselineAllowlist: payload.baselineAllowlist,
         jobContext: payload.jobContext,
@@ -423,5 +436,117 @@ export class ComplianceService {
       flag.confidence = confidence;
     }
     return flag;
+  }
+
+  private selectBaselineClaimSections(
+    sections: ComplianceTextSection[],
+  ): Array<{ title?: string | null; content?: string | null }> {
+    if (!Array.isArray(sections) || sections.length === 0) return [];
+
+    const mapped: Array<{ title?: string | null; content?: string | null }> =
+      [];
+
+    for (const section of sections) {
+      const sectionSourceType =
+        section.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
+      const sentenceSources = Array.isArray(section.sentenceSources)
+        ? section.sentenceSources
+        : [];
+
+      if (sentenceSources.length > 0) {
+        const claimSentences = sentenceSources
+          .filter(
+            (sentence) =>
+              (sentence.sourceType ?? sectionSourceType) ===
+              GeneratedTextSourceType.BASELINE_EVIDENCE,
+          )
+          .map((sentence) => this.normalizeText(String(sentence.text ?? '')))
+          .filter(Boolean);
+
+        if (claimSentences.length > 0) {
+          mapped.push({
+            title: section.title,
+            content: claimSentences.join(' '),
+          });
+        }
+        continue;
+      }
+
+      if (sectionSourceType !== GeneratedTextSourceType.BASELINE_EVIDENCE) {
+        continue;
+      }
+
+      const content = this.normalizeText(String(section.content ?? ''));
+      if (!content) continue;
+      mapped.push({
+        title: section.title,
+        content,
+      });
+    }
+
+    return mapped;
+  }
+
+  private normalizeGeneratedSectionsForClaimValidation(
+    sections: ComplianceTextSection[],
+  ): ComplianceTextSection[] {
+    if (!Array.isArray(sections) || sections.length === 0) return [];
+
+    const normalized: ComplianceTextSection[] = [];
+
+    for (const section of sections) {
+      const sectionSourceType =
+        section.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
+      const sentenceSources = Array.isArray(section.sentenceSources)
+        ? section.sentenceSources
+        : [];
+
+      if (sentenceSources.length > 0) {
+        const claimSentences = sentenceSources
+          .map((sentence) => ({
+            text: this.normalizeText(String(sentence.text ?? '')),
+            sourceType:
+              sentence.sourceType ??
+              sectionSourceType ??
+              GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+          }))
+          .filter(
+            (sentence) =>
+              sentence.text.length > 0 &&
+              sentence.sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE,
+          );
+
+        if (!claimSentences.length) continue;
+
+        normalized.push({
+          ...section,
+          sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          sentenceSources: claimSentences,
+          content: claimSentences.map((sentence) => sentence.text).join(' '),
+        });
+        continue;
+      }
+
+      if (sectionSourceType !== GeneratedTextSourceType.BASELINE_EVIDENCE) {
+        continue;
+      }
+
+      const content = this.normalizeText(String(section.content ?? ''));
+      if (!content) continue;
+
+      normalized.push({
+        ...section,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        content,
+        sentenceSources: [
+          {
+            text: content,
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+    }
+
+    return normalized;
   }
 }

@@ -12,6 +12,7 @@ import { Baseline } from '../baseline/baseline.entity';
 import {
   BaselineIncludePolicy,
   BaselineSection,
+  BaselineSectionType,
 } from '../baseline/baseline-section.entity';
 import { BaselineVersion } from '../baseline/baseline-version.entity';
 import { FitAssessment } from '../analysis/fit-assessment.entity';
@@ -23,7 +24,13 @@ import {
   INSUFFICIENT_EXTRACTED_TEXT_ERROR_MESSAGE,
 } from '../compliance/extracted-text.utils';
 import { validateComplianceWithFallback } from '../compliance/compliance-error.utils';
-import { ComplianceAction } from '../compliance/compliance.types';
+import { shapeComplianceForUi } from '../compliance/compliance-ui-shaping';
+import {
+  ComplianceAction,
+  ComplianceTextSection,
+  GeneratedTextSourceType,
+} from '../compliance/compliance.types';
+import { validateStatementIntegrity } from '../compliance/statement-integrity';
 import { Job } from '../jobs/job.entity';
 import { ApplicationsService } from '../applications/applications.service';
 import type { CxFitScoreSnapshot } from '../applications/applications.service';
@@ -42,7 +49,13 @@ import {
   getDocxTemplate,
 } from '../docx-templates/docx-template.registry';
 import { resolveBaselineIdentity } from '../baseline/baseline-identity.utils';
-import { buildResumeDraftSections } from './resume-draft-bullets';
+import { resolveBaselineSectionsForGeneration } from '../baseline/baseline-section-source';
+import {
+  buildResumeDraftSections,
+  extractEvidenceUnitsFromLogicalUnits,
+  reconstructLogicalTextUnits,
+  validateResumeDraftBulletAnchors,
+} from './resume-draft-bullets';
 import {
   buildNormalizedResumeDocument,
   buildResumePlainText,
@@ -79,6 +92,34 @@ export type ResumePreExportSnapshot = {
   sectionFragments: Array<{ title: string | null; content: string }>;
   docxModel: ResumeDocxModel;
   normalizedDocument: NormalizedResumeDocument;
+};
+
+type ResumeExperiencePipelineDiagnostics = {
+  resumeGenerationStage?: string;
+  resumeGenerationReason?: string;
+  baselineVersionLoaded: boolean;
+  totalBaselineSections: number;
+  sectionTypeHistogram: Record<string, number>;
+  logicalUnitsReconstructed: number;
+  extractedEvidenceUnits: number;
+  selectedEvidenceUnits: number;
+  draftedBullets: number;
+  anchorValidationPassed?: boolean;
+  resumeStructureAssembled?: boolean;
+  complianceEvaluationPassed?: boolean;
+  candidateExperienceLikeSections: number;
+  candidateExperienceLikeRetainedSections: number;
+  strictTypedExperienceSections: number;
+  strictRetainedExperienceSections: number;
+  baselineExperienceSections: number;
+  allowedExperienceSections: number;
+  draftedExperienceSections: number;
+  draftedExperienceSectionsWithBullets: number;
+  normalizedExperienceEntries: number;
+  validatedExperienceEntries: number;
+  experienceLikeSectionIds: string[];
+  retainedExperienceSectionIds: string[];
+  stageFailureReason?: string;
 };
 
 @Injectable()
@@ -133,26 +174,26 @@ export class ResumeService {
         .replace(/\u2026/g, '...')
         .replace(/\u00a0/g, ' ')
         // Keep visible bullet glyph in plain text while normalizing variants.
-        .replace(/[\u25CF\u25E6\u2043\u2219]/g, '•')
+        .replace(/[\u25CF\u25E6\u2043\u2219]/g, 'â€¢')
         // Repair common mojibake sequences when UTF-8 punctuation was decoded as Latin-1.
-        .replace(/â€¢/g, '•')
-        .replace(/â€“|â€”/g, '-')
-        .replace(/â€˜|â€™/g, "'")
-        .replace(/â€œ|â€/g, '"')
-        .replace(/â€¦/g, '...');
+        .replace(/Ã¢â‚¬Â¢/g, 'â€¢')
+        .replace(/Ã¢â‚¬â€œ|Ã¢â‚¬â€/g, '-')
+        .replace(/Ã¢â‚¬Ëœ|Ã¢â‚¬â„¢/g, "'")
+        .replace(/Ã¢â‚¬Å“|Ã¢â‚¬/g, '"')
+        .replace(/Ã¢â‚¬Â¦/g, '...');
 
       return normalizedChars
         .split('\n')
         .map((line) => {
           // Some inputs still encode bullets as leading "&"; normalize only at line start.
-          if (/^\s*&&+¢\s+/.test(line)) {
-            return line.replace(/^\s*&&+¢\s+/, '- ');
+          if (/^\s*&&+Â¢\s+/.test(line)) {
+            return line.replace(/^\s*&&+Â¢\s+/, '- ');
           }
           if (/^\s*&\s+/.test(line)) {
             return line.replace(/^\s*&\s+/, '- ');
           }
-          if (/^\s*•\s+/.test(line)) {
-            return line.replace(/^\s*•\s+/, '- ');
+          if (/^\s*â€¢\s+/.test(line)) {
+            return line.replace(/^\s*â€¢\s+/, '- ');
           }
           return line;
         })
@@ -298,64 +339,21 @@ export class ResumeService {
       .sort((a, b) => a.order - b.order);
   }
 
-  private readonly complianceReasonLabels: Record<string, string> = {
-    invented_company: 'Company reference needs verification',
-    invented_role: 'Role or title needs verification',
-    invented_metric: 'Metric or outcome needs verification',
-    scope_inflation: 'Scope statement needs verification',
-    missing_baseline_support: 'Evidence is missing from your baseline',
-    fictional_technology: 'Technology claim needs verification',
-    stylized_punctuation: 'Formatting is not compliant yet',
-  };
-
-  private normalizeEvidenceForDisplay(value: string, max = 180): string {
-    const normalized = String(value ?? '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!normalized) return '';
-    const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
-    if (firstSentence.length <= max) return firstSentence;
-    return `${firstSentence.slice(0, max - 3).trim()}...`;
-  }
-
-  private dedupeDisplayStrings(values: string[]): string[] {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const raw of values) {
-      const value = this.normalizeEvidenceForDisplay(raw);
-      if (!value) continue;
-      const key = value.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(value);
-    }
-    return result;
-  }
-
-  private buildSafeComplianceReasons(
-    complianceFlags: Array<{ code?: string; message?: string }>,
-  ): string[] {
-    const reasons = this.dedupeDisplayStrings(
-      complianceFlags.map((flag) => {
-        const code = String(flag.code ?? '')
-          .trim()
-          .toLowerCase();
-        const label = this.complianceReasonLabels[code] ?? 'Content needs verification';
-        const message = this.normalizeEvidenceForDisplay(String(flag.message ?? ''), 140);
-        return message ? `${label}: ${message}` : label;
-      }),
-    );
-    return reasons.slice(0, 4);
-  }
-
   private buildBlockedDisplayPayload(
-    complianceFlags: Array<{ code?: string; message?: string }>,
+    complianceFlags: Array<{
+      code?: string;
+      message?: string;
+      severity?: string;
+      confidence?: number;
+      evidence?: Array<{ baseline: string; generated: string }>;
+    }>,
   ): UserSafeDisplayPayload {
+    const shaped = shapeComplianceForUi(complianceFlags as any);
     return {
       title: 'Resume blocked by compliance',
       description:
         'Some generated statements could not be verified against your baseline.',
-      reasons: this.buildSafeComplianceReasons(complianceFlags),
+      reasons: shaped.reasons,
       cta: {
         label: 'Review compliance in Results',
         href: '/results',
@@ -378,21 +376,35 @@ export class ResumeService {
   private sanitizeGapGuidance(gapInsights: ReturnType<GapAnalysisService['analyze']> | null) {
     if (!gapInsights) return null;
 
-    const strengthSignals = this.dedupeDisplayStrings(gapInsights.strengths).slice(0, 6);
-    const gapSignals = this.dedupeDisplayStrings(
-      gapInsights.criticalGaps.flatMap((gap) => [
+    const normalizeEvidenceForDisplay = (value: string, max = 180) => {
+      const normalized = String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!normalized) return '';
+      const firstSentence = normalized.split(/(?<=[.!?])\s+/)[0] ?? normalized;
+      if (firstSentence.length <= max) return firstSentence;
+      return `${firstSentence.slice(0, max - 3).trim()}...`;
+    };
+    const strengthSignals = gapInsights.strengths
+      .map((value) => normalizeEvidenceForDisplay(value))
+      .filter(Boolean)
+      .slice(0, 6);
+    const gapSignals = gapInsights.criticalGaps
+      .flatMap((gap) => [
         gap.title,
         gap.requirementEvidence,
         gap.baselineEvidence ?? '',
-      ]),
-    ).slice(0, 8);
+      ])
+      .map((value) => normalizeEvidenceForDisplay(value))
+      .filter(Boolean)
+      .slice(0, 8);
     const reframingPriorities = gapInsights.criticalGaps.slice(0, 2).map((gap) => ({
-      title: this.normalizeEvidenceForDisplay(gap.title, 90),
-      requirementEvidence: this.normalizeEvidenceForDisplay(gap.requirementEvidence, 180),
+      title: normalizeEvidenceForDisplay(gap.title, 90),
+      requirementEvidence: normalizeEvidenceForDisplay(gap.requirementEvidence, 180),
       baselineEvidence: gap.baselineEvidence
-        ? this.normalizeEvidenceForDisplay(gap.baselineEvidence, 180)
+        ? normalizeEvidenceForDisplay(gap.baselineEvidence, 180)
         : null,
-      reasoning: this.normalizeEvidenceForDisplay(gap.reasoning, 180),
+      reasoning: normalizeEvidenceForDisplay(gap.reasoning, 180),
     }));
 
     return {
@@ -437,8 +449,396 @@ export class ResumeService {
         education: payload.normalized.education ?? [],
       },
     };
-    // eslint-disable-next-line no-console
     console.log('[resume-normalization]', JSON.stringify(snapshot, null, 2));
+  }
+
+  private splitIntoSentences(text: string): string[] {
+    const normalized = String(text ?? '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[|\u00A6\uFF5C]/g, ' | ')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/[ \t]+/g, ' ');
+    if (!normalized.trim()) {
+      return [];
+    }
+
+    const rawLines = normalized
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!rawLines.length) {
+      return [];
+    }
+
+    const BULLET_LINE_PREFIX = /^[-*â€¢\u2022\u25CF\u25E6\u2043\u2219]\s+/;
+    const NUMBERED_LINE_PREFIX = /^\d{1,2}[.)]\s+/;
+    const DANGLING_TERMINAL_TOKEN = /\b(?:on|in|for|with|at|of|to|and|a|an|the)$/i;
+    const TERMINAL_PUNCTUATION = /[.!?]$/;
+    const lines: string[] = [];
+
+    for (const rawLine of rawLines) {
+      const hasExplicitBoundary =
+        BULLET_LINE_PREFIX.test(rawLine) || NUMBERED_LINE_PREFIX.test(rawLine);
+      const line = rawLine
+        .replace(BULLET_LINE_PREFIX, '')
+        .replace(NUMBERED_LINE_PREFIX, '')
+        .trim();
+      if (!line) continue;
+      if (!lines.length || hasExplicitBoundary) {
+        lines.push(line);
+        continue;
+      }
+
+      const prev = lines[lines.length - 1] ?? '';
+      const shouldMerge =
+        (!TERMINAL_PUNCTUATION.test(prev) &&
+          !/^[A-Z][A-Z\s]+$/.test(line)) ||
+        DANGLING_TERMINAL_TOKEN.test(prev);
+      if (shouldMerge) {
+        lines[lines.length - 1] = `${prev} ${line}`.replace(/\s+/g, ' ').trim();
+      } else {
+        lines.push(line);
+      }
+    }
+
+    return lines
+      .flatMap((line) =>
+        line
+          .split(/(?<=[.!?])\s+/)
+          .map((sentence) => sentence.trim())
+          .filter(Boolean),
+      )
+      .filter((sentence) => !/^[|:-]+$/.test(sentence));
+  }
+
+  private buildResumeGeneratedSectionsForCompliance(
+    sections: ResumeExportSection[],
+  ): ComplianceTextSection[] {
+    return sections.map((section) => {
+      const upperType = String(section.type ?? '').toUpperCase();
+      const bullets = Array.isArray(section.bullets) ? section.bullets : [];
+
+      const sentenceSources =
+        upperType === 'EXPERIENCE' && bullets.length > 0
+          ? bullets.map((bullet) => ({
+              text: bullet.text,
+              sourceType:
+                Array.isArray((bullet as { source?: { sourceEvidenceIds?: string[] } }).source?.sourceEvidenceIds) &&
+                ((bullet as { source?: { sourceEvidenceIds?: string[] } }).source?.sourceEvidenceIds?.length ?? 0) > 0
+                  ? GeneratedTextSourceType.BASELINE_EVIDENCE
+                  : GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+            }))
+          : this.splitIntoSentences(section.content ?? '').map((sentence) => ({
+              text: sentence,
+              sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            }));
+
+      const integrityCheckedSentences = sentenceSources
+        .map((sentence) => {
+          const sourceType =
+            sentence.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE;
+          const integrity = validateStatementIntegrity(sentence.text ?? '', {
+            sourceType,
+          });
+          if (process.env.COMPLIANCE_TRACE === 'true') {
+            console.debug(
+              '[compliance-trace]',
+              JSON.stringify({
+                detector: 'pre_compliance_statement_integrity',
+                text: sentence.text ?? '',
+                normalized: integrity.normalized,
+                sourceType,
+                statementIntegrity: integrity.valid ? 'pass' : 'fail',
+                detectorInvoked: integrity.valid,
+                skipReason: integrity.valid ? null : integrity.reason,
+              }),
+            );
+          }
+          if (!integrity.valid) {
+            return null;
+          }
+          return {
+            text: integrity.normalized,
+            sourceType,
+          };
+        })
+        .filter(
+          (
+            sentence,
+          ): sentence is { text: string; sourceType: GeneratedTextSourceType } =>
+            Boolean(sentence),
+        );
+
+      return {
+        title: section.title,
+        content: section.content,
+        sectionType: section.type,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        sentenceSources: integrityCheckedSentences.map((sentence) => ({
+          text: sentence.text,
+          sourceType:
+            sentence.sourceType ?? GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+        })),
+      };
+    });
+  }
+
+  private buildExperiencePipelineDiagnostics(payload: {
+    baselineVersionLoaded: boolean;
+    sectionsWithPolicies: BaselineSection[];
+    allowedSections: BaselineSection[];
+    resumeInputSections: BaselineSection[];
+    draftedSections: ResumeExportSection[];
+    normalizedDocument: NormalizedResumeDocument;
+    anchorValidationPassed?: boolean;
+    resumeStructureAssembled?: boolean;
+    complianceEvaluationPassed?: boolean;
+  }): ResumeExperiencePipelineDiagnostics {
+    const strictTypedExperienceSections = payload.sectionsWithPolicies.filter(
+      (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE',
+    ).length;
+    const strictRetainedExperienceSections = payload.allowedSections.filter(
+      (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE',
+    ).length;
+    const baselineExperienceSections = payload.resumeInputSections.filter(
+      (section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE',
+    ).length;
+    const allowedExperienceSections = baselineExperienceSections;
+    const experienceLikeSections = payload.sectionsWithPolicies.filter((section) =>
+      this.looksLikeExperienceSection(section),
+    );
+    const retainedExperienceLikeSections = payload.allowedSections.filter((section) =>
+      this.looksLikeExperienceSection(section),
+    );
+    const sectionTypeHistogram: Record<string, number> = {};
+    payload.sectionsWithPolicies.forEach((section) => {
+      const key = String(section.sectionType ?? section.type ?? 'UNKNOWN')
+        .trim()
+        .toUpperCase();
+      sectionTypeHistogram[key] = (sectionTypeHistogram[key] ?? 0) + 1;
+    });
+    const draftedExperienceSections = payload.draftedSections.filter(
+      (section) => String(section.type ?? '').toUpperCase() === 'EXPERIENCE',
+    ).length;
+    const draftedExperienceSectionsWithBullets = payload.draftedSections.filter(
+      (section) =>
+        String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
+        Array.isArray(section.bullets) &&
+        section.bullets.length > 0,
+    ).length;
+    const normalizedExperienceEntries = payload.normalizedDocument.experience.length;
+    const validatedExperienceEntries = payload.normalizedDocument.experience.filter(
+      (entry) =>
+        entry.company?.trim().length > 0 &&
+        !/^company$/i.test(entry.company.trim()) &&
+        entry.bullets.length > 0,
+    ).length;
+
+    const logicalUnitsReconstructed = payload.resumeInputSections
+      .filter((section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE')
+      .reduce(
+        (sum, section) => sum + reconstructLogicalTextUnits(section.content ?? '').length,
+        0,
+      );
+    const extractedEvidenceUnits = payload.resumeInputSections
+      .filter((section) => String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE')
+      .reduce((sum, section) => {
+        const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
+        return sum + extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits).length;
+      }, 0);
+    const draftedBullets = payload.draftedSections.reduce(
+      (sum, section) => sum + (Array.isArray(section.bullets) ? section.bullets.length : 0),
+      0,
+    );
+    const selectedEvidenceUnits = payload.draftedSections.reduce((sum, section) => {
+      const bullets = Array.isArray(section.bullets) ? section.bullets : [];
+      return (
+        sum +
+        bullets.reduce((bulletSum, bullet) => {
+          const ids = (bullet as { source?: { sourceEvidenceIds?: string[] } })
+            ?.source?.sourceEvidenceIds;
+          return bulletSum + (Array.isArray(ids) ? ids.length : 0);
+        }, 0)
+      );
+    }, 0);
+
+    let stageFailureReason: string | undefined;
+    let resumeGenerationStage: string | undefined;
+    let resumeGenerationReason: string | undefined;
+    if (baselineExperienceSections > 0 && logicalUnitsReconstructed === 0) {
+      resumeGenerationStage = 'logical_unit_reconstruction';
+      resumeGenerationReason = 'no_logical_units_reconstructed';
+      stageFailureReason =
+        'No logical experience units could be reconstructed from baseline content.';
+    } else if (baselineExperienceSections > 0 && extractedEvidenceUnits === 0) {
+      resumeGenerationStage = 'evidence_extraction';
+      resumeGenerationReason = 'no_valid_evidence_units';
+      stageFailureReason =
+        'No valid evidence units were extracted from reconstructed experience content.';
+    } else if (baselineExperienceSections > 0 && validatedExperienceEntries === 0) {
+      if (allowedExperienceSections === 0) {
+        resumeGenerationStage = 'include_policy';
+        resumeGenerationReason = 'no_candidate_experience_sections';
+        stageFailureReason =
+          'Experience entries were removed by section include policy filtering.';
+      } else if (draftedExperienceSections === 0) {
+        resumeGenerationStage = 'draft_section_build';
+        resumeGenerationReason = 'no_evidence_units_selected';
+        stageFailureReason =
+          'Experience entries were dropped while building drafted resume sections.';
+      } else if (draftedExperienceSectionsWithBullets === 0) {
+        resumeGenerationStage = 'draft_bullet_creation';
+        resumeGenerationReason = 'drafted_bullets_empty';
+        stageFailureReason =
+          'Experience bullets were dropped during focus and positioning transforms.';
+      } else if (normalizedExperienceEntries === 0) {
+        resumeGenerationStage = 'resume_structure_assembly';
+        resumeGenerationReason = 'resume_structure_empty';
+        stageFailureReason =
+          'Experience entries were dropped during normalized resume mapping.';
+      } else {
+        resumeGenerationStage = 'resume_validation';
+        resumeGenerationReason = 'resume_structure_empty';
+        stageFailureReason =
+          'Experience entries were dropped by final normalized resume validation rules.';
+      }
+    } else if (
+      validatedExperienceEntries === 0 &&
+      experienceLikeSections.length > 0 &&
+      retainedExperienceLikeSections.length === 0
+    ) {
+      resumeGenerationStage = 'include_policy';
+      resumeGenerationReason = 'no_candidate_experience_sections';
+      stageFailureReason =
+        'Work-history-like sections were removed by include policy before resume assembly.';
+    } else if (
+      validatedExperienceEntries === 0 &&
+      strictTypedExperienceSections === 0 &&
+      experienceLikeSections.length > 0
+    ) {
+      resumeGenerationStage = 'section_classification';
+      resumeGenerationReason = 'no_candidate_experience_sections';
+      stageFailureReason =
+        'Work-history-like baseline sections were found but not recognized as EXPERIENCE before resume assembly.';
+    } else if (
+      validatedExperienceEntries === 0 &&
+      strictTypedExperienceSections > 0 &&
+      strictRetainedExperienceSections === 0
+    ) {
+      resumeGenerationStage = 'include_policy';
+      resumeGenerationReason = 'no_candidate_experience_sections';
+      stageFailureReason =
+        'Recognized EXPERIENCE sections were removed by include policy before resume assembly.';
+    }
+
+    return {
+      resumeGenerationStage,
+      resumeGenerationReason,
+      baselineVersionLoaded: payload.baselineVersionLoaded,
+      totalBaselineSections: payload.sectionsWithPolicies.length,
+      sectionTypeHistogram,
+      logicalUnitsReconstructed,
+      extractedEvidenceUnits,
+      selectedEvidenceUnits,
+      draftedBullets,
+      anchorValidationPassed: payload.anchorValidationPassed,
+      resumeStructureAssembled: payload.resumeStructureAssembled,
+      complianceEvaluationPassed: payload.complianceEvaluationPassed,
+      candidateExperienceLikeSections: experienceLikeSections.length,
+      candidateExperienceLikeRetainedSections: retainedExperienceLikeSections.length,
+      strictTypedExperienceSections,
+      strictRetainedExperienceSections,
+      baselineExperienceSections,
+      allowedExperienceSections,
+      draftedExperienceSections,
+      draftedExperienceSectionsWithBullets,
+      normalizedExperienceEntries,
+      validatedExperienceEntries,
+      experienceLikeSectionIds: experienceLikeSections
+        .map((section) => section.id)
+        .filter(Boolean)
+        .slice(0, 8),
+      retainedExperienceSectionIds: payload.resumeInputSections
+        .filter(
+          (section) =>
+            String(section.sectionType ?? section.type ?? '').toUpperCase() ===
+            'EXPERIENCE',
+        )
+        .map((section) => section.id)
+        .filter(Boolean)
+        .slice(0, 8),
+      stageFailureReason,
+    };
+  }
+
+  private mapResumeFailureDescription(reason?: string): string {
+    switch (reason) {
+      case 'no_valid_evidence_units':
+        return 'Resume could not be generated because no verified baseline evidence could be assembled into role relevant experience bullets.';
+      case 'anchor_validation_failed':
+        return 'Resume could not be generated because drafted content could not be verified against your baseline.';
+      case 'resume_structure_empty':
+        return 'Resume could not be generated because verified content was insufficient to build a valid resume structure.';
+      case 'no_logical_units_reconstructed':
+        return 'Resume could not be generated because no logical experience content could be reconstructed from your baseline.';
+      case 'no_candidate_experience_sections':
+        return 'Resume could not be generated because no usable experience sections were available after policy and section classification checks.';
+      default:
+        return 'We could not build a valid resume structure from the available data.';
+    }
+  }
+
+  private looksLikeExperienceSection(section: Pick<BaselineSection, 'title' | 'content'>): boolean {
+    const title = String(section.title ?? '')
+      .trim()
+      .toLowerCase();
+    const content = String(section.content ?? '').trim();
+    if (!content) return false;
+
+    const experienceTitlePattern =
+      /\b(experience|professional experience|work experience|work history|employment history|career history)\b/i;
+    if (experienceTitlePattern.test(title)) {
+      return true;
+    }
+
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 40);
+    const hasDateRange = lines.some((line) =>
+      /\b(?:19|20)\d{2}\s*(?:-|â€“|â€”|to)\s*(?:present|current|(?:19|20)\d{2})\b/i.test(
+        line,
+      ),
+    );
+    const hasRoleSignal = lines.some((line) =>
+      /\b(manager|director|engineer|lead|analyst|consultant|producer|designer|coordinator|specialist)\b/i.test(
+        line,
+      ),
+    );
+    const hasBulletSignal = lines.some((line) => /^[-*â€¢Â·]\s+/.test(line));
+    const hasHeaderSignal = lines.some((line) => line.includes('|'));
+
+    return hasDateRange && (hasRoleSignal || hasBulletSignal || hasHeaderSignal);
+  }
+
+  private promoteExperienceLikeSections(sections: BaselineSection[]): BaselineSection[] {
+    return sections.map((section) => {
+      const normalizedType = String(section.sectionType ?? section.type ?? '')
+        .trim()
+        .toUpperCase();
+      if (normalizedType === 'EXPERIENCE') {
+        return section;
+      }
+      if (!this.looksLikeExperienceSection(section)) {
+        return section;
+      }
+      return {
+        ...section,
+        sectionType: BaselineSectionType.EXPERIENCE,
+        type: BaselineSectionType.EXPERIENCE,
+      } as BaselineSection;
+    });
   }
 
   async generateResume(
@@ -484,8 +884,9 @@ export class ResumeService {
       order: { order: 'ASC' },
     });
 
+    const sourceSections = resolveBaselineSectionsForGeneration(baseline);
     const sectionsWithPolicies = this.applyPoliciesToSections(
-      baseline.sections ?? [],
+      sourceSections,
       policies,
     );
 
@@ -494,6 +895,8 @@ export class ResumeService {
         (section.includePolicy ?? BaselineIncludePolicy.OPTIONAL) !==
         BaselineIncludePolicy.NEVER,
     );
+    const resumeInputSections =
+      this.promoteExperienceLikeSections(allowedSections);
 
     const baselineText = allowedSections
       .map((section) => section.content ?? '')
@@ -526,7 +929,7 @@ export class ResumeService {
     }
 
     const claimRiskInventory = buildBaselineEvidenceTermInventory({
-      sections: allowedSections,
+      sections: resumeInputSections,
       baselineVersion,
     });
 
@@ -557,7 +960,7 @@ export class ResumeService {
       .filter(Boolean)
       .join('\n');
 
-    const sections = buildResumeDraftSections(allowedSections, {
+    const sections = buildResumeDraftSections(resumeInputSections, {
       jobText: draftJobText || null,
       gapGuidance: gapGuidance
         ? {
@@ -575,6 +978,17 @@ export class ResumeService {
       sections as ResumeExportSection[],
       identity,
     );
+    let experienceDiagnostics = this.buildExperiencePipelineDiagnostics({
+      sectionsWithPolicies,
+      allowedSections,
+      baselineVersionLoaded: Boolean(baselineVersion?.id),
+      resumeInputSections,
+      draftedSections: sections as ResumeExportSection[],
+      normalizedDocument,
+      anchorValidationPassed: undefined,
+      resumeStructureAssembled: undefined,
+      complianceEvaluationPassed: undefined,
+    });
     this.logNormalizationDiagnostics({
       baselineId: baseline.id,
       sectionCount: sections.length,
@@ -585,15 +999,38 @@ export class ResumeService {
       })),
       normalized: normalizedDocument,
     });
-    const normalizedValidation = validateNormalizedResumeDocument(
-      normalizedDocument,
+    const bulletAnchorValidation = validateResumeDraftBulletAnchors(
+      sections,
+      resumeInputSections,
     );
-    if (!normalizedValidation.valid) {
+    if (!bulletAnchorValidation.valid) {
+      const reasons = [
+        'Drafted experience bullets could not be anchored to complete baseline sentence spans.',
+        ...bulletAnchorValidation.reasons,
+      ].slice(0, 6);
+      const blockingReasons = reasons.filter((reason) =>
+        /(sentence fragment|missing sourceEvidenceIds|missing baseline anchor text|does not map to baseline sentence spans|not present in baseline section)/i.test(
+          reason,
+        ),
+      );
+      experienceDiagnostics = {
+        ...experienceDiagnostics,
+        anchorValidationPassed: blockingReasons.length === 0,
+      };
+      if (blockingReasons.length > 0) {
+        experienceDiagnostics = {
+          ...experienceDiagnostics,
+          resumeGenerationStage: 'anchor_validation',
+          resumeGenerationReason: 'anchor_validation_failed',
+          stageFailureReason: 'Draft bullet anchoring failed before compliance evaluation.',
+          anchorValidationPassed: false,
+        };
       const display: UserSafeDisplayPayload = {
         title: 'Resume generation failed',
-        description:
-          'We could not build a valid resume structure from the available data.',
-        reasons: normalizedValidation.reasons.slice(0, 4),
+        description: this.mapResumeFailureDescription(
+          experienceDiagnostics.resumeGenerationReason,
+        ),
+        reasons: reasons.slice(0, 4),
         cta: {
           label: 'Review source resume in Results',
           href: '/results',
@@ -629,9 +1066,92 @@ export class ResumeService {
         safeDisplay: display,
         internal: {
           complianceFlags: [],
+          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+          resumeGenerationDiagnostics: experienceDiagnostics,
+          normalizationDiagnostics: experienceDiagnostics,
+          anchorValidationReasons: reasons,
+        },
+      };
+      }
+    }
+    experienceDiagnostics = {
+      ...experienceDiagnostics,
+      anchorValidationPassed:
+        experienceDiagnostics.anchorValidationPassed !== false,
+    };
+    const normalizedValidation = validateNormalizedResumeDocument(
+      normalizedDocument,
+    );
+    if (!normalizedValidation.valid) {
+      experienceDiagnostics = {
+        ...experienceDiagnostics,
+        resumeGenerationStage:
+          experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
+        resumeGenerationReason:
+          experienceDiagnostics.resumeGenerationReason ?? 'resume_structure_empty',
+        resumeStructureAssembled: false,
+      };
+      const reasons = normalizedValidation.reasons.slice();
+      if (
+        experienceDiagnostics.stageFailureReason &&
+        !reasons.includes(experienceDiagnostics.stageFailureReason)
+      ) {
+        reasons.unshift(experienceDiagnostics.stageFailureReason);
+      }
+      const display: UserSafeDisplayPayload = {
+        title: 'Resume generation failed',
+        description: this.mapResumeFailureDescription(
+          experienceDiagnostics.resumeGenerationReason,
+        ),
+        reasons: reasons.slice(0, 4),
+        cta: {
+          label: 'Review source resume in Results',
+          href: '/results',
+        },
+      };
+      return {
+        ok: false,
+        status: 'error',
+        generationStatus: 'error',
+        exportReady: false,
+        blocked: false,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? null,
+        sections: [],
+        compliance_flags: [],
+        compliance_blocked: false,
+        audit_id: null,
+        auditId: null,
+        baseline_version_hash: baselineVersion.hash,
+        quality: 'blocked',
+        exports: { docx: false, pdf: false } as DocumentGenerationExports,
+        preview: {
+          resume: null,
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        claimRiskSummary,
+        gapAnalysis: gapInsights,
+        gapGuidance,
+        display,
+        safeDisplay: display,
+        internal: {
+          complianceFlags: [],
+          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+          resumeGenerationDiagnostics: experienceDiagnostics,
+          normalizationDiagnostics: experienceDiagnostics,
+          normalizationValidationReasons: reasons,
         },
       };
     }
+    experienceDiagnostics = {
+      ...experienceDiagnostics,
+      resumeStructureAssembled: true,
+    };
 
     const normalizedBaselineSections =
       this.complianceService.normalizeSectionsForOutput(
@@ -659,13 +1179,17 @@ export class ResumeService {
       generatedSections: sections,
     });
 
-    const scopeFlags = this.complianceService.detectScopeInflation({
+    const scopeFlags = await this.complianceService.detectScopeInflation({
       baselineSections: sections,
       generatedSections: sections,
     });
 
     const normalizedSections =
       this.complianceService.normalizeSectionsForOutput(sections);
+    const generatedSectionsForCompliance =
+      this.buildResumeGeneratedSectionsForCompliance(
+        sections as ResumeExportSection[],
+      );
 
       const { complianceFlags, blocked, audit } =
         await validateComplianceWithFallback(this.complianceService, {
@@ -677,13 +1201,20 @@ export class ResumeService {
           scopeInflationDetected: false,
           extraFlags: [...writingFlags, ...scopeFlags],
           baselineSections: normalizedBaselineSections,
-          generatedSections: normalizedSections,
+          generatedSections: generatedSectionsForCompliance,
         });
 
     const complianceBlocked = blocked;
 
     if (complianceBlocked) {
+      experienceDiagnostics = {
+        ...experienceDiagnostics,
+        resumeGenerationStage: 'compliance_evaluation',
+        resumeGenerationReason: 'compliance_blocked',
+        complianceEvaluationPassed: false,
+      };
       const display = this.buildBlockedDisplayPayload(complianceFlags);
+      const shapedCompliance = shapeComplianceForUi(complianceFlags);
       const exports: DocumentGenerationExports = { docx: false, pdf: false };
       return {
         ok: false,
@@ -717,9 +1248,19 @@ export class ResumeService {
           auditId: audit.id,
           baselineVersionHash: audit.baselineVersionHash,
           complianceFlags,
+          complianceDiagnostics: shapedCompliance.diagnostics,
+          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+          resumeGenerationDiagnostics: experienceDiagnostics,
         },
       };
     }
+    experienceDiagnostics = {
+      ...experienceDiagnostics,
+      complianceEvaluationPassed: true,
+      resumeGenerationStage: experienceDiagnostics.resumeGenerationStage ?? 'success',
+      resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+    };
 
     const trackerEntry =
       await this.applicationsService.upsertPreparedFromResumeGeneration({
@@ -784,6 +1325,10 @@ export class ResumeService {
         auditId: audit.id,
         baselineVersionHash: audit.baselineVersionHash,
         complianceFlags,
+        resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+        resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+        resumeGenerationDiagnostics: experienceDiagnostics,
+        normalizationDiagnostics: experienceDiagnostics,
       },
     };
   }
@@ -1029,3 +1574,4 @@ export class ResumeService {
     };
   }
 }
+

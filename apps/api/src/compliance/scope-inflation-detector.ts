@@ -5,14 +5,11 @@ import {
   ComplianceFlagSeverity,
   DocumentType,
   JobApplicationContext,
+  GeneratedTextSourceType,
+  ComplianceTextSection,
 } from './compliance.types';
-
-type ScopeCategory = 'seniority' | 'ownership' | 'scale';
-
-type Fingerprint = {
-  cues: Record<ScopeCategory, Set<string>>;
-  evidence: Record<ScopeCategory, Map<string, string>>;
-};
+import { extractClaimUnitsFromSections } from './claim-units';
+import { findBestSemanticEvidenceMatch } from './semantic-evidence';
 
 type SectionShape = {
   content?: string | null;
@@ -20,66 +17,39 @@ type SectionShape = {
   sectionType?: string;
 };
 
-const SCOPE_CUES: Record<ScopeCategory, string[]> = {
-  seniority: [
-    'director',
-    'executive director',
-    'senior director',
-    'vp',
-    'vice president',
-    'svp',
-    'evp',
-    'chief',
-    'cto',
-    'ceo',
-    'cpo',
-    'head of',
-    'principal',
-    'executive',
-    'global head',
-    'senior vice president',
-  ],
-  ownership: [
-    'owned',
-    'led',
-    'architected',
-    'built',
-    'drove',
-    'managed',
-    'spearheaded',
-    'transformed',
-    'accountable for',
-    'responsible for',
-    'oversaw',
-    'directed',
-    'created',
-    'launched',
-    'delivered',
-    'implemented',
-  ],
-  scale: [
-    'global',
-    'worldwide',
-    'multi-region',
-    'multi region',
-    'multi-regional',
-    'company-wide',
-    'enterprise',
-    'enterprise-wide',
-    'nationwide',
-    'country-wide',
-    'thousands',
-    'millions',
-    'billions',
-  ],
+type ScopeEvidence = {
+  text: string;
+  normalized: string;
+  snippet: string;
+  hasExtremeScale: boolean;
 };
 
-const CATEGORY_SEVERITY: Record<ScopeCategory, ComplianceFlagSeverity> = {
-  seniority: ComplianceFlagSeverity.BLOCK,
-  scale: ComplianceFlagSeverity.BLOCK,
-  ownership: ComplianceFlagSeverity.WARN,
+type ScopeClaim = {
+  text: string;
+  normalized: string;
+  snippet: string;
+  hasExtremeScale: boolean;
 };
 
+type ScopeViolation = {
+  generated: string;
+  baseline: string;
+  similarity: number;
+  reason: 'no_semantic_support' | 'extreme_scale_without_baseline_match';
+};
+
+type ScopeSignalClass =
+  | 'leadership'
+  | 'responsibility'
+  | 'scale'
+  | 'quantitative';
+
+type DetectorOptions = {
+  embeddingProvider?: (text: string) => Promise<number[] | null>;
+  similarityThreshold?: number;
+};
+
+const DEFAULT_SIMILARITY_THRESHOLD = 0.75;
 const APPLICATION_SCOPE_WINDOW = 400;
 const APPLICATION_SCOPE_PHRASE_DISTANCE = 120;
 const APPLICATION_SCOPE_PATTERNS = [
@@ -88,139 +58,112 @@ const APPLICATION_SCOPE_PATTERNS = [
   /\bthis role aligns with my\b/,
 ];
 
+const SCOPE_VERBS = [
+  'led',
+  'owned',
+  'managed',
+  'directed',
+  'oversaw',
+  'built',
+  'ran',
+  'headed',
+];
+
+const ORGANIZATIONAL_SIGNALS = [
+  'team',
+  'staff',
+  'department',
+  'organization',
+  'global',
+  'program',
+  'initiative',
+  'engineers',
+  'devices',
+  'labs',
+];
+
+const EXTREME_SCALE_PATTERNS: RegExp[] = [
+  /\bglobal\b.*\borganization\b/i,
+  /\bcompany-wide\b/i,
+  /\benterprise-wide\b/i,
+  /\bthousands of employees\b/i,
+  /\bthousands\b/i,
+  /\b\d+\s*(?:thousand|k)\b/i,
+];
+
+const SCALE_COUNT_PATTERN = /\b\d+\s*(?:engineers?|staff|devices?|labs?)\b/i;
+const LEADERSHIP_VERB_PATTERN =
+  /\b(?:led|managed|directed|oversaw|headed|owned|built|ran|executed|implemented|delivered)\b/i;
+const RESPONSIBILITY_VERB_PATTERN =
+  /\b(?:responsible for|accountable for|drove|supported|coordinated|operated|maintained|administered)\b/i;
+const SCALE_INDICATOR_PATTERN =
+  /\b(?:team|staff|department|organization|group|program|initiative|vendors?|devices?|systems?|labs?|infrastructure|environment|platform)\b/i;
+const QUANTITATIVE_INDICATOR_PATTERN =
+  /\b(?:\d[\d,]*(?:\.\d+)?%|\d[\d,]*(?:\.\d+)?\s*(?:k|m|b|thousand|million|billion|devices?|systems?|engineers?|staff|labs?|vendors?)|budget|budgets|headcount|team size|count)\b/i;
+
 export class ScopeInflationDetector {
-  private normalize(text: string) {
-    return text.toLowerCase().replace(/\s+/g, ' ').trim();
+  private normalize(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/\r\n?/g, '\n')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
-  private extractSnippet(text: string, cue: string) {
-    const lower = text.toLowerCase();
-    const index = lower.indexOf(cue);
-    if (index === -1) {
-      return text.slice(0, 200).trim();
-    }
-
-    const start = Math.max(0, index - 60);
-    const end = Math.min(text.length, index + cue.length + 60);
-    return text.slice(start, end).trim();
+  private extractSnippet(text: string): string {
+    const trimmed = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (!trimmed) return '';
+    return trimmed.length <= 220 ? trimmed : `${trimmed.slice(0, 217).trim()}...`;
   }
 
-  private buildFingerprint(sections: SectionShape[]): Fingerprint {
-    const fingerprint: Fingerprint = {
-      cues: {
-        seniority: new Set<string>(),
-        ownership: new Set<string>(),
-        scale: new Set<string>(),
-      },
-      evidence: {
-        seniority: new Map<string, string>(),
-        ownership: new Map<string, string>(),
-        scale: new Map<string, string>(),
-      },
-    };
-
-    const relevantSections = sections.filter((section) => {
-      const type = section.sectionType as BaselineSectionType | undefined;
-      if (!type) return true;
-      return [
-        BaselineSectionType.EXPERIENCE,
-        BaselineSectionType.PROJECT,
-        BaselineSectionType.SUMMARY,
-        BaselineSectionType.SKILLS,
-      ].includes(type);
-    });
-
-    for (const section of relevantSections) {
-      const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
-      if (!text) continue;
-
-      const normalized = this.normalize(text);
-      for (const [category, cues] of Object.entries(SCOPE_CUES) as [
-        ScopeCategory,
-        string[],
-      ][]) {
-        for (const cue of cues) {
-          if (normalized.includes(cue)) {
-            fingerprint.cues[category].add(cue);
-            if (!fingerprint.evidence[category].has(cue)) {
-              fingerprint.evidence[category].set(
-                cue,
-                this.extractSnippet(text, cue),
-              );
-            }
-          }
-        }
-      }
-    }
-
-    return fingerprint;
+  private hasScopeVerb(normalized: string): boolean {
+    return SCOPE_VERBS.some((verb) => new RegExp(`\\b${verb}\\b`, 'i').test(normalized));
   }
 
-  private gatherCues(
-    section: {
-      content?: string | null;
-      title?: string | null;
-    },
-    jobContext?: JobApplicationContext,
-  ): Array<{ category: ScopeCategory; cue: string; snippet: string }> {
-    const text = `${section.title ?? ''} ${section.content ?? ''}`.trim();
-    if (!text) return [];
-    const normalized = this.normalize(text);
+  private hasScaleSignal(normalized: string): boolean {
+    return (
+      ORGANIZATIONAL_SIGNALS.some((signal) =>
+        new RegExp(`\\b${signal}\\b`, 'i').test(normalized),
+      ) || SCALE_COUNT_PATTERN.test(normalized)
+    );
+  }
 
-    const matches: Array<{
-      category: ScopeCategory;
-      cue: string;
-      snippet: string;
-    }> = [];
+  private hasExtremeScaleSignal(normalized: string): boolean {
+    return EXTREME_SCALE_PATTERNS.some((pattern) => pattern.test(normalized));
+  }
 
-    for (const [category, cues] of Object.entries(SCOPE_CUES) as [
-      ScopeCategory,
-      string[],
-    ][]) {
-      for (const cue of cues) {
-        if (
-          normalized.includes(cue) &&
-          !this.isApplyingSentence(normalized, cue, jobContext)
-        ) {
-          matches.push({
-            category,
-            cue,
-            snippet: this.extractSnippet(text, cue),
-          });
-        }
-      }
+  private matchedSignalClasses(normalized: string): Set<ScopeSignalClass> {
+    const classes = new Set<ScopeSignalClass>();
+    if (LEADERSHIP_VERB_PATTERN.test(normalized)) {
+      classes.add('leadership');
     }
-
-    return matches;
+    if (RESPONSIBILITY_VERB_PATTERN.test(normalized)) {
+      classes.add('responsibility');
+    }
+    if (SCALE_INDICATOR_PATTERN.test(normalized)) {
+      classes.add('scale');
+    }
+    if (QUANTITATIVE_INDICATOR_PATTERN.test(normalized)) {
+      classes.add('quantitative');
+    }
+    return classes;
   }
 
   private shouldSkipCueDueToJobContext(
     normalized: string,
-    cue: string,
     jobContext?: JobApplicationContext,
   ): boolean {
     if (!jobContext?.allowedRoleTitles?.length) {
       return false;
     }
-    const lowerCue = cue.toLowerCase();
     const window = normalized.slice(0, APPLICATION_SCOPE_WINDOW);
-    const candidateIndex = window.indexOf(lowerCue);
-    if (candidateIndex === -1) {
-      return false;
-    }
 
     for (const pattern of APPLICATION_SCOPE_PATTERNS) {
       pattern.lastIndex = 0;
       const match = pattern.exec(window);
-      if (!match) {
-        continue;
-      }
-
+      if (!match) continue;
       const afterMatch = match.index + match[0].length;
-      if (
-        candidateIndex >= afterMatch &&
-        candidateIndex - afterMatch <= APPLICATION_SCOPE_PHRASE_DISTANCE
-      ) {
+      if (window.length - afterMatch <= APPLICATION_SCOPE_PHRASE_DISTANCE) {
         return true;
       }
     }
@@ -228,25 +171,86 @@ export class ScopeInflationDetector {
     return false;
   }
 
-  private isApplyingSentence(
-    normalized: string,
-    cue: string,
-    jobContext?: JobApplicationContext,
-  ): boolean {
-    const pattern = /\bi am (?:excited to )?apply(?:ing)? for\b/;
-    const match = pattern.exec(normalized);
-    if (match) {
-      const start = match.index + match[0].length;
-      const remainder = normalized.slice(start);
-      if (remainder.includes(cue.toLowerCase())) {
-        return true;
-      }
+  private gatherBaselineEvidence(sections: SectionShape[]): ScopeEvidence[] {
+    const relevantSections = sections.filter((section) => {
+      const type = section.sectionType as BaselineSectionType | undefined;
+      if (!type) return true;
+      return [
+        BaselineSectionType.EXPERIENCE,
+        BaselineSectionType.PROJECT,
+        BaselineSectionType.SUMMARY,
+      ].includes(type);
+    });
+
+    const evidence: ScopeEvidence[] = [];
+    const complianceSections: ComplianceTextSection[] = relevantSections.map(
+      (section) => ({
+        title: section.title,
+        content: section.content,
+        sectionType: section.sectionType,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      }),
+    );
+    const baselineUnits = extractClaimUnitsFromSections(complianceSections, {
+      baselineOnly: true,
+      enforceIntegrityForBaseline: true,
+    });
+
+    for (const unit of baselineUnits) {
+      const statement = unit.text;
+        const normalized = this.normalize(statement);
+        if (!normalized) continue;
+        const signalClasses = this.matchedSignalClasses(normalized);
+        if (signalClasses.size < 2) {
+          continue;
+        }
+        evidence.push({
+          text: statement,
+          normalized,
+          snippet: this.extractSnippet(statement),
+          hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+        });
     }
 
-    return this.shouldSkipCueDueToJobContext(normalized, cue, jobContext);
+    return evidence;
   }
 
-  detect(
+  private gatherGeneratedScopeClaims(
+    sections: Array<{ title?: string | null; content?: string | null }>,
+    jobContext?: JobApplicationContext,
+  ): ScopeClaim[] {
+    const claims: ScopeClaim[] = [];
+    const complianceSections: ComplianceTextSection[] = (sections ?? []).map(
+      (section) => ({
+        title: section.title,
+        content: section.content,
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      }),
+    );
+    const claimUnits = extractClaimUnitsFromSections(complianceSections, {
+      baselineOnly: true,
+      enforceIntegrityForBaseline: true,
+    });
+
+    for (const unit of claimUnits) {
+      const statement = unit.text;
+        const normalized = this.normalize(statement);
+        if (!normalized) continue;
+        if (this.shouldSkipCueDueToJobContext(normalized, jobContext)) continue;
+        if (!(this.hasScopeVerb(normalized) && this.hasScaleSignal(normalized))) {
+          continue;
+        }
+        claims.push({
+          text: statement,
+          normalized,
+          snippet: this.extractSnippet(statement),
+          hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+        });
+    }
+    return claims;
+  }
+
+  async detect(
     baselineSections: SectionShape[],
     generatedSections: Array<{
       title?: string | null;
@@ -254,59 +258,104 @@ export class ScopeInflationDetector {
     }>,
     jobContext?: JobApplicationContext,
     documentType?: DocumentType,
-  ): ComplianceFlag[] {
-    const baselineFingerprint = this.buildFingerprint(baselineSections ?? []);
+    options?: DetectorOptions,
+  ): Promise<ComplianceFlag[]> {
     void documentType;
-    const violations: Array<{
-      category: ScopeCategory;
-      cue: string;
-      generated: string;
-      baseline: string;
-    }> = [];
+    const similarityThreshold =
+      options?.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
+    const baselineEvidence = this.gatherBaselineEvidence(baselineSections ?? []);
+    const baselineHasExtremeScale = baselineEvidence.some(
+      (evidence) => evidence.hasExtremeScale,
+    );
 
-    for (const section of generatedSections ?? []) {
-      const cues = this.gatherCues(section, jobContext);
-      for (const cue of cues) {
-        if (!baselineFingerprint.cues[cue.category].has(cue.cue)) {
-          const baselineEvidence =
-            baselineFingerprint.evidence[cue.category].get(cue.cue) ??
-            'Baseline has no matching scope evidence.';
-          violations.push({
-            category: cue.category,
-            cue: cue.cue,
-            generated: cue.snippet,
-            baseline: baselineEvidence,
-          });
-        }
-      }
+    const claims = this.gatherGeneratedScopeClaims(
+      generatedSections ?? [],
+      jobContext,
+    );
+    if (process.env.COMPLIANCE_TRACE === 'true') {
+      console.debug(
+        '[scope-inflation-trace]',
+        JSON.stringify({
+          baselineScopeCandidateCount: baselineEvidence.length,
+        }),
+      );
+    }
+    if (!claims.length) {
+      return [];
     }
 
-    if (!violations.length) return [];
+    const violations: ScopeViolation[] = [];
+    for (const claim of claims) {
+      const similarityMatch = await findBestSemanticEvidenceMatch(
+        claim.text,
+        baselineEvidence.map((evidence) => evidence.text),
+        {
+          embeddingProvider: options?.embeddingProvider,
+          topK: 3,
+        },
+      );
+      const similaritySupported =
+        similarityMatch.bestSimilarity >= similarityThreshold;
+      if (process.env.COMPLIANCE_TRACE === 'true') {
+        console.debug(
+          '[scope-inflation-trace]',
+          JSON.stringify({
+            claim: claim.snippet,
+            claimType: 'scope_leadership',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            integrityResult: 'pass',
+            evidenceCandidateCount: baselineEvidence.length,
+            bestSimilarity: Number(similarityMatch.bestSimilarity.toFixed(3)),
+            bestBaselineMatch: similarityMatch.bestEvidenceText,
+            topSimilarityScores: similarityMatch.topMatches.map((match) => ({
+              similarity: Number(match.similarity.toFixed(3)),
+              baseline: match.text,
+            })),
+          }),
+        );
+      }
+      if (similaritySupported) {
+        continue;
+      }
+
+      const extremeUnsupported = claim.hasExtremeScale && !baselineHasExtremeScale;
+      violations.push({
+        generated: claim.snippet,
+        baseline: similarityMatch.bestEvidenceText,
+        similarity: similarityMatch.bestSimilarity,
+        reason: extremeUnsupported
+          ? 'extreme_scale_without_baseline_match'
+          : 'no_semantic_support',
+      });
+    }
+
+    if (!violations.length) {
+      return [];
+    }
 
     const hasBlocking = violations.some(
       (violation) =>
-        CATEGORY_SEVERITY[violation.category] === ComplianceFlagSeverity.BLOCK,
+        violation.reason === 'extreme_scale_without_baseline_match',
     );
-
-    const severity = hasBlocking
-      ? ComplianceFlagSeverity.BLOCK
-      : ComplianceFlagSeverity.WARN;
-    const confidence = hasBlocking ? 0.92 : 0.45;
 
     const evidence = violations.map((violation) => ({
       baseline: violation.baseline,
       generated: violation.generated,
+      similarity: Number(violation.similarity.toFixed(3)),
+      reason: violation.reason,
     }));
 
     return [
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
-        severity,
+        severity: hasBlocking
+          ? ComplianceFlagSeverity.BLOCK
+          : ComplianceFlagSeverity.WARN,
         message: hasBlocking
           ? 'Potential scope inflation exceeds baseline scope.'
           : 'Potential scope inflation cues need review against baseline.',
         evidence,
-        confidence,
+        confidence: hasBlocking ? 0.9 : 0.58,
       },
     ];
   }

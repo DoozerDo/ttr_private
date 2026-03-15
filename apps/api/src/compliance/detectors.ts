@@ -4,22 +4,45 @@ import {
   ComplianceFlagSeverity,
   ComplianceTextSection,
   DocumentType,
+  GeneratedTextSourceType,
   JobApplicationContext,
 } from './compliance.types';
 import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
+import { extractClaimUnitsFromSections } from './claim-units';
 
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
   generatedSections?: ComplianceTextSection[] | null;
-  job?: { title?: string | null; company?: string | null } | null;
+  job?: {
+    title?: string | null;
+    company?: string | null;
+    normalizedRequirements?: string[] | null;
+    normalizedResponsibilities?: string[] | null;
+  } | null;
   baselineAllowlist?: BaselineAllowlistSnapshot | null;
   jobContext?: JobApplicationContext | null;
   documentType?: DocumentType;
 };
 
+type DetectorTraceRecord = {
+  detector: string;
+  text: string;
+  normalized: string;
+  sourceType: string;
+  evaluated: boolean;
+  skipReason: string | null;
+  assertionPattern?: string | null;
+};
+
+function emitDetectorTrace(record: DetectorTraceRecord): void {
+  if (process.env.COMPLIANCE_TRACE !== 'true') return;
+  // Debug-safe server-side trace for compliance tuning. Not exposed to UI payloads.
+  console.debug(`[compliance-trace] ${JSON.stringify(record)}`);
+}
+
 const COMPANY_CONTEXT_PATTERN =
-  /\b(?:at|with|for|from|employer|organization|company|partnered with)\s+([A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+)+)/gi;
+  /\b(?:at|with|for|from|employer|organization|company|partnered with)\s+([A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+)+)/g;
 const COMPANY_SUFFIX_PATTERN =
   /\b([A-Z][\w&.'-]+(?:\s+[A-Z][\w&.'-]+)*\s+(?:Inc|Corp|LLC|LTD|Group|Labs|Technologies|Systems|Solutions|Studios|Partners|Agency|Works|Collective|Consulting|Ventures))\b/g;
 const COMPANY_UPPERCASE_PATTERN = /\b(?:at|with|for|from)\s+([A-Z]{2,})\b/g;
@@ -64,11 +87,35 @@ const BASELINE_ROLE_SECTION_TYPES = new Set<string>([
 const EXPERIENCE_HEADER_DELIMITERS = /[-@|/]+/;
 
 const ROLE_CONTEXT_PATTERN =
-  /\b(?:as|served as|acting as|in the role of|wearing the)\s+([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4})/gi;
-const ROLE_TRAILING_PATTERN =
-  /([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4})\s+(?:role|title|position)\b/gi;
-const ROLE_GENERAL_PATTERN =
-  /\b[A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,4}\b/gi;
+  /\b(?:served as|worked as|was|acting as|appointed|promoted to|my role was|in the role of)\s+(?:an?\s+|the\s+)?([A-Za-z][\w&'.-]*(?:\s+(?:of\s+)?[A-Za-z][\w&'.-]*){0,5})/gi;
+const ROLE_ASSERTION_PREFIX_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: 'served as', pattern: /\b(?:i\s+)?served as\s+(?:an?\s+|the\s+)?/i },
+  { label: 'worked as', pattern: /\b(?:i\s+)?worked as\s+(?:an?\s+|the\s+)?/i },
+  { label: 'was a', pattern: /\b(?:i\s+)?was\s+(?:an?\s+|the\s+)?/i },
+  { label: 'my role was', pattern: /\bmy role was\s+(?:an?\s+|the\s+)?/i },
+  { label: 'acting as', pattern: /\b(?:i\s+)?acting as\s+(?:an?\s+|the\s+)?/i },
+  { label: 'appointed', pattern: /\b(?:i\s+was\s+)?appointed\s+(?:as\s+)?(?:an?\s+|the\s+)?/i },
+  { label: 'promoted to', pattern: /\b(?:i\s+was\s+)?promoted to\s+(?:an?\s+|the\s+)?/i },
+  { label: 'as a', pattern: /\b(?:i|my)\b[\s\S]{0,80}?\bas\s+(?:an?\s+|the\s+)?/i },
+];
+const ROLE_EXPLICIT_ASSERTION_PATTERN =
+  /\b(?:served as|worked as|was|acting as|appointed|promoted to|my role was|in the role of)\b/i;
+const ROLE_NON_ASSERTION_PATTERNS = [
+  /\brecommended for this role\b/i,
+  /\bthis focus emphasizes\b/i,
+  /\btechnical depth highlights\b/i,
+  /\bin partnership with\b/i,
+  /\bresponsible for\b/i,
+  /\bfor this role\b/i,
+  /\brole aligned with\b/i,
+];
+const ROLE_DANGLING_SUFFIX_PATTERN =
+  /\b(?:on|in|for|with|at|of|to|and)\s+the\s*$/i;
+const ROLE_DANGLING_TOKEN_PATTERN = /\b(?:on|in|for|with|at|of|to|and|a|an|the)\s*$/i;
+const ROLE_LOWERCASE_NARRATIVE_PATTERN =
+  /^(?:leadership|support|customer|technical|operations|incident|strategy|programs|tooling)\b/i;
+const ROLE_CONNECTIVE_PREFIX_PATTERN =
+  /^(?:and|or|but|on the|in the|for the|with the|within the|to the)\b/i;
 
 const COMPANY_ALLOWLIST = new Set([
   'team',
@@ -162,6 +209,14 @@ const NON_COMPANY_PATTERNS = [
   /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\s*(?:-|to)\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*(?:k|m)?\b/i,
   /\b(?:gift\s*cards?|real\s*world\s*merchandise|electronics?)\b/i,
 ];
+const COMPANY_FRAGMENT_CONNECTOR_PATTERN =
+  /\b(?:and|or|both|either|neither|as\s+well\s+as|well\s+as|client|server|resources)\b/i;
+const COMPANY_OPERATIONAL_VERB_PATTERN =
+  /\b(?:test|identify|manage|analyze|build|monitor|ensure)\b/i;
+const COMPANY_LOWER_DETERMINER_PATTERN =
+  /^(?:a|an|the|this|that|these|those|all|any|each|every)\b/i;
+const COMPANY_TRAILING_PREPOSITION_PATTERN =
+  /\b(?:of|for|to|with|at|in|on|from|by|about|over|under|into|across)\s*$/i;
 const ROLE_ALLOWLIST = new Set([
   'hiring manager',
   'recruiter',
@@ -175,6 +230,16 @@ const ROLE_ALLOWLIST = new Set([
   'the role',
   'the position',
   'the position',
+  'point person',
+  'key contributor',
+  'team member',
+  'individual contributor',
+]);
+const ROLE_IDIOM_IGNORE = new Set([
+  'point person',
+  'key contributor',
+  'team member',
+  'individual contributor',
 ]);
 
 const ROLE_KEYWORDS = [
@@ -183,6 +248,7 @@ const ROLE_KEYWORDS = [
   'developer',
   'architect',
   'director',
+  'president',
   'designer',
   'specialist',
   'consultant',
@@ -226,50 +292,6 @@ const APPLICATION_PHRASE_PATTERNS = [
 ];
 const APPLICATION_SUBSTRING_PREFIX =
   /^(?:for\s+(?:the|a)?|about|as\s+(?:a|the)?)\s+/;
-
-// Header delimiters used for detecting "header-like" fragments when scanning text.
-const HEADER_DELIMITERS = new Set<string>([':', '-', '–', '—', '|', '/', '@']);
-
-function hasSentenceTerminatorBeforeIndex(
-  text: string,
-  index: number,
-): boolean {
-  let cursor = index - 1;
-  while (cursor >= 0) {
-    const char = text[cursor];
-    if (char === '\n' || char === '\r' || char === ' ' || char === '\t') {
-      cursor -= 1;
-      continue;
-    }
-    return /[.!?]/.test(char);
-  }
-  return false;
-}
-
-function isLikelyHeaderStart(text: string, index: number): boolean {
-  if (index <= 0) return true;
-  let cursor = index - 1;
-
-  while (cursor >= 0) {
-    const char = text[cursor];
-
-    if (char === '\n' || char === '\r') {
-      if (hasSentenceTerminatorBeforeIndex(text, cursor)) {
-        return false;
-      }
-      return true;
-    }
-
-    if (char === ' ' || char === '\t') {
-      cursor -= 1;
-      continue;
-    }
-
-    return HEADER_DELIMITERS.has(char);
-  }
-
-  return true;
-}
 
 function matchesBaselineAllowlistSuffix(
   normalized: string,
@@ -455,6 +477,113 @@ export function collectCandidates(
   }
 
   return candidates;
+}
+
+type SourcedCandidate = {
+  normalized: string;
+  original: string;
+  sourceType?: GeneratedTextSourceType | null;
+  sourceText?: string;
+};
+
+type SourcedTextSpan = {
+  text: string;
+  sourceType?: GeneratedTextSourceType | null;
+};
+
+function isBaselineEvidenceSourceType(
+  sourceType: GeneratedTextSourceType | null | undefined,
+): boolean {
+  return sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE;
+}
+
+function collectSourcedTextSpans(
+  sections: ComplianceTextSection[] | null | undefined,
+): SourcedTextSpan[] {
+  return extractClaimUnitsFromSections(sections, {
+    baselineOnly: false,
+    enforceIntegrityForBaseline: true,
+  }).map((unit) => ({
+    text: unit.text,
+    sourceType: unit.sourceType,
+  }));
+}
+
+const FRAGMENT_LEADING_CONTINUATION_PATTERN =
+  /^(?:and|or|but|as\s+well\s+as|well\s+as|to|for|with|in|on|of|the)\b/i;
+const FRAGMENT_TRAILING_PATTERN =
+  /\b(?:and|or|but|to|for|with|in|on|of|as)\s*$/i;
+const FRAGMENT_OPERATIONAL_VERB_PATTERN =
+  /\b(?:test|identify|manage|analyze|build|monitor|ensure|configure|maintain)\b/i;
+
+function isLikelyFragmentSpan(
+  text: string,
+  options?: {
+    minTokens?: number;
+    requireTerminalPunctuation?: boolean;
+    requireCapitalizedStart?: boolean;
+    requireEntityLikeCapitalization?: boolean;
+  },
+): boolean {
+  const normalized = normalizeCandidate(text);
+  if (!normalized) return true;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const minTokens = options?.minTokens ?? 3;
+  if (tokens.length < minTokens) return true;
+  if (FRAGMENT_LEADING_CONTINUATION_PATTERN.test(normalized)) return true;
+  if (FRAGMENT_TRAILING_PATTERN.test(normalized)) return true;
+  if (options?.requireTerminalPunctuation && !/[.!?]$/.test(normalized))
+    return true;
+  if (
+    options?.requireCapitalizedStart &&
+    !/^(?:I|We|He|She|They|The|This|That|[A-Z])/.test(normalized)
+  ) {
+    return true;
+  }
+  if (/^[a-z]/.test(normalized)) return true;
+  if (
+    options?.requireEntityLikeCapitalization &&
+    !/[A-Z][A-Za-z0-9&'.-]+(?:\s+[A-Z][A-Za-z0-9&'.-]+)+/.test(normalized)
+  ) {
+    return true;
+  }
+  if (
+    FRAGMENT_OPERATIONAL_VERB_PATTERN.test(normalized) &&
+    !/[.!?]$/.test(normalized)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function collectCandidatesWithSource(
+  sections: ComplianceTextSection[] | null | undefined,
+  extractor: (text: string) => string[],
+  normalizer: (value: string) => string = normalizeTokenForComparison,
+): SourcedCandidate[] {
+  const sourced: SourcedCandidate[] = [];
+
+  for (const span of collectSourcedTextSpans(sections)) {
+    for (const candidate of extractor(span.text)) {
+      const normalized = normalizer(candidate);
+      if (!normalized) continue;
+      sourced.push({
+        normalized,
+        original: normalizeCandidate(candidate),
+        sourceType: span.sourceType,
+        sourceText: span.text,
+      });
+    }
+  }
+
+  const deduped = new Map<string, SourcedCandidate>();
+  for (const candidate of sourced) {
+    const key = `${candidate.normalized}::${candidate.sourceType ?? 'UNKNOWN'}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, candidate);
+    }
+  }
+  return [...deduped.values()];
 }
 
 function looksLikeCompanyName(value: string): boolean {
@@ -783,6 +912,8 @@ type MetricCandidate = {
   normalized: string;
   original: string;
   context: string;
+  sourceType?: GeneratedTextSourceType | null;
+  sourceText?: string;
 };
 
 function normalizeMetricToken(value: string): string {
@@ -839,8 +970,8 @@ export function collectMetricCandidatesFromSections(
 ): MetricCandidate[] {
   const candidates: MetricCandidate[] = [];
 
-  for (const section of sections ?? []) {
-    const text = [section.title, section.content].filter(Boolean).join(' ');
+  for (const span of collectSourcedTextSpans(sections)) {
+    const text = span.text;
     if (!text) continue;
 
     METRIC_VALUE_PATTERN.lastIndex = 0;
@@ -862,6 +993,8 @@ export function collectMetricCandidatesFromSections(
         normalized,
         original: normalizeCandidate(original),
         context,
+        sourceType: span.sourceType,
+        sourceText: text,
       });
     }
 
@@ -904,6 +1037,8 @@ export function collectMetricCandidatesFromSections(
             : spelledMatch[0],
         ),
         context,
+        sourceType: span.sourceType,
+        sourceText: text,
       });
     }
   }
@@ -950,6 +1085,7 @@ export function detectInventedMetric(
   const flags: ComplianceFlag[] = [];
 
   for (const candidate of generatedCandidates) {
+    if (!isBaselineEvidenceSourceType(candidate.sourceType)) continue;
     if (baselineSet.has(candidate.normalized)) continue;
     if (flagged.has(candidate.normalized)) continue;
     if (!hasMetricContext(candidate.context)) continue;
@@ -962,6 +1098,12 @@ export function detectInventedMetric(
       message: `Detected invented metric "${candidate.original}". Only mention measurable outcomes you can trace back to your verified baseline or scoped job context.`,
       confidence: 0.96,
     });
+    console.warn(
+      'inventedMetric detector blocked span',
+      `text="${candidate.sourceText ?? candidate.original}" sourceType=${String(
+        candidate.sourceType ?? 'UNSPECIFIED',
+      )} detector=inventedMetric`,
+    );
   }
 
   return flags;
@@ -971,10 +1113,40 @@ export function extractCompanyCandidatesFromText(text: string): string[] {
   const matches = new Set<string>();
   let match: RegExpExecArray | null;
 
+  const sanitizeCompanyCandidate = (raw: string): string => {
+    const normalized = normalizeCandidate(raw);
+    if (!normalized) return '';
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (tokens.length <= 2) return normalized;
+
+    const kept: string[] = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i];
+      const isTitleLike = /^[A-Z][A-Za-z0-9&'.-]*$/.test(token);
+      const lower = token.toLowerCase();
+      const next = tokens[i + 1];
+      const nextIsTitleLike = next ? /^[A-Z][A-Za-z0-9&'.-]*$/.test(next) : false;
+      const allowedConnector =
+        (lower === 'of' || lower === 'and' || lower === '&') && nextIsTitleLike;
+
+      if (!isTitleLike && !allowedConnector) {
+        break;
+      }
+
+      kept.push(token);
+    }
+
+    return kept.length >= 2 ? kept.join(' ') : normalized;
+  };
+
   const capture = (pattern: RegExp) => {
     pattern.lastIndex = 0;
     while ((match = pattern.exec(text))) {
-      matches.add(match[1]);
+      const extracted = normalizeCandidate(match[1]);
+      if (!extracted) continue;
+      const sanitized = sanitizeCompanyCandidate(extracted);
+      if (!sanitized) continue;
+      matches.add(sanitized);
     }
   };
 
@@ -988,6 +1160,10 @@ export function extractCompanyCandidatesFromText(text: string): string[] {
 export function extractRoleCandidatesFromText(text: string): string[] {
   const matches = new Set<string>();
   let match: RegExpExecArray | null;
+  const normalizedStatement = normalizeCandidate(text);
+  const statementLooksLikeStandaloneRole = isStandaloneRoleTitleAssertion(
+    normalizedStatement,
+  );
 
   const capture = (pattern: RegExp) => {
     pattern.lastIndex = 0;
@@ -997,18 +1173,8 @@ export function extractRoleCandidatesFromText(text: string): string[] {
   };
 
   capture(ROLE_CONTEXT_PATTERN);
-  capture(ROLE_TRAILING_PATTERN);
-
-  ROLE_GENERAL_PATTERN.lastIndex = 0;
-  while ((match = ROLE_GENERAL_PATTERN.exec(text))) {
-    const candidate = match[0];
-    const startIndex = typeof match.index === 'number' ? match.index : 0;
-    if (!isLikelyHeaderStart(text, startIndex)) {
-      continue;
-    }
-    if (containsRoleKeyword(candidate)) {
-      matches.add(candidate);
-    }
+  if (statementLooksLikeStandaloneRole) {
+    matches.add(normalizedStatement);
   }
 
   return [...matches];
@@ -1042,6 +1208,315 @@ function isNonCompanyReference(normalized: string, original: string): boolean {
 
   const value = `${normalized} ${original}`.trim();
   return NON_COMPANY_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function hasCompanyLikeCapitalization(original: string): boolean {
+  const tokens = normalizeCandidate(original).split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  const capitalized = tokens.filter((token) => /^[A-Z][A-Za-z0-9&'.-]*$/.test(token)).length;
+  return capitalized >= 2 && capitalized / tokens.length >= 0.6;
+}
+
+function appearsMidSentence(
+  normalizedText: string,
+  normalizedCandidate: string,
+): boolean {
+  if (!normalizedText || !normalizedCandidate) return false;
+  const idx = normalizedText.indexOf(normalizedCandidate);
+  if (idx <= 0) return false;
+  const prior = normalizedText[idx - 1];
+  return prior !== '.' && prior !== '!' && prior !== '?' && prior !== '\n';
+}
+
+function overlapsJobRequirementTokens(
+  normalizedCandidate: string,
+  jobRequirements: string[],
+): boolean {
+  if (!normalizedCandidate || !jobRequirements.length) return false;
+  const candidateTokens = new Set(
+    normalizedCandidate.split(/\s+/).filter((token) => token.length >= 3),
+  );
+  if (!candidateTokens.size) return false;
+
+  for (const req of jobRequirements) {
+    const normalizedReq = normalizeTokenForComparison(req);
+    if (!normalizedReq) continue;
+    const reqTokens = new Set(
+      normalizedReq.split(/\s+/).filter((token) => token.length >= 3),
+    );
+    let overlap = 0;
+    for (const token of candidateTokens) {
+      if (reqTokens.has(token)) overlap += 1;
+    }
+    if (overlap / candidateTokens.size >= 0.6) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isLikelyCompanyFragment(options: {
+  normalized: string;
+  original: string;
+  normalizedGeneratedText: string;
+  jobRequirementSignals: string[];
+  sourceText?: string;
+}): boolean {
+  const normalized = normalizeCandidate(options.normalized).toLowerCase();
+  const original = normalizeCandidate(options.original);
+  if (!normalized) return true;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const originalTokens = original.split(/\s+/).filter(Boolean);
+
+  if (tokens.length < 2 && originalTokens.length < 2) return true;
+  if (COMPANY_LOWER_DETERMINER_PATTERN.test(normalized)) return true;
+  if (COMPANY_OPERATIONAL_VERB_PATTERN.test(normalized)) return true;
+  if (COMPANY_FRAGMENT_CONNECTOR_PATTERN.test(normalized)) return true;
+  if (COMPANY_TRAILING_PREPOSITION_PATTERN.test(normalized)) return true;
+  if (
+    options.sourceText &&
+    isLikelyFragmentSpan(options.sourceText, {
+      minTokens: 3,
+      requireCapitalizedStart: false,
+      requireTerminalPunctuation: false,
+      requireEntityLikeCapitalization: false,
+    })
+  ) {
+    return true;
+  }
+  const hasCompanyCaps = hasCompanyLikeCapitalization(original);
+  if (!hasCompanyCaps) return true;
+  if (
+    appearsMidSentence(options.normalizedGeneratedText, normalized) &&
+    (COMPANY_FRAGMENT_CONNECTOR_PATTERN.test(normalized) ||
+      COMPANY_OPERATIONAL_VERB_PATTERN.test(normalized))
+  ) {
+    return true;
+  }
+  if (overlapsJobRequirementTokens(normalized, options.jobRequirementSignals)) return true;
+
+  return false;
+}
+
+function isLikelyRoleFragment(options: {
+  normalized: string;
+  original: string;
+  sourceText?: string;
+}): boolean {
+  const normalized = normalizeCandidate(options.normalized);
+  const sourceText = normalizeCandidate(options.sourceText ?? '');
+  if (!normalized) return true;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const tokenCount = tokens.length;
+  if (tokenCount < 2 || tokenCount > 6) return true;
+  if (tokenCount < 3) return true;
+  if (ROLE_DANGLING_SUFFIX_PATTERN.test(normalized)) return true;
+  if (ROLE_DANGLING_TOKEN_PATTERN.test(normalized)) return true;
+  if (ROLE_CONNECTIVE_PREFIX_PATTERN.test(normalized)) return true;
+  if (ROLE_LOWERCASE_NARRATIVE_PATTERN.test(normalized)) return true;
+  if (/^(?:and|or|as\s+well\s+as|well\s+as)\b/i.test(normalized)) return true;
+  if (/\b(?:and|or|as|with|for|to)\s*$/i.test(normalized)) return true;
+  if (/\b(?:requirements?|responsibilities|qualifications?)\b/i.test(normalized))
+    return true;
+  if (
+    /^(?:collaborated|designed|built|implemented|supported|coordinated|managed|developed)\b/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(?:workflows?|methods?|process(?:es)?)\b/i.test(normalized)) return true;
+  if (/ing$/i.test(tokens[tokens.length - 1] ?? '')) return true;
+  if (ROLE_IDIOM_IGNORE.has(normalizeTokenForComparison(normalized))) return true;
+  if (COMPANY_OPERATIONAL_VERB_PATTERN.test(normalized)) return true;
+  if (!containsRoleKeyword(options.original) && !containsRoleKeyword(normalized)) {
+    return true;
+  }
+  if (!isValidRoleTitleShape(options.original)) return true;
+  if (sourceText && !resolveRoleAssertionPattern(sourceText, options.original)) {
+    return true;
+  }
+  return false;
+}
+
+function isStandaloneRoleTitleAssertion(statement: string): boolean {
+  const normalized = normalizeCandidate(statement);
+  if (!normalized) return false;
+  if (/[.!?]$/.test(normalized)) return false;
+  if (ROLE_NON_ASSERTION_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return false;
+  }
+  if (ROLE_CONNECTIVE_PREFIX_PATTERN.test(normalized)) return false;
+  if (ROLE_DANGLING_SUFFIX_PATTERN.test(normalized)) return false;
+  if (ROLE_DANGLING_TOKEN_PATTERN.test(normalized)) return false;
+  return isValidRoleTitleShape(normalized);
+}
+
+type RoleAssertionEvaluation = {
+  eligible: boolean;
+  reason:
+    | 'evaluated_complete_asserted_role'
+    | 'skipped_non_baseline_source'
+    | 'skipped_non_assertion'
+    | 'skipped_fragment'
+    | 'skipped_incomplete_candidate';
+  assertionPattern: string | null;
+};
+
+function shouldEvaluateInventedRoleAssertion(options: {
+  sourceType?: GeneratedTextSourceType | null;
+  sourceText?: string;
+  candidate: string;
+}): RoleAssertionEvaluation {
+  if (!isBaselineEvidenceSourceType(options.sourceType)) {
+    return {
+      eligible: false,
+      reason: 'skipped_non_baseline_source',
+      assertionPattern: null,
+    };
+  }
+
+  const sourceText = normalizeCandidate(options.sourceText ?? '');
+  const candidate = normalizeCandidate(options.candidate);
+  if (!sourceText || !candidate) {
+    return {
+      eligible: false,
+      reason: 'skipped_non_assertion',
+      assertionPattern: null,
+    };
+  }
+
+  if (ROLE_NON_ASSERTION_PATTERNS.some((pattern) => pattern.test(sourceText))) {
+    return {
+      eligible: false,
+      reason: 'skipped_non_assertion',
+      assertionPattern: null,
+    };
+  }
+
+  const assertionPattern = resolveRoleAssertionPattern(sourceText, candidate);
+  const standaloneAssertion = isStandaloneRoleTitleAssertion(sourceText);
+  if (
+    !assertionPattern &&
+    !standaloneAssertion &&
+    !ROLE_EXPLICIT_ASSERTION_PATTERN.test(sourceText)
+  ) {
+    return {
+      eligible: false,
+      reason: 'skipped_non_assertion',
+      assertionPattern: null,
+    };
+  }
+
+  if (
+    isLikelyRoleFragment({
+      normalized: candidate,
+      original: candidate,
+      sourceText,
+    })
+  ) {
+    return {
+      eligible: false,
+      reason: 'skipped_fragment',
+      assertionPattern: assertionPattern ?? (standaloneAssertion ? 'standalone_title' : null),
+    };
+  }
+
+  if (!isValidRoleTitleShape(candidate)) {
+    return {
+      eligible: false,
+      reason: 'skipped_incomplete_candidate',
+      assertionPattern: assertionPattern ?? (standaloneAssertion ? 'standalone_title' : null),
+    };
+  }
+
+  return {
+    eligible: true,
+    reason: 'evaluated_complete_asserted_role',
+    assertionPattern: assertionPattern ?? (standaloneAssertion ? 'standalone_title' : null),
+  };
+}
+
+function isValidRoleTitleShape(value: string): boolean {
+  const normalized = normalizeCandidate(value);
+  if (!normalized) return false;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 6) return false;
+
+  const connectors = new Set(['of', 'and', 'the', 'for', 'to', 'in', '&']);
+  const activityVerbs = new Set([
+    'collaborated',
+    'designed',
+    'built',
+    'implemented',
+    'supported',
+    'coordinated',
+    'managed',
+    'developed',
+  ]);
+  const adjectiveWords = new Set([
+    'complex',
+    'multiple',
+    'various',
+    'cross',
+    'functional',
+    'strategic',
+    'operational',
+  ]);
+
+  let nounOrTitleLike = 0;
+  let verbs = 0;
+  let adjectives = 0;
+
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (connectors.has(lower)) {
+      nounOrTitleLike += 1;
+      continue;
+    }
+    if (activityVerbs.has(lower) || /(ed|ing)$/.test(lower)) {
+      verbs += 1;
+    }
+    if (adjectiveWords.has(lower)) {
+      adjectives += 1;
+    }
+    if (
+      /^[A-Z][A-Za-z0-9&'.-]*$/.test(token) ||
+      ROLE_KEYWORDS.includes(lower)
+    ) {
+      nounOrTitleLike += 1;
+    }
+  }
+
+  if (verbs > Math.floor(tokens.length / 2)) return false;
+  if (adjectives > Math.floor(tokens.length / 2)) return false;
+  if (nounOrTitleLike / tokens.length < 0.5) return false;
+  return true;
+}
+
+function resolveRoleAssertionPattern(
+  sourceText: string,
+  candidate: string,
+): string | null {
+  const normalizedSource = normalizeTokenForComparison(sourceText);
+  const normalizedCandidate = normalizeTokenForComparison(candidate);
+  if (!normalizedSource || !normalizedCandidate) return null;
+
+  for (const assertion of ROLE_ASSERTION_PREFIX_PATTERNS) {
+    const prefixMatch = normalizedSource.match(assertion.pattern);
+    if (!prefixMatch || prefixMatch.index === undefined) continue;
+    const start = prefixMatch.index + prefixMatch[0].length;
+    const remainder = normalizedSource.slice(start).trim();
+    if (
+      remainder.startsWith(normalizedCandidate) ||
+      normalizedCandidate.startsWith(remainder.split(/\s+/).slice(0, 2).join(' '))
+    ) {
+      return assertion.label;
+    }
+  }
+
+  return null;
 }
 
 function buildRoleAllowlist(
@@ -1085,10 +1560,27 @@ function detectInventedEntity(options: {
   ) => boolean;
   generatedText?: string;
   documentType?: DocumentType;
+  sourceTypeGuard?: (
+    sourceType: GeneratedTextSourceType | null | undefined,
+  ) => boolean;
+  candidateSkip?: (candidate: {
+    normalized: string;
+    original: string;
+    sourceType?: GeneratedTextSourceType | null;
+    normalizedGeneratedText: string;
+    sourceText?: string;
+  }) => boolean;
+  assertionPatternResolver?: (candidate: {
+    normalized: string;
+    original: string;
+    sourceType?: GeneratedTextSourceType | null;
+    normalizedGeneratedText: string;
+    sourceText?: string;
+  }) => string | null;
 }): ComplianceFlag[] {
   const normalizer = options.normalizer ?? normalizeTokenForComparison;
 
-  const generated = collectCandidates(
+  const generated = collectCandidatesWithSource(
     options.generatedSections,
     options.candidateExtractor,
     normalizer,
@@ -1096,12 +1588,12 @@ function detectInventedEntity(options: {
   if (process.env.DEBUG_DETECTORS === 'true') {
     console.log(
       'generated candidates',
-      [...generated.keys()],
+      generated.map((candidate) => candidate.normalized),
       'from text',
       buildNormalizedGeneratedText(options.generatedSections),
     );
   }
-  if (!generated.size) return [];
+  if (!generated.length) return [];
 
   const normalizedGeneratedText = (
     options.generatedText ??
@@ -1167,16 +1659,63 @@ function detectInventedEntity(options: {
   }
 
   const flags: ComplianceFlag[] = [];
+  const detectorName = String(options.code);
 
-  for (const [normalized, original] of generated.entries()) {
-    if (allowedNormalized.has(normalized)) continue;
+  for (const candidate of generated) {
+    const { normalized, original, sourceType } = candidate;
+    const sourceGuard =
+      options.sourceTypeGuard ?? isBaselineEvidenceSourceType;
+    if (!sourceGuard(sourceType)) {
+      emitDetectorTrace({
+        detector: detectorName,
+        text: candidate.sourceText ?? original,
+        normalized,
+        sourceType: String(sourceType ?? 'UNSPECIFIED'),
+        evaluated: false,
+        skipReason: 'skipped_non_baseline_source',
+      });
+      continue;
+    }
+    if (
+      options.candidateSkip &&
+      options.candidateSkip({
+        normalized,
+        original,
+        sourceType,
+        normalizedGeneratedText,
+        sourceText: candidate.sourceText,
+      })
+    ) {
+      continue;
+    }
+    if (allowedNormalized.has(normalized)) {
+      emitDetectorTrace({
+        detector: detectorName,
+        text: candidate.sourceText ?? original,
+        normalized,
+        sourceType: String(sourceType ?? 'UNSPECIFIED'),
+        evaluated: false,
+        skipReason: 'skipped_allowlisted',
+      });
+      continue;
+    }
     if (
       baselineSuffixSet &&
       matchesBaselineAllowlistSuffix(normalized, baselineSuffixSet)
     ) {
       continue;
     }
-    if (options.allowlist(normalized, original)) continue;
+    if (options.allowlist(normalized, original)) {
+      emitDetectorTrace({
+        detector: detectorName,
+        text: candidate.sourceText ?? original,
+        normalized,
+        sourceType: String(sourceType ?? 'UNSPECIFIED'),
+        evaluated: false,
+        skipReason: 'skipped_allowlist_rule',
+      });
+      continue;
+    }
 
     if (
       options.documentType === DocumentType.COVER_LETTER &&
@@ -1239,6 +1778,30 @@ function detectInventedEntity(options: {
       message: options.message(original),
       confidence,
     });
+    const assertionPattern = options.assertionPatternResolver
+      ? options.assertionPatternResolver({
+          normalized,
+          original,
+          sourceType,
+          normalizedGeneratedText,
+          sourceText: candidate.sourceText,
+        })
+      : null;
+    emitDetectorTrace({
+      detector: detectorName,
+      text: candidate.sourceText ?? original,
+      normalized,
+      sourceType: String(sourceType ?? 'UNSPECIFIED'),
+      evaluated: true,
+      skipReason: null,
+      assertionPattern,
+    });
+    console.warn(
+      `${detectorName} detector blocked span`,
+      `text="${candidate.sourceText ?? original}" sourceType=${String(
+        sourceType ?? 'UNSPECIFIED',
+      )} detector=${detectorName} assertionPattern="${assertionPattern ?? 'none'}"`,
+    );
   }
 
   return flags;
@@ -1247,6 +1810,13 @@ function detectInventedEntity(options: {
 export function detectInventedCompany(
   payload: DetectorPayload,
 ): ComplianceFlag[] {
+  const jobRequirementSignals = [
+    ...(payload.job?.normalizedRequirements ?? []),
+    ...(payload.job?.normalizedResponsibilities ?? []),
+  ]
+    .map((value) => normalizeCandidate(value))
+    .filter(Boolean);
+
   return detectInventedEntity({
     baselineSections: payload.baselineSections,
     generatedSections: payload.generatedSections,
@@ -1268,6 +1838,16 @@ export function detectInventedCompany(
     baselineAllowlist: payload.baselineAllowlist?.allowedCompanies ?? [],
     confidence: 0.95,
     documentType: payload.documentType,
+    sourceTypeGuard: (sourceType) =>
+      sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE,
+    candidateSkip: ({ normalized, original, normalizedGeneratedText, sourceText }) =>
+      isLikelyCompanyFragment({
+        normalized,
+        original,
+        normalizedGeneratedText,
+        jobRequirementSignals,
+        sourceText,
+      }),
   });
 }
 
@@ -1298,6 +1878,31 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
     baselineSuffixAllowlist: true,
     confidence: 0.95,
     documentType: payload.documentType,
+    sourceTypeGuard: (sourceType) =>
+      sourceType === GeneratedTextSourceType.BASELINE_EVIDENCE,
+    candidateSkip: ({ original, sourceText, sourceType }) => {
+      const evaluation = shouldEvaluateInventedRoleAssertion({
+        candidate: original,
+        sourceText,
+        sourceType,
+      });
+      emitDetectorTrace({
+        detector: String(ComplianceFlagCode.INVENTED_ROLE),
+        text: sourceText ?? original,
+        normalized: normalizeTokenForComparison(original),
+        sourceType: String(sourceType ?? 'UNSPECIFIED'),
+        evaluated: evaluation.eligible,
+        skipReason: evaluation.eligible ? null : evaluation.reason,
+        assertionPattern: evaluation.assertionPattern,
+      });
+      return !evaluation.eligible;
+    },
+    assertionPatternResolver: ({ original, sourceText, sourceType }) =>
+      shouldEvaluateInventedRoleAssertion({
+        candidate: original,
+        sourceText,
+        sourceType,
+      }).assertionPattern,
   });
 }
 
@@ -1322,8 +1927,19 @@ export function collectTechnologyTokensFromSections(
 ): Map<string, string> {
   const tokens = new Map<string, string>();
 
-  for (const section of sections ?? []) {
-    const text = [section.title, section.content].filter(Boolean).join(' ');
+  for (const span of collectSourcedTextSpans(sections)) {
+    if (!isBaselineEvidenceSourceType(span.sourceType)) continue;
+    if (
+      isLikelyFragmentSpan(span.text, {
+        minTokens: 2,
+        requireCapitalizedStart: false,
+        requireTerminalPunctuation: false,
+        requireEntityLikeCapitalization: false,
+      })
+    ) {
+      continue;
+    }
+    const text = span.text;
     if (!text) continue;
 
     TECHNOLOGY_TOKEN_PATTERN.lastIndex = 0;
@@ -1378,6 +1994,10 @@ export function detectFictionalTechnology(
       message: `Technology "${original}" not found in baseline.`,
       confidence,
     });
+    console.warn(
+      'inventedTechnology detector blocked span',
+      `text="${original}" sourceType=${GeneratedTextSourceType.BASELINE_EVIDENCE} detector=inventedTechnology`,
+    );
   }
 
   return flags;

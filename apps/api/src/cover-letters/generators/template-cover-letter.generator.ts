@@ -7,6 +7,20 @@ import type {
 } from './cover-letter-generator.interface';
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
 import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
+import {
+  COVER_LETTER_BULLET_PATTERN,
+  COVER_LETTER_FORBIDDEN_PHRASES,
+  COVER_LETTER_PHRASE_REWRITES,
+  COVER_LETTER_REQUIRED_SALUTATION,
+  COVER_LETTER_RESUME_ARTIFACT_PATTERNS,
+  COVER_LETTER_SIGNOFF,
+  COVER_LETTER_WORD_LIMITS,
+} from './cover-letter-writing-contract';
+import {
+  extractEvidenceUnitsFromLogicalUnits,
+  reconstructLogicalTextUnits,
+  type ResumeEvidenceUnit,
+} from '../../resume/resume-draft-bullets';
 
 type NormalizedJob = CoverLetterJobContext & {
   title: string | null;
@@ -20,11 +34,16 @@ type NormalizedBlock = AllowedBaselineBlock & {
   title: string | null;
 };
 
-const PAGE_MARKER_PATTERN = /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|\d+\s*[\/|]\s*\d+|p\.?\s*\d+)$/i;
+type ScoredEvidence = {
+  evidence: ResumeEvidenceUnit;
+  score: number;
+  stableIndex: number;
+};
+
+const PAGE_MARKER_PATTERN =
+  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|\d+\s*[/|]\s*\d+|p\.?\s*\d+)$/i;
 
 export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
-  private readonly hardCap = 340;
-
   generate(input: CoverLetterGenerationInput): CoverLetterGenerationResult {
     const targetWords = this.resolveTargetWords(input.maxWords);
     const normalizedJob = this.applyComplianceConstraintsToJob(
@@ -32,67 +51,113 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       input.complianceConstraints,
     );
     const baselineBlocks = this.normalizeBlocks(input.allowedBaselineBlocks);
-    const verifiedEvidence = this.selectEvidenceSnippets(
+    const candidateName = this.cleanText(input.candidateName) || 'Candidate';
+
+    const allEvidence = this.collectEvidenceUnits(
       baselineBlocks,
-      normalizedJob,
       input.complianceConstraints,
     );
-
-    const opening = this.ensureSentence(
-      `I am applying for ${this.describeRole(normalizedJob)} and I can contribute immediately with verified operational experience.`,
+    const selectedEvidence = this.selectEvidenceUnits(
+      allEvidence,
+      normalizedJob,
+      input.safeMode === true,
     );
 
-    const priorities = this.selectPriorities(normalizedJob);
-    const bodyParagraphs = [
-      this.ensureSentence(
-        priorities.length
-          ? `Your team is prioritizing ${this.formatList(priorities)}. My background aligns with those priorities through documented execution and clear ownership.`
-          : 'Your team is prioritizing reliable execution, measurable service outcomes, and strong cross functional collaboration. My background aligns with those priorities through documented execution and clear ownership.',
-      ),
-      this.composeEvidenceParagraph(verifiedEvidence),
-    ].filter(Boolean);
+    const roleDescriptor = this.describeRole(normalizedJob);
+    const openingEvidence = selectedEvidence[0] ? [selectedEvidence[0]] : [];
+    const remainingEvidence = selectedEvidence.slice(openingEvidence.length);
 
-    const closingParagraph = this.ensureSentence(
-      normalizedJob.company
-        ? `I would welcome the chance to discuss how this experience can support ${normalizedJob.company}.`
-        : 'I would welcome the chance to discuss how this experience can support your team.',
+    const bodyOneEvidence = remainingEvidence.slice(0, 3);
+    const bodyTwoEvidence = remainingEvidence.slice(3, 6);
+    const bodyThreeEvidence = remainingEvidence.slice(6, 9);
+    const closingEvidence =
+      remainingEvidence[9] ?? bodyTwoEvidence[bodyTwoEvidence.length - 1] ?? selectedEvidence[0] ?? null;
+
+    const opening = this.joinSentences([
+      this.ensureSentence(`I am applying for ${roleDescriptor}`),
+      ...openingEvidence.map((entry) => this.ensureSentence(entry.normalizedText)),
+    ]);
+
+    const bodyParagraphs = [bodyOneEvidence, bodyTwoEvidence, bodyThreeEvidence]
+      .filter((group) => group.length > 0)
+      .map((group) => this.joinSentences(group.map((entry) => this.ensureSentence(entry.normalizedText))))
+      .slice(0, 3);
+
+    const closing = this.joinSentences(
+      [
+        this.ensureSentence(
+          normalizedJob.company
+            ? `I am interested in bringing this experience to ${normalizedJob.company} and would value a conversation about the role`
+            : 'I am interested in bringing this experience to your team and would value a conversation about the role',
+        ),
+        closingEvidence ? this.ensureSentence(closingEvidence.normalizedText) : '',
+      ].filter(Boolean),
     );
 
-    const signatureName = '';
-    const letterDocument: NormalizedCoverLetterDocument = {
+    const document: NormalizedCoverLetterDocument = {
       senderHeading: {
-        name: '',
+        name: candidateName,
       },
-      salutation: 'Dear Hiring Team,',
+      salutation: COVER_LETTER_REQUIRED_SALUTATION,
       opening,
       bodyParagraphs,
-      closingParagraph,
-      signoff: 'Sincerely,',
-      signatureName,
+      closingParagraph: closing,
+      signoff: COVER_LETTER_SIGNOFF,
+      signatureName: candidateName,
     };
 
-    let content = this.composeTextContent(letterDocument);
+    const paragraphEvidence: CoverLetterGenerationResult['paragraphEvidence'] = [
+      {
+        paragraphKey: 'opening',
+        sourceEvidenceIds: openingEvidence.map((entry) => entry.id),
+        anchorTexts: openingEvidence.map((entry) => entry.sourceText),
+      },
+      ...bodyParagraphs.map((paragraph, index) => {
+        void paragraph;
+        const source = [bodyOneEvidence, bodyTwoEvidence, bodyThreeEvidence][index] ?? [];
+        return {
+          paragraphKey: (`body_${index + 1}` as 'body_1' | 'body_2' | 'body_3'),
+          sourceEvidenceIds: source.map((entry) => entry.id),
+          anchorTexts: source.map((entry) => entry.sourceText),
+        };
+      }),
+      {
+        paragraphKey: 'closing',
+        sourceEvidenceIds: closingEvidence ? [closingEvidence.id] : [],
+        anchorTexts: closingEvidence ? [closingEvidence.sourceText] : [],
+      },
+    ];
+
+    let content = this.composeTextContent(document);
     content = this.removeDisallowedPhrases(content, input.complianceConstraints);
+    content = this.normalizeWritingStyle(content);
+    content = this.ensureMinimumWordCount(content, document, targetWords);
     content = this.trimToWordLimit(content, targetWords);
 
-    const parsed = this.parseContentToDocument(content, letterDocument);
+    // Keep evidence anchored paragraphs immutable after sanitization.
+    const parsed = this.parseContentToDocument(content, document);
+    const parsedContent = this.composeTextContent(parsed);
 
     return {
       document: parsed,
-      content,
-      wordCount: this.countWords(content),
+      content: parsedContent,
+      wordCount: this.countWords(parsedContent),
       greeting: parsed.salutation,
       paragraphs: [parsed.opening, ...parsed.bodyParagraphs],
-      closingParagraphs: [`${parsed.closingParagraph} ${parsed.signoff}`.trim()],
+      closingParagraphs: [parsed.closingParagraph],
       constraintSummary: this.buildConstraintSummary(input.complianceConstraints),
+      paragraphEvidence,
     };
   }
 
   private resolveTargetWords(maxWords?: number | null) {
     if (!maxWords || Number.isNaN(maxWords) || maxWords <= 0) {
-      return 320;
+      return COVER_LETTER_WORD_LIMITS.preferredTarget;
     }
-    return Math.min(Math.max(Math.floor(maxWords), 220), this.hardCap);
+    return Math.min(
+      Math.max(Math.floor(maxWords), COVER_LETTER_WORD_LIMITS.minimum),
+      COVER_LETTER_WORD_LIMITS.maximum,
+    );
   }
 
   private normalizeJob(job: CoverLetterJobContext): NormalizedJob {
@@ -122,15 +187,61 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .sort((a, b) => a.order - b.order);
   }
 
-  private cleanText(value?: string | null) {
-    return (value ?? '')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/\t/g, ' ')
-      .replace(/\u00a0/g, ' ')
-      .replace(/[\u2013\u2014]/g, ',')
-      .replace(/\s+/g, ' ')
-      .trim();
+  private collectEvidenceUnits(
+    blocks: NormalizedBlock[],
+    constraints?: CoverLetterComplianceConstraints,
+  ): ResumeEvidenceUnit[] {
+    const evidence: ResumeEvidenceUnit[] = [];
+
+    for (const block of blocks) {
+      const logicalUnits = reconstructLogicalTextUnits(block.content);
+      if (!logicalUnits.length) continue;
+      const extracted = extractEvidenceUnitsFromLogicalUnits(block.id, logicalUnits)
+        .filter((entry) => !this.shouldSkipStatement(entry.normalizedText, constraints))
+        .filter((entry) => entry.normalizedText.length >= 35)
+        .filter((entry) => !PAGE_MARKER_PATTERN.test(entry.normalizedText))
+        .filter((entry) => !this.looksLikeRawPayload(entry.normalizedText));
+      evidence.push(...extracted);
+    }
+
+    return evidence;
+  }
+
+  private selectEvidenceUnits(
+    evidence: ResumeEvidenceUnit[],
+    job: NormalizedJob,
+    safeMode: boolean,
+  ): ResumeEvidenceUnit[] {
+    const jobSignals = new Set(
+      this.tokenize(
+        [job.title, ...job.requirements, ...job.responsibilities]
+          .filter(Boolean)
+          .join(' '),
+      ),
+    );
+
+    const scored: ScoredEvidence[] = evidence.map((entry, index) => {
+      const tokens = this.tokenize(entry.normalizedText);
+      const overlap = tokens.filter((token) => jobSignals.has(token)).length;
+      const score = overlap * (safeMode ? 1 : 2) + Math.min(tokens.length / 14, 2);
+      return {
+        evidence: entry,
+        score,
+        stableIndex: index,
+      };
+    });
+
+    return scored
+      .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.stableIndex - b.stableIndex))
+      .map((item) => item.evidence)
+      .filter(
+        (entry, index, list) =>
+          list.findIndex(
+            (candidate) =>
+              candidate.normalizedText.toLowerCase() === entry.normalizedText.toLowerCase(),
+          ) === index,
+      )
+      .slice(0, safeMode ? 8 : 12);
   }
 
   private applyComplianceConstraintsToJob(
@@ -160,84 +271,16 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return sanitized;
   }
 
-  private selectEvidenceSnippets(
-    blocks: NormalizedBlock[],
-    job: NormalizedJob,
-    constraints?: CoverLetterComplianceConstraints,
-  ): string[] {
-    const jobSignals = new Set(this.tokenize([job.title, ...job.requirements, ...job.responsibilities].filter(Boolean).join(' ')));
-    const scored: Array<{ text: string; score: number; idx: number }> = [];
-
-    blocks.forEach((block, blockIndex) => {
-      const sentences = block.content
-        .split(/(?<=[.!?])\s+|\n+/)
-        .map((line) => this.cleanText(line))
-        .filter((line) => line.length >= 25 && line.length <= 180)
-        .filter((line) => !PAGE_MARKER_PATTERN.test(line))
-        .filter((line) => !this.looksLikeRawPayload(line))
-        .filter((line) => !this.shouldSkipStatement(line, constraints));
-
-      sentences.forEach((sentence, sentenceIndex) => {
-        const capped = this.limitWords(sentence, 20);
-        const overlap = this.tokenize(capped).filter((token) => jobSignals.has(token)).length;
-        const score = overlap * 2 + Math.min(capped.length / 60, 2);
-        scored.push({ text: this.ensureSentence(capped), score, idx: blockIndex * 100 + sentenceIndex });
-      });
-    });
-
-    return scored
-      .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.idx - b.idx))
-      .map((entry) => entry.text)
-      .filter((text, index, list) => list.findIndex((candidate) => candidate.toLowerCase() === text.toLowerCase()) === index)
-      .slice(0, 3);
-  }
-
-  private composeEvidenceParagraph(snippets: string[]): string {
-    if (!snippets.length) {
-      return 'Verified experience includes operational leadership, stakeholder communication, and measurable service improvement across recurring support workflows.';
-    }
-    if (snippets.length === 1) {
-      return this.ensureSentence(`Verified experience includes ${this.stripTrailingPeriod(snippets[0]).toLowerCase()}.`);
-    }
-
-    const [first, ...rest] = snippets;
-    return this.ensureSentence(
-      `Verified experience includes ${this.stripTrailingPeriod(first).toLowerCase()}. ${rest.join(' ')}`,
-    );
-  }
-
-  private selectPriorities(job: NormalizedJob) {
-    const combined = [...job.responsibilities, ...job.requirements]
-      .map((item) => this.cleanText(item))
-      .filter(Boolean)
-      .map((item) => this.limitWords(item, 10));
-    return combined
-      .filter((item, index) => combined.findIndex((entry) => entry.toLowerCase() === item.toLowerCase()) === index)
-      .slice(0, 3);
-  }
-
-  private describeRole(job: NormalizedJob) {
-    if (job.title && job.company) {
-      return `the ${job.title} role at ${job.company}`;
-    }
-    if (job.title) {
-      return `the ${job.title} role`;
-    }
-    if (job.company) {
-      return `an opening at ${job.company}`;
-    }
-    return 'this role';
-  }
-
   private composeTextContent(document: NormalizedCoverLetterDocument): string {
     return [
-      document.salutation,
+      COVER_LETTER_REQUIRED_SALUTATION,
       document.opening,
-      ...document.bodyParagraphs,
+      ...document.bodyParagraphs.slice(0, 3),
       document.closingParagraph,
-      document.signoff,
+      COVER_LETTER_SIGNOFF,
       document.signatureName,
     ]
+      .map((line) => this.cleanText(line))
       .filter(Boolean)
       .join('\n\n')
       .replace(/\n{3,}/g, '\n\n')
@@ -253,19 +296,32 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .map((part) => this.cleanText(part))
       .filter(Boolean);
 
-    const salutation = /^dear\b/i.test(paragraphs[0] ?? '') ? paragraphs.shift()! : seed.salutation;
-    const signoffCandidate = paragraphs[paragraphs.length - 1] ?? '';
-    const signoff = /^sincerely[,]?$/i.test(signoffCandidate) ? paragraphs.pop()! : seed.signoff;
+    if ((paragraphs[0] ?? '').toLowerCase() === COVER_LETTER_REQUIRED_SALUTATION.toLowerCase()) {
+      paragraphs.shift();
+    }
+
+    let signatureName = seed.signatureName;
+    const signoffIndex = paragraphs.findIndex(
+      (line) => line.toLowerCase() === COVER_LETTER_SIGNOFF.toLowerCase(),
+    );
+    if (signoffIndex >= 0) {
+      if (paragraphs[signoffIndex + 1]) {
+        signatureName = paragraphs[signoffIndex + 1];
+      }
+      paragraphs.splice(signoffIndex);
+    }
+
     const opening = paragraphs.shift() ?? seed.opening;
     const closingParagraph = paragraphs.pop() ?? seed.closingParagraph;
 
     return {
       ...seed,
-      salutation,
+      salutation: COVER_LETTER_REQUIRED_SALUTATION,
       opening,
-      bodyParagraphs: paragraphs,
+      bodyParagraphs: paragraphs.slice(0, 3),
       closingParagraph,
-      signoff,
+      signoff: COVER_LETTER_SIGNOFF,
+      signatureName,
     };
   }
 
@@ -273,26 +329,214 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     content: string,
     constraints?: CoverLetterComplianceConstraints,
   ) {
-    if (!constraints || constraints.mode !== 'strict') {
-      return content;
-    }
-
     const phrases = [
-      ...(constraints.disallowPhrases ?? []),
-      ...(constraints.disallowRoleTitles ?? []),
+      ...COVER_LETTER_FORBIDDEN_PHRASES,
+      ...(constraints?.mode === 'strict' ? constraints.disallowPhrases ?? [] : []),
+      ...(constraints?.mode === 'strict' ? constraints.disallowRoleTitles ?? [] : []),
     ];
 
     let sanitized = content;
+    for (const rewrite of COVER_LETTER_PHRASE_REWRITES) {
+      sanitized = sanitized.replace(rewrite.pattern, rewrite.replacement);
+    }
     for (const phrase of phrases) {
       const trimmed = phrase.trim();
       if (!trimmed) continue;
-      sanitized = sanitized.replace(new RegExp(`\\b${this.escapeRegExp(trimmed)}\\b`, 'gi'), '');
+      sanitized = sanitized.replace(
+        new RegExp(`\\b${this.escapeRegExp(trimmed)}\\b`, 'gi'),
+        '',
+      );
     }
+
     return sanitized
-      .replace(/[\u2013\u2014]/g, ',')
-      .replace(/\s+-\s+/g, ' ')
       .replace(/\s{2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private normalizeWritingStyle(content: string) {
+    const sanitizedBlocks = content
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split(/\n\s*\n/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => {
+        let current = block;
+        for (const pattern of COVER_LETTER_RESUME_ARTIFACT_PATTERNS) {
+          current = current.replace(pattern, ' ');
+        }
+        return current
+          .split('\n')
+          .map((line) => line.replace(COVER_LETTER_BULLET_PATTERN, '').trim())
+          .filter(Boolean)
+          .join(' ');
+      });
+
+    return sanitizedBlocks
+      .join('\n\n')
+      .replace(/[\u2013\u2014-]/g, ' ')
+      .replace(/\s*[,;:]\s*[,;:]+/g, ', ')
+      .replace(/,{2,}/g, ',')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private describeRole(job: NormalizedJob) {
+    if (job.title && job.company) {
+      return `the ${job.title} role at ${job.company}`;
+    }
+    if (job.title) {
+      return `the ${job.title} role`;
+    }
+    if (job.company) {
+      return `an opening at ${job.company}`;
+    }
+    return 'this role';
+  }
+
+  private shouldSkipStatement(
+    statement: string,
+    constraints?: CoverLetterComplianceConstraints,
+  ) {
+    if (!constraints || constraints.mode !== 'strict') {
+      return false;
+    }
+
+    return (
+      this.containsDisallowedValue(statement, constraints.disallowPhrases) ||
+      this.containsDisallowedValue(statement, constraints.disallowRoleTitles)
+    );
+  }
+
+  private joinSentences(sentences: string[]): string {
+    return sentences
+      .map((sentence) => this.ensureSentence(sentence))
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  private trimToWordLimit(text: string, limit: number) {
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length <= limit) {
+      return text.trim();
+    }
+
+    const trimmed = words.slice(0, limit).join(' ').trim();
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  }
+
+  private ensureMinimumWordCount(
+    content: string,
+    document: NormalizedCoverLetterDocument,
+    targetWords: number,
+  ): string {
+    if (this.countWords(content) >= COVER_LETTER_WORD_LIMITS.minimum) {
+      return content;
+    }
+
+    const additions = [
+      'I value clear priorities, reliable execution, and practical collaboration across teams.',
+      'I work best in environments where goals are explicit and accountability is shared.',
+      'I focus on consistent delivery quality and transparent communication throughout execution.',
+      'I would welcome the opportunity to discuss where this background can support your team.',
+    ];
+
+    const body = [...document.bodyParagraphs];
+    if (!body[0]) body[0] = '';
+    if (!body[1]) body[1] = '';
+
+    let expanded = content;
+    const appendPlan = [
+      () => {
+        body[0] = this.joinSentences([body[0], additions[0]]);
+      },
+      () => {
+        body[1] = this.joinSentences([body[1], additions[1]]);
+      },
+      () => {
+        document.opening = this.joinSentences([document.opening, additions[2]]);
+      },
+      () => {
+        document.closingParagraph = this.joinSentences([
+          document.closingParagraph,
+          additions[3],
+        ]);
+      },
+      () => {
+        body[0] = this.joinSentences([body[0], additions[2]]);
+      },
+      () => {
+        body[1] = this.joinSentences([body[1], additions[0]]);
+      },
+    ];
+
+    for (const apply of appendPlan) {
+      if (this.countWords(expanded) >= COVER_LETTER_WORD_LIMITS.minimum) {
+        break;
+      }
+      apply();
+      expanded = [
+        COVER_LETTER_REQUIRED_SALUTATION,
+        document.opening,
+        ...body.slice(0, 3),
+        document.closingParagraph,
+        COVER_LETTER_SIGNOFF,
+        document.signatureName,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+
+    while (this.countWords(expanded) < COVER_LETTER_WORD_LIMITS.minimum) {
+      document.closingParagraph = this.joinSentences([
+        document.closingParagraph,
+        'Thank you for considering my application.',
+      ]);
+      expanded = [
+        COVER_LETTER_REQUIRED_SALUTATION,
+        document.opening,
+        ...body.slice(0, 3),
+        document.closingParagraph,
+        COVER_LETTER_SIGNOFF,
+        document.signatureName,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+
+    return this.trimToWordLimit(expanded, targetWords);
+  }
+
+  private countWords(text: string) {
+    return text.split(/\s+/).filter(Boolean).length;
+  }
+
+  private tokenize(text: string) {
+    return (
+      text
+        .toLowerCase()
+        .match(/[a-z0-9]+/g)
+        ?.filter((token) => token.length >= 3) ?? []
+    );
+  }
+
+  private ensureSentence(text: string) {
+    const sanitized = this.cleanText(text).trim();
+    if (!sanitized) return '';
+    return /[.!?]$/.test(sanitized) ? sanitized : `${sanitized}.`;
+  }
+
+  private cleanText(value?: string | null) {
+    return (value ?? '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
@@ -320,91 +564,6 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return segments.length ? segments.join(' ') : null;
   }
 
-  private looksLikeRawPayload(value: string): boolean {
-    const lowered = value.toLowerCase();
-    return lowered.includes('{"') || lowered.includes('audit_id') || lowered.includes('compliance_flags');
-  }
-
-  private shouldSkipStatement(
-    statement: string,
-    constraints?: CoverLetterComplianceConstraints,
-  ) {
-    if (!constraints || constraints.mode !== 'strict') {
-      return false;
-    }
-
-    return (
-      this.containsDisallowedValue(statement, constraints.disallowPhrases) ||
-      this.containsDisallowedValue(statement, constraints.disallowRoleTitles)
-    );
-  }
-
-  private limitWords(text: string, limit: number) {
-    const words = text.split(/\s+/).filter(Boolean);
-    if (words.length <= limit) {
-      return this.cleanText(text);
-    }
-
-    return this.cleanText(words.slice(0, limit).join(' '));
-  }
-
-  private trimToWordLimit(text: string, limit: number) {
-    const words = text.split(/\s+/).filter(Boolean);
-    if (words.length <= limit) {
-      return text.trim();
-    }
-
-    const trimmed = words.slice(0, limit).join(' ').trim();
-    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-  }
-
-  private countWords(text: string) {
-    return text.split(/\s+/).filter(Boolean).length;
-  }
-
-  private formatList(items: string[]) {
-    const cleaned = items.map((item) => this.cleanText(item)).filter(Boolean);
-
-    if (cleaned.length === 0) {
-      return '';
-    }
-
-    if (cleaned.length === 1) {
-      return cleaned[0];
-    }
-
-    if (cleaned.length === 2) {
-      return `${cleaned[0]} and ${cleaned[1]}`;
-    }
-
-    const last = cleaned[cleaned.length - 1];
-    return `${cleaned.slice(0, -1).join(', ')}, and ${last}`;
-  }
-
-  private tokenize(text: string) {
-    return text
-      .toLowerCase()
-      .match(/[a-z0-9]+/g)
-      ?.filter((token) => token.length >= 3) ?? [];
-  }
-
-  private stripTrailingPeriod(text: string) {
-    return text.replace(/[.]+$/, '').trim();
-  }
-
-  private ensureSentence(text: string) {
-    const sanitized = this.cleanText(text)
-      .replace(/\s+-\s+/g, ' ')
-      .replace(/[\u2013\u2014]/g, ',')
-      .trim();
-    if (!sanitized) return '';
-    return /[.!?]$/.test(sanitized) ? sanitized : `${sanitized}.`;
-  }
-
-  private escapeRegExp(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
   private normalizeConstraintSet(values?: string[] | null): Set<string> {
     const set = new Set<string>();
     if (!values) {
@@ -430,6 +589,21 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       return false;
     }
     const normalized = statement.toLowerCase();
-    return disallowList.some((value) => value && normalized.includes(value.toLowerCase()));
+    return disallowList.some(
+      (value) => value && normalized.includes(value.toLowerCase()),
+    );
+  }
+
+  private looksLikeRawPayload(value: string): boolean {
+    const lowered = value.toLowerCase();
+    return (
+      lowered.includes('{"') ||
+      lowered.includes('audit_id') ||
+      lowered.includes('compliance_flags')
+    );
+  }
+
+  private escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }

@@ -1,131 +1,86 @@
 import { TemplateCoverLetterGenerator } from './template-cover-letter.generator';
+import {
+  gameDesignFixture,
+  supportOperationsFixture,
+} from './__fixtures__/cover-letter-fixtures';
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 describe('TemplateCoverLetterGenerator', () => {
-  it('produces structured letter components with recruiter-friendly length', () => {
+  it('produces concise recruiter ready output for game design fixture', () => {
     const generator = new TemplateCoverLetterGenerator();
+    const output = generator.generate(gameDesignFixture);
 
-    const output = generator.generate({
-      job: {
-        id: 'job-1',
-        title: 'Director, Customer Support Operations',
-        company: 'Acme Corp',
-        responsibilities: [
-          'Build and scale support programs and operating rhythms.',
-          'Partner with Product and Engineering to reduce defects.',
-        ],
-        requirements: [
-          'Experience leading cross functional programs.',
-          'Strong metrics and continuous improvement mindset.',
-        ],
-      },
-      allowedBaselineBlocks: [
-        {
-          id: 'b1',
-          title: 'Summary',
-          content:
-            'Customer operations leader with experience building scalable support programs. Led cross functional initiatives to improve customer experience and operational outcomes.',
-          includePolicy: 'always' as any,
-          order: 0,
-          sectionType: 'summary' as any,
-        },
-      ],
-      closingTemplate: {
-        key: 'steady',
-        text: 'Thank you for your consideration.',
-      },
-      baselineId: 'baseline-1',
-      jobId: 'job-1',
-      maxWords: 320,
-    });
-
-    expect(output.document.salutation).toBe('Dear Hiring Team,');
-    expect(output.document.opening.length).toBeGreaterThan(0);
-    expect(output.document.bodyParagraphs.length).toBeGreaterThanOrEqual(1);
-    expect(output.document.closingParagraph.length).toBeGreaterThan(0);
-    const totalNarrativeParagraphs =
-      1 + output.document.bodyParagraphs.length + 1;
-    expect(totalNarrativeParagraphs).toBeGreaterThanOrEqual(3);
-    expect(totalNarrativeParagraphs).toBeLessThanOrEqual(5);
-    expect(output.document.signoff).toBe('Sincerely,');
-    expect(output.content).not.toContain('{"');
-    expect(output.content).not.toContain('audit_id');
-    expect(countWords(output.content)).toBeLessThanOrEqual(340);
+    expect(output.content.startsWith('Dear Hiring Team,')).toBe(true);
+    expect(output.content).not.toMatch(/-/);
+    expect(output.content).not.toMatch(
+      /\bverified experience\b|\bdocumented execution\b|\bclear ownership\b/i,
+    );
+    expect(output.content).toContain('Northline Interactive');
+    expect(output.content).toContain('Senior Game Designer');
+    expect(output.content).toContain('\n\nSincerely,\n\nAlex Rivera');
+    expect(output.paragraphEvidence?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(
+      output.paragraphEvidence?.every(
+        (entry) => Array.isArray(entry.sourceEvidenceIds) && entry.sourceEvidenceIds.length > 0,
+      ),
+    ).toBe(true);
+    expect(countWords(output.content)).toBeGreaterThanOrEqual(250);
+    expect(countWords(output.content)).toBeLessThanOrEqual(400);
+    expect(output.document.bodyParagraphs.length).toBeLessThanOrEqual(3);
   });
 
-  it('filters giant evidence blobs and page markers from body paragraphs', () => {
+  it('filters resume artifacts and raw payload fragments', () => {
     const generator = new TemplateCoverLetterGenerator();
-
     const output = generator.generate({
-      job: {
-        id: 'job-1',
-        title: 'Program Manager',
-        company: 'Acme Corp',
-        responsibilities: ['Own incident response.'],
-        requirements: ['Lead cross functional execution.'],
-      },
+      ...supportOperationsFixture,
       allowedBaselineBlocks: [
         {
-          id: 'b1',
-          title: 'Experience',
-          content: `Page 1\nDelivered measurable support outcomes across recurring operations workflows while partnering across teams and maintaining stakeholder communication.\n{"audit_id":"raw"}`,
-          includePolicy: 'always' as any,
-          order: 0,
-          sectionType: 'experience' as any,
+          ...supportOperationsFixture.allowedBaselineBlocks[0],
+          content:
+            'Page 2 | 3\n• Summary\nDelivered measurable support outcomes across recurring operations workflows while partnering across teams.\n{"audit_id":"raw"}',
         },
       ],
-      closingTemplate: {
-        key: 'steady',
-        text: 'Thank you for your consideration.',
-      },
-      baselineId: 'baseline-1',
-      jobId: 'job-1',
     });
 
-    const body = output.document.bodyParagraphs.join(' ');
-    expect(body).not.toContain('Page 1');
-    expect(body).not.toContain('audit_id');
-    expect(body).not.toContain('{"');
+    expect(output.content).not.toContain('Page 2 | 3');
+    expect(output.content).not.toContain('•');
+    expect(output.content).not.toContain('Summary');
+    expect(output.content).not.toContain('audit_id');
+    expect(output.content).not.toContain('{"');
+  });
+
+  it('supports support operations fixture without collapsing into JD mirror text', () => {
+    const generator = new TemplateCoverLetterGenerator();
+    const output = generator.generate(supportOperationsFixture);
+
+    expect(output.content).toContain('Support Operations Manager');
+    expect(output.content).toContain('Acme Care');
+    expect(output.content).toContain('Jordan Lee');
+    expect(output.content).toContain('Dear Hiring Team,');
+    expect(output.content).toContain('Sincerely,');
+
+    const jdLine =
+      supportOperationsFixture.job.responsibilities[0].toLowerCase().replace(/[^\w\s]/g, '');
+    const letter = output.content.toLowerCase().replace(/[^\w\s]/g, ' ');
+    expect(letter.includes(jdLine)).toBe(false);
   });
 
   it('surfaces constraints summary in strict mode', () => {
     const generator = new TemplateCoverLetterGenerator();
 
     const output = generator.generate({
-      job: {
-        id: 'job-1',
-        title: 'Director, Customer Support Operations',
-        company: 'Acme Corp',
-        responsibilities: ['Build programs.'],
-        requirements: ['Partner with engineering.'],
-      },
-      allowedBaselineBlocks: [
-        {
-          id: 'b1',
-          title: 'Summary',
-          content: 'Documented program growth anchored in customer focus.',
-          includePolicy: 'always' as any,
-          order: 0,
-          sectionType: 'summary' as any,
-        },
-      ],
-      closingTemplate: {
-        key: 'steady',
-        text: 'Thank you for your consideration.',
-      },
-      baselineId: 'baseline-1',
-      jobId: 'job-1',
+      ...supportOperationsFixture,
       complianceConstraints: {
         mode: 'strict',
-        allowedCompanyNames: ['Acme Corp'],
+        allowedCompanyNames: ['Acme Care'],
         disallowPhrases: ['the Director'],
       },
     });
 
-    expect(output.constraintSummary).toContain('Allowed companies: Acme Corp');
+    expect(output.constraintSummary).toContain('Allowed companies: Acme Care');
     expect(output.constraintSummary).toContain('Avoid phrases such as the Director');
   });
 });

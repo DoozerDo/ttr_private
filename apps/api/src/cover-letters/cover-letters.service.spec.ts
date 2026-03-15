@@ -16,6 +16,7 @@ import {
 } from '../compliance/compliance.types';
 import type { ValidateAndAuditResult } from '../compliance/compliance.service';
 import { GapAnalysisService } from '../analysis/gap-analysis.service';
+import { ScopeInflationDetector } from '../compliance/scope-inflation-detector';
 import { CoverLettersService } from './cover-letters.service';
 
 type MockRepository<T extends Record<string, any>> = {
@@ -82,6 +83,17 @@ describe('CoverLettersService', () => {
   const baselineRepository = buildRepository<any>({
     id: 'baseline-1',
     userId: 'user-1',
+    parsedRecords: [
+      {
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        parsedJson: {
+          identity: {
+            full_name: 'Jordan Lee',
+            current_title: 'Operations Lead',
+          },
+        },
+      },
+    ],
     sections: [
       {
         id: 'section-1',
@@ -120,7 +132,7 @@ describe('CoverLettersService', () => {
 
   const complianceService = {
     enforceResumeWritingRules: jest.fn().mockReturnValue([]),
-    detectScopeInflation: jest.fn().mockReturnValue([]),
+    detectScopeInflation: jest.fn().mockResolvedValue([]),
     normalizeText: jest.fn((value: string) => value),
     validateAndAudit: jest.fn((ctx: any) =>
       Promise.resolve({
@@ -203,6 +215,100 @@ describe('CoverLettersService', () => {
     expect(second.audit_id).toBe('audit-1');
   });
 
+  it('sanitizes and validates generated cover letter structure and tone', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    const result = await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.content.startsWith('Dear Hiring Team,')).toBe(true);
+    expect(result.content).not.toContain('-');
+    expect(result.content).not.toMatch(
+      /\bverified experience\b|\bverified operational experience\b|\bdocumented execution\b|\bdocumented expertise\b|\bclear ownership\b|\bproven expertise\b/i,
+    );
+    expect(result.content).not.toMatch(/\bpage\s*\d+\s*(\||\/|of)\s*\d+\b/i);
+    expect(result.content).not.toContain('â€¢');
+    expect(result.content).toContain('Program Manager');
+    expect(result.content).toContain('Acme Corp');
+    expect(result.content).toContain('\n\nSincerely,\n\nJordan Lee');
+    expect(result.content).not.toContain('10%');
+
+    const wordCount = result.content.split(/\s+/).filter(Boolean).length;
+    expect(wordCount).toBeGreaterThanOrEqual(250);
+    expect(wordCount).toBeLessThanOrEqual(400);
+
+    const jdLine =
+      'Improve processes by 10%'.toLowerCase().replace(/[^\w\s]/g, '');
+    const normalizedLetter = result.content
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ');
+    expect(normalizedLetter.includes(jdLine)).toBe(false);
+    expect(
+      result.preview?.coverLetter &&
+        Array.isArray((result as any).preview?.coverLetter?.bodyParagraphs),
+    ).toBe(true);
+  });
+
+  it('rejects freewritten cover letter paragraphs that cannot be anchored to baseline evidence', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    ) as any;
+
+    service.generator = {
+      generate: jest.fn().mockReturnValue({
+        document: {
+          senderHeading: { name: 'Jordan Lee' },
+          salutation: 'Dear Hiring Team,',
+          opening: 'I am applying for the Program Manager role at Acme Corp.',
+          bodyParagraphs: [
+            'I built a global transformation program across twelve countries.',
+          ],
+          closingParagraph: 'I would welcome a conversation.',
+          signoff: 'Sincerely,',
+          signatureName: 'Jordan Lee',
+        },
+        content:
+          'Dear Hiring Team,\n\nI am applying for the Program Manager role at Acme Corp.\n\nI built a global transformation program across twelve countries.\n\nI would welcome a conversation.\n\nSincerely,\n\nJordan Lee',
+        wordCount: 54,
+        greeting: 'Dear Hiring Team,',
+        paragraphs: [
+          'I am applying for the Program Manager role at Acme Corp.',
+          'I built a global transformation program across twelve countries.',
+        ],
+        closingParagraphs: ['I would welcome a conversation.'],
+        paragraphEvidence: [
+          { paragraphKey: 'opening', sourceEvidenceIds: [], anchorTexts: [] },
+          { paragraphKey: 'body_1', sourceEvidenceIds: [], anchorTexts: [] },
+          { paragraphKey: 'closing', sourceEvidenceIds: [], anchorTexts: [] },
+        ],
+      }),
+    };
+
+    await expect(
+      service.generateCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'COVER_LETTER_ANCHOR_VALIDATION_FAILED',
+        },
+      },
+    });
+  });
+
   it('blocks generation and strips content when invented metrics are flagged', async () => {
     complianceService.enforceResumeWritingRules.mockReturnValueOnce([
       {
@@ -248,11 +354,18 @@ describe('CoverLettersService', () => {
   });
 
   it('blocks generation and strips content when scope inflation is detected', async () => {
-    complianceService.detectScopeInflation.mockReturnValueOnce([
+    complianceService.detectScopeInflation.mockResolvedValueOnce([
       {
         code: ComplianceFlagCode.SCOPE_INFLATION,
         severity: ComplianceFlagSeverity.BLOCK,
         message: 'Scope exceeds baseline.',
+        evidence: [
+          {
+            baseline: 'Baseline has no matching scope evidence.',
+            generated: 'Led global support organization across regions.',
+            reason: 'extreme_scale_without_baseline_match',
+          } as any,
+        ] as any,
       },
     ]);
 
@@ -274,10 +387,227 @@ describe('CoverLettersService', () => {
     expect(result.compliance_flags?.[0].code).toBe(
       ComplianceFlagCode.SCOPE_INFLATION,
     );
+    expect(result.safeDisplay?.reasons?.[0]).toContain(
+      'broader leadership scope than your baseline clearly supports',
+    );
+    expect(result.safeDisplay?.reasons?.[0]).not.toContain(
+      'extreme_scale_without_baseline_match',
+    );
+    expect((result.internal as any)?.complianceDiagnostics?.[0]?.rawReasons).toContain(
+      'extreme_scale_without_baseline_match',
+    );
     expect(result).not.toHaveProperty('content');
     expect(coverLetterRepository.save).not.toHaveBeenCalled();
 
     expect(complianceService.validateAndAudit).toHaveBeenCalled();
+  });
+
+  it('does not emit extreme-scale warning when semantic baseline scope evidence exists in cover letter flow', async () => {
+    const detector = new ScopeInflationDetector();
+    baselineRepository.findOne.mockResolvedValueOnce({
+      id: 'baseline-1',
+      userId: 'user-1',
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          parsedJson: {
+            identity: {
+              full_name: 'Jordan Lee',
+            },
+          },
+        },
+      ],
+      sections: [
+        {
+          id: 'section-1',
+          title: 'Experience',
+          content:
+            'Managed global customer support organization performance and staffing operations.',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        },
+        {
+          id: 'section-2',
+          title: 'Summary',
+          content:
+            'Experienced operations leader with multi year ownership of support reliability, incident governance, stakeholder communication, process optimization, quality controls, and cross functional execution across enterprise environments. '.repeat(
+              6,
+            ),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          sectionType: BaselineSectionType.SUMMARY,
+        },
+      ],
+    });
+
+    complianceService.detectScopeInflation.mockImplementationOnce(async (payload: any) =>
+      detector.detect(
+        payload.baselineSections ?? [],
+        [
+          ...(payload.generatedSections ?? []),
+          {
+            title: 'Generated Cover Letter',
+            content:
+              'Led global customer support organization through reliability improvements.',
+          },
+        ],
+        payload.jobContext,
+        payload.documentType,
+        {
+          embeddingProvider: async (text: string) => {
+            const normalized = text.toLowerCase();
+            if (
+              normalized.includes('global') &&
+              normalized.includes('support') &&
+              normalized.includes('organization')
+            ) {
+              return [0.91, 0.08, 0.11];
+            }
+            return [0.1, 0.1, 0.1];
+          },
+          similarityThreshold: 0.75,
+        },
+      ),
+    );
+
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    const result = await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.compliance_flags.map((flag) => flag.code)).not.toContain(
+      ComplianceFlagCode.SCOPE_INFLATION,
+    );
+  });
+
+  it('does not emit extreme_scale_without_baseline_match when baseline has leadership and scale evidence', async () => {
+    const detector = new ScopeInflationDetector();
+    coverLetterRepository.findOne.mockResolvedValue(null);
+    baselineRepository.findOne.mockResolvedValueOnce({
+      id: 'baseline-1',
+      userId: 'user-1',
+      parsedRecords: [
+        {
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          parsedJson: {
+            identity: {
+              full_name: 'Jordan Lee',
+            },
+          },
+        },
+      ],
+      sections: [
+        {
+          id: 'section-1',
+          title: 'Experience',
+          content:
+            'Led turnaround of department responsible for mobile test resources (50,000 devices).',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 0,
+          sectionType: BaselineSectionType.EXPERIENCE,
+        },
+        {
+          id: 'section-2',
+          title: 'Summary',
+          content:
+            'Operational leader improving cross functional service reliability and delivery quality across enterprise environments. '.repeat(
+              6,
+            ),
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          sectionType: BaselineSectionType.SUMMARY,
+        },
+      ],
+    });
+
+    complianceService.detectScopeInflation.mockImplementationOnce(async (payload: any) =>
+      detector.detect(
+        payload.baselineSections ?? [],
+        [
+          ...(payload.generatedSections ?? []),
+          {
+            title: 'Generated Cover Letter',
+            content: 'Led department managing mobile test infrastructure.',
+          },
+        ],
+        payload.jobContext,
+        payload.documentType,
+        {
+          embeddingProvider: async (text: string) => {
+            const normalized = text.toLowerCase();
+            if (
+              normalized.includes('department') &&
+              normalized.includes('mobile test') &&
+              normalized.includes('devices')
+            ) {
+              return [0.87, 0.16, 0.22];
+            }
+            return [0.1, 0.1, 0.1];
+          },
+          similarityThreshold: 0.75,
+        },
+      ),
+    );
+
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    const result = await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+    });
+
+    expect(result.status).toBe('success');
+    const scopeFlag = result.compliance_flags.find(
+      (flag) => flag.code === ComplianceFlagCode.SCOPE_INFLATION,
+    );
+    expect(scopeFlag).toBeUndefined();
+  });
+
+  it('passes explicit sourceType metadata for all generated compliance spans', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+
+    await service.generateCoverLetter('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      jobContext: {
+        allowedCompanies: ['Winona'],
+        allowedRoleTitles: ['Head of Customer Services'],
+      },
+    });
+
+    const generateAuditCall = (complianceService.validateAndAudit as jest.Mock).mock.calls
+      .map((call) => call[0])
+      .find((ctx) => ctx.action === ComplianceAction.COVER_LETTER_GENERATION);
+    expect(generateAuditCall).toBeDefined();
+
+    const generatedSections = (generateAuditCall as { generatedSections?: Array<{ sourceType?: string; sentenceSources?: Array<{ sourceType?: string }> }> }).generatedSections ?? [];
+    expect(generatedSections.length).toBeGreaterThan(0);
+    for (const section of generatedSections) {
+      expect(section.sourceType).toBeDefined();
+      const sentenceSources = section.sentenceSources ?? [];
+      for (const sentence of sentenceSources) {
+        expect(sentence.sourceType).toBeDefined();
+      }
+    }
   });
 
   it('rejects generation without a baseline version id', async () => {

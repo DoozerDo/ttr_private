@@ -637,6 +637,28 @@ describe('resume-normalization', () => {
     expect(validation.reasons).toEqual([]);
   });
 
+  it('keeps lowercase single-word company entries when baseline bullets are valid', () => {
+    const document = buildNormalizedResumeDocument([
+      {
+        type: BaselineSectionType.EXPERIENCE,
+        title: 'Experience',
+        content: [
+          'producer | playstudios | 2018 - 2020',
+          '- Led social casino release planning and content operations.',
+        ].join('\n'),
+      },
+    ] as any);
+
+    expect(document.experience).toHaveLength(1);
+    expect(document.experience[0]?.company.toLowerCase()).toBe('playstudios');
+    expect(document.experience[0]?.bullets).toEqual([
+      'Led social casino release planning and content operations.',
+    ]);
+
+    const validation = validateNormalizedResumeDocument(document);
+    expect(validation.valid).toBe(true);
+  });
+
   it('strips pagination artifacts from final normalized fields before validation', () => {
     const document = buildNormalizedResumeDocument(
       [

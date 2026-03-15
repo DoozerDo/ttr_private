@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCoverLetterParagraphs,
   formatPreview,
   presentCoverLetterGeneration,
   presentResumeGeneration,
@@ -33,12 +34,14 @@ describe("studio presenter helpers", () => {
       exports: { docx: true, pdf: true },
       preview: {
         coverLetter: {
-          salutation: "Dear Hiring Team,",
-          opening: "I am excited to apply.",
-          bodyParagraphs: ["I have led support operations programs."],
-          closingParagraph: "I would welcome the opportunity to discuss this role.",
-          signoff: "Sincerely,",
-          signatureName: "Test Candidate",
+          paragraphs: [
+            "Dear Hiring Team,",
+            "I am excited to apply.",
+            "I have led support operations programs.",
+            "I would welcome the opportunity to discuss this role.",
+            "Sincerely,",
+            "Test Candidate",
+          ],
         },
       },
       safeDisplay: {
@@ -101,6 +104,21 @@ describe("studio presenter helpers", () => {
     expect(presented.display?.title).toBe("Resume generation failed");
   });
 
+  it("maps no-evidence resume payloads to explicit no-evidence state", () => {
+    const payload = {
+      status: "no_evidence",
+      generationStatus: "error",
+      safeDisplay: {
+        title: "No evidence available",
+        description: "Resume generation needs more verified baseline evidence.",
+      },
+    };
+
+    const presented = presentResumeGeneration(payload);
+    expect(presented.status).toBe("error");
+    expect(presented.display?.title).toBe("No evidence available");
+  });
+
   it("does not stringify arbitrary payload objects in preview text", () => {
     const preview = formatPreview({
       internal: {
@@ -112,5 +130,147 @@ describe("studio presenter helpers", () => {
     expect(preview).toBe("");
     expect(preview).not.toContain("audit-raw");
     expect(preview).not.toContain("{");
+  });
+
+  it("does not duplicate salutation when opening already starts with the greeting", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "Dear Hiring Team, I am applying for the role.",
+            "I have led support operations programs.",
+            "I would welcome the opportunity to discuss this role.",
+            "Sincerely,",
+            "Test Candidate",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs[0]).toBe("Dear Hiring Team,");
+    expect(paragraphs[1]).toBe("I am applying for the role.");
+  });
+
+  it("renders one closing paragraph and one signoff when structured payload has repeated closing tokens", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "I am applying for the role.",
+            "I have led support operations programs.",
+            "Sincerely,",
+            "Test Candidate",
+            "Sincerely, Test Candidate",
+            "Sincerely,",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs.filter((line) => /^dear hiring team[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^sincerely[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^test candidate$/i.test(line))).toHaveLength(1);
+  });
+
+  it("renders exactly one sincerely when signoff appears in opening, body, and closing fields", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "Dear Hiring Team, I am applying for this role.",
+            "I have led support operations programs.",
+            "Sincerely,",
+            "Sincerely,",
+            "Test Candidate",
+            "Sincerely, Test Candidate",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs.filter((line) => /^dear hiring team[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^sincerely[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^test candidate$/i.test(line))).toHaveLength(1);
+  });
+
+  it("does not duplicate closing paragraph when closing field contains embedded signoff and signature", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "I am applying for this role.",
+            "I have led support operations programs.",
+            "I would welcome the opportunity to discuss this role. Sincerely, Test Candidate",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs.filter((line) => /^dear hiring team[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^sincerely[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.filter((line) => /^test candidate$/i.test(line))).toHaveLength(0);
+    const contentParagraphs = paragraphs.filter(
+      (line) =>
+        !/^dear hiring team[,]?$/i.test(line) &&
+        !/^sincerely[,]?$/i.test(line) &&
+        !/^test candidate$/i.test(line),
+    );
+    expect(contentParagraphs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("filters resume-like leakage and bullet markers from cover letter preview", () => {
+    const payload = {
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "Employment History",
+            "• Led turnaround for support operations.",
+            "- Assigned to take over incident queue.",
+            "Cat Daddy Games | Seattle | 2020 - 2023",
+            "I have led support operations programs.",
+            "Sincerely,",
+            "Test Candidate",
+          ],
+        },
+      },
+    };
+
+    const paragraphs = buildCoverLetterParagraphs(payload);
+    expect(paragraphs.filter((line) => /^dear hiring team[,]?$/i.test(line))).toHaveLength(1);
+    expect(paragraphs.some((line) => /employment history/i.test(line))).toBe(false);
+    expect(paragraphs.some((line) => /^[•*-]\s*/.test(line))).toBe(false);
+    expect(paragraphs.some((line) => /\|\s*.*\b(?:19|20)\d{2}\b/.test(line))).toBe(false);
+  });
+
+  it("maps warning-only cover letter payloads to personalization-limited messaging", () => {
+    const payload = {
+      status: "success",
+      generationStatus: "success",
+      preview: {
+        coverLetter: {
+          paragraphs: [
+            "Dear Hiring Team,",
+            "I am applying for this role.",
+            "I have led support operations programs.",
+            "Sincerely,",
+            "Test Candidate",
+          ],
+        },
+      },
+      compliance_flags: [{ code: "style_warning", severity: "warn", message: "soft warning" }],
+    };
+
+    const presented = presentCoverLetterGeneration(payload);
+    expect(presented.status).toBe("success");
+    expect(presented.display?.description).toContain("Personalization may be limited");
   });
 });

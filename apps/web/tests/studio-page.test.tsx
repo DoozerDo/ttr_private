@@ -101,9 +101,9 @@ describe("Studio page UX", () => {
 
     expect(screen.getAllByText("Generate Resume").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Generate Cover Letter").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Download: DOCX | PDF").length).toBe(2);
-    expect(screen.getAllByRole("button", { name: "Download DOCX" }).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByRole("button", { name: "Download PDF" }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("Download: DOCX | PDF")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download DOCX" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
   });
 
   it("shows a blocked compliance card without rendering raw JSON payloads", async () => {
@@ -233,8 +233,8 @@ describe("Studio page UX", () => {
       throw new Error("Expected resume and cover sections");
     }
 
-    expect(within(resumeSection).getByRole("button", { name: "Download DOCX" })).toBeDisabled();
-    expect(within(coverSection).getByRole("button", { name: "Download DOCX" })).toBeDisabled();
+    expect(within(resumeSection).queryByRole("button", { name: "Download DOCX" })).toBeNull();
+    expect(within(coverSection).queryByRole("button", { name: "Download DOCX" })).toBeNull();
 
     const resumeGenerateButton = within(resumeSection).getByRole("button", { name: "Generate Resume" });
     await waitFor(() => {
@@ -248,8 +248,9 @@ describe("Studio page UX", () => {
 
     fireEvent.click(within(coverSection).getByRole("button", { name: "Generate Cover Letter" }));
     await waitFor(() => {
-      expect(within(coverSection).getByText("Cover letter blocked by compliance")).toBeInTheDocument();
+      expect(within(coverSection).getAllByText("Cover letter blocked by compliance").length).toBeGreaterThan(0);
     });
+    expect(within(coverSection).getByText("Next step")).toBeInTheDocument();
     expect(within(coverSection).getByRole("button", { name: "Download DOCX" })).toBeDisabled();
   });
 

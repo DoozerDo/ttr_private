@@ -2,8 +2,11 @@ import { BaselineIncludePolicy, BaselineSectionType } from '../baseline/baseline
 import {
   buildDraftBulletsForSection,
   buildResumeDraftSections,
+  extractEvidenceUnitsFromLogicalUnits,
   extractJobKeywords,
+  reconstructLogicalTextUnits,
   splitSectionContentToBulletTexts,
+  validateResumeDraftBulletAnchors,
 } from './resume-draft-bullets';
 
 describe('resume draft bullets', () => {
@@ -391,5 +394,237 @@ describe('resume draft bullets', () => {
     );
     expect(directorBulletIndex).toBeGreaterThan(directorHeaderIndex);
     expect(seniorBulletIndex).toBeGreaterThan(seniorHeaderIndex);
+  });
+
+  it('retains experience sections when bullet extraction yields none but raw experience content exists', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-experience-no-bullets',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          order: 0,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: [
+            'support operations manager | acme | 2021 - present',
+            'support operations manager | beta | 2019 - 2021',
+          ].join('\n'),
+        } as never,
+      ],
+      { jobText: 'support operations leadership' },
+    );
+
+    expect(draft).toHaveLength(1);
+    expect(draft[0].type).toBe(BaselineSectionType.EXPERIENCE);
+    expect(draft[0].content.length).toBeGreaterThan(0);
+  });
+
+  it('rejects partial sentence fragments that are not complete baseline sentence spans', () => {
+    const result = splitSectionContentToBulletTexts(
+      ['needed', 'well as the backend infrastructure', 'and platform'].join('\n'),
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('rejects stitched conjunction fragments in experience bullet drafting', () => {
+    const section = {
+      id: 'section-fragment-reject',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Platform Engineer | Example Co | 2020 - 2024',
+        '- As well as the backend infrastructure',
+        '- And',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('platform engineering backend operations')),
+    });
+
+    expect(bullets).toEqual([]);
+  });
+
+  it('adds source anchoring metadata for drafted bullets', () => {
+    const section = {
+      id: 'section-anchor-metadata',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: [
+        'Support Operations Manager | Example Co | 2021 - 2025',
+        '- Managed incident workflows and escalation governance.',
+      ].join('\n'),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('incident escalation support operations')),
+    });
+
+    expect(bullets).toHaveLength(1);
+    expect(bullets[0].source).toMatchObject({
+      anchorKind: 'bullet_line',
+      exactBaselineBullet: true,
+      anchorText: 'Managed incident workflows and escalation governance.',
+    });
+  });
+
+  it('rejects lowercase sentence starts when deriving sentence candidates', () => {
+    const result = splitSectionContentToBulletTexts(
+      'we led support operations improvements and incident recovery.',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('rejects sentence candidates that do not end with terminal punctuation', () => {
+    const result = splitSectionContentToBulletTexts(
+      'We led support operations improvements and incident recovery',
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('maps sentence-derived bullets to full baseline sentence spans', () => {
+    const content =
+      'We led support operations improvements and reduced escalation volume across enterprise queues.';
+
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-sentence-span',
+          sectionType: BaselineSectionType.OTHER,
+          order: 0,
+          title: 'Highlights',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content,
+        } as never,
+      ],
+      { jobText: 'support operations escalation leadership' },
+    );
+
+    expect(draft).toHaveLength(1);
+    expect(draft[0].bullets).toHaveLength(1);
+    expect(draft[0].bullets[0].source).toMatchObject({
+      anchorKind: 'sentence',
+      anchorText: content,
+      exactBaselineBullet: false,
+    });
+  });
+
+  it('rejects anchor validation when sentence bullets are not full baseline sentence spans', () => {
+    const validation = validateResumeDraftBulletAnchors(
+      [
+        {
+          id: 'section-x',
+          type: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          order: 0,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          source: 'baseline',
+          content: 'well as the backend infrastructure.',
+          bullets: [
+            {
+              id: 'bullet-x',
+              text: 'well as the backend infrastructure.',
+              confidence: 'Low',
+              claimRisk: { level: 'None', flaggedTerms: [] },
+              source: {
+                baselineSectionId: 'section-x',
+                baselineSectionType: BaselineSectionType.EXPERIENCE,
+                baselineSectionOrder: 0,
+                bulletIndex: 0,
+                anchorText: 'well as the backend infrastructure.',
+                anchorKind: 'sentence',
+                exactBaselineBullet: false,
+              },
+            },
+          ],
+        },
+      ],
+      [
+        {
+          id: 'section-x',
+          content:
+            'We improved backend reliability through platform hardening and operational safeguards.',
+        } as never,
+      ],
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.reasons.join(' ')).toContain('sentence fragment');
+  });
+
+  it('reconstructs wrapped DOCX bullet lines into single logical units', () => {
+    const units = reconstructLogicalTextUnits(
+      [
+        '- Served as the Windows stack SME for the bleeding edge',
+        'project and built out all needed systems/services using',
+        'infrastructure as code.',
+      ].join('\n'),
+    );
+
+    expect(units).toHaveLength(1);
+    expect(units[0].text).toBe(
+      'Served as the Windows stack SME for the bleeding edge project and built out all needed systems/services using infrastructure as code.',
+    );
+  });
+
+  it('does not emit mid-sentence fragments as evidence units', () => {
+    const units = reconstructLogicalTextUnits(
+      ['needed', 'well as the backend infrastructure', 'the Windows stack SME for'].join('\n'),
+    );
+    const evidence = extractEvidenceUnitsFromLogicalUnits('section-fragment', units);
+    expect(evidence).toEqual([]);
+  });
+
+  it('preserves baseline source spans for evidence units', () => {
+    const units = reconstructLogicalTextUnits(
+      ['- Improved release operations.', '- Reduced escalation volume by 20%.'].join('\n'),
+    );
+    const evidence = extractEvidenceUnitsFromLogicalUnits('section-spans', units);
+
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0].sourceSpan).toMatchObject({ startLine: 0, endLine: 0 });
+    expect(evidence[1].sourceSpan).toMatchObject({ startLine: 1, endLine: 1 });
+  });
+
+  it('adds sourceEvidenceIds on drafted bullets', () => {
+    const section = {
+      id: 'section-evidence-ids',
+      sectionType: BaselineSectionType.EXPERIENCE,
+      order: 1,
+      content: ['Manager | Example Co | 2022 - Present', '- Improved support quality outcomes.'].join(
+        '\n',
+      ),
+    };
+
+    const bullets = buildDraftBulletsForSection(section, {
+      keywords: new Set(extractJobKeywords('support quality outcomes')),
+    });
+
+    expect(bullets).toHaveLength(1);
+    expect(bullets[0].source.sourceEvidenceIds?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('prevents fragment spans from reaching draft bullets', () => {
+    const draft = buildResumeDraftSections(
+      [
+        {
+          id: 'section-no-fragments',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          order: 0,
+          title: 'Experience',
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          content: ['- needed', '- well as the backend infrastructure', '- the Windows stack SME for'].join(
+            '\n',
+          ),
+        } as never,
+      ],
+      { jobText: 'support operations' },
+    );
+
+    const bulletTexts = draft.flatMap((section) => section.bullets.map((bullet) => bullet.text));
+    expect(bulletTexts).toEqual([]);
   });
 });

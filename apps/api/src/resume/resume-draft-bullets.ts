@@ -13,6 +13,10 @@ export interface ResumeDraftBulletSource {
   baselineSectionOrder: number;
   bulletIndex: number;
   experienceEntryIndex?: number;
+  sourceEvidenceIds?: string[];
+  anchorText?: string;
+  anchorKind?: 'sentence' | 'bullet_line';
+  exactBaselineBullet?: boolean;
 }
 
 export interface ResumeDraftBullet {
@@ -47,6 +51,41 @@ type ResumeDraftGapGuidance = {
   gapSignals?: string[];
 };
 
+type ResumeDraftBulletCandidate = {
+  evidenceId?: string;
+  text: string;
+  sourceIndex: number;
+  anchorText: string;
+  anchorKind: 'sentence' | 'bullet_line';
+  exactBaselineBullet: boolean;
+};
+
+type EvidenceUnitSourceSpan = {
+  startLine: number;
+  endLine: number;
+  kind: 'bullet_line' | 'logical_bullet' | 'sentence';
+};
+
+export type ResumeEvidenceUnit = {
+  id: string;
+  sectionId: string;
+  experienceEntryId?: number;
+  sourceText: string;
+  normalizedText: string;
+  sourceSpan: EvidenceUnitSourceSpan;
+  anchorKind: 'sentence' | 'bullet_line';
+  exactBaselineBullet: boolean;
+};
+
+type LogicalTextUnit = {
+  text: string;
+  startLine: number;
+  endLine: number;
+  indent: number;
+  explicitBullet: boolean;
+  merged: boolean;
+};
+
 type JobSignalCategory =
   | 'leadership'
   | 'operations'
@@ -71,7 +110,7 @@ const BULLET_GLYPH = '\u2022';
 const MOJIBAKE_BULLET = '\u00e2\u20ac\u00a2';
 const SECTION_HEADING_PATTERN =
   /^(?:summary|professional summary|skills|technical skills|core competencies|experience|professional experience|education|certifications)\s*:?\s*$/i;
-const PLACEHOLDER_ONLY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:\-]+$/;
+const PLACEHOLDER_ONLY_PATTERN = /^[\s\u2022\u25CF\u25E6|,;:-]+$/;
 const STOPWORDS = new Set([
   'a',
   'an',
@@ -116,12 +155,18 @@ const STOPWORDS = new Set([
 const BULLET_LINE_PATTERN =
   /^\s*(?:[-*•●◦▪▹►‣]\s+|(?:\(?\d{1,3}\)?[.)])\s+|(?:[a-zA-Z][.)])\s+)(.+)$/;
 const PAGE_MARKER_PATTERN =
-  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|\d+\s*[\/|]\s*\d+|p\.?\s*\d+)$/i;
-const SENTENCE_END_PATTERN = /[.!?;:]$/;
-const CONTINUATION_LINE_START_PATTERN =
-  /^(?:[a-z]|and\b|or\b|to\b|for\b|with\b|in\b|on\b|of\b|by\b|from\b|that\b|which\b|who\b|where\b|when\b|while\b|as\b|at\b)/;
-const BULLET_CONTINUATION_END_PATTERN =
-  /(?:,\s*$|\b(?:and|with|including|across)\s*$)/i;
+  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|\d+\s*[/|]\s*\d+|p\.?\s*\d+)$/i;
+const SENTENCE_END_PATTERN = /[.!?]$/;
+const LEADING_FRAGMENT_PATTERN =
+  /^(?:and|or|as\s+well\s+as|well\s+as|including|with|for|to|of)\b/i;
+const TRAILING_FRAGMENT_PATTERN =
+  /(?:,\s*$|\b(?:and|or|as|with|for|to|of|including)\s*$)/i;
+const SENTENCE_SPAN_PATTERN = /[^.!?]+[.!?]/g;
+const MIN_NON_BULLET_TOKENS = 5;
+const MIN_SENTENCE_TOKENS = 6;
+const KNOWN_SENTENCE_START_PATTERN =
+  /^(?:[A-Z]|I\b|We\b|My\b|Our\b|He\b|She\b|They\b|It\b|This\b|That\b|These\b|Those\b)/;
+const LEADING_PUNCTUATION_ARTIFACT_PATTERN = /^[,;:)\]}]+/;
 
 function buildNoClaimRiskResult(): ClaimRiskResult {
   return {
@@ -134,8 +179,218 @@ function normalizeLine(line: string) {
   return line.replace(/\u00a0/g, ' ').trim();
 }
 
+function countTokens(text: string) {
+  return (normalizeLine(text).match(/[A-Za-z0-9][A-Za-z0-9'/-]*/g) ?? []).length;
+}
+
+function hasValidSentenceStart(text: string) {
+  return KNOWN_SENTENCE_START_PATTERN.test(normalizeLine(text));
+}
+
+function isLowercaseStart(text: string) {
+  return /^[a-z]/.test(normalizeLine(text));
+}
+
+function isCompleteSentenceSpan(text: string) {
+  const normalized = normalizeLine(text);
+  if (!normalized) return false;
+  if (LEADING_PUNCTUATION_ARTIFACT_PATTERN.test(normalized)) return false;
+  if (isLowercaseStart(normalized)) return false;
+  if (!hasValidSentenceStart(normalized)) return false;
+  if (!SENTENCE_END_PATTERN.test(normalized)) return false;
+  if (countTokens(normalized) < MIN_SENTENCE_TOKENS) return false;
+  if (LEADING_FRAGMENT_PATTERN.test(normalized)) return false;
+  if (TRAILING_FRAGMENT_PATTERN.test(normalized)) return false;
+  return true;
+}
+
+function extractSentenceSpans(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const collectSpans = (value: string) =>
+    value.match(SENTENCE_SPAN_PATTERN)?.map((entry) => normalizeLine(entry)) ?? [];
+
+  const segmenterCtor = (Intl as unknown as { Segmenter?: new (
+    locales?: string | string[],
+    options?: { granularity: 'sentence' },
+  ) => { segment: (value: string) => Iterable<{ segment: string }> } }).Segmenter;
+
+  if (segmenterCtor) {
+    const segmenter = new segmenterCtor('en', { granularity: 'sentence' });
+    const segmented: string[] = [];
+    for (const part of segmenter.segment(normalized)) {
+      const spanMatches = collectSpans(part.segment);
+      if (spanMatches.length) {
+        segmented.push(...spanMatches);
+        continue;
+      }
+      const candidate = normalizeLine(part.segment);
+      if (candidate && SENTENCE_END_PATTERN.test(candidate)) {
+        segmented.push(candidate);
+      }
+    }
+    return segmented;
+  }
+
+  return collectSpans(normalized);
+}
+
+function hasFragmentBoundary(text: string, exactBaselineBullet: boolean) {
+  const normalized = normalizeLine(text);
+  if (!normalized) return true;
+  if (LEADING_PUNCTUATION_ARTIFACT_PATTERN.test(normalized)) return true;
+  if (!exactBaselineBullet && isLowercaseStart(normalized)) return true;
+  if (LEADING_FRAGMENT_PATTERN.test(normalized)) return true;
+  if (TRAILING_FRAGMENT_PATTERN.test(normalized)) return true;
+  if (!exactBaselineBullet && countTokens(normalized) < MIN_NON_BULLET_TOKENS) return true;
+  if (!exactBaselineBullet && !SENTENCE_END_PATTERN.test(normalized)) return true;
+  return false;
+}
+
+function isValidBulletCandidateText(text: string, exactBaselineBullet: boolean) {
+  const normalized = normalizeLine(text);
+  if (!normalized) return false;
+  if (PLACEHOLDER_ONLY_PATTERN.test(normalized)) return false;
+  if (SECTION_HEADING_PATTERN.test(normalized)) return false;
+  if (looksLikeExperienceHeader(normalized)) return false;
+  if (lineLooksLikeHeaderFragment(normalized) && !ACTION_VERB_PATTERN.test(normalized)) {
+    return false;
+  }
+  if (hasFragmentBoundary(normalized, exactBaselineBullet)) return false;
+  return true;
+}
+
 function isPaginationArtifact(value: string) {
   return PAGE_MARKER_PATTERN.test(normalizeLine(value));
+}
+
+function getLineIndent(rawLine: string) {
+  const match = rawLine.match(/^\s*/);
+  return match ? match[0].length : 0;
+}
+
+function startsWithContinuationCue(text: string) {
+  const normalized = normalizeLine(text).toLowerCase();
+  if (!normalized) return false;
+  return (
+    /^[a-z]/.test(normalized) ||
+    /^(?:and|or|but|as\s+well\s+as|well\s+as)\b/.test(normalized)
+  );
+}
+
+function hasTerminalPunctuation(text: string) {
+  return SENTENCE_END_PATTERN.test(normalizeLine(text));
+}
+
+function shouldMergeLogicalContinuation(previous: LogicalTextUnit, current: {
+  text: string;
+  indent: number;
+  explicitBullet: boolean;
+}) {
+  if (!previous.text) return false;
+  if (current.explicitBullet) return false;
+  if (hasTerminalPunctuation(previous.text)) return false;
+  if (/^[A-Z]/.test(current.text) && looksLikeExperienceHeader(current.text)) return false;
+  if (startsWithContinuationCue(current.text)) return true;
+  if (
+    previous.explicitBullet &&
+    previous.indent === current.indent &&
+    !/^[A-Z]/.test(current.text)
+  ) {
+    return true;
+  }
+  if (current.indent > previous.indent) return true;
+  return false;
+}
+
+export function reconstructLogicalTextUnits(content?: string | null): LogicalTextUnit[] {
+  const normalized = (content ?? '').replace(/\r\n/g, '\n');
+  const rawLines = normalized.split('\n');
+  const units: LogicalTextUnit[] = [];
+  let active: LogicalTextUnit | null = null;
+
+  const flush = () => {
+    if (!active) return;
+    const text = normalizeLine(active.text);
+    if (!text || isPaginationArtifact(text)) {
+      active = null;
+      return;
+    }
+    units.push({
+      ...active,
+      text,
+    });
+    active = null;
+  };
+
+  rawLines.forEach((rawLine, lineIndex) => {
+    const trimmed = normalizeLine(rawLine);
+    if (!trimmed || isPaginationArtifact(trimmed)) return;
+    const bulletMatch = trimmed.match(BULLET_LINE_PATTERN);
+    const explicitBullet = Boolean(bulletMatch);
+    const candidateText = normalizeLine(bulletMatch?.[1] ?? trimmed);
+    if (!candidateText) return;
+    const indent = getLineIndent(rawLine);
+
+    if (!active) {
+      active = {
+        text: candidateText,
+        startLine: lineIndex,
+        endLine: lineIndex,
+        indent,
+        explicitBullet,
+        merged: false,
+      };
+      return;
+    }
+
+    if (explicitBullet) {
+      flush();
+      active = {
+        text: candidateText,
+        startLine: lineIndex,
+        endLine: lineIndex,
+        indent,
+        explicitBullet: true,
+        merged: false,
+      };
+      return;
+    }
+
+    if (shouldMergeLogicalContinuation(active, { text: candidateText, indent, explicitBullet })) {
+      active.text = normalizeLine(`${active.text} ${candidateText}`);
+      active.endLine = lineIndex;
+      active.merged = true;
+      return;
+    }
+
+    const startsUppercase = /^[A-Z]/.test(candidateText);
+    if (startsUppercase && hasTerminalPunctuation(active.text)) {
+      flush();
+      active = {
+        text: candidateText,
+        startLine: lineIndex,
+        endLine: lineIndex,
+        indent,
+        explicitBullet: false,
+        merged: false,
+      };
+      return;
+    }
+
+    flush();
+    active = {
+      text: candidateText,
+      startLine: lineIndex,
+      endLine: lineIndex,
+      indent,
+      explicitBullet: false,
+      merged: false,
+    };
+  });
+
+  flush();
+  return units;
 }
 
 function lineLooksLikeHeaderFragment(line: string) {
@@ -283,32 +538,117 @@ function countSignalOverlap(text: string, signals: Set<string>) {
   return overlap;
 }
 
-export function splitSectionContentToBulletTexts(
-  content?: string | null,
-): Array<{ text: string; sourceIndex: number }> {
-  const normalized = (content ?? '').replace(/\r\n/g, '\n');
-  const lines = normalized
-    .split('\n')
-    .map((line) => normalizeLine(line))
-    .filter(Boolean);
+function mapEvidenceUnitsToCandidates(units: ResumeEvidenceUnit[]): ResumeDraftBulletCandidate[] {
+  return units.map((unit) => ({
+    evidenceId: unit.id,
+    text: unit.normalizedText,
+    sourceIndex: unit.sourceSpan.startLine,
+    anchorText: unit.sourceText,
+    anchorKind: unit.anchorKind,
+    exactBaselineBullet: unit.exactBaselineBullet,
+  }));
+}
 
-  const bullets: Array<{ text: string; sourceIndex: number }> = [];
-  lines.forEach((line, index) => {
-    if (isPaginationArtifact(line)) return;
-    const match = line.match(BULLET_LINE_PATTERN);
-    if (!match) return;
-    const text = normalizeLine(match[1] ?? '');
-    if (!text) return;
-    bullets.push({ text, sourceIndex: index });
+export function extractEvidenceUnitsFromLogicalUnits(
+  sectionId: string,
+  units: LogicalTextUnit[],
+): ResumeEvidenceUnit[] {
+  const evidenceUnits: ResumeEvidenceUnit[] = [];
+
+  units.forEach((unit, index) => {
+    const normalizedUnitText = normalizeLine(unit.text);
+    if (!normalizedUnitText) return;
+
+    if (unit.explicitBullet) {
+      const inlinePieces = normalizedUnitText
+        .split(new RegExp(`(?:${BULLET_GLYPH}|${MOJIBAKE_BULLET})`))
+        .map((piece) => normalizeLine(piece))
+        .filter(Boolean);
+      const bulletPieces = inlinePieces.length > 1 ? inlinePieces : [normalizedUnitText];
+      bulletPieces.forEach((piece, pieceIndex) => {
+        if (!isValidBulletCandidateText(piece, true)) return;
+        evidenceUnits.push({
+          id: `${sectionId}:evidence:${index}:${pieceIndex}`,
+          sectionId,
+          sourceText: piece,
+          normalizedText: piece,
+          sourceSpan: {
+            startLine: unit.startLine,
+            endLine: unit.endLine,
+            kind: unit.merged ? 'logical_bullet' : 'bullet_line',
+          },
+          anchorKind: 'bullet_line',
+          exactBaselineBullet: true,
+        });
+      });
+      return;
+    }
+
+    const sentenceSpans = extractSentenceSpans(normalizedUnitText)
+      .map((sentence) => normalizeLine(sentence))
+      .filter((sentence) => isCompleteSentenceSpan(sentence))
+      .filter((sentence) => isValidBulletCandidateText(sentence, false));
+
+    if (sentenceSpans.length) {
+      sentenceSpans.forEach((span, sentenceIndex) => {
+        evidenceUnits.push({
+          id: `${sectionId}:evidence:${index}:${sentenceIndex}`,
+          sectionId,
+          sourceText: span,
+          normalizedText: span,
+          sourceSpan: {
+            startLine: unit.startLine,
+            endLine: unit.endLine,
+            kind: 'sentence',
+          },
+          anchorKind: 'sentence',
+          exactBaselineBullet: false,
+        });
+      });
+      return;
+    }
+
+    const hasDelimiterSignal =
+      normalizedUnitText.includes('|') ||
+      normalizedUnitText.includes(';') ||
+      normalizedUnitText.includes(BULLET_GLYPH) ||
+      normalizedUnitText.includes(MOJIBAKE_BULLET) ||
+      /\s[-/]\s/.test(normalizedUnitText);
+    const hasAchievementSignal =
+      ACTION_VERB_PATTERN.test(normalizedUnitText) ||
+      /\b\d+(?:%|x|k|m|million|billion)?\b/i.test(normalizedUnitText);
+    if (
+      hasDelimiterSignal &&
+      hasAchievementSignal &&
+      countTokens(normalizedUnitText) >= MIN_SENTENCE_TOKENS &&
+      !startsWithContinuationCue(normalizedUnitText) &&
+      isValidBulletCandidateText(normalizedUnitText, true)
+    ) {
+      evidenceUnits.push({
+        id: `${sectionId}:evidence:${index}`,
+        sectionId,
+        sourceText: normalizedUnitText,
+        normalizedText: normalizedUnitText,
+        sourceSpan: {
+          startLine: unit.startLine,
+          endLine: unit.endLine,
+          kind: unit.merged ? 'logical_bullet' : 'bullet_line',
+        },
+        anchorKind: 'bullet_line',
+        exactBaselineBullet: true,
+      });
+    }
   });
 
-  if (!bullets.length) {
-    const text = normalized.trim();
-    if (!text || isPaginationArtifact(text)) return [];
-    return [{ text, sourceIndex: 0 }];
-  }
+  return evidenceUnits;
+}
 
-  return bullets;
+export function splitSectionContentToBulletTexts(
+  content?: string | null,
+): ResumeDraftBulletCandidate[] {
+  const logicalUnits = reconstructLogicalTextUnits(content);
+  const evidenceUnits = extractEvidenceUnitsFromLogicalUnits('section', logicalUnits);
+  return mapEvidenceUnitsToCandidates(evidenceUnits);
 }
 
 function extractSummaryBullets(content?: string | null) {
@@ -351,10 +691,20 @@ function extractSummaryBullets(content?: string | null) {
     return [];
   }
 
-  return [{
-    text: prose.join(' '),
+  const spans = extractSentenceSpans(prose.join(' '))
+    .map((sentence) => normalizeLine(sentence))
+    .filter((sentence) => isCompleteSentenceSpan(sentence))
+    .filter((sentence) => isValidBulletCandidateText(sentence, false));
+
+  if (!spans.length) return [];
+
+  return spans.map((text) => ({
+    text,
     sourceIndex: 0,
-  }];
+    anchorText: text,
+    anchorKind: 'sentence' as const,
+    exactBaselineBullet: false,
+  }));
 }
 
 function extractSkillBullets(content?: string | null) {
@@ -376,13 +726,37 @@ function extractSkillBullets(content?: string | null) {
     .filter((token) => token.length > 1)
     .filter((token) => !isPaginationArtifact(token));
 
-  return tokens.map((text, sourceIndex) => ({ text, sourceIndex }));
+  return tokens.map((text, sourceIndex) => ({
+    text,
+    sourceIndex,
+    anchorText: text,
+    anchorKind: 'bullet_line' as const,
+    exactBaselineBullet: true,
+  }));
+}
+
+function extractEducationBullets(content?: string | null) {
+  const lines = (content ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => normalizeLine(line))
+    .filter(Boolean)
+    .filter((line) => !isPaginationArtifact(line))
+    .filter((line) => !SECTION_HEADING_PATTERN.test(line));
+
+  return lines.map((text, sourceIndex) => ({
+    text,
+    sourceIndex,
+    anchorText: text,
+    anchorKind: 'bullet_line' as const,
+    exactBaselineBullet: true,
+  }));
 }
 
 type ExperienceEntry = {
   entryIndex: number;
   headerLines: string[];
-  bullets: Array<{ text: string; sourceIndex: number }>;
+  bullets: ResumeDraftBulletCandidate[];
 };
 
 function looksLikeExperienceHeader(line: string) {
@@ -398,27 +772,15 @@ function looksLikeExperienceHeader(line: string) {
 }
 
 function isValidExperienceBulletText(text: string) {
-  const normalized = normalizeLine(text);
-  if (!normalized) return false;
-  if (PLACEHOLDER_ONLY_PATTERN.test(normalized)) return false;
-  if (SECTION_HEADING_PATTERN.test(normalized)) return false;
-  if (looksLikeExperienceHeader(normalized)) return false;
-  if (lineLooksLikeHeaderFragment(normalized) && !ACTION_VERB_PATTERN.test(normalized)) {
-    return false;
-  }
-  return true;
+  return isValidBulletCandidateText(text, true);
 }
 
-function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
-  const normalized = (content ?? '').replace(/\r\n/g, '\n');
-  const rawLines = normalized
-    .split('\n')
-    .map((line) => normalizeLine(line))
-    .filter((line) => !isPaginationArtifact(line));
-  const lines = reconstructWrappedExperienceLines(rawLines);
-  if (!lines.some((line) => BULLET_LINE_PATTERN.test(line))) {
-    return [];
-  }
+function parseExperienceEntries(
+  sectionId: string,
+  content?: string | null,
+): ExperienceEntry[] {
+  const logicalUnits = reconstructLogicalTextUnits(content);
+  if (!logicalUnits.length) return [];
 
   const entries: ExperienceEntry[] = [];
   let active: ExperienceEntry = { entryIndex: 0, headerLines: [], bullets: [] };
@@ -439,99 +801,52 @@ function parseExperienceEntries(content?: string | null): ExperienceEntry[] {
     sawHeader = false;
   };
 
-  lines.forEach((line, index) => {
-    const bulletMatch = line.match(BULLET_LINE_PATTERN);
-    if (bulletMatch) {
-      const text = normalizeLine(bulletMatch[1] ?? '');
-      if (text) {
-        const inlinePieces = text
-          .split(new RegExp(`(?:${BULLET_GLYPH}|${MOJIBAKE_BULLET})`))
-          .map((segment) => normalizeLine(segment))
-          .filter((segment) => isValidExperienceBulletText(segment));
+  logicalUnits.forEach((unit, unitIndex) => {
+    const text = normalizeLine(unit.text);
+    if (!text) return;
 
-        if (inlinePieces.length > 1) {
-          inlinePieces.forEach((piece) => {
-            active.bullets.push({ text: piece, sourceIndex: index });
-          });
-        } else if (isValidExperienceBulletText(text)) {
-          active.bullets.push({ text, sourceIndex: index });
-        }
-      }
-      return;
-    }
-
-    if (line.includes(BULLET_GLYPH) || line.includes(MOJIBAKE_BULLET)) {
-      const inlineBullets = line
-        .split(new RegExp(`(?:${BULLET_GLYPH}|${MOJIBAKE_BULLET})`))
-        .map((segment) => normalizeLine(segment))
-        .filter(Boolean);
-      if (inlineBullets.length >= 2) {
-        inlineBullets.slice(1).forEach((text) => {
-          if (isValidExperienceBulletText(text)) {
-            active.bullets.push({ text, sourceIndex: index });
-          }
-        });
-        return;
-      }
-    }
-
-    if (looksLikeExperienceHeader(line)) {
+    if (!unit.explicitBullet && looksLikeExperienceHeader(text)) {
       flushActive();
-      active.headerLines.push(line);
+      active.headerLines.push(text);
       sawHeader = true;
       return;
     }
 
+    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(
+      `${sectionId}:entry:${active.entryIndex}`,
+      [unit],
+    );
+    if (evidenceUnits.length) {
+      evidenceUnits.forEach((evidence) => {
+        if (!isValidExperienceBulletText(evidence.normalizedText)) return;
+        active.bullets.push({
+          evidenceId: evidence.id,
+          text: evidence.normalizedText,
+          sourceIndex: evidence.sourceSpan.startLine ?? unit.startLine ?? unitIndex,
+          anchorText: evidence.sourceText,
+          anchorKind: evidence.anchorKind,
+          exactBaselineBullet: evidence.exactBaselineBullet,
+        });
+      });
+      return;
+    }
+
     if (sawHeader && !active.bullets.length) {
-      // Preserve short role metadata continuation lines (company/date/location).
-      if (line.length <= 140 && !SECTION_HEADING_PATTERN.test(line)) {
-        active.headerLines.push(line);
+      if (text.length <= 140 && !SECTION_HEADING_PATTERN.test(text)) {
+        active.headerLines.push(text);
       }
     }
   });
 
   flushActive();
-
   return entries;
 }
 
-function reconstructWrappedExperienceLines(lines: string[]): string[] {
-  const merged: string[] = [];
-
-  for (const line of lines) {
-    if (!line) continue;
-
-    const previous = merged[merged.length - 1];
-    const previousBulletMatch = previous?.match(BULLET_LINE_PATTERN);
-    const currentIsBullet = BULLET_LINE_PATTERN.test(line);
-    const currentLine = normalizeLine(line);
-
-    const previousBulletText = normalizeLine(previousBulletMatch?.[1] ?? '');
-    const previousEndsWithContinuation = BULLET_CONTINUATION_END_PATTERN.test(
-      previousBulletText,
-    );
-    const shouldMergeContinuation =
-      Boolean(previousBulletText) &&
-      !currentIsBullet &&
-      CONTINUATION_LINE_START_PATTERN.test(currentLine) &&
-      (previousEndsWithContinuation || !SENTENCE_END_PATTERN.test(previousBulletText));
-
-    if (shouldMergeContinuation && previous) {
-      merged[merged.length - 1] = normalizeLine(`${previous} ${currentLine}`);
-      continue;
-    }
-
-    merged.push(currentLine);
-  }
-
-  return merged;
-}
-
 function dedupeExperienceBullets(
-  bullets: Array<{ text: string; sourceIndex: number }>,
-): Array<{ text: string; sourceIndex: number }> {
+  bullets: ResumeDraftBulletCandidate[],
+): ResumeDraftBulletCandidate[] {
   const seen = new Set<string>();
-  const deduped: Array<{ text: string; sourceIndex: number }> = [];
+  const deduped: ResumeDraftBulletCandidate[] = [];
 
   for (const bullet of bullets) {
     const normalized = normalizeLine(bullet.text).toLowerCase();
@@ -673,6 +988,10 @@ export function buildDraftBulletsForSection(
       ? extractSummaryBullets(section.content)
       : sectionType === 'SKILLS'
       ? extractSkillBullets(section.content)
+      : sectionType === 'EDUCATION' ||
+        sectionType === 'CERTIFICATION' ||
+        sectionType === 'CERTIFICATIONS'
+      ? extractEducationBullets(section.content)
       : splitSectionContentToBulletTexts(section.content);
   const strengthSignals = normalizedOptions.gapGuidance?.strengthSignals?.length
     ? new Set(normalizedOptions.gapGuidance.strengthSignals.map((value) => value.toLowerCase()))
@@ -688,7 +1007,7 @@ export function buildDraftBulletsForSection(
   );
 
   const buildBullet = (
-    entry: { text: string; sourceIndex: number },
+    entry: ResumeDraftBulletCandidate,
     stableIndex: number,
     experienceEntryIndex?: number,
   ) => {
@@ -719,6 +1038,10 @@ export function buildDraftBulletsForSection(
         baselineSectionType: section.sectionType,
         baselineSectionOrder: section.order,
         bulletIndex: entry.sourceIndex,
+        sourceEvidenceIds: entry.evidenceId ? [entry.evidenceId] : [],
+        anchorText: entry.anchorText,
+        anchorKind: entry.anchorKind,
+        exactBaselineBullet: entry.exactBaselineBullet,
         ...(typeof experienceEntryIndex === 'number'
           ? { experienceEntryIndex }
           : {}),
@@ -738,7 +1061,7 @@ export function buildDraftBulletsForSection(
   };
 
   if (section.sectionType === 'EXPERIENCE') {
-    const entries = parseExperienceEntries(section.content);
+    const entries = parseExperienceEntries(section.id, section.content);
     if (entries.length) {
       let stableCounter = 0;
       const ordered = entries.flatMap((experienceEntry) => {
@@ -753,13 +1076,13 @@ export function buildDraftBulletsForSection(
         });
         return orderBulletsByRelevance(withScores, shouldRank);
       });
-      return ordered.map(({ relevanceScore, stableIndex, ...bullet }) => bullet);
+      return ordered.map(({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet);
     }
   }
 
   const withScores = parsed.map((entry, index) => buildBullet(entry, index));
   return orderBulletsByRelevance(withScores, shouldRank).map(
-    ({ relevanceScore, stableIndex, ...bullet }) => bullet,
+    ({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet,
   );
 }
 
@@ -773,11 +1096,35 @@ function formatDraftSectionContent(
     .filter((text) => text.length > 0)
     .filter((text) => !PLACEHOLDER_ONLY_PATTERN.test(text));
 
+  const upperType = sectionType.toUpperCase();
   if (!bulletTexts.length) {
+    if (upperType === 'EXPERIENCE') {
+      const rawLines = (fallbackRawContent ?? '')
+        .split(/\r?\n/)
+        .map((line) => normalizeLine(line))
+        .filter(Boolean);
+      const hasBulletLikeSource = rawLines.some(
+        (line) =>
+          BULLET_LINE_PATTERN.test(line) ||
+          line.includes(BULLET_GLYPH) ||
+          line.includes(MOJIBAKE_BULLET),
+      );
+      if (hasBulletLikeSource) {
+        return rawLines
+          .filter((line) => !SECTION_HEADING_PATTERN.test(line))
+          .join('\n')
+          .trim();
+      }
+      if (rawLines.length) {
+        return rawLines
+          .filter((line) => !SECTION_HEADING_PATTERN.test(line))
+          .join('\n')
+          .trim();
+      }
+    }
     return '';
   }
 
-  const upperType = sectionType.toUpperCase();
   if (upperType === 'SUMMARY') {
     return bulletTexts.join('\n\n');
   }
@@ -785,7 +1132,7 @@ function formatDraftSectionContent(
     return bulletTexts.join(', ');
   }
   if (upperType === 'EXPERIENCE') {
-    const entries = parseExperienceEntries(fallbackRawContent);
+    const entries = parseExperienceEntries('experience', fallbackRawContent);
     if (entries.length) {
       const renderedLines: string[] = [];
 
@@ -834,6 +1181,168 @@ function formatDraftSectionContent(
   return [...headerLines, ...bulletLines].join('\n');
 }
 
+function normalizeForAnchorMatch(text: string) {
+  return String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function tokenizeForCompression(text: string): string[] {
+  return normalizeForAnchorMatch(text).match(/[a-z0-9]+/g) ?? [];
+}
+
+function isTokenSubsequence(tokens: string[], within: string[]) {
+  if (!tokens.length) return false;
+  let pointer = 0;
+  for (const token of within) {
+    if (token !== tokens[pointer]) continue;
+    pointer += 1;
+    if (pointer === tokens.length) return true;
+  }
+  return false;
+}
+
+function isCompleteSentenceCompression(sentence: string, candidate: string) {
+  const normalizedSentence = normalizeForAnchorMatch(sentence);
+  const normalizedCandidate = normalizeForAnchorMatch(candidate);
+  if (!normalizedSentence || !normalizedCandidate) return false;
+  if (normalizedSentence === normalizedCandidate) return true;
+  const sentenceTokens = tokenizeForCompression(normalizedSentence);
+  const candidateTokens = tokenizeForCompression(normalizedCandidate);
+  if (candidateTokens.length < MIN_SENTENCE_TOKENS) return false;
+  if (candidateTokens.length > sentenceTokens.length) return false;
+  return isTokenSubsequence(candidateTokens, sentenceTokens);
+}
+
+export function validateResumeDraftBulletAnchors(
+  draftedSections: ResumeDraftSection[],
+  baselineSections: Array<Pick<BaselineSection, 'id' | 'content'>>,
+): { valid: boolean; reasons: string[] } {
+  const baselineEvidenceById = new Map<string, ResumeEvidenceUnit>();
+  baselineSections.forEach((section) => {
+    const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
+    const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+    evidenceUnits.forEach((evidence) => {
+      baselineEvidenceById.set(evidence.id, evidence);
+    });
+    const parsedEntries = parseExperienceEntries(section.id, section.content ?? '');
+    parsedEntries.forEach((entry) => {
+      entry.bullets.forEach((bullet) => {
+        if (!bullet.evidenceId) return;
+        baselineEvidenceById.set(bullet.evidenceId, {
+          id: bullet.evidenceId,
+          sectionId: section.id,
+          sourceText: bullet.anchorText,
+          normalizedText: bullet.text,
+          sourceSpan: {
+            startLine: bullet.sourceIndex,
+            endLine: bullet.sourceIndex,
+            kind: bullet.anchorKind === 'sentence' ? 'sentence' : 'bullet_line',
+          },
+          anchorKind: bullet.anchorKind,
+          exactBaselineBullet: bullet.exactBaselineBullet,
+        });
+      });
+    });
+  });
+  const baselineContentBySectionId = new Map(
+    baselineSections.map((section) => [
+      section.id,
+      normalizeForAnchorMatch(section.content ?? ''),
+    ]),
+  );
+  const reasons: string[] = [];
+
+  draftedSections.forEach((section) => {
+    if (String(section.type ?? '').toUpperCase() !== 'EXPERIENCE') {
+      return;
+    }
+    section.bullets.forEach((bullet) => {
+      if (String(bullet.source.baselineSectionType ?? '').toUpperCase() !== 'EXPERIENCE') {
+        return;
+      }
+      const sourceSectionId = bullet.source.baselineSectionId;
+      const baselineContent = baselineContentBySectionId.get(sourceSectionId) ?? '';
+      const anchorText = normalizeForAnchorMatch(
+        bullet.source.anchorText ?? bullet.text,
+      );
+      const sourceEvidenceIds = bullet.source.sourceEvidenceIds ?? [];
+      const exactBaselineBullet = Boolean(bullet.source.exactBaselineBullet);
+
+      if (!anchorText) {
+        reasons.push(
+          `Bullet "${bullet.text}" is missing baseline anchor text for section ${sourceSectionId}.`,
+        );
+        return;
+      }
+
+      if (hasFragmentBoundary(bullet.text, exactBaselineBullet)) {
+        reasons.push(`Bullet "${bullet.text}" looks like a sentence fragment.`);
+        return;
+      }
+
+      if (!sourceEvidenceIds.length) {
+        reasons.push(`Bullet "${bullet.text}" is missing sourceEvidenceIds.`);
+        return;
+      }
+
+      const matchedEvidence = sourceEvidenceIds
+        .map((evidenceId) => baselineEvidenceById.get(evidenceId))
+        .filter((evidence): evidence is ResumeEvidenceUnit => Boolean(evidence))
+        .filter((evidence) => evidence.sectionId === sourceSectionId);
+
+      if (!matchedEvidence.length) {
+        reasons.push(
+          `Bullet "${bullet.text}" references evidence ids that are not present in baseline section ${sourceSectionId}.`,
+        );
+        return;
+      }
+
+      if (bullet.source.anchorKind === 'sentence') {
+        if (!isCompleteSentenceSpan(bullet.text)) {
+          reasons.push(`Bullet "${bullet.text}" is not a complete sentence span.`);
+          return;
+        }
+        const hasSentenceMatch = matchedEvidence.some((evidence) =>
+          evidence.anchorKind === 'sentence' &&
+          isCompleteSentenceCompression(evidence.normalizedText, bullet.text),
+        );
+        if (!hasSentenceMatch) {
+          reasons.push(
+            `Bullet "${bullet.text}" is not equal to or a compression of a full baseline sentence span in section ${sourceSectionId}.`,
+          );
+          return;
+        }
+      }
+
+      const hasEvidenceMatch = matchedEvidence.some((evidence) =>
+        exactBaselineBullet
+          ? normalizeForAnchorMatch(evidence.normalizedText) === normalizeForAnchorMatch(bullet.text)
+          : isCompleteSentenceCompression(evidence.normalizedText, bullet.text),
+      );
+      if (!hasEvidenceMatch) {
+        reasons.push(
+          `Bullet "${bullet.text}" is not equal to or a compression of referenced evidence units.`,
+        );
+        return;
+      }
+
+      if (!baselineContent || !baselineContent.includes(anchorText)) {
+        reasons.push(
+          `Bullet "${bullet.text}" does not map to baseline sentence spans for section ${sourceSectionId}.`,
+        );
+      }
+    });
+  });
+
+  const dedupedReasons = Array.from(new Set(reasons));
+  return {
+    valid: dedupedReasons.length === 0,
+    reasons: dedupedReasons.slice(0, 8),
+  };
+}
+
 export function buildResumeDraftSections(
   sections: BaselineSection[],
   options?: {
@@ -871,5 +1380,13 @@ export function buildResumeDraftSections(
       rawContent: section.content ?? '',
     };
     })
-    .filter((section) => section.bullets.length > 0 && section.content.length > 0);
+    .filter((section) => {
+      if (section.content.length === 0) {
+        return false;
+      }
+      if (section.bullets.length > 0) {
+        return true;
+      }
+      return String(section.type ?? '').toUpperCase() === 'EXPERIENCE';
+    });
 }

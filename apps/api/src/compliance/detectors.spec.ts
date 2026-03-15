@@ -1,5 +1,10 @@
-import { DocumentType } from './compliance.types';
-import { detectInventedCompany, detectInventedRole } from './detectors';
+import { DocumentType, GeneratedTextSourceType } from './compliance.types';
+import {
+  detectFictionalTechnology,
+  detectInventedCompany,
+  detectInventedMetric,
+  detectInventedRole,
+} from './detectors';
 
 const roleJobContext = {
   allowedRoleTitles: ['Head of Customer Services'],
@@ -11,6 +16,72 @@ const companyJobContext = {
 
 describe('compliance detectors job context allowlist cover letters', () => {
   describe('invented_role', () => {
+    it('does not flag JD role references when sentence source type is JD_REFERENCE', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content:
+              'Your posting for a Senior Network Infrastructure Engineer requires deep systems expertise.',
+            sentenceSources: [
+              {
+                text: 'Your posting for a Senior Network Infrastructure Engineer requires deep systems expertise.',
+                sourceType: GeneratedTextSourceType.JD_REFERENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.COVER_LETTER,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('flags invented role claims when sentence source type is BASELINE_EVIDENCE', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content:
+              'I served as a Senior Network Infrastructure Engineer leading distributed operations.',
+            sentenceSources: [
+              {
+                text: 'I served as a Senior Network Infrastructure Engineer leading distributed operations.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags.length).toBeGreaterThan(0);
+    });
+
+    it('does not evaluate connective language spans as role claims', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content:
+              'I am excited to contribute and would welcome the opportunity to speak.',
+            sentenceSources: [
+              {
+                text: 'I am excited to contribute and would welcome the opportunity to speak.',
+                sourceType: GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.COVER_LETTER,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
     it('suppresses invented_role for cover letter opening text with application language', () => {
       const flags = detectInventedRole({
         generatedSections: [
@@ -28,13 +99,19 @@ describe('compliance detectors job context allowlist cover letters', () => {
       expect(flags).toHaveLength(0);
     });
 
-    it('still blocks when the same title appears outside application language in a cover letter', () => {
+    it('skips non-assertive title mentions outside application language in a cover letter', () => {
       const flags = detectInventedRole({
         generatedSections: [
           {
             title: 'Cover Letter',
             content:
-              'As the Head of Customer Services, the candidate will manage teams across regions.',
+              'As the Chief Innovation Strategist, the candidate will manage teams across regions.',
+            sentenceSources: [
+              {
+                text: 'As the Chief Innovation Strategist, the candidate will manage teams across regions.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
           },
         ],
         baselineSections: [],
@@ -42,16 +119,22 @@ describe('compliance detectors job context allowlist cover letters', () => {
         documentType: DocumentType.COVER_LETTER,
       });
 
-      expect(flags.length).toBeGreaterThan(0);
+      expect(flags).toHaveLength(0);
     });
 
-    it('continues to flag the fragment when the document type is not cover letter', () => {
+    it('does not flag non-assertive role phrases even in resume context', () => {
       const flags = detectInventedRole({
         generatedSections: [
           {
             title: 'Resume',
             content:
-              'Dear Hiring Team, I am applying for the Head of Customer Services role.',
+              'Senior Network Infrastructure Engineer workflows',
+            sentenceSources: [
+              {
+                text: 'Senior Network Infrastructure Engineer workflows',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
           },
         ],
         baselineSections: [],
@@ -59,11 +142,355 @@ describe('compliance detectors job context allowlist cover letters', () => {
         documentType: DocumentType.RESUME,
       });
 
+      expect(flags).toHaveLength(0);
+    });
+
+    it('passes activity-fragment text and does not treat it as role assertion', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Collaborated closely with multiple partners',
+            sentenceSources: [
+              {
+                text: 'Collaborated closely with multiple partners',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('passes short fragment phrases like Code methods', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Code methods',
+            sentenceSources: [
+              {
+                text: 'Code methods',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('passes non-assertive lab engineer phrase', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Lab Engineer',
+            sentenceSources: [
+              {
+                text: 'Lab Engineer',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('ignores idiomatic role-like phrases such as point person', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'point person',
+            sentenceSources: [
+              {
+                text: 'point person',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag dangling asserted fragments like Senior Lead IT Engineer on the', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'I served as Senior Lead IT Engineer on the',
+            sentenceSources: [
+              {
+                text: 'I served as Senior Lead IT Engineer on the',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag capability phrase fragments', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'leadership scope and incident management programs',
+            sentenceSources: [
+              {
+                text: 'leadership scope and incident management programs',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag recommendation language', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Recommended for this role',
+            sentenceSources: [
+              {
+                text: 'Recommended for this role',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag focus explanation text', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content:
+              'This focus emphasizes leadership scope and incident management programs because those signals best support this role.',
+            sentenceSources: [
+              {
+                text: 'This focus emphasizes leadership scope and incident management programs because those signals best support this role.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag technical-depth connective text', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content:
+              'technical depth highlights systems, platforms, and implementation depth',
+            sentenceSources: [
+              {
+                text: 'technical depth highlights systems, platforms, and implementation depth',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('flags unsupported explicit assertion Served as Vice President of Global Support', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Served as Vice President of Global Support',
+            sentenceSources: [
+              {
+                text: 'Served as Vice President of Global Support',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
       expect(flags.length).toBeGreaterThan(0);
+    });
+
+    it('flags unsupported explicit assertion Worked as Chief Customer Officer', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'Worked as Chief Customer Officer',
+            sentenceSources: [
+              {
+                text: 'Worked as Chief Customer Officer',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags.length).toBeGreaterThan(0);
+    });
+
+    it('does not flag supported explicit baseline role assertion', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'I was a Support Operations Manager',
+            sentenceSources: [
+              {
+                text: 'I was a Support Operations Manager',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            sectionType: 'EXPERIENCE',
+            content: 'Support Operations Manager | Acme | 2020 - 2024',
+          },
+        ],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
     });
   });
 
   describe('invented_company', () => {
+    it('skips invented-company detection for connective-language fragments', () => {
+      const flags = detectInventedCompany({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content: 'All Windows test resources both client and server',
+            sentenceSources: [
+              {
+                text: 'All Windows test resources both client and server',
+                sourceType: GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.COVER_LETTER,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not flag fragments as invented companies', () => {
+      const flags = detectInventedCompany({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'All Windows test resources both client and server',
+            sentenceSources: [
+              {
+                text: 'All Windows test resources both client and server',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('still blocks fabricated company references', () => {
+      const flags = detectInventedCompany({
+        generatedSections: [
+          {
+            title: 'Resume',
+            content: 'I partnered with Contoso Systems International to deliver migration plans.',
+            sentenceSources: [
+              {
+                text: 'I partnered with Contoso Systems International to deliver migration plans.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags.length).toBeGreaterThan(0);
+    });
+
+    it('skips detection when sourceType is missing', () => {
+      const flags = detectInventedRole({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content:
+              'I served as a Senior Network Infrastructure Engineer leading distributed operations.',
+            sentenceSources: [
+              {
+                text: 'I served as a Senior Network Infrastructure Engineer leading distributed operations.',
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.COVER_LETTER,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
     it('suppresses invented_company inside the cover letter application window', () => {
       const flags = detectInventedCompany({
         generatedSections: [
@@ -209,6 +636,48 @@ describe('compliance detectors job context allowlist cover letters', () => {
       expect(flags).toHaveLength(0);
     });
   });
+
+  describe('source-aware metric and technology checks', () => {
+    it('does not evaluate CONNECTIVE_LANGUAGE for invented metrics', () => {
+      const flags = detectInventedMetric({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content: 'I am excited to improve outcomes by 25% in this role.',
+            sentenceSources: [
+              {
+                text: 'I am excited to improve outcomes by 25% in this role.',
+                sourceType: GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not evaluate CONNECTIVE_LANGUAGE for fictional technology', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Cover Letter',
+            content: 'I am excited to learn NebulaGridX this quarter.',
+            sentenceSources: [
+              {
+                text: 'I am excited to learn NebulaGridX this quarter.',
+                sourceType: GeneratedTextSourceType.CONNECTIVE_LANGUAGE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+  });
 });
 
 describe('cover letter job context allowlist', () => {
@@ -265,12 +734,18 @@ describe('cover letter job context allowlist', () => {
     expect(flags).toHaveLength(0);
   });
 
-  it('still flags when document type differs even with jobContext', () => {
+  it('skips non-assertive role phrasing when document type differs even with jobContext', () => {
     const flags = detectInventedRole({
       generatedSections: [
         {
           title: 'Resume',
           content: 'Supports the Head of Customer Services and builds discipline.',
+          sentenceSources: [
+            {
+              text: 'Supports the Head of Customer Services and builds discipline.',
+              sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+            },
+          ],
         },
       ],
       baselineSections: [],
@@ -278,6 +753,6 @@ describe('cover letter job context allowlist', () => {
       documentType: DocumentType.RESUME,
     });
 
-    expect(flags.length).toBeGreaterThan(0);
+    expect(flags).toHaveLength(0);
   });
 });

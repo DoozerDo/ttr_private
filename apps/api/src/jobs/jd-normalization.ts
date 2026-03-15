@@ -24,6 +24,21 @@ const MIN_ITEM_LENGTH = 3;
 const MAX_ITEMS = 40;
 
 const sentenceSplitRegex = /(?<=[.!?])\s+/;
+const LEGAL_OR_APPLICATION_BOILERPLATE_PATTERNS = [
+  /\bequal opportunity employer\b/i,
+  /\ball qualified applicants\b/i,
+  /\bwithout regard to\b/i,
+  /\bprotected (?:class|characteristic)\b/i,
+  /\breasonable accommodation\b/i,
+  /\baccommodation (?:during|throughout) the application\b/i,
+  /\bif you require an accommodation\b/i,
+  /\bapplication process\b/i,
+  /\bconsideration for employment\b/i,
+  /\bbackground check\b/i,
+  /\be-?verify\b/i,
+  /\bdrug screening\b/i,
+  /\bwork authorization\b/i,
+];
 
 const normalizeHeadingText = (line: string) =>
   line.toLowerCase().replace(/[:*]+/g, '').replace(/\s+/g, ' ').trim();
@@ -36,8 +51,9 @@ const isHeading = (line: string, headings: string[]) => {
   return headings.some(
     (heading) =>
       normalized === heading ||
-      normalized.startsWith(`${heading} `) ||
-      normalized.includes(heading),
+      normalized === `${heading}:` ||
+      normalized.startsWith(`${heading}:`) ||
+      normalized.startsWith(`${heading} -`),
   );
 };
 
@@ -58,6 +74,13 @@ export const sanitizeListItems = (items: string[]) => {
   for (const item of items) {
     const trimmed = item.trim();
     if (!trimmed || trimmed.length < MIN_ITEM_LENGTH) {
+      continue;
+    }
+    if (
+      LEGAL_OR_APPLICATION_BOILERPLATE_PATTERNS.some((pattern) =>
+        pattern.test(trimmed),
+      )
+    ) {
       continue;
     }
     if (seen.has(trimmed)) {
@@ -129,9 +152,7 @@ export const normalizeJobDescription = (rawDescription: string) => {
       .map(({ line, index }) => ({ item: stripBullet(line), index }));
 
     const requirementKeywordIndex = lines.findIndex((line) =>
-      REQUIREMENT_HEADINGS.some((heading) =>
-        normalizeHeadingText(line).includes(heading),
-      ),
+      isHeading(line, REQUIREMENT_HEADINGS),
     );
 
     if (bulletItems.length > 0) {

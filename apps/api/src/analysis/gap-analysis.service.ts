@@ -97,6 +97,24 @@ const GENERIC_COMPANY_BOILERPLATE_PATTERNS = [
   /\b(?:multi|cross)-region footprint\b/i,
   /\bdistributed across (?:countries|regions|continents)\b/i,
 ];
+const LEGAL_OR_APPLICATION_BOILERPLATE_PATTERNS = [
+  /\bequal opportunity employer\b/i,
+  /\ball qualified applicants\b/i,
+  /\bwithout regard to\b/i,
+  /\bprotected (?:class|characteristic)\b/i,
+  /\brace|religion|sex|gender identity|sexual orientation|national origin|veteran status|disability\b/i,
+  /\breasonable accommodation\b/i,
+  /\baccommodation (?:during|throughout) the application\b/i,
+  /\bif you require an accommodation\b/i,
+  /\bapplication process\b/i,
+  /\bconsideration for employment\b/i,
+  /\bwe are committed to (?:equal opportunity|diversity|inclusion)\b/i,
+  /\be-?verify\b/i,
+  /\bbackground check\b/i,
+  /\bdrug screening\b/i,
+  /\bwork authorization\b/i,
+  /\bapply (?:today|now)\b/i,
+];
 const MAX_EVIDENCE_LENGTH = 180;
 
 @Injectable()
@@ -216,6 +234,7 @@ export class GapAnalysisService {
       const text = this.clean(entry);
       if (!text) continue;
       if (this.isCompensationText(text)) continue;
+      if (this.isLegalOrApplicationBoilerplate(text)) continue;
       raw.push({ text, source: 'requirement' });
     }
 
@@ -223,6 +242,7 @@ export class GapAnalysisService {
       const text = this.clean(entry);
       if (!text) continue;
       if (this.isCompensationText(text)) continue;
+      if (this.isLegalOrApplicationBoilerplate(text)) continue;
       raw.push({ text, source: 'responsibility' });
     }
 
@@ -445,6 +465,14 @@ export class GapAnalysisService {
     const text = this.clean(value);
     if (!text) return false;
     return GENERIC_COMPANY_BOILERPLATE_PATTERNS.some((pattern) =>
+      pattern.test(text),
+    );
+  }
+
+  private isLegalOrApplicationBoilerplate(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return false;
+    return LEGAL_OR_APPLICATION_BOILERPLATE_PATTERNS.some((pattern) =>
       pattern.test(text),
     );
   }

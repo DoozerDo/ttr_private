@@ -68,4 +68,20 @@ Requirements
 
     expect(result.requirements).toEqual(['Strong communication']);
   });
+
+  it('filters legal and accommodation boilerplate from normalized requirements', () => {
+    const text = `
+Requirements
+- 5+ years building support operations
+- We are an equal opportunity employer and consider all qualified applicants
+- If you require reasonable accommodation during the application process, contact recruiting
+`;
+
+    const result = normalizeJobDescription(text);
+
+    expect(result.requirements).toContain('5+ years building support operations');
+    expect(result.requirements.join(' ').toLowerCase()).not.toContain('equal opportunity');
+    expect(result.requirements.join(' ').toLowerCase()).not.toContain('reasonable accommodation');
+    expect(result.requirements.join(' ').toLowerCase()).not.toContain('application process');
+  });
 });

@@ -438,6 +438,9 @@ export default function StudioPage() {
     canExportDocuments &&
     resumePresenter.status === "success" &&
     hasResumeArtifact;
+  const showResumeDownloadActions =
+    resumePresenter.status === "blocked" ||
+    (resumePresenter.status === "success" && hasResumeArtifact);
   const isResumeDownloadLocked = !isPro;
   const resumePreviewText = useMemo(() => formatPreview(resumeState.response), [resumeState.response]);
   const coverLetterParagraphs = useMemo(
@@ -454,6 +457,10 @@ export default function StudioPage() {
     coverPresenter.status === "success" &&
     hasCoverLetterArtifact &&
     !coverLetterComplianceBlocked;
+  const showCoverDownloadActions =
+    Boolean(coverLetterComplianceBlocked) ||
+    coverPresenter.status === "blocked" ||
+    (coverPresenter.status === "success" && hasCoverLetterArtifact);
   const positioningNarrative = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return analysis.summary.trim();
@@ -1175,27 +1182,33 @@ export default function StudioPage() {
             <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
               {resumeGenerating ? "Generating..." : "Generate Resume"}
             </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportResume("docx")}
-              disabled={
-                isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"
-              }
-            >
-              {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportResume("pdf")}
-              disabled={
-                isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"
-              }
-            >
-              {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-            </FormButton>
+            {showResumeDownloadActions ? (
+              <>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportResume("docx")}
+                  disabled={
+                    isResumeDownloadLocked || !canExportResume || resumeExportFormat === "docx"
+                  }
+                >
+                  {resumeExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+                </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportResume("pdf")}
+                  disabled={
+                    isResumeDownloadLocked || !canExportResume || resumeExportFormat === "pdf"
+                  }
+                >
+                  {resumeExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+                </FormButton>
+              </>
+            ) : null}
           </div>
         </div>
-        <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
+        {showResumeDownloadActions ? (
+          <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
+        ) : null}
 
         {generationMessage ? (
           <Alert intent="warning" title="Prerequisites missing">
@@ -1217,6 +1230,17 @@ export default function StudioPage() {
           <Alert intent="error" title="Resume unavailable">
             {resumeState.error}
           </Alert>
+        ) : null}
+
+        {resumePresenter.display && resumePresenter.status !== "blocked" ? (
+          <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <p className="text-sm font-semibold text-slate-100">{resumePresenter.display.title}</p>
+            <p className="text-sm text-slate-300">{resumePresenter.display.description}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Next step</p>
+            <p className="text-sm text-slate-200">
+              {resumePresenter.display.reasons[0] ?? "Review flagged items in Results and adjust baseline evidence."}
+            </p>
+          </div>
         ) : null}
 
         {isResumeDownloadLocked ? (
@@ -1312,23 +1336,29 @@ export default function StudioPage() {
             <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
               {coverGenerating ? "Generating..." : "Generate Cover Letter"}
             </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportCoverLetter("docx")}
-              disabled={!canExportCover || coverExportFormat === "docx"}
-            >
-              {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
-            </FormButton>
-            <FormButton
-              variant="secondary"
-              onClick={() => void exportCoverLetter("pdf")}
-              disabled={!canExportCover || coverExportFormat === "pdf"}
-            >
-              {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
-            </FormButton>
+            {showCoverDownloadActions ? (
+              <>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportCoverLetter("docx")}
+                  disabled={!canExportCover || coverExportFormat === "docx"}
+                >
+                  {coverExportFormat === "docx" ? "Downloading..." : "Download DOCX"}
+                </FormButton>
+                <FormButton
+                  variant="secondary"
+                  onClick={() => void exportCoverLetter("pdf")}
+                  disabled={!canExportCover || coverExportFormat === "pdf"}
+                >
+                  {coverExportFormat === "pdf" ? "Downloading..." : "Download PDF"}
+                </FormButton>
+              </>
+            ) : null}
           </div>
         </div>
-        <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
+        {showCoverDownloadActions ? (
+          <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
+        ) : null}
 
         {generationMessage ? (
           <Alert intent="warning" title="Prerequisites missing">
@@ -1388,6 +1418,34 @@ export default function StudioPage() {
           <Alert intent="error" title="Cover letter unavailable">
             {coverState.error}
           </Alert>
+        ) : null}
+
+        {coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
+          <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <p className="text-sm font-semibold text-slate-100">{coverPresenter.display.title}</p>
+            <p className="text-sm text-slate-300">{coverPresenter.display.description}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Next step</p>
+            <p className="text-sm text-slate-200">
+              {coverPresenter.display.reasons[0] ?? "Review the generated draft and download DOCX or PDF."}
+            </p>
+          </div>
+        ) : null}
+
+        {!coverLetterComplianceBlocked && coverPresenter.status === "blocked" ? (
+          <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4">
+            <p className="text-sm font-semibold text-amber-100">
+              {coverPresenter.display?.title ?? "Cover letter blocked by compliance"}
+            </p>
+            <p className="text-sm text-slate-200">
+              {coverPresenter.display?.description ??
+                "Some generated statements could not be verified against your baseline."}
+            </p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">Next step</p>
+            <p className="text-sm text-slate-200">
+              {coverPresenter.display?.reasons?.[0] ??
+                "Review flagged items in Results and adjust baseline evidence."}
+            </p>
+          </div>
         ) : null}
 
         {!isPro ? (

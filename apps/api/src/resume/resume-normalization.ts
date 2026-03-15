@@ -16,9 +16,9 @@ import type {
   NormalizedResumeExperienceEntry,
 } from '../documents/normalized-document.models';
 
-const BULLET_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*\-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
+const BULLET_PATTERN = /^\s*(?:[\u2022\u25CF\u25E6*-]|(?:\(?\d{1,3}\)?[.)]))\s+/;
 const PAGE_MARKER_PATTERN =
-  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|page\s+\d+\s+\d+|\d+\s*[\/|]\s*\d+|\d+\s+\d+|p\.?\s*\d+|\d{1,2})$/i;
+  /^(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|page\s+\d+\s+\d+|\d+\s*[/|]\s*\d+|\d+\s+\d+|p\.?\s*\d+|\d{1,2})$/i;
 const PAGE_TOKEN_PATTERN =
   /\b(?:page\s*\d+(?:\s*(?:of|\/)\s*\d+)?|page\s+\d+\s+\d+|p\.?\s*\d+)\b/gi;
 const DATE_RANGE_PATTERN = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*[-\u2013\u2014]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}|present)\b|\b\d{4}\s*[-\u2013\u2014]\s*(?:\d{4}|present)\b)/i;
@@ -129,7 +129,14 @@ function isDiscardableCompanyToken(value: string): boolean {
   if (FRAGMENT_TOKEN_REJECT_PATTERN.test(normalized)) return true;
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length === 1 && normalized.length <= 3) return true;
-  if (words.length === 1 && /^[a-z]+$/.test(normalized)) return true;
+  if (
+    words.length === 1 &&
+    /^(?:experience|summary|profile|role|title|company|skills|education)$/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 
