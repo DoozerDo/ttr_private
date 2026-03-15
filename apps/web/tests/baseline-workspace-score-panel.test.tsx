@@ -29,7 +29,7 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
 }
 
 describe("BaselineWorkspace live score panel", () => {
-  it("renders the redesigned score panel on the active Baseline page path", async () => {
+  function stubWindowState() {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
@@ -41,9 +41,11 @@ describe("BaselineWorkspace live score panel", () => {
     });
 
     overrideSearchParams({ baselineId: "base-1", jobId: "job-1" });
+  }
 
+  function blockAutoRunTimer() {
     const originalSetTimeout = window.setTimeout.bind(window);
-    const setTimeoutSpy = vi
+    return vi
       .spyOn(window, "setTimeout")
       .mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
         if (timeout === 320) {
@@ -52,6 +54,11 @@ describe("BaselineWorkspace live score panel", () => {
 
         return originalSetTimeout(handler, timeout, ...(args as []));
       }) as typeof window.setTimeout);
+  }
+
+  it("renders the redesigned score panel on the active Baseline page path", async () => {
+    stubWindowState();
+    const setTimeoutSpy = blockAutoRunTimer();
 
     try {
       setFetchImplementation(
@@ -148,6 +155,80 @@ describe("BaselineWorkspace live score panel", () => {
       expect(screen.queryByText("Why this score?")).toBeNull();
       expect(screen.queryByText("Evidence from your background")).toBeNull();
       expect(screen.queryByText("Tooling and Platform Experience")).toBeNull();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("shows a fallback strength when the score is high and explicit strengths are empty", async () => {
+    stubWindowState();
+    const setTimeoutSpy = blockAutoRunTimer();
+
+    try {
+      setFetchImplementation(
+        vi.fn((input: RequestInfo) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : "url" in input
+                  ? input.url
+                  : String(input);
+
+          if (url.includes("/api/analysis/") && url.includes("/latest")) {
+            return Promise.resolve(
+              createResponse({
+                assessmentId: "assessment-2",
+                baselineId: "base-1",
+                jobId: "job-1",
+                score: 82,
+                strengths: [],
+                criticalGaps: [
+                  {
+                    title: "Experience with embedded Rust and RTOS toolchains",
+                    requirementEvidence: "Embedded Rust and RTOS toolchains",
+                    baselineEvidence: "Partnered with engineering teams to operate complex systems.",
+                    severityScore: 0.42,
+                  },
+                ],
+              }),
+            );
+          }
+
+          if (url.includes("/api/analysis/run")) {
+            return Promise.resolve(createResponse({}));
+          }
+
+          return Promise.resolve(createResponse({}));
+        }),
+      );
+
+      render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Strong Match")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("Why this role fits you")).toBeInTheDocument();
+      expect(
+        screen.getByText(/Partnered with engineering teams to operate complex systems\./i),
+      ).toBeInTheDocument();
     } finally {
       setTimeoutSpy.mockRestore();
     }

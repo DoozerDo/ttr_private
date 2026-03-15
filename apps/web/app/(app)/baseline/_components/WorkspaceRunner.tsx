@@ -245,6 +245,7 @@ function extractFallbackEvidence(value: FitResultPayload | null): string[] {
 type CriticalGapSignal = {
   title: string;
   requirementEvidence?: string | null;
+  baselineEvidence?: string | null;
   severityScore?: number | null;
 };
 
@@ -261,16 +262,34 @@ function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[
       (gap): gap is {
         title: string;
         requirementEvidence?: string | null;
+        baselineEvidence?: string | null;
         severityScore?: number | null;
       } => Boolean(gap) && typeof (gap as { title?: unknown }).title === "string",
     )
     .map((gap) => ({
       title: gap.title.trim(),
       requirementEvidence: gap.requirementEvidence,
+      baselineEvidence: gap.baselineEvidence,
       severityScore: gap.severityScore,
     }))
     .filter((gap) => gap.title.length > 0)
     .slice(0, 3);
+}
+
+function extractStrengthFallbackFromGaps(
+  gaps: CriticalGapSignal[],
+  score: number | null,
+): string[] {
+  if (typeof score !== "number" || score < 75) return [];
+
+  return gaps
+    .filter((gap): gap is CriticalGapSignal & { baselineEvidence: string } =>
+      typeof gap.baselineEvidence === "string" && gap.baselineEvidence.trim().length > 0,
+    )
+    .sort((a, b) => (a.severityScore ?? 1) - (b.severityScore ?? 1))
+    .map((gap) => normalizeDiagnosticLine(gap.baselineEvidence))
+    .filter(Boolean)
+    .slice(0, 1);
 }
 
 function resolveGapSeverityLabel(severityScore?: number | null): string {
@@ -532,6 +551,9 @@ export function WorkspaceRunner({
     .filter(Boolean)
     .slice(0, 3);
   const gapSignals = extractCriticalGaps(displayResult);
+  const strengthFallbackSignals = extractStrengthFallbackFromGaps(gapSignals, score);
+  const visibleStrengthSignals =
+    strengthSignals.length > 0 ? strengthSignals : strengthFallbackSignals;
   const competitiveContext = getCompetitiveContext(score);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
@@ -935,11 +957,11 @@ export function WorkspaceRunner({
                 <p className="mt-3 text-sm text-slate-300">{competitiveContext}</p>
               ) : null}
             </div>
-            {strengthSignals.length ? (
+            {visibleStrengthSignals.length ? (
               <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
                 <h3 className="text-base font-semibold text-white">Why this role fits you</h3>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                  {strengthSignals.map((line) => (
+                  {visibleStrengthSignals.map((line) => (
                     <li key={line}>&bull; {line}</li>
                   ))}
                 </ul>

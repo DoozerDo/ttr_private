@@ -278,7 +278,22 @@ describe('GapAnalysisService', () => {
       jobResponsibilities: [],
     });
 
-    expect(result.criticalGaps[0]?.title).toBe('Proficient in embedded Rust RTOS SDK environments');
+    expect(result.criticalGaps[0]?.title).toBe('Experience with embedded Rust RTOS SDK environments');
+  });
+
+  it('removes generic section-header nouns from gap candidates', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and workflow design.' }],
+      jobRequirements: ['Qualifications', 'Skills', 'Requirements', 'Candidate'],
+      jobResponsibilities: ['Embedded systems development experience.'],
+    });
+
+    const gapTitles = result.criticalGaps.map((gap) => gap.title.toLowerCase());
+    expect(gapTitles).not.toContain('qualifications');
+    expect(gapTitles).not.toContain('skills');
+    expect(gapTitles).not.toContain('requirements');
+    expect(gapTitles).not.toContain('candidate');
+    expect(gapTitles.some((title) => title.includes('embedded systems development'))).toBe(true);
   });
 });
 

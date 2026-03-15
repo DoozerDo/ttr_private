@@ -149,6 +149,12 @@ const BASELINE_BUZZWORD_PATTERNS = [
 const REQUIREMENT_FRAGMENT_PATTERNS = [
   /^(?:or\s+)?equivalent experience\.?$/i,
   /^proficient\.?$/i,
+  /^qualifications\.?$/i,
+  /^skills\.?$/i,
+  /^requirements\.?$/i,
+  /^experience\.?$/i,
+  /^abilities\.?$/i,
+  /^candidate\.?$/i,
   /^preferred\.?$/i,
   /^required\.?$/i,
   /^strong ability\.?$/i,
@@ -177,6 +183,12 @@ const STRUCTURAL_REQUIREMENT_NOISE_PATTERNS = [
   /\bwill be open for\b/i,
   /\bresponsibilities?\s+include\b/i,
   /\bjob summary\b/i,
+  /^\s*qualifications\s*:?\s*$/i,
+  /^\s*skills\s*:?\s*$/i,
+  /^\s*requirements\s*:?\s*$/i,
+  /^\s*experience\s*:?\s*$/i,
+  /^\s*abilities\s*:?\s*$/i,
+  /^\s*candidate\s*:?\s*$/i,
 ];
 const ACRONYM_WORDS = new Set([
   'api',
@@ -550,6 +562,10 @@ export class GapAnalysisService {
   private extractRequirementSignal(text: string): string {
     const compact = this.clean(text);
     if (!compact) return '';
+    const proficiencyMatch = compact.match(/^proficien(?:t|cy)\s+in\s+(.+)$/i);
+    if (proficiencyMatch?.[1]) {
+      return this.toSentenceCasePreservingAcronyms(`experience with ${proficiencyMatch[1]}`);
+    }
 
     const normalized = compact
       .replace(/^[•\-]\s*/, '')
@@ -673,6 +689,11 @@ export class GapAnalysisService {
       'and/or',
       'equivalent',
       'experience',
+      'qualifications',
+      'skills',
+      'requirements',
+      'abilities',
+      'candidate',
       'proficient',
       'preferred',
       'required',
