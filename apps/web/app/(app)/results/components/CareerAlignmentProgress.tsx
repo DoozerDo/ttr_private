@@ -40,7 +40,15 @@ const EMPTY_HISTORY: AlignmentHistoryResponse = {
   badges: [],
 };
 
-export function CareerAlignmentProgress() {
+type CareerAlignmentProgressProps = {
+  showProgressSection?: boolean;
+  showBadgesSection?: boolean;
+};
+
+export function CareerAlignmentProgress({
+  showProgressSection = true,
+  showBadgesSection = true,
+}: CareerAlignmentProgressProps) {
   const [history, setHistory] = useState<AlignmentHistoryResponse>(EMPTY_HISTORY);
   const [loading, setLoading] = useState(true);
 
@@ -95,13 +103,15 @@ export function CareerAlignmentProgress() {
   if (loading) {
     return (
       <section className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-        <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
+        <h3 className="text-lg font-semibold text-slate-100">
+          {showProgressSection ? "Career Alignment Progress" : "Achievement Badges"}
+        </h3>
         <p className="text-sm text-slate-400">Preparing compatibility report…</p>
       </section>
     );
   }
 
-  if (sortedRecentAnalyses.length < 2) {
+  if (showProgressSection && sortedRecentAnalyses.length < 2) {
     return (
       <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
         <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
@@ -118,52 +128,60 @@ export function CareerAlignmentProgress() {
     );
   }
 
+  if (!showProgressSection && (!history.badges.length || !showBadgesSection)) {
+    return null;
+  }
+
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-      <header className="space-y-1">
-        <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
-        <p className="text-sm text-slate-400">
-          Insights derived from your recent role compatibility analyses.
-        </p>
-      </header>
+      {showProgressSection ? (
+        <>
+          <header className="space-y-1">
+            <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
+            <p className="text-sm text-slate-400">
+              Insights derived from your recent role compatibility analyses.
+            </p>
+          </header>
 
-      <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-        <h4 className="text-base font-semibold text-slate-100">Recent Analyses</h4>
-        <ul className="space-y-3">
-          {sortedRecentAnalyses.map((analysis) => (
-            <li key={analysis.analysisId} className="space-y-1">
-              <p className="text-sm font-semibold text-slate-100">{analysis.jobTitle}</p>
-              <p className="text-sm text-slate-300">
-                {analysis.score.toFixed(1)} | {analysis.classification}
+          <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <h4 className="text-base font-semibold text-slate-100">Recent Analyses</h4>
+            <ul className="space-y-3">
+              {sortedRecentAnalyses.map((analysis) => (
+                <li key={analysis.analysisId} className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-100">{analysis.jobTitle}</p>
+                  <p className="text-sm text-slate-300">
+                    {analysis.score.toFixed(1)} | {analysis.classification}
+                  </p>
+                  {analysis.company ? <p className="text-xs text-slate-400">{analysis.company}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </article>
+
+          <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <h4 className="text-base font-semibold text-slate-100">Strongest Alignment Pattern</h4>
+            <p className="text-sm text-slate-300">
+              Your strongest compatibility appears in these role paths.
+            </p>
+            {history.alignmentPattern.strongestAlignmentRoles.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
+                {history.alignmentPattern.strongestAlignmentRoles.map((role) => (
+                  <li key={role}>{role}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-400">
+                Run additional analyses to strengthen pattern confidence.
               </p>
-              {analysis.company ? <p className="text-xs text-slate-400">{analysis.company}</p> : null}
-            </li>
-          ))}
-        </ul>
-      </article>
+            )}
+            <p className="text-xs text-slate-400">
+              This insight is derived from your recent role compatibility analyses.
+            </p>
+          </article>
+        </>
+      ) : null}
 
-      <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-        <h4 className="text-base font-semibold text-slate-100">Strongest Alignment Pattern</h4>
-        <p className="text-sm text-slate-300">
-          Your strongest compatibility appears in these role paths.
-        </p>
-        {history.alignmentPattern.strongestAlignmentRoles.length ? (
-          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
-            {history.alignmentPattern.strongestAlignmentRoles.map((role) => (
-              <li key={role}>{role}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-slate-400">
-            Run additional analyses to strengthen pattern confidence.
-          </p>
-        )}
-        <p className="text-xs text-slate-400">
-          This insight is derived from your recent role compatibility analyses.
-        </p>
-      </article>
-
-      {history.badges.length ? (
+      {showBadgesSection && history.badges.length ? (
         <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
           <h4 className="text-base font-semibold text-slate-100">Achievement Badges</h4>
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">

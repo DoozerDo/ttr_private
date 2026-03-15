@@ -17,7 +17,6 @@ import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
 import { CareerGravity } from "./components/CareerGravity";
 import { CareerInsightEmerging } from "./components/CareerInsightEmerging";
 import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
-import { FitVerdictReveal } from "./components/FitVerdictReveal";
 import {
   formatErrorMessage,
   parseComplianceError,
@@ -266,58 +265,6 @@ const COMPATIBILITY_ANALYSIS_ERROR =
 
 const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
-
-function mapFitClassification(score?: number | null): string {
-  if (typeof score !== "number") return "Assessment Pending";
-  if (score >= 95) return "Elite Match";
-  if (score >= 85) return "Top Tier Candidate";
-  if (score >= 70) return "Competitive Alignment";
-  if (score >= 50) return "Developing Fit";
-  return "Misaligned Role";
-}
-
-function getScoreTierLabel(score?: number | null): string {
-  if (typeof score !== "number") return "Pending";
-  if (score >= 85) return "Strong Target";
-  if (score >= 70) return "Competitive";
-  return "Needs Work";
-}
-
-function getScoreInterpretation(score?: number | null): string {
-  if (typeof score !== "number") return "Run an analysis to see where you stand.";
-  if (score >= 85) {
-    return "You have strong alignment for this role based on the experience reflected in your resume.";
-  }
-  if (score >= 70) {
-    return "You are a plausible candidate, but there are visible gaps that may weaken your competitiveness.";
-  }
-  return "This role appears to stretch beyond your current fit. The strongest opportunity may be nearby roles where your experience aligns better.";
-}
-
-function getRecommendedNextStep(score?: number | null): { title: string; body: string } {
-  if (typeof score !== "number") {
-    return {
-      title: "Run analysis",
-      body: "Complete an analysis first so you can act on clear strengths and gaps.",
-    };
-  }
-  if (score >= 85) {
-    return {
-      title: "Apply with confidence",
-      body: "This role appears well aligned with your background. Save this analysis and move into tailored materials.",
-    };
-  }
-  if (score >= 70) {
-    return {
-      title: "Apply strategically",
-      body: "You may still be competitive, but your application should address visible gaps with stronger positioning.",
-    };
-  }
-  return {
-    title: "Explore stronger-fit roles",
-    body: "You may have better odds targeting adjacent roles where your experience is more directly aligned.",
-  };
-}
 
 function normalizeOpportunityLine(value: string): string {
   return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
@@ -568,6 +515,107 @@ export function OpportunityMapSection({
               </div>
             ))}
           </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+type HiringManagerLensSectionProps = {
+  strengths: string[];
+  questions: string[];
+  recommendations: string[];
+};
+
+export function getHiringManagerCaseRecommendations(input: {
+  score?: number | null;
+  recommendedActions?: string[];
+  strengths?: string[];
+  watchouts?: string[];
+}): string[] {
+  const explicitActions = (input.recommendedActions ?? [])
+    .map((action) => normalizeOpportunityLine(action))
+    .filter(Boolean);
+
+  if (explicitActions.length >= 2) {
+    return explicitActions.slice(0, 2);
+  }
+
+  const recommendations = new Set<string>(explicitActions);
+  const watchoutCorpus = (input.watchouts ?? []).join(" ").toLowerCase();
+  const strengthsCorpus = (input.strengths ?? []).join(" ").toLowerCase();
+
+  if (/(engineering|firmware|embedded|platform|infrastructure|technical)/.test(watchoutCorpus)) {
+    recommendations.add("Highlight collaboration with infrastructure or platform engineering");
+  }
+
+  if (/(operations|workflow|incident|escalation|systems|cross-functional)/.test(strengthsCorpus)) {
+    recommendations.add("Emphasize operational ownership of complex technical systems");
+  }
+
+  if (typeof input.score === "number" && input.score >= 80) {
+    recommendations.add("Lead with the strongest role-specific wins in your resume summary");
+  } else if (typeof input.score === "number" && input.score >= 70) {
+    recommendations.add("Tailor your resume bullets to connect adjacent experience to the role requirements");
+  } else {
+    recommendations.add("Reposition your experience toward the closest adjacent requirements before applying");
+  }
+
+  return Array.from(recommendations).slice(0, 2);
+}
+
+export function HiringManagerLensSection({
+  strengths,
+  questions,
+  recommendations,
+}: HiringManagerLensSectionProps) {
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.98))] p-6 shadow-[0_18px_60px_rgba(2,6,23,0.28)]">
+      <header className="space-y-2">
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">
+          Hiring Manager Lens
+        </p>
+        <p className="max-w-2xl text-sm text-slate-300">
+          How a hiring manager is likely to view your profile for this role.
+        </p>
+      </header>
+
+      <div className="mt-6 grid gap-4 xl:grid-cols-3">
+        <article className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.06] p-5">
+          <h3 className="text-base font-semibold text-slate-100">
+            Strengths a hiring manager will notice
+          </h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {strengths.length ? (
+              strengths.map((item) => <li key={item}>&bull; {item}</li>)
+            ) : (
+              <li>&bull; Clear standout baseline signals are not available yet.</li>
+            )}
+          </ul>
+        </article>
+
+        <article className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.05] p-5">
+          <h3 className="text-base font-semibold text-slate-100">
+            Questions a hiring manager may have
+          </h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {questions.length ? (
+              questions.map((item) => <li key={item}>&bull; {item}</li>)
+            ) : (
+              <li>&bull; No major hiring concerns are surfaced from this run.</li>
+            )}
+          </ul>
+        </article>
+
+        <article className="rounded-2xl border border-sky-400/15 bg-sky-500/[0.05] p-5">
+          <h3 className="text-base font-semibold text-slate-100">How to strengthen your case</h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {recommendations.length ? (
+              recommendations.map((item) => <li key={item}>&bull; {item}</li>)
+            ) : (
+              <li>&bull; Tailor your resume around the strongest verified evidence for this role.</li>
+            )}
+          </ul>
         </article>
       </div>
     </section>
@@ -1095,9 +1143,6 @@ export default function ResultsPage() {
   const executionMode = typeof activeScore === "number" && activeScore > 70;
   const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
-  const dimensionCardBaseClass = "rounded-2xl border border-white/10 bg-slate-900/30 p-3";
-  const dimensionCardClassName = dimensionCardBaseClass;
-  const verdictClassification = useMemo(() => mapFitClassification(activeScore), [activeScore]);
   const confidenceLevel = useMemo(
     () =>
       resolveConfidenceLevel({
@@ -1186,9 +1231,6 @@ export default function ResultsPage() {
     const fallbackRisks = riskItems.map((risk) => normalizeOpportunityLine(risk.title));
     return Array.from(new Set([...rankedCriticalGaps, ...fallbackRisks].filter(Boolean))).slice(0, 3);
   }, [criticalGapDetails, riskItems]);
-  const scoreTierLabel = useMemo(() => getScoreTierLabel(activeScore), [activeScore]);
-  const scoreInterpretation = useMemo(() => getScoreInterpretation(activeScore), [activeScore]);
-  const recommendedNextStep = useMemo(() => getRecommendedNextStep(activeScore), [activeScore]);
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
   const opportunityNextMove = useMemo(() => getOpportunityNextMove(activeScore), [activeScore]);
   const compactIndicators = useMemo(
@@ -1198,6 +1240,18 @@ export default function ResultsPage() {
       { label: "Readiness", value: getReadinessLevel(activeScore, confidenceLevel) },
     ],
     [activeScore, confidenceLevel, highestGapSeverity],
+  );
+  const hiringManagerStrengths = useMemo(() => advantageSignals.slice(0, 3), [advantageSignals]);
+  const hiringManagerQuestions = useMemo(() => watchoutSignals.slice(0, 3), [watchoutSignals]);
+  const hiringManagerRecommendations = useMemo(
+    () =>
+      getHiringManagerCaseRecommendations({
+        score: activeScore,
+        recommendedActions,
+        strengths: hiringManagerStrengths,
+        watchouts: hiringManagerQuestions,
+      }),
+    [activeScore, hiringManagerQuestions, hiringManagerStrengths, recommendedActions],
   );
   const isAuthenticatedContext = Boolean(latest?.baselineId);
   const interviewToolkitHref = useMemo(() => {
@@ -1795,28 +1849,22 @@ export default function ResultsPage() {
               />
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Role positioning</p>
-                    <p className="mt-2 text-xl font-semibold text-slate-100">{scoreTierLabel}</p>
-                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">
-                      {scoreInterpretation}
-                    </p>
-                    <p className="mt-3 text-sm text-slate-400">
-                      {recommendedNextStep.body}
-                    </p>
-                  </div>
-                  <div>
-                    <div className="mb-3">
-                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Opportunity Radar</p>
-                      <p className="mt-1 text-sm text-slate-300">
-                        Shows where your background appears most viable across adjacent areas.
-                      </p>
-                    </div>
-                    <OpportunityRadarChart areas={compatibilityMapSignals} />
-                  </div>
+                <div className="mb-3">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Opportunity Radar
+                  </p>
+                  <p className="mt-1 text-sm text-slate-300">
+                    A quick visual of where your background looks strongest across adjacent areas.
+                  </p>
                 </div>
+                <OpportunityRadarChart areas={compatibilityMapSignals} />
               </section>
+
+              <HiringManagerLensSection
+                strengths={hiringManagerStrengths}
+                questions={hiringManagerQuestions}
+                recommendations={hiringManagerRecommendations}
+              />
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/45 p-6">
                 <h3 className="text-2xl font-semibold text-slate-100">
@@ -1831,7 +1879,7 @@ export default function ResultsPage() {
                   {isAuthenticatedContext ? (
                     executionMode ? (
                       <FormButton onClick={() => navigateToStudio()} disabled={!canOpenStudio}>
-                        Continue in Studio
+                        Tailor Resume for This Role
                       </FormButton>
                     ) : (
                       <FormButton onClick={() => void router.push(fitReviewPath)}>Open Fit Review</FormButton>
@@ -1872,16 +1920,20 @@ export default function ResultsPage() {
                 </div>
               </section>
 
-              <section className="space-y-4">
-                <CareerInsightEmerging />
-                <CareerGravity />
-                <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
+              <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
+              <CareerAlignmentProgress showProgressSection={false} />
 
+              <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                  Advanced Insights
+                </summary>
+                <div className="mt-4 space-y-4">
+                  <CareerInsightEmerging />
+                  <CareerGravity />
+                  <CareerAlignmentProgress showBadgesSection={false} />
                 {scoreBreakdown ? (
-                  <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                    <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-                      Supporting score breakdown
-                    </summary>
+                  <section className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
+                    <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
                     <div className="mt-4 space-y-3">
                       {scoreBreakdown.dimensions.map((dimension) => {
                         const percent =
@@ -1909,18 +1961,18 @@ export default function ResultsPage() {
                         </span>
                       </div>
                     </div>
-                  </details>
+                  </section>
                 ) : (
                   <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-300">
                     Supporting score breakdown is unavailable for this run.
                   </div>
                 )}
-              </section>
+                </div>
+              </details>
             </div>
           )}
         </section>
 
-        <CareerAlignmentProgress />
         <AnalyzeAnotherRoleBar baselineVersionId={latest?.baselineVersionId ?? null} />
 
         {error ? (

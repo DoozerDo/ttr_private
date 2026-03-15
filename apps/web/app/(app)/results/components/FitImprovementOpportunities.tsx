@@ -74,7 +74,10 @@ export function FitImprovementOpportunities({ assessmentId }: FitImprovementOppo
   return (
     <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
       <div className="space-y-1">
-        <h3 className="text-lg font-semibold text-slate-100">Fit Improvement Opportunities</h3>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Secondary analysis
+        </p>
+        <h3 className="text-base font-semibold text-slate-100">Fit Improvement Opportunities</h3>
         <p className="text-sm text-slate-400">
           These estimates show how additional verified baseline signals could improve compatibility for this role.
         </p>
