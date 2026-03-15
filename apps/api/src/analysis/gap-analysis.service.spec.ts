@@ -116,8 +116,10 @@ describe('GapAnalysisService', () => {
       jobResponsibilities: ['Drive cross-functional CX systems.'],
     });
 
-    expect(result.strengths).toContain('Led global support operations at SentinelOne.');
     expect(result.strengths.length).toBeGreaterThan(0);
+    expect(result.strengths.every((value) => /SentinelOne|escalation|cross-functional/i.test(value))).toBe(
+      true,
+    );
     expect(result.strengths).not.toContain('Tooling and Platform Experience');
     expect(result.strengths).not.toContain('Support Operations and Process Rigor');
   });
@@ -137,6 +139,72 @@ describe('GapAnalysisService', () => {
     expect(gapTitles).toContain('Embedded Systems Development Exposure.');
     expect(gapTitles).not.toContain('Tooling and Platform Experience');
     expect(gapTitles).not.toContain('Domain and Business Context');
+  });
+
+  it('filters requirement fragments and modifier-only phrases out of gap signals', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led customer support operations and escalation reviews.' }],
+      jobRequirements: [
+        'Proficient',
+        'OR Equivalent Experience',
+        'Strong ability',
+        'Direct firmware engineering experience',
+      ],
+      jobResponsibilities: ['Embedded systems development exposure.'],
+    });
+
+    const flattened = [
+      ...result.criticalGaps.map((gap) => `${gap.title} ${gap.requirementEvidence}`),
+      ...result.recommendedActions,
+      ...result.positioningSuggestions,
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    expect(flattened).not.toContain('proficient');
+    expect(flattened).not.toContain('equivalent experience');
+    expect(flattened).not.toContain('strong ability');
+    expect(flattened).toContain('direct firmware engineering experience');
+    expect(flattened).toContain('embedded systems development exposure');
+  });
+
+  it('rejects buzzword-only baseline lines and keeps strengths evidence-based', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Leadership, team building, and innovation evangelism.\nLed customer operations and escalation programs.\nPartnered with engineering teams to operate complex systems.',
+        },
+      ],
+      jobRequirements: [
+        'Led customer operations and escalation programs.',
+        'Partnered with engineering teams to operate complex systems.',
+      ],
+      jobResponsibilities: [],
+    });
+
+    expect(result.strengths).toContain('Led customer operations and escalation programs.');
+    expect(result.strengths).toContain(
+      'Partnered with engineering teams to operate complex systems.',
+    );
+    expect(result.strengths).not.toContain('Leadership, team building, and innovation evangelism.');
+  });
+
+  it('builds positioning suggestions from clean gap signals instead of keyword clusters', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and incident reviews.' }],
+      jobRequirements: ['Direct firmware engineering experience in pre-silicon environments.'],
+      jobResponsibilities: [],
+    });
+
+    expect(result.positioningSuggestions.length).toBeGreaterThan(0);
+    expect(result.positioningSuggestions[0]?.toLowerCase()).toContain(
+      'direct firmware engineering experience',
+    );
+    expect(result.positioningSuggestions.join(' ').toLowerCase()).not.toContain('proficient');
+    expect(result.positioningSuggestions.join(' ').toLowerCase()).not.toContain(
+      'equivalent experience',
+    );
   });
 });
 

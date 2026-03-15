@@ -22,6 +22,7 @@ export type GapAnalysisResult = {
   strengths: string[];
   criticalGaps: CriticalGap[];
   recommendedActions: string[];
+  positioningSuggestions: string[];
   interviewRisks: InterviewRisk[];
 };
 
@@ -116,6 +117,51 @@ const LEGAL_OR_APPLICATION_BOILERPLATE_PATTERNS = [
   /\bapply (?:today|now)\b/i,
 ];
 const MAX_EVIDENCE_LENGTH = 180;
+const EVIDENCE_ACTION_PATTERNS = [
+  /\bled\b/i,
+  /\bbuilt\b/i,
+  /\bdesigned\b/i,
+  /\bdeveloped\b/i,
+  /\bdrove\b/i,
+  /\bmanaged\b/i,
+  /\bowned\b/i,
+  /\bpartnered\b/i,
+  /\boperated\b/i,
+  /\bscaled\b/i,
+  /\blaunched\b/i,
+  /\bimplemented\b/i,
+  /\bcreated\b/i,
+  /\bdelivered\b/i,
+  /\boverse(?:e|en)\b/i,
+  /\bimproved\b/i,
+  /\btransformed\b/i,
+];
+const BASELINE_BUZZWORD_PATTERNS = [
+  /\bleadership(?:\s|,|$)/i,
+  /\bteam building\b/i,
+  /\binnovation evangelism\b/i,
+  /\bexcellent communication\b/i,
+  /\bstrategic thinking\b/i,
+  /\bproblem solving\b/i,
+  /\bself-starter\b/i,
+];
+const REQUIREMENT_FRAGMENT_PATTERNS = [
+  /^(?:or\s+)?equivalent experience\.?$/i,
+  /^proficient\.?$/i,
+  /^preferred\.?$/i,
+  /^required\.?$/i,
+  /^strong ability\.?$/i,
+  /^excellent communication\.?$/i,
+  /^communication skills\.?$/i,
+];
+const REQUIREMENT_SIGNAL_STOP_PHRASES = [
+  /\bor equivalent experience\b/i,
+  /\band\/or\b/i,
+  /\bpreferred\b/i,
+  /\bproficient\b/i,
+  /\bstrong ability to\b/i,
+  /\bability to\b/i,
+];
 
 @Injectable()
 export class GapAnalysisService {
@@ -126,6 +172,7 @@ export class GapAnalysisService {
         strengths: [],
         criticalGaps: [],
         recommendedActions: [],
+        positioningSuggestions: [],
         interviewRisks: [],
       };
     }
@@ -152,16 +199,29 @@ export class GapAnalysisService {
               entry.evidenceScore >= 0.62 &&
               entry.importance >= 0.6 &&
               typeof entry.baselineEvidence === 'string' &&
-              entry.baselineEvidence.trim().length > 0,
+              entry.baselineEvidence.trim().length > 0 &&
+              this.isDisplayableBaselineEvidence(entry.baselineEvidence),
           )
           .sort((a, b) => b.evidenceScore - a.evidenceScore)
           .map((entry) => entry.baselineEvidence!.trim()),
       ),
     ).slice(0, 4);
+    const normalizedStrengthSignals = new Set(
+      uniqueStrengths.map((value) => this.normalizeSignalKey(value)),
+    );
 
     const maxGaps = this.clampMaxGaps(input.maxGaps);
     const criticalGaps = [...dedupedEvaluated]
       .sort((a, b) => b.severity - a.severity)
+      .filter((entry) => {
+        const normalizedTitle = this.normalizeSignalKey(entry.title);
+        const normalizedRequirement = this.normalizeSignalKey(entry.requirementEvidence);
+        if (!normalizedTitle && !normalizedRequirement) return false;
+        return !(
+          (normalizedTitle && normalizedStrengthSignals.has(normalizedTitle)) ||
+          (normalizedRequirement && normalizedStrengthSignals.has(normalizedRequirement))
+        );
+      })
       .slice(0, maxGaps)
       .map((entry, index) => {
         const gapId = this.toGapId(entry.title, index);
@@ -176,10 +236,10 @@ export class GapAnalysisService {
         };
       });
 
-    const recommendedActions = criticalGaps.slice(0, 3).map((gap) => {
-      const requirement = this.shorten(gap.requirementEvidence, 110);
-      return `Strengthen "${gap.title}" by anchoring verified examples to: ${requirement}`;
-    });
+    const positioningSuggestions = criticalGaps.slice(0, 3).map((gap) =>
+      this.buildPositioningSuggestion(gap),
+    );
+    const recommendedActions = positioningSuggestions;
 
     const interviewRisks = criticalGaps.slice(0, 3).map((gap, index) => ({
       riskId: `risk-${index + 1}`,
@@ -202,6 +262,7 @@ export class GapAnalysisService {
       strengths: uniqueStrengths,
       criticalGaps,
       recommendedActions,
+      positioningSuggestions,
       interviewRisks,
     };
   }
@@ -237,7 +298,7 @@ export class GapAnalysisService {
     const raw: RequirementCandidate[] = [];
 
     for (const entry of input.jobRequirements ?? []) {
-      const text = this.clean(entry);
+      const text = this.normalizeRequirementCandidate(entry);
       if (!text) continue;
       if (this.isCompensationText(text)) continue;
       if (this.isLegalOrApplicationBoilerplate(text)) continue;
@@ -245,7 +306,7 @@ export class GapAnalysisService {
     }
 
     for (const entry of input.jobResponsibilities ?? []) {
-      const text = this.clean(entry);
+      const text = this.normalizeRequirementCandidate(entry);
       if (!text) continue;
       if (this.isCompensationText(text)) continue;
       if (this.isLegalOrApplicationBoilerplate(text)) continue;
@@ -268,14 +329,21 @@ export class GapAnalysisService {
   ): string[] {
     const lines: string[] = [];
     for (const section of sections) {
-      const content = this.clean(section?.content);
-      if (!content) continue;
-      for (const line of content.split(/\n+/)) {
+      const rawContent = section?.content ?? '';
+      if (!this.clean(rawContent)) continue;
+      for (const line of rawContent.split(/\r?\n+/)) {
         const cleaned = this.clean(line);
         if (cleaned) lines.push(cleaned);
       }
     }
     return lines;
+  }
+
+  private normalizeRequirementCandidate(value?: string | null): string | null {
+    const text = this.clean(value);
+    if (!text) return null;
+    if (this.isRequirementFragmentNoise(text)) return null;
+    return text;
   }
 
   private evaluateRequirement(
@@ -415,6 +483,7 @@ export class GapAnalysisService {
 
     const normalized = compact
       .replace(/^[•\-]\s*/, '')
+      .replace(/^(?:or|and\/or)\s+/i, '')
       .replace(
         /^(?:must\s+have|required|preferred|experience\s+with|experience\s+in|ability\s+to|proven\s+ability\s+to|demonstrated\s+ability\s+to|track\s+record\s+of|strong)\s+/i,
         '',
@@ -423,14 +492,23 @@ export class GapAnalysisService {
         /^(?:own|lead|build|design|develop|drive|manage|support|oversee|deliver|partner\s+with|collaborate\s+with)\s+/i,
         '',
       )
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/[,;:]+$/g, '')
+      .trim();
+
+    const withoutStopPhrases = REQUIREMENT_SIGNAL_STOP_PHRASES.reduce(
+      (current, pattern) => current.replace(pattern, ' '),
+      normalized,
+    )
+      .replace(/\s+/g, ' ')
       .replace(/\b(?:in|with|across|for)\b.*$/i, '')
       .trim();
 
-    if (!normalized) {
+    if (!withoutStopPhrases || this.isRequirementFragmentNoise(withoutStopPhrases)) {
       return this.toTitleFromRequirement(compact);
     }
 
-    const words = normalized.split(/\s+/).slice(0, 6);
+    const words = withoutStopPhrases.split(/\s+/).slice(0, 6);
     return words
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
@@ -477,6 +555,73 @@ export class GapAnalysisService {
 
   private clean(value?: string | null): string {
     return (value ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  private normalizeSignalKey(value?: string | null): string {
+    return this.clean(value)
+      .toLowerCase()
+      .replace(/^[^a-z0-9]+/, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  private isDisplayableBaselineEvidence(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return false;
+    if (BASELINE_BUZZWORD_PATTERNS.some((pattern) => pattern.test(text))) {
+      return EVIDENCE_ACTION_PATTERNS.some((pattern) => pattern.test(text));
+    }
+    return EVIDENCE_ACTION_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
+  private isRequirementFragmentNoise(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return true;
+    if (REQUIREMENT_FRAGMENT_PATTERNS.some((pattern) => pattern.test(text))) {
+      return true;
+    }
+
+    const normalized = text
+      .toLowerCase()
+      .replace(/^[•\-]\s*/, '')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/[^a-z0-9\s/]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return true;
+
+    const tokens = normalized.split(' ');
+    const meaninglessTokens = new Set([
+      'or',
+      'and',
+      'and/or',
+      'equivalent',
+      'experience',
+      'proficient',
+      'preferred',
+      'required',
+      'strong',
+      'ability',
+      'excellent',
+      'communication',
+      'skills',
+    ]);
+
+    if (tokens.every((token) => meaninglessTokens.has(token))) {
+      return true;
+    }
+
+    return tokens.length <= 2 && tokens.every((token) => meaninglessTokens.has(token));
+  }
+
+  private buildPositioningSuggestion(gap: CriticalGap): string {
+    const target = this.clean(gap.title).toLowerCase();
+    const baselineEvidence = this.clean(gap.baselineEvidence);
+    if (baselineEvidence) {
+      return `Use "${this.shorten(baselineEvidence, 90)}" to frame adjacent evidence against ${target}.`;
+    }
+
+    return `Add a concrete example that shows adjacent experience relevant to ${target}.`;
   }
 
   private isCompensationText(value: string): boolean {
