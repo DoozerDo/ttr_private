@@ -590,6 +590,7 @@ export class AnalysisService {
           reasoning: 'Derived from previously stored fit assessment gap output.',
         })),
         recommendedActions: [],
+        positioningSuggestions: [],
         interviewRisks: [],
       };
     }
