@@ -44,6 +44,7 @@ type RequirementAssessment = {
   requirementEvidence: string;
   baselineEvidence: string | null;
   evidenceScore: number;
+  relevanceScore: number;
   severity: number;
   importance: number;
   reasoning: string;
@@ -162,6 +163,51 @@ const REQUIREMENT_SIGNAL_STOP_PHRASES = [
   /\bstrong ability to\b/i,
   /\bability to\b/i,
 ];
+const STRUCTURAL_REQUIREMENT_NOISE_PATTERNS = [
+  /\bthis position\b/i,
+  /\bthis role\b/i,
+  /\bthe role\b/i,
+  /\bthe candidate\b/i,
+  /\bideal candidate\b/i,
+  /\bwe are looking for\b/i,
+  /\bwe're looking for\b/i,
+  /\bthis opportunity\b/i,
+  /\bposition will be\b/i,
+  /\brole will be\b/i,
+  /\bwill be open for\b/i,
+  /\bresponsibilities?\s+include\b/i,
+  /\bjob summary\b/i,
+];
+const ACRONYM_WORDS = new Set([
+  'api',
+  'apis',
+  'ai',
+  'os',
+  'rtos',
+  'sdk',
+  'sdks',
+  'crm',
+  'qa',
+  'kpi',
+  'kpis',
+  'sla',
+  'slas',
+  'cx',
+  'saas',
+  'b2b',
+  'b2c',
+  'ux',
+  'ui',
+]);
+const PROPER_CASE_WORDS: Record<string, string> = {
+  rust: 'Rust',
+  python: 'Python',
+  java: 'Java',
+  javascript: 'JavaScript',
+  typescript: 'TypeScript',
+  zendesk: 'Zendesk',
+  salesforce: 'Salesforce',
+};
 
 @Injectable()
 export class GapAnalysisService {
@@ -191,21 +237,7 @@ export class GapAnalysisService {
       .filter((entry): entry is RequirementAssessment => Boolean(entry));
     const dedupedEvaluated = this.dedupeAssessments(evaluated);
 
-    const uniqueStrengths = Array.from(
-      new Set(
-        evaluated
-          .filter(
-            (entry) =>
-              entry.evidenceScore >= 0.62 &&
-              entry.importance >= 0.6 &&
-              typeof entry.baselineEvidence === 'string' &&
-              entry.baselineEvidence.trim().length > 0 &&
-              this.isDisplayableBaselineEvidence(entry.baselineEvidence),
-          )
-          .sort((a, b) => b.evidenceScore - a.evidenceScore)
-          .map((entry) => entry.baselineEvidence!.trim()),
-      ),
-    ).slice(0, 4);
+    const uniqueStrengths = this.selectStrengthSignals(evaluated, 3);
     const normalizedStrengthSignals = new Set(
       uniqueStrengths.map((value) => this.normalizeSignalKey(value)),
     );
@@ -343,7 +375,43 @@ export class GapAnalysisService {
     const text = this.clean(value);
     if (!text) return null;
     if (this.isRequirementFragmentNoise(text)) return null;
+    if (this.isStructuralRequirementNoise(text)) return null;
     return text;
+  }
+
+  private selectStrengthSignals(
+    assessments: RequirementAssessment[],
+    maxCount: number,
+  ): string[] {
+    const selected: string[] = [];
+    const selectedKeys: string[] = [];
+
+    const candidates = assessments
+      .filter(
+        (entry) =>
+          entry.evidenceScore >= 0.5 &&
+          entry.importance >= 0.45 &&
+          typeof entry.baselineEvidence === 'string' &&
+          entry.baselineEvidence.trim().length > 0 &&
+          this.isDisplayableBaselineEvidence(entry.baselineEvidence),
+      )
+      .sort((a, b) => {
+        if (b.relevanceScore !== a.relevanceScore) return b.relevanceScore - a.relevanceScore;
+        return b.evidenceScore - a.evidenceScore;
+      });
+
+    for (const entry of candidates) {
+      const signal = this.toCompactEvidence(entry.baselineEvidence!, MAX_EVIDENCE_LENGTH);
+      if (!signal) continue;
+      const normalized = this.normalizeSignalKey(signal);
+      if (!normalized) continue;
+      if (selectedKeys.some((key) => this.signalsOverlap(key, normalized))) continue;
+      selected.push(signal);
+      selectedKeys.push(normalized);
+      if (selected.length >= maxCount) break;
+    }
+
+    return selected;
   }
 
   private evaluateRequirement(
@@ -377,6 +445,7 @@ export class GapAnalysisService {
       0,
       Math.min(1, Number((importance - evidenceScore).toFixed(4))),
     );
+    const relevanceScore = Number((evidenceScore * 0.72 + importance * 0.28).toFixed(4));
 
     const title = this.inferTitle(req, dimensionKey);
     const compactRequirementEvidence = this.toCompactEvidence(
@@ -398,6 +467,7 @@ export class GapAnalysisService {
       requirementEvidence: compactRequirementEvidence,
       baselineEvidence: compactBaselineEvidence,
       evidenceScore,
+      relevanceScore,
       severity,
       importance,
       reasoning,
@@ -508,20 +578,15 @@ export class GapAnalysisService {
       return this.toTitleFromRequirement(compact);
     }
 
-    const words = withoutStopPhrases.split(/\s+/).slice(0, 6);
-    return words
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+    const words = withoutStopPhrases.split(/\s+/).slice(0, 10);
+    return this.toSentenceCasePreservingAcronyms(words.join(' '));
   }
 
   private toTitleFromRequirement(text: string): string {
     const compact = this.clean(text);
     if (!compact) return 'Role Requirement Coverage';
-    const words = compact.split(/\s+/).slice(0, 6);
-    const title = words
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
-    return title;
+    const words = compact.split(/\s+/).slice(0, 8);
+    return this.toSentenceCasePreservingAcronyms(words.join(' '));
   }
 
   private keywordBoost(text: string): number {
@@ -565,9 +630,20 @@ export class GapAnalysisService {
       .trim();
   }
 
+  private signalsOverlap(left: string, right: string): boolean {
+    if (left === right) return true;
+    if (left.includes(right) || right.includes(left)) return true;
+    const leftTokens = new Set(left.split(' '));
+    const rightTokens = new Set(right.split(' '));
+    const shared = [...leftTokens].filter((token) => rightTokens.has(token));
+    const smallest = Math.min(leftTokens.size, rightTokens.size);
+    return smallest > 0 && shared.length / smallest >= 0.7;
+  }
+
   private isDisplayableBaselineEvidence(value: string): boolean {
     const text = this.clean(value);
     if (!text) return false;
+    if (text.length < 12) return false;
     if (BASELINE_BUZZWORD_PATTERNS.some((pattern) => pattern.test(text))) {
       return EVIDENCE_ACTION_PATTERNS.some((pattern) => pattern.test(text));
     }
@@ -614,6 +690,12 @@ export class GapAnalysisService {
     return tokens.length <= 2 && tokens.every((token) => meaninglessTokens.has(token));
   }
 
+  private isStructuralRequirementNoise(value: string): boolean {
+    const text = this.clean(value);
+    if (!text) return true;
+    return STRUCTURAL_REQUIREMENT_NOISE_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
   private buildPositioningSuggestion(gap: CriticalGap): string {
     const target = this.clean(gap.title).toLowerCase();
     const baselineEvidence = this.clean(gap.baselineEvidence);
@@ -649,21 +731,74 @@ export class GapAnalysisService {
   private toCompactEvidence(value: string, max: number): string {
     const compact = this.clean(value);
     if (!compact) return '';
-    const sentences = compact
-      .split(/(?<=[.!?])\s+/)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-    const firstSentence = sentences[0] ?? compact;
-    if (firstSentence.length <= max) {
-      return firstSentence;
+    const sentences = compact.match(/[^.!?]+[.!?]+/g)?.map((sentence) => sentence.trim()) ?? [];
+    const firstCompleteSentence = sentences.find((sentence) => sentence.length > 0);
+    if (firstCompleteSentence) {
+      return firstCompleteSentence.length <= max
+        ? firstCompleteSentence
+        : this.trimAtWordBoundary(firstCompleteSentence, max, true);
     }
-    return this.shorten(firstSentence, max);
+
+    const clause = compact.split(/\s*[;:]\s*/)[0]?.trim() ?? compact;
+    if (clause.length <= max) {
+      return this.ensureTerminalPunctuation(clause);
+    }
+    return this.trimAtWordBoundary(clause, max, true);
   }
 
   private shorten(value: string, max: number): string {
     const trimmed = this.clean(value);
     if (trimmed.length <= max) return trimmed;
     return `${trimmed.slice(0, max - 3).trim()}...`;
+  }
+
+  private trimAtWordBoundary(value: string, max: number, preservePunctuation = false): string {
+    const trimmed = this.clean(value);
+    if (trimmed.length <= max) {
+      return preservePunctuation ? this.ensureTerminalPunctuation(trimmed) : trimmed;
+    }
+
+    const window = trimmed.slice(0, max);
+    const cut = window.lastIndexOf(' ');
+    const bounded = (cut > 20 ? window.slice(0, cut) : window).trim().replace(/[,:;/-]+$/, '');
+    return preservePunctuation ? this.ensureTerminalPunctuation(bounded) : bounded;
+  }
+
+  private ensureTerminalPunctuation(value: string): string {
+    const trimmed = this.clean(value).replace(/[,:;]+$/, '');
+    if (!trimmed) return '';
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  }
+
+  private toSentenceCasePreservingAcronyms(value: string): string {
+    const compact = this.clean(value);
+    if (!compact) return '';
+    const lower = compact.toLowerCase();
+    const tokens = lower.split(/(\s+|\/|-|,|\(|\))/);
+    let isFirstWord = true;
+
+    return tokens
+      .map((token) => {
+        if (!/[a-z0-9]/i.test(token)) return token;
+        const bare = token.replace(/[^a-z0-9']/gi, '');
+        const normalizedBare = bare.toLowerCase();
+        if (!normalizedBare) return token;
+        if (ACRONYM_WORDS.has(normalizedBare)) {
+          isFirstWord = false;
+          return token.replace(new RegExp(bare, 'i'), bare.toUpperCase());
+        }
+        if (PROPER_CASE_WORDS[normalizedBare]) {
+          isFirstWord = false;
+          return token.replace(new RegExp(bare, 'i'), PROPER_CASE_WORDS[normalizedBare]);
+        }
+
+        const replacement = isFirstWord
+          ? normalizedBare.charAt(0).toUpperCase() + normalizedBare.slice(1)
+          : normalizedBare;
+        isFirstWord = false;
+        return token.replace(new RegExp(bare, 'i'), replacement);
+      })
+      .join('');
   }
 }
 

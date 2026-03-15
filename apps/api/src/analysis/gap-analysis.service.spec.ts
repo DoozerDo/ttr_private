@@ -135,8 +135,8 @@ describe('GapAnalysisService', () => {
     });
 
     const gapTitles = result.criticalGaps.map((gap) => gap.title);
-    expect(gapTitles).toContain('Direct Firmware Engineering Experience');
-    expect(gapTitles).toContain('Embedded Systems Development Exposure.');
+    expect(gapTitles).toContain('Direct firmware engineering experience');
+    expect(gapTitles).toContain('Embedded systems development exposure.');
     expect(gapTitles).not.toContain('Tooling and Platform Experience');
     expect(gapTitles).not.toContain('Domain and Business Context');
   });
@@ -205,6 +205,80 @@ describe('GapAnalysisService', () => {
     expect(result.positioningSuggestions.join(' ').toLowerCase()).not.toContain(
       'equivalent experience',
     );
+  });
+
+  it('keeps strength evidence readable and trimmed at sentence boundaries', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content:
+            'Developed/deployed numerous proprietary automation workflows across support systems. Additional fragment that should not display.',
+        },
+      ],
+      jobRequirements: ['Develop proprietary automation workflows across support systems.'],
+      jobResponsibilities: [],
+    });
+
+    expect(result.strengths[0]).toBe(
+      'Developed/deployed numerous proprietary automation workflows across support systems.',
+    );
+    expect(result.strengths[0]).not.toContain('Additional fragment');
+  });
+
+  it('filters structural job description language from gaps', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and workflow design.' }],
+      jobRequirements: [
+        'This Position Will Be Open For applications through May.',
+        'We are looking for a candidate who can lead embedded systems development.',
+        'Embedded systems development experience.',
+      ],
+      jobResponsibilities: ['Role will be part of the platform team.'],
+    });
+
+    const flattened = result.criticalGaps
+      .map((gap) => `${gap.title} ${gap.requirementEvidence}`)
+      .join(' ')
+      .toLowerCase();
+
+    expect(flattened).not.toContain('this position will be open for');
+    expect(flattened).not.toContain('we are looking for');
+    expect(flattened).not.toContain('role will be');
+    expect(flattened).toContain('embedded systems development');
+  });
+
+  it('selects up to three unique strength signals when available', () => {
+    const result = service.analyze({
+      baselineSections: [
+        {
+          content: [
+            'Led customer operations and escalation programs.',
+            'Built operational workflows across support teams.',
+            'Partnered with engineering teams to operate complex systems.',
+            'Led customer operations and escalation programs.',
+          ].join('\n'),
+        },
+      ],
+      jobRequirements: [
+        'Lead customer operations and escalation programs.',
+        'Build operational workflows across support teams.',
+        'Partner with engineering teams to operate complex systems.',
+      ],
+      jobResponsibilities: [],
+    });
+
+    expect(result.strengths).toHaveLength(3);
+    expect(new Set(result.strengths).size).toBe(3);
+  });
+
+  it('normalizes gap titles to sentence case while preserving acronyms', () => {
+    const result = service.analyze({
+      baselineSections: [{ content: 'Led support operations and workflow design.' }],
+      jobRequirements: ['PROFICIENT IN EMBEDDED RUST RTOS SDK ENVIRONMENTS'],
+      jobResponsibilities: [],
+    });
+
+    expect(result.criticalGaps[0]?.title).toBe('Proficient in embedded Rust RTOS SDK environments');
   });
 });
 

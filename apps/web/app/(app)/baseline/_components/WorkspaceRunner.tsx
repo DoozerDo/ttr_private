@@ -249,7 +249,7 @@ type CriticalGapSignal = {
 };
 
 function normalizeDiagnosticLine(value: string): string {
-  return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
+  return value.replace(/^[^:]+:\s*/, "").trim();
 }
 
 function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[] {
