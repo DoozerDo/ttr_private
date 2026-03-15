@@ -8,7 +8,6 @@ import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
-import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 type ProgressState = {
   isScoring: boolean;
@@ -79,45 +78,34 @@ type ResultsUrlArgs = {
   baselineId?: string | null;
 };
 
-type JobDetailsPayload = {
-  company?: string | null;
-  title?: string | null;
-};
-
-type ScoreBandKey = "exceptional" | "strong" | "competitive" | "borderline" | "weak";
+type ScoreBandKey = "prime" | "strong" | "competitive" | "possible" | "low";
 
 type ScoreBandPresentation = {
   key: ScoreBandKey;
   label: string;
   summary: string;
-  ctaLabel: string;
-  ctaTarget: "results" | "fitReview";
-  chipLabel: string;
-  chipClassName: string;
+  accentClassName: string;
+  surfaceClassName: string;
 };
 
 export function resolveScoreBandPresentation(score: number): ScoreBandPresentation {
-  if (score >= 95) {
+  if (score >= 90) {
     return {
-      key: "exceptional",
-      label: "Exceptional Match",
-      summary: "Your experience strongly aligns with this role's scope and expectations.",
-      ctaLabel: "Review your results",
-      ctaTarget: "results",
-      chipLabel: "Exceptional",
-      chipClassName: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+      key: "prime",
+      label: "Prime Opportunity",
+      summary: "You are highly competitive for this role.",
+      accentClassName: "text-emerald-200",
+      surfaceClassName: "border-emerald-300/20 bg-emerald-400/10",
     };
   }
 
-  if (score >= 85) {
+  if (score >= 80) {
     return {
       key: "strong",
       label: "Strong Match",
-      summary: "You are well positioned to pursue this role with tailored materials.",
-      ctaLabel: "Review your results",
-      ctaTarget: "results",
-      chipLabel: "Prime Opportunity",
-      chipClassName: "border-sky-300/40 bg-sky-300/10 text-sky-100",
+      summary: "You are highly competitive for this role.",
+      accentClassName: "text-sky-200",
+      surfaceClassName: "border-sky-300/20 bg-sky-400/10",
     };
   }
 
@@ -125,34 +113,28 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
     return {
       key: "competitive",
       label: "Competitive Match",
-      summary: "You have a credible path forward and should refine your materials for this role.",
-      ctaLabel: "Review your results",
-      ctaTarget: "results",
-      chipLabel: "Competitive",
-      chipClassName: "border-slate-300/40 bg-slate-300/10 text-slate-100",
+      summary: "You look like a plausible candidate, with a few areas that need stronger proof.",
+      accentClassName: "text-cyan-100",
+      surfaceClassName: "border-cyan-300/20 bg-cyan-400/10",
     };
   }
 
-  if (score >= 50) {
+  if (score >= 60) {
     return {
-      key: "borderline",
-      label: "Promising but Incomplete",
-      summary: "Important experience may be underrepresented. Review the fit analysis before applying.",
-      ctaLabel: "Improve Fit",
-      ctaTarget: "fitReview",
-      chipLabel: "Needs Improvement",
-      chipClassName: "border-slate-400/50 bg-slate-400/10 text-slate-200",
+      key: "possible",
+      label: "Possible Fit",
+      summary: "There is some alignment here, but the gaps are still noticeable.",
+      accentClassName: "text-amber-100",
+      surfaceClassName: "border-amber-300/20 bg-amber-400/10",
     };
   }
 
   return {
-    key: "weak",
-    label: "Not Ready Yet",
-    summary: "This role currently shows substantial gaps. Start with Fit Review to see what can be strengthened.",
-    ctaLabel: "Open Fit Review",
-    ctaTarget: "fitReview",
-    chipLabel: "Action Needed",
-    chipClassName: "border-slate-500/60 bg-slate-500/10 text-slate-200",
+    key: "low",
+    label: "Low Match",
+    summary: "This role currently shows substantial gaps against your baseline evidence.",
+    accentClassName: "text-rose-100",
+    surfaceClassName: "border-rose-300/20 bg-rose-400/10",
   };
 }
 
@@ -182,22 +164,6 @@ export function buildResultsUrl({
   return null;
 }
 
-function buildFitReviewUrl(jobId?: string | null, baselineId?: string | null): string {
-  const normalizedJobId = jobId?.trim();
-  const normalizedBaselineId = baselineId?.trim();
-  const params = new URLSearchParams();
-
-  if (normalizedJobId) {
-    params.set("jobId", normalizedJobId);
-  }
-  if (normalizedBaselineId) {
-    params.set("baselineId", normalizedBaselineId);
-  }
-
-  const query = params.toString();
-  return query ? `/fit-review?${query}` : "/fit-review";
-}
-
 function formatScoreValue(score: number | null): string {
   if (score === null) return "--";
   const rounded = Math.round(score * 10) / 10;
@@ -211,7 +177,7 @@ const PRE_REVEAL_MESSAGES = [
   "Comparing operational depth...",
 ] as const;
 const PRE_REVEAL_MIN_MS = 1300;
-const COUNT_UP_MS = 720;
+const COUNT_UP_MS = 800;
 
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -274,6 +240,81 @@ function extractFallbackEvidence(value: FitResultPayload | null): string[] {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3);
+}
+
+type CriticalGapSignal = {
+  title: string;
+  requirementEvidence?: string | null;
+  severityScore?: number | null;
+};
+
+function normalizeDiagnosticLine(value: string): string {
+  return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
+}
+
+function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[] {
+  const criticalGaps = (value as { criticalGaps?: unknown } | null)?.criticalGaps;
+  if (!Array.isArray(criticalGaps)) return [];
+
+  return criticalGaps
+    .filter(
+      (gap): gap is {
+        title: string;
+        requirementEvidence?: string | null;
+        severityScore?: number | null;
+      } => Boolean(gap) && typeof (gap as { title?: unknown }).title === "string",
+    )
+    .map((gap) => ({
+      title: gap.title.trim(),
+      requirementEvidence: gap.requirementEvidence,
+      severityScore: gap.severityScore,
+    }))
+    .filter((gap) => gap.title.length > 0)
+    .slice(0, 3);
+}
+
+function extractRecommendedActions(value: FitResultPayload | null): string[] {
+  const recommendedActions = (value as { recommendedActions?: unknown } | null)?.recommendedActions;
+  if (!Array.isArray(recommendedActions)) return [];
+  return recommendedActions
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function resolveGapSeverityLabel(severityScore?: number | null): string {
+  if (typeof severityScore !== "number") return "Moderate gap";
+  if (severityScore >= 0.75) return "Major gap";
+  if (severityScore >= 0.5) return "Moderate gap";
+  return "Minor gap";
+}
+
+function buildImprovementSuggestions(
+  recommendedActions: string[],
+  gaps: CriticalGapSignal[],
+): string[] {
+  if (recommendedActions.length > 0) {
+    return recommendedActions.map((item) => normalizeDiagnosticLine(item));
+  }
+
+  if (gaps.length > 0) {
+    return gaps.map((gap) => {
+      const subject = normalizeDiagnosticLine(gap.requirementEvidence ?? gap.title).toLowerCase();
+      return `Add clearer evidence of ${subject}`;
+    });
+  }
+
+  return [
+    "Quantify the impact behind your closest matching experience",
+    "Mirror the job language in your strongest baseline evidence",
+    "Highlight cross-functional outcomes that prove role readiness",
+  ];
+}
+
+function getCompetitiveContext(score: number | null): string | null {
+  if (typeof score !== "number" || score < 80) return null;
+  return "You appear stronger than many typical applicants for this role.";
 }
 
 const extractErrorMessage = (payload: unknown): string | null => {
@@ -450,9 +491,6 @@ export function WorkspaceRunner({
   const [isRevealAnalyzing, setIsRevealAnalyzing] = useState(false);
   const [revealMessageIndex, setRevealMessageIndex] = useState(0);
   const [revealedScoreValue, setRevealedScoreValue] = useState<number | null>(null);
-  const [opportunityActionNotice, setOpportunityActionNotice] = useState<string | null>(null);
-  const [isAddingOpportunity, setIsAddingOpportunity] = useState(false);
-  const [addedOpportunityKey, setAddedOpportunityKey] = useState<string | null>(null);
   const journeyNavAppState = useJourneyNavAppState();
   const autoRunCombinationRef = useRef<string | null>(null);
   const autoRunCompletionTimerRef = useRef<number | null>(null);
@@ -520,6 +558,14 @@ export function WorkspaceRunner({
     evidenceLinesFromBreakdown.length > 0
       ? evidenceLinesFromBreakdown
       : extractFallbackEvidence(displayResult);
+  const strengthSignals = evidenceLines
+    .map((line) => normalizeDiagnosticLine(line))
+    .filter(Boolean)
+    .slice(0, 3);
+  const gapSignals = extractCriticalGaps(displayResult);
+  const recommendedActions = extractRecommendedActions(displayResult);
+  const improvementSuggestions = buildImprovementSuggestions(recommendedActions, gapSignals);
+  const competitiveContext = getCompetitiveContext(score);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
   const resultsHref =
@@ -528,20 +574,9 @@ export function WorkspaceRunner({
       jobId: latestJobId,
       baselineId: latestBaselineId,
     }) ?? "/results";
-  const fitReviewHref = buildFitReviewUrl(latestJobId, latestBaselineId);
-  const actionHref =
-    scoreBand?.ctaTarget === "fitReview"
-      ? fitReviewHref
-      : resultsHref;
-  const scoreAboveOpportunityThreshold = typeof score === "number" && score >= 70;
-  const canQuickAddOpportunity =
-    scoreAboveOpportunityThreshold && Boolean(latestJobId) && !isAddingOpportunity;
-  const opportunityKey = latestJobId ? `${latestJobId}:${Math.round(score ?? 0)}` : null;
-  const hasAddedCurrentOpportunity =
-    Boolean(opportunityKey) && opportunityKey === addedOpportunityKey;
 
   const resultCardClasses = [
-    "score-summary-card space-y-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-[13px] text-slate-200",
+    "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
   ].join(" ");
 
   const runAssessment = useCallback(async () => {
@@ -570,7 +605,6 @@ export function WorkspaceRunner({
     setLatestBaselineId(null);
     setRunState(null);
     setShowUploadAgainCTA(false);
-    setOpportunityActionNotice(null);
     setRevealedScoreValue(0);
     setIsRevealAnalyzing(true);
     revealStartMsRef.current = Date.now();
@@ -749,67 +783,6 @@ export function WorkspaceRunner({
     }
   };
 
-  const handleAddToOpportunities = useCallback(async () => {
-    if (!latestJobId || !scoreAboveOpportunityThreshold || !score) return;
-
-    setIsAddingOpportunity(true);
-    setOpportunityActionNotice(null);
-
-    try {
-      const jobResponse = await fetch(`/api/jobs/${encodeURIComponent(latestJobId)}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      let jobPayload: JobDetailsPayload | null = null;
-      if (jobResponse.ok) {
-        const parsed = (await jobResponse.json().catch(() => null)) as JobDetailsPayload | null;
-        jobPayload = parsed;
-      }
-
-      const roleTitle = jobPayload?.title?.trim() || "Untitled role";
-      const company = jobPayload?.company?.trim() || "Unknown company";
-
-      const response = await fetch("/api/job-tracker", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          roleTitle,
-          company,
-          cxFitScore: Math.round(score),
-          stage: "Targeted",
-          notes: "Added from score reveal.",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("We couldn't add this role to Opportunities. Please try again.");
-      }
-
-      if (opportunityKey) {
-        setAddedOpportunityKey(opportunityKey);
-      }
-      trackEvent("opportunity_saved", {
-        source: "workspace",
-        score,
-        scoreBucket: resolveScoreBucket(score),
-        jobId: latestJobId ?? undefined,
-        baselineId: latestBaselineId ?? undefined,
-      });
-      setOpportunityActionNotice("Added to Opportunities.");
-    } catch (addError) {
-      setOpportunityActionNotice(
-        addError instanceof Error
-          ? addError.message
-          : "We couldn't add this role to Opportunities. Please try again.",
-      );
-    } finally {
-      setIsAddingOpportunity(false);
-    }
-  }, [latestJobId, opportunityKey, score, scoreAboveOpportunityThreshold]);
-
   const handleAutoRunFinalize = useCallback(() => {
     autoRunCombinationRef.current = null;
     autoRunInitiatedRef.current = false;
@@ -976,70 +949,95 @@ export function WorkspaceRunner({
 
       {showResult ? (
         <div ref={scoreSummaryRef} className={resultCardClasses}>
-          <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
-            {scoreBand && (score ?? 0) >= 85 ? (
-              <span
-                className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${scoreBand.chipClassName}`}
-              >
-                {scoreBand.chipLabel}
-              </span>
-            ) : null}
-            <div className="text-6xl font-bold tracking-tight text-[var(--text-primary)]">
-              {scoreDisplayValue}
+          <div className="flex flex-col gap-5 px-2 py-6 text-left sm:px-4">
+            <div
+              className={`rounded-[24px] border p-6 text-center sm:p-8 ${scoreBand?.surfaceClassName ?? "border-white/10 bg-white/5"}`}
+            >
+              <p className="text-[88px] font-black leading-none tracking-[-0.06em] text-white sm:text-[112px]">
+                {scoreDisplayValue}
+              </p>
+              {scoreBand ? (
+                <>
+                  <p className={`mt-3 text-xl font-semibold ${scoreBand.accentClassName}`}>
+                    {scoreBand.label}
+                  </p>
+                  <p className="mt-2 text-base text-slate-100">{scoreBand.summary}</p>
+                </>
+              ) : null}
+              {competitiveContext ? (
+                <p className="mt-3 text-sm text-slate-300">{competitiveContext}</p>
+              ) : null}
             </div>
-            {scoreBand ? (
-              <>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-300">
-                  {scoreBand.label}
-                </p>
-                <p className="max-w-xs text-sm text-slate-300/90">{scoreBand.summary}</p>
-              </>
-            ) : null}
-            {evidenceLines.length ? (
-              <div className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/40 p-4 text-left">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-300">
-                  Evidence from your background
-                </p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-200">
-                  {evidenceLines.slice(0, 3).map((line) => (
+            {strengthSignals.length ? (
+              <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
+                <h3 className="text-base font-semibold text-white">Why this role fits you</h3>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {strengthSignals.map((line) => (
                     <li key={line}>• {line}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
+            {gapSignals.length ? (
+              <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-5">
+                <h3 className="text-base font-semibold text-white">Where the gaps are</h3>
+                <div className="mt-3 space-y-3">
+                  {gapSignals.map((gap) => (
+                    <div
+                      key={`${gap.title}-${gap.requirementEvidence ?? ""}`}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                        {resolveGapSeverityLabel(gap.severityScore)}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-200">• {normalizeDiagnosticLine(gap.title)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <a
-              href={actionHref}
-              className="whitespace-nowrap rounded-xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+              href={resultsHref}
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
             >
-              {scoreBand?.ctaLabel ?? "Review your results"}
+              Review Detailed Results
             </a>
-            {scoreAboveOpportunityThreshold ? (
-              <button
-                type="button"
-                className="rounded-xl border border-white/25 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => {
-                  void handleAddToOpportunities();
-                }}
-                disabled={!canQuickAddOpportunity || hasAddedCurrentOpportunity}
-              >
-                {hasAddedCurrentOpportunity
-                  ? "Added to Opportunities"
-                  : isAddingOpportunity
-                    ? "Adding..."
-                    : "Add to Opportunities"}
-              </button>
-            ) : null}
-            {opportunityActionNotice ? (
-              <p className="text-xs text-slate-400">{opportunityActionNotice}</p>
-            ) : null}
-            <details className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/30 p-3 text-left">
+            <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-left">
               <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
                 Why this score?
               </summary>
-              <p className="mt-2 text-xs text-slate-300">
-                This score reflects how well your background signals align with the role's core scope,
-                operational demands, and context. Review results for full role-fit detail.
-              </p>
+              <div className="mt-4 grid gap-4">
+                <section>
+                  <h4 className="text-sm font-semibold text-white">Strength signals</h4>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                    {strengthSignals.length ? (
+                      strengthSignals.map((line) => <li key={`strength-${line}`}>• {line}</li>)
+                    ) : (
+                      <li>• No baseline strength signals are available yet.</li>
+                    )}
+                  </ul>
+                </section>
+                <section>
+                  <h4 className="text-sm font-semibold text-white">Gap signals</h4>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                    {gapSignals.length ? (
+                      gapSignals.map((gap) => (
+                        <li key={`gap-${gap.title}`}>• {normalizeDiagnosticLine(gap.title)}</li>
+                      ))
+                    ) : (
+                      <li>• No major gap signals are available yet.</li>
+                    )}
+                  </ul>
+                </section>
+                <section>
+                  <h4 className="text-sm font-semibold text-white">Ways to increase this score</h4>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                    {improvementSuggestions.map((item) => (
+                      <li key={`improve-${item}`}>• {item}</li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
             </details>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { ResultsV2 } from "@/app/(app)/results/components/ResultsV2";
 
 describe("ResultsV2", () => {
-  it("renders evidence block when score signals exist", () => {
+  it("renders fit evidence block when score signals exist", () => {
     render(
       <ResultsV2
         heroHeading="Test"
@@ -43,10 +43,8 @@ describe("ResultsV2", () => {
       />,
     );
 
-    expect(screen.getByText("Evidence from your background")).toBeInTheDocument();
-    expect(
-      screen.getByText("Leadership scope alignment: Director level support leadership."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Why this role fits you")).toBeInTheDocument();
+    expect(screen.getAllByText("Director level support leadership").length).toBeGreaterThan(0);
   });
 
   it("does not render evidence block when score signals are missing", () => {
@@ -73,6 +71,6 @@ describe("ResultsV2", () => {
       />,
     );
 
-    expect(screen.queryByText("Evidence from your background")).toBeNull();
+    expect(screen.queryByText("Why this role fits you")).toBeNull();
   });
 });

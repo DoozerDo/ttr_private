@@ -37,7 +37,9 @@ export function ResultsV2({
   primaryActionDisabled,
   scoreBreakdown,
 }: ResultsV2Props) {
-  const evidenceLines = buildEvidenceLines(scoreBreakdown);
+  const evidenceLines = buildEvidenceLines(scoreBreakdown).map((line) =>
+    line.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim(),
+  );
 
   return (
     <div
@@ -76,7 +78,7 @@ export function ResultsV2({
 
               {evidenceLines.length ? (
                 <section style={{ marginTop: 16, marginBottom: 16 }}>
-                  <h3 className="text-sm font-semibold text-slate-200">Evidence from your background</h3>
+                  <h3 className="text-sm font-semibold text-slate-200">Why this role fits you</h3>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
                     {evidenceLines.map((line) => (
                       <li key={line}>{line}</li>
