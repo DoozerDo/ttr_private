@@ -8,7 +8,7 @@ import {
   GeneratedTextSourceType,
   ComplianceTextSection,
 } from './compliance.types';
-import { extractClaimUnitsFromSections } from './claim-units';
+import { buildComparableComplianceUnits } from './comparable-units';
 import { findBestSemanticEvidenceMatch } from './semantic-evidence';
 
 type SectionShape = {
@@ -43,6 +43,12 @@ type ScopeSignalClass =
   | 'responsibility'
   | 'scale'
   | 'quantitative';
+type BaselineFragmentSignalClass =
+  | 'technical_platform'
+  | 'infrastructure'
+  | 'responsibility_term'
+  | 'tech_stack'
+  | 'domain_noun';
 
 type DetectorOptions = {
   embeddingProvider?: (text: string) => Promise<number[] | null>;
@@ -100,6 +106,16 @@ const SCALE_INDICATOR_PATTERN =
   /\b(?:team|staff|department|organization|group|program|initiative|vendors?|devices?|systems?|labs?|infrastructure|environment|platform)\b/i;
 const QUANTITATIVE_INDICATOR_PATTERN =
   /\b(?:\d[\d,]*(?:\.\d+)?%|\d[\d,]*(?:\.\d+)?\s*(?:k|m|b|thousand|million|billion|devices?|systems?|engineers?|staff|labs?|vendors?)|budget|budgets|headcount|team size|count)\b/i;
+const TECHNICAL_PLATFORM_PATTERN =
+  /\b(?:technical|technology|platform|automation|engineering|systems?|environment|validation|cloud|devops|sre)\b/i;
+const INFRASTRUCTURE_SIGNAL_PATTERN =
+  /\b(?:infrastructure|network|deployment|operations?|ops|architecture|lab|labs|device|devices)\b/i;
+const RESPONSIBILITY_TERM_PATTERN =
+  /\b(?:management|ownership|responsibility|support|administration|maintenance|oversight)\b/i;
+const TECH_STACK_REFERENCE_PATTERN =
+  /\b(?:stack|azure|aws|gcp|kubernetes|docker|windows|linux|terraform|ansible|ci\/cd|python|java|sql)\b/i;
+const DOMAIN_NOUN_PATTERN =
+  /\b(?:platform|infrastructure|environment|network|lab|system|systems)\b/i;
 
 export class ScopeInflationDetector {
   private normalize(text: string): string {
@@ -149,6 +165,28 @@ export class ScopeInflationDetector {
     return classes;
   }
 
+  private matchedBaselineFragmentSignalClasses(
+    normalized: string,
+  ): Set<BaselineFragmentSignalClass> {
+    const classes = new Set<BaselineFragmentSignalClass>();
+    if (TECHNICAL_PLATFORM_PATTERN.test(normalized)) {
+      classes.add('technical_platform');
+    }
+    if (INFRASTRUCTURE_SIGNAL_PATTERN.test(normalized)) {
+      classes.add('infrastructure');
+    }
+    if (RESPONSIBILITY_TERM_PATTERN.test(normalized)) {
+      classes.add('responsibility_term');
+    }
+    if (TECH_STACK_REFERENCE_PATTERN.test(normalized)) {
+      classes.add('tech_stack');
+    }
+    if (DOMAIN_NOUN_PATTERN.test(normalized)) {
+      classes.add('domain_noun');
+    }
+    return classes;
+  }
+
   private shouldSkipCueDueToJobContext(
     normalized: string,
     jobContext?: JobApplicationContext,
@@ -191,25 +229,29 @@ export class ScopeInflationDetector {
         sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
       }),
     );
-    const baselineUnits = extractClaimUnitsFromSections(complianceSections, {
+    const baselineUnits = buildComparableComplianceUnits(complianceSections, {
       baselineOnly: true,
-      enforceIntegrityForBaseline: true,
+      enforceIntegrityForBaseline: false,
+      sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      includeBaselineEvidenceFragments: true,
     });
 
     for (const unit of baselineUnits) {
       const statement = unit.text;
-        const normalized = this.normalize(statement);
-        if (!normalized) continue;
-        const signalClasses = this.matchedSignalClasses(normalized);
-        if (signalClasses.size < 2) {
-          continue;
-        }
-        evidence.push({
-          text: statement,
-          normalized,
-          snippet: this.extractSnippet(statement),
-          hasExtremeScale: this.hasExtremeScaleSignal(normalized),
-        });
+      const normalized = unit.normalized;
+      if (!normalized) continue;
+      const signalClasses = this.matchedSignalClasses(normalized);
+      const fragmentSignalClasses =
+        this.matchedBaselineFragmentSignalClasses(normalized);
+      if (signalClasses.size < 2 && fragmentSignalClasses.size < 2) {
+        continue;
+      }
+      evidence.push({
+        text: statement,
+        normalized,
+        snippet: this.extractSnippet(statement),
+        hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+      });
     }
 
     return evidence;
@@ -227,25 +269,27 @@ export class ScopeInflationDetector {
         sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
       }),
     );
-    const claimUnits = extractClaimUnitsFromSections(complianceSections, {
+    const claimUnits = buildComparableComplianceUnits(complianceSections, {
       baselineOnly: true,
       enforceIntegrityForBaseline: true,
+      sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+      includeBaselineEvidenceFragments: false,
     });
 
     for (const unit of claimUnits) {
       const statement = unit.text;
-        const normalized = this.normalize(statement);
-        if (!normalized) continue;
-        if (this.shouldSkipCueDueToJobContext(normalized, jobContext)) continue;
-        if (!(this.hasScopeVerb(normalized) && this.hasScaleSignal(normalized))) {
-          continue;
-        }
-        claims.push({
-          text: statement,
-          normalized,
-          snippet: this.extractSnippet(statement),
-          hasExtremeScale: this.hasExtremeScaleSignal(normalized),
-        });
+      const normalized = unit.normalized;
+      if (!normalized) continue;
+      if (this.shouldSkipCueDueToJobContext(normalized, jobContext)) continue;
+      if (!(this.hasScopeVerb(normalized) && this.hasScaleSignal(normalized))) {
+        continue;
+      }
+      claims.push({
+        text: statement,
+        normalized,
+        snippet: this.extractSnippet(statement),
+        hasExtremeScale: this.hasExtremeScaleSignal(normalized),
+      });
     }
     return claims;
   }

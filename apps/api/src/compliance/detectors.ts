@@ -9,7 +9,8 @@ import {
 } from './compliance.types';
 import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
-import { extractClaimUnitsFromSections } from './claim-units';
+import { buildComparableComplianceUnits } from './comparable-units';
+import { ResumeLineType } from './resume-line-classifier';
 
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
@@ -499,14 +500,28 @@ function isBaselineEvidenceSourceType(
 
 function collectSourcedTextSpans(
   sections: ComplianceTextSection[] | null | undefined,
+  options?: {
+    includeSkillStacks?: boolean;
+    includeBaselineEvidenceFragments?: boolean;
+    allowedLineTypes?: ResumeLineType[];
+  },
 ): SourcedTextSpan[] {
-  return extractClaimUnitsFromSections(sections, {
+  const units = buildComparableComplianceUnits(sections, {
     baselineOnly: false,
     enforceIntegrityForBaseline: true,
-  }).map((unit) => ({
+    includeSkillStacks: options?.includeSkillStacks ?? false,
+    includeBaselineEvidenceFragments:
+      options?.includeBaselineEvidenceFragments ?? false,
+  });
+  const allowedLineTypes =
+    options?.allowedLineTypes ??
+    [ResumeLineType.ROLE_HEADER, ResumeLineType.BULLET_CLAIM];
+  return units
+    .filter((unit) => allowedLineTypes.includes(unit.lineType))
+    .map((unit) => ({
     text: unit.text,
     sourceType: unit.sourceType,
-  }));
+    }));
 }
 
 const FRAGMENT_LEADING_CONTINUATION_PATTERN =
@@ -1927,7 +1942,16 @@ export function collectTechnologyTokensFromSections(
 ): Map<string, string> {
   const tokens = new Map<string, string>();
 
-  for (const span of collectSourcedTextSpans(sections)) {
+  for (const span of collectSourcedTextSpans(sections, {
+    includeSkillStacks: true,
+    includeBaselineEvidenceFragments: true,
+    allowedLineTypes: [
+      ResumeLineType.ROLE_HEADER,
+      ResumeLineType.BULLET_CLAIM,
+      ResumeLineType.BULLET_EVIDENCE_FRAGMENT,
+      ResumeLineType.SKILL_STACK,
+    ],
+  })) {
     if (!isBaselineEvidenceSourceType(span.sourceType)) continue;
     if (
       isLikelyFragmentSpan(span.text, {

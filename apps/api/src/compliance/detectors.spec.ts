@@ -470,6 +470,27 @@ describe('compliance detectors job context allowlist cover letters', () => {
       expect(flags.length).toBeGreaterThan(0);
     });
 
+    it('does not treat skill stacks as invented companies', () => {
+      const flags = detectInventedCompany({
+        generatedSections: [
+          {
+            title: 'Skills',
+            content: 'Azure | Terraform | Kubernetes',
+            sentenceSources: [
+              {
+                text: 'Azure | Terraform | Kubernetes',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        documentType: DocumentType.RESUME,
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
     it('skips detection when sourceType is missing', () => {
       const flags = detectInventedRole({
         generatedSections: [
