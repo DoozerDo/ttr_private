@@ -323,7 +323,7 @@ function normalizeOpportunityLine(value: string): string {
   return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
 }
 
-function getOpportunityVerdict(score?: number | null): {
+export function getOpportunityVerdict(score?: number | null): {
   label: string;
   explanation: string;
 } {
@@ -363,7 +363,7 @@ function getOpportunityVerdict(score?: number | null): {
   };
 }
 
-function getOpportunityNextMove(score?: number | null): {
+export function getOpportunityNextMove(score?: number | null): {
   title: string;
   body: string;
 } {
@@ -403,14 +403,14 @@ function getOpportunityNextMove(score?: number | null): {
   };
 }
 
-function getFitLevel(score?: number | null): "High" | "Moderate" | "Low" {
+export function getFitLevel(score?: number | null): "High" | "Moderate" | "Low" {
   if (typeof score !== "number") return "Low";
   if (score >= 80) return "High";
   if (score >= 70) return "Moderate";
   return "Low";
 }
 
-function getRiskLevel(
+export function getRiskLevel(
   score?: number | null,
   highestGapSeverity?: number | null,
 ): "Low" | "Moderate" | "High" {
@@ -425,7 +425,7 @@ function getRiskLevel(
   return "High";
 }
 
-function getReadinessLevel(
+export function getReadinessLevel(
   score?: number | null,
   confidenceLevel?: "High" | "Moderate" | "Low",
 ): "High" | "Moderate" | "Low" {
@@ -475,6 +475,104 @@ type ScoreDriver = {
   showNoChangesMessage: boolean;
   ctaDisabled?: boolean;
 };
+
+type OpportunityMapSectionProps = {
+  score: number | null;
+  verdict: {
+    label: string;
+    explanation: string;
+  };
+  advantageSignals: string[];
+  watchoutSignals: string[];
+  nextMove: {
+    title: string;
+    body: string;
+  };
+  compactIndicators: Array<{
+    label: string;
+    value: string;
+  }>;
+};
+
+export function OpportunityMapSection({
+  score,
+  verdict,
+  advantageSignals,
+  watchoutSignals,
+  nextMove,
+  compactIndicators,
+}: OpportunityMapSectionProps) {
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
+      <div className="flex flex-col gap-6">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">Opportunity Map</p>
+          <p className="mt-2 max-w-2xl text-sm text-slate-300">
+            Your executive summary for whether this role is worth pursuing.
+          </p>
+        </div>
+
+        <article className="rounded-[24px] border border-white/10 bg-slate-950/45 p-5">
+          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Score and verdict</p>
+              <div className="mt-4 flex items-end gap-4">
+                <p className="text-[68px] font-black leading-none tracking-[-0.06em] text-white">
+                  {typeof score === "number" ? Math.round(score) : "--"}
+                </p>
+                <div className="pb-2">
+                  <p className="text-2xl font-semibold text-white">{verdict.label}</p>
+                  <p className="mt-1 text-sm text-slate-300">{verdict.explanation}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+          <h3 className="text-lg font-semibold text-slate-100">Your advantage</h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {advantageSignals.length ? (
+              advantageSignals.map((strength) => <li key={strength}>• {strength}</li>)
+            ) : (
+              <li>• Verified baseline advantages are not available for this run yet.</li>
+            )}
+          </ul>
+        </article>
+
+        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+          <h3 className="text-lg font-semibold text-slate-100">Watchouts</h3>
+          <ul className="mt-3 space-y-2 text-sm text-slate-300">
+            {watchoutSignals.length ? (
+              watchoutSignals.map((watchout) => <li key={watchout}>• {watchout}</li>)
+            ) : (
+              <li>• No major mismatch areas are surfaced for this run.</li>
+            )}
+          </ul>
+        </article>
+
+        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Best next move</p>
+          <p className="mt-4 text-2xl font-semibold text-white">{nextMove.title}</p>
+          <p className="mt-2 text-sm leading-relaxed text-slate-300">{nextMove.body}</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            {compactIndicators.map((indicator) => (
+              <div
+                key={indicator.label}
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  {indicator.label}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">{indicator.value}</p>
+              </div>
+            ))}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
 
 type DriverBucket = "strong" | "watch" | "fix" | "pending";
 
@@ -1042,13 +1140,6 @@ export default function ResultsPage() {
       ),
     ).slice(0, 3);
   }, [scoreBreakdown, strategicStrengths]);
-  const watchoutSignals = useMemo(() => {
-    const rankedCriticalGaps = [...criticalGapDetails]
-      .sort((a, b) => (b.severityScore ?? 0) - (a.severityScore ?? 0))
-      .map((gap) => normalizeOpportunityLine(gap.title));
-    const fallbackRisks = riskItems.map((risk) => normalizeOpportunityLine(risk.title));
-    return Array.from(new Set([...rankedCriticalGaps, ...fallbackRisks].filter(Boolean))).slice(0, 3);
-  }, [criticalGapDetails, riskItems]);
   const highestGapSeverity = useMemo(() => {
     if (!criticalGapDetails.length) return null;
     return criticalGapDetails.reduce<number | null>(
@@ -1088,6 +1179,13 @@ export default function ResultsPage() {
             impactLine: undefined,
           },
         ];
+  const watchoutSignals = useMemo(() => {
+    const rankedCriticalGaps = [...criticalGapDetails]
+      .sort((a, b) => (b.severityScore ?? 0) - (a.severityScore ?? 0))
+      .map((gap) => normalizeOpportunityLine(gap.title));
+    const fallbackRisks = riskItems.map((risk) => normalizeOpportunityLine(risk.title));
+    return Array.from(new Set([...rankedCriticalGaps, ...fallbackRisks].filter(Boolean))).slice(0, 3);
+  }, [criticalGapDetails, riskItems]);
   const scoreTierLabel = useMemo(() => getScoreTierLabel(activeScore), [activeScore]);
   const scoreInterpretation = useMemo(() => getScoreInterpretation(activeScore), [activeScore]);
   const recommendedNextStep = useMemo(() => getRecommendedNextStep(activeScore), [activeScore]);
@@ -1687,79 +1785,14 @@ export default function ResultsPage() {
             />
           ) : (
             <div className="space-y-6">
-              <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
-                <div className="flex flex-col gap-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">Opportunity Map</p>
-                      <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                        Your executive summary for whether this role is worth pursuing.
-                      </p>
-                    </div>
-                    <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300 md:inline-flex">
-                      {confidenceLevel} confidence
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-                    <article className="rounded-[24px] border border-white/10 bg-slate-950/45 p-5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Score and verdict</p>
-                      <div className="mt-4 flex items-end gap-4">
-                        <p className="text-[68px] font-black leading-none tracking-[-0.06em] text-white">
-                          {typeof activeScore === "number" ? Math.round(activeScore) : "--"}
-                        </p>
-                        <div className="pb-2">
-                          <p className="text-2xl font-semibold text-white">{opportunityVerdict.label}</p>
-                          <p className="mt-1 text-sm text-slate-300">{opportunityVerdict.explanation}</p>
-                        </div>
-                      </div>
-                    </article>
-
-                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Best next move</p>
-                      <p className="mt-4 text-2xl font-semibold text-white">{opportunityNextMove.title}</p>
-                      <p className="mt-2 text-sm leading-relaxed text-slate-300">{opportunityNextMove.body}</p>
-                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                        {compactIndicators.map((indicator) => (
-                          <div
-                            key={indicator.label}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-                          >
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                              {indicator.label}
-                            </p>
-                            <p className="mt-1 text-sm font-semibold text-slate-100">{indicator.value}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </article>
-                  </div>
-
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-                      <h3 className="text-lg font-semibold text-slate-100">Your advantage</h3>
-                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
-                        {advantageSignals.length ? (
-                          advantageSignals.map((strength) => <li key={strength}>• {strength}</li>)
-                        ) : (
-                          <li>• Verified baseline advantages are not available for this run yet.</li>
-                        )}
-                      </ul>
-                    </article>
-
-                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-                      <h3 className="text-lg font-semibold text-slate-100">Watchouts</h3>
-                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
-                        {watchoutSignals.length ? (
-                          watchoutSignals.map((watchout) => <li key={watchout}>• {watchout}</li>)
-                        ) : (
-                          <li>• No major mismatch areas are surfaced for this run.</li>
-                        )}
-                      </ul>
-                    </article>
-                  </div>
-                </div>
-              </section>
+              <OpportunityMapSection
+                score={activeScore}
+                verdict={opportunityVerdict}
+                advantageSignals={advantageSignals}
+                watchoutSignals={watchoutSignals}
+                nextMove={opportunityNextMove}
+                compactIndicators={compactIndicators}
+              />
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
