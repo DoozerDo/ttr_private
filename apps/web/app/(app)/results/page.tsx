@@ -319,6 +319,122 @@ function getRecommendedNextStep(score?: number | null): { title: string; body: s
   };
 }
 
+function normalizeOpportunityLine(value: string): string {
+  return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
+}
+
+function getOpportunityVerdict(score?: number | null): {
+  label: string;
+  explanation: string;
+} {
+  if (typeof score !== "number") {
+    return {
+      label: "Pending",
+      explanation: "Run an analysis to see how strong this role looks for you.",
+    };
+  }
+  if (score >= 90) {
+    return {
+      label: "Prime Opportunity",
+      explanation: "You are exceptionally well aligned for this role.",
+    };
+  }
+  if (score >= 80) {
+    return {
+      label: "Strong Match",
+      explanation: "You are highly competitive for this role.",
+    };
+  }
+  if (score >= 70) {
+    return {
+      label: "Competitive Match",
+      explanation: "You have a realistic shot if you tailor carefully.",
+    };
+  }
+  if (score >= 60) {
+    return {
+      label: "Possible Fit",
+      explanation: "You may need stronger positioning before applying.",
+    };
+  }
+  return {
+    label: "Low Match",
+    explanation: "This role appears weakly aligned with your current baseline.",
+  };
+}
+
+function getOpportunityNextMove(score?: number | null): {
+  title: string;
+  body: string;
+} {
+  if (typeof score !== "number") {
+    return {
+      title: "Run analysis",
+      body: "Complete an analysis first so you can turn this role into a clear decision.",
+    };
+  }
+  if (score >= 90) {
+    return {
+      title: "Apply now",
+      body: "Your background is already strong enough to pursue this role with confidence.",
+    };
+  }
+  if (score >= 80) {
+    return {
+      title: "Tailor and apply",
+      body: "Your background is strong enough to pursue this role with focused positioning.",
+    };
+  }
+  if (score >= 70) {
+    return {
+      title: "Tailor before applying",
+      body: "You have a viable path here, but sharper positioning will matter before you apply.",
+    };
+  }
+  if (score >= 60) {
+    return {
+      title: "Strengthen baseline before applying",
+      body: "The role has some overlap, but your current baseline does not yet make the strongest case.",
+    };
+  }
+  return {
+    title: "Consider skipping or repositioning",
+    body: "This role appears materially outside your strongest lane right now.",
+  };
+}
+
+function getFitLevel(score?: number | null): "High" | "Moderate" | "Low" {
+  if (typeof score !== "number") return "Low";
+  if (score >= 80) return "High";
+  if (score >= 70) return "Moderate";
+  return "Low";
+}
+
+function getRiskLevel(
+  score?: number | null,
+  highestGapSeverity?: number | null,
+): "Low" | "Moderate" | "High" {
+  if (typeof highestGapSeverity === "number") {
+    if (highestGapSeverity >= 0.75) return "High";
+    if (highestGapSeverity >= 0.5) return "Moderate";
+    return typeof score === "number" && score >= 85 ? "Low" : "Moderate";
+  }
+  if (typeof score !== "number") return "High";
+  if (score >= 90) return "Low";
+  if (score >= 70) return "Moderate";
+  return "High";
+}
+
+function getReadinessLevel(
+  score?: number | null,
+  confidenceLevel?: "High" | "Moderate" | "Low",
+): "High" | "Moderate" | "Low" {
+  if (typeof score !== "number") return "Low";
+  if (score >= 85 && confidenceLevel !== "Low") return "High";
+  if (score >= 70) return "Moderate";
+  return "Low";
+}
+
 function resolveConfidenceLevel(input: {
   confidenceScore?: number | null;
   scoreBreakdown?: ScoreBreakdownShape | null;
@@ -916,6 +1032,33 @@ export default function ResultsPage() {
       ? latest.recommendedActions.filter((item) => typeof item === "string" && item.trim().length > 0)
       : [];
   }, [latest?.recommendedActions]);
+  const advantageSignals = useMemo(() => {
+    const evidenceSignals = buildEvidenceLines(scoreBreakdown).map((line) => normalizeOpportunityLine(line));
+    return Array.from(
+      new Set(
+        [...strategicStrengths, ...evidenceSignals]
+          .map((item) => normalizeOpportunityLine(item))
+          .filter(Boolean),
+      ),
+    ).slice(0, 3);
+  }, [scoreBreakdown, strategicStrengths]);
+  const watchoutSignals = useMemo(() => {
+    const rankedCriticalGaps = [...criticalGapDetails]
+      .sort((a, b) => (b.severityScore ?? 0) - (a.severityScore ?? 0))
+      .map((gap) => normalizeOpportunityLine(gap.title));
+    const fallbackRisks = riskItems.map((risk) => normalizeOpportunityLine(risk.title));
+    return Array.from(new Set([...rankedCriticalGaps, ...fallbackRisks].filter(Boolean))).slice(0, 3);
+  }, [criticalGapDetails, riskItems]);
+  const highestGapSeverity = useMemo(() => {
+    if (!criticalGapDetails.length) return null;
+    return criticalGapDetails.reduce<number | null>(
+      (highest, gap) =>
+        typeof gap.severityScore === "number" && (highest === null || gap.severityScore > highest)
+          ? gap.severityScore
+          : highest,
+      null,
+    );
+  }, [criticalGapDetails]);
   const strategicBrief = useMemo(
     () =>
       buildStrategicBrief({
@@ -948,6 +1091,16 @@ export default function ResultsPage() {
   const scoreTierLabel = useMemo(() => getScoreTierLabel(activeScore), [activeScore]);
   const scoreInterpretation = useMemo(() => getScoreInterpretation(activeScore), [activeScore]);
   const recommendedNextStep = useMemo(() => getRecommendedNextStep(activeScore), [activeScore]);
+  const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
+  const opportunityNextMove = useMemo(() => getOpportunityNextMove(activeScore), [activeScore]);
+  const compactIndicators = useMemo(
+    () => [
+      { label: "Fit", value: getFitLevel(activeScore) },
+      { label: "Risk", value: getRiskLevel(activeScore, highestGapSeverity) },
+      { label: "Readiness", value: getReadinessLevel(activeScore, confidenceLevel) },
+    ],
+    [activeScore, confidenceLevel, highestGapSeverity],
+  );
   const isAuthenticatedContext = Boolean(latest?.baselineId);
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
@@ -1534,19 +1687,93 @@ export default function ResultsPage() {
             />
           ) : (
             <div className="space-y-6">
+              <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
+                <div className="flex flex-col gap-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">Opportunity Map</p>
+                      <p className="mt-2 max-w-2xl text-sm text-slate-300">
+                        Your executive summary for whether this role is worth pursuing.
+                      </p>
+                    </div>
+                    <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300 md:inline-flex">
+                      {confidenceLevel} confidence
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+                    <article className="rounded-[24px] border border-white/10 bg-slate-950/45 p-5">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Score and verdict</p>
+                      <div className="mt-4 flex items-end gap-4">
+                        <p className="text-[68px] font-black leading-none tracking-[-0.06em] text-white">
+                          {typeof activeScore === "number" ? Math.round(activeScore) : "--"}
+                        </p>
+                        <div className="pb-2">
+                          <p className="text-2xl font-semibold text-white">{opportunityVerdict.label}</p>
+                          <p className="mt-1 text-sm text-slate-300">{opportunityVerdict.explanation}</p>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Best next move</p>
+                      <p className="mt-4 text-2xl font-semibold text-white">{opportunityNextMove.title}</p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-300">{opportunityNextMove.body}</p>
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                        {compactIndicators.map((indicator) => (
+                          <div
+                            key={indicator.label}
+                            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+                          >
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              {indicator.label}
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-100">{indicator.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+                      <h3 className="text-lg font-semibold text-slate-100">Your advantage</h3>
+                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                        {advantageSignals.length ? (
+                          advantageSignals.map((strength) => <li key={strength}>• {strength}</li>)
+                        ) : (
+                          <li>• Verified baseline advantages are not available for this run yet.</li>
+                        )}
+                      </ul>
+                    </article>
+
+                    <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
+                      <h3 className="text-lg font-semibold text-slate-100">Watchouts</h3>
+                      <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                        {watchoutSignals.length ? (
+                          watchoutSignals.map((watchout) => <li key={watchout}>• {watchout}</li>)
+                        ) : (
+                          <li>• No major mismatch areas are surfaced for this run.</li>
+                        )}
+                      </ul>
+                    </article>
+                  </div>
+                </div>
+              </section>
+
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
-                  <div className="lg:col-span-5">
-                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Compatibility Score</p>
-                    <p className="mt-2 text-[56px] font-bold leading-none text-white lg:text-[64px]">
-                      {typeof activeScore === "number" ? Math.round(activeScore) : "--"}
-                    </p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-100">{scoreTierLabel}</p>
-                    <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-slate-300">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Role positioning</p>
+                    <p className="mt-2 text-xl font-semibold text-slate-100">{scoreTierLabel}</p>
+                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300">
                       {scoreInterpretation}
                     </p>
+                    <p className="mt-3 text-sm text-slate-400">
+                      {recommendedNextStep.body}
+                    </p>
                   </div>
-                  <div className="lg:col-span-7">
+                  <div>
                     <div className="mb-3">
                       <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Opportunity Radar</p>
                       <p className="mt-1 text-sm text-slate-300">
@@ -1556,35 +1783,6 @@ export default function ResultsPage() {
                     <OpportunityRadarChart areas={compatibilityMapSignals} />
                   </div>
                 </div>
-              </section>
-
-              <section className="grid gap-4 lg:grid-cols-2">
-                <article className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                  <h3 className="text-xl font-semibold text-slate-100">Strengths</h3>
-                  <ul className="mt-3 space-y-2 text-[15px] text-slate-300">
-                    {strategicStrengths.length ? (
-                      strategicStrengths.map((strength) => <li key={strength}>- {strength}</li>)
-                    ) : (
-                      <li>No strengths are available for this analysis yet.</li>
-                    )}
-                  </ul>
-                </article>
-                <article className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                  <h3 className="text-xl font-semibold text-slate-100">Gaps</h3>
-                  <ul className="mt-3 space-y-2 text-[15px] text-slate-300">
-                    {riskItems.length ? (
-                      riskItems.slice(0, 4).map((gap) => <li key={gap.id}>- {gap.title}</li>)
-                    ) : (
-                      <li>No critical gaps are available for this analysis yet.</li>
-                    )}
-                  </ul>
-                </article>
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                <h3 className="text-2xl font-semibold text-slate-100">Recommended next step</h3>
-                <p className="mt-2 text-xl font-semibold text-white">{recommendedNextStep.title}</p>
-                <p className="mt-2 text-[15px] leading-relaxed text-slate-300">{recommendedNextStep.body}</p>
               </section>
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/45 p-6">
