@@ -11,7 +11,7 @@ import { buildBaselineStrength } from "@/src/features/baseline/utils/baselineStr
 type BaselineStrengthCardProps = {
   progressPercent: number;
   onContinue: () => void;
-  onRunAnalysis: () => void;
+  onRunAnalysis?: () => void;
 };
 
 export function BaselineStrengthCard({
@@ -75,7 +75,7 @@ export function BaselineStrengthCard({
         })}
       </div>
 
-      {canRunAnalysis ? (
+      {canRunAnalysis && onRunAnalysis ? (
         <div className="space-y-2 rounded-xl border border-white/20 bg-white/5 p-3">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-200">
             Baseline Ready

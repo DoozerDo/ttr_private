@@ -7,7 +7,7 @@ type BaselineUnlockProgressProps = {
   milestoneLabel: string;
   isBaselineReady: boolean;
   onContinue: () => void;
-  onRunAnalysis: () => void;
+  onRunAnalysis?: () => void;
 };
 
 export function BaselineUnlockProgress({

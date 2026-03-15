@@ -54,6 +54,7 @@ import {
   buildResumeDraftSections,
   extractEvidenceUnitsFromLogicalUnits,
   reconstructLogicalTextUnits,
+  type ResumeDraftSection,
   validateResumeDraftBulletAnchors,
 } from './resume-draft-bullets';
 import {
@@ -64,6 +65,7 @@ import {
 } from './resume-normalization';
 import {
   buildBaselineEvidenceTermInventory,
+  detectClaimRiskForBullet,
   summarizeClaimRisk,
 } from './claim-risk';
 import type {
@@ -77,6 +79,7 @@ export type GenerateResumeRequest = {
   baselineVersionId?: string;
   jobId?: string | null;
   oneTap?: boolean;
+  editedResume?: NormalizedResumeDocument;
 };
 
 export type GenerateResumeOptions = {
@@ -771,6 +774,86 @@ export class ResumeService {
     };
   }
 
+  private buildFallbackExperienceSection(
+    sections: BaselineSection[],
+    claimRiskInventory: ReturnType<typeof buildBaselineEvidenceTermInventory>,
+  ): ResumeDraftSection | null {
+    const bullets: ResumeDraftSection['bullets'] = [];
+    const seen = new Set<string>();
+    const experienceSection = sections.find(
+      (section) =>
+        String(section.sectionType ?? section.type ?? '').toUpperCase() === 'EXPERIENCE',
+    );
+    const fallbackHeader = String(experienceSection?.content ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+
+    for (const section of sections) {
+      const logicalUnits = reconstructLogicalTextUnits(section.content ?? '');
+      const evidenceUnits = extractEvidenceUnitsFromLogicalUnits(section.id, logicalUnits);
+
+      for (const evidence of evidenceUnits) {
+        const text = String(evidence.normalizedText ?? '').trim();
+        const dedupeKey = text.toLowerCase();
+        if (!text || seen.has(dedupeKey)) continue;
+
+        seen.add(dedupeKey);
+        bullets.push({
+          id: `fallback:${section.id}:${bullets.length}`,
+          text,
+          source: {
+            baselineSectionId: section.id,
+            baselineSectionType: section.sectionType,
+            baselineSectionOrder: section.order,
+            bulletIndex: evidence.sourceSpan.startLine ?? bullets.length,
+            sourceEvidenceIds: [evidence.id],
+            anchorText: evidence.sourceText,
+            anchorKind: evidence.anchorKind,
+            exactBaselineBullet: evidence.exactBaselineBullet,
+          },
+          confidence: 'High',
+          keywordOverlapCount: 0,
+          relevance: {
+            totalScore: 0,
+            matchedTerms: [],
+            matchedPhrases: [],
+            matchedCategories: [],
+          },
+          claimRisk: detectClaimRiskForBullet(text, claimRiskInventory),
+        });
+
+        if (bullets.length >= 5) {
+          break;
+        }
+      }
+
+      if (bullets.length >= 5) {
+        break;
+      }
+    }
+
+    if (!bullets.length) {
+      return null;
+    }
+
+    return {
+      id: 'fallback-experience',
+      type: BaselineSectionType.EXPERIENCE,
+      title: 'Experience',
+      order: sections.length + 1,
+      includePolicy: BaselineIncludePolicy.ALWAYS,
+      source: 'baseline',
+      bullets,
+      content: [fallbackHeader, ...bullets.map((bullet) => `• ${bullet.text}`)]
+        .filter(Boolean)
+        .join('\n'),
+      rawContent: [fallbackHeader, ...bullets.map((bullet) => bullet.text)]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  }
+
   private mapResumeFailureDescription(reason?: string): string {
     switch (reason) {
       case 'no_valid_evidence_units':
@@ -960,16 +1043,38 @@ export class ResumeService {
       .filter(Boolean)
       .join('\n');
 
-    const sections = buildResumeDraftSections(resumeInputSections, {
+    let sections = buildResumeDraftSections(resumeInputSections, {
       jobText: draftJobText || null,
       gapGuidance: gapGuidance
         ? {
             strengthSignals: gapGuidance.strengthSignals,
             gapSignals: gapGuidance.gapSignals,
-          }
-        : undefined,
+      }
+      : undefined,
       claimRiskInventory,
     });
+    const hasExperienceBullets = sections.some(
+      (section) =>
+        String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
+        Array.isArray(section.bullets) &&
+        section.bullets.length > 0,
+    );
+    if (!hasExperienceBullets) {
+      const fallbackExperienceSection = this.buildFallbackExperienceSection(
+        allowedSections,
+        claimRiskInventory,
+      );
+      if (fallbackExperienceSection) {
+        sections = [
+          ...sections.filter(
+            (section) =>
+              String(section.type ?? '').toUpperCase() !== 'EXPERIENCE' ||
+              (Array.isArray(section.bullets) && section.bullets.length > 0),
+          ),
+          fallbackExperienceSection,
+        ];
+      }
+    }
     const claimRiskSummary = summarizeClaimRisk(
       sections.flatMap((section) => section.bullets.map((bullet) => bullet.claimRisk)),
     );
@@ -1471,7 +1576,8 @@ export class ResumeService {
         },
       });
     }
-    const normalizedDocument = generation.preview?.resume ?? null;
+    const normalizedDocument =
+      request.editedResume ?? generation.preview?.resume ?? null;
     if (!normalizedDocument) {
       throw new UnprocessableEntityException({
         error: {

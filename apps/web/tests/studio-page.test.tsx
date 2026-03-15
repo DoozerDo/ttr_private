@@ -2,8 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
+import { listBaselines } from "@/lib/baselines";
+import { listJobs } from "@/lib/jobsClient";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { setFetchImplementation } from "./setup";
+import { overrideSearchParams, setFetchImplementation } from "./setup";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
@@ -77,6 +79,207 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
 }
 
 describe("Studio page UX", () => {
+  it("hydrates Studio from Results query params and shows the ready banner", async () => {
+    overrideSearchParams({
+      jobId: "job-2",
+      baselineId: "base-2",
+      baselineVersionId: "base-version-2",
+    });
+    vi.mocked(listJobs).mockResolvedValueOnce([
+      {
+        id: "job-1",
+        company: "Acme",
+        title: "Director of Support",
+        archivedAt: null,
+        isArchived: false,
+      },
+      {
+        id: "job-2",
+        company: "Orbit",
+        title: "Head of Customer Operations",
+        archivedAt: null,
+        isArchived: false,
+      },
+    ]);
+    vi.mocked(listBaselines).mockResolvedValueOnce([
+      {
+        id: "base-1",
+        originalFilename: "Leadership Resume",
+        version: 1,
+      },
+      {
+        id: "base-2",
+        originalFilename: "Platform Resume",
+        version: 2,
+      },
+    ]);
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-2/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]),
+        );
+      }
+      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+        return Promise.resolve(
+          createResponse({
+            score: 84,
+            baselineId: "base-2",
+            baselineVersionId: "base-version-2",
+            company: "Orbit",
+            jobTitle: "Head of Customer Operations",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-results-ready-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Studio ready")).toBeInTheDocument();
+    expect(screen.getByText("Baseline and role context loaded.")).toBeInTheDocument();
+    expect(screen.getByText("Orbit — Head of Customer Operations")).toBeInTheDocument();
+    expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Platform Resume");
+    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/job/job-2/baseline/base-2/latest");
+  });
+
+  it("falls back gracefully when Results query params do not match available context", async () => {
+    overrideSearchParams({
+      jobId: "missing-job",
+      baselineId: "missing-base",
+      baselineVersionId: "missing-version",
+    });
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Role context unavailable")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(
+        "We could not load the selected role context. Please choose a baseline and job to continue.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-results-ready-banner")).toBeNull();
+  });
+
+  it("hydrates Studio from Results context without baselineVersionId", async () => {
+    overrideSearchParams({
+      jobId: "job-2",
+      baselineId: "base-2",
+    });
+    vi.mocked(listJobs).mockResolvedValueOnce([
+      {
+        id: "job-2",
+        company: "Orbit",
+        title: "Head of Customer Operations",
+        archivedAt: null,
+        isArchived: false,
+      },
+    ]);
+    vi.mocked(listBaselines).mockResolvedValueOnce([
+      {
+        id: "base-2",
+        originalFilename: "Platform Resume",
+        version: 2,
+      },
+    ]);
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-2/versions")) {
+        return Promise.resolve(createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]));
+      }
+      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+        return Promise.resolve(
+          createResponse({
+            score: 84,
+            baselineId: "base-2",
+            company: "Orbit",
+            jobTitle: "Head of Customer Operations",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-results-ready-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Role context unavailable")).toBeNull();
+    expect(screen.getByText("84.0")).toBeInTheDocument();
+  });
+
+  it("shows a concise analysis error when the analysis endpoint returns html", async () => {
+    overrideSearchParams({
+      jobId: "job-2",
+      baselineId: "base-2",
+      baselineVersionId: "base-version-2",
+    });
+    vi.mocked(listJobs).mockResolvedValueOnce([
+      {
+        id: "job-2",
+        company: "Orbit",
+        title: "Head of Customer Operations",
+        archivedAt: null,
+        isArchived: false,
+      },
+    ]);
+    vi.mocked(listBaselines).mockResolvedValueOnce([
+      {
+        id: "base-2",
+        originalFilename: "Platform Resume",
+        version: 2,
+      },
+    ]);
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-2/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]),
+        );
+      }
+      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+        return Promise.resolve({
+          ok: false,
+          status: 502,
+          headers: {
+            get: (name: string) => (name.toLowerCase() === "content-type" ? "text/html" : null),
+          },
+          json: () => Promise.resolve(null),
+          text: () =>
+            Promise.resolve(
+              "<!doctype html><html><body><h1>Application error</h1></body></html>",
+            ),
+          blob: () => Promise.resolve(new Blob()),
+        });
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Unable to load role analysis")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText("Unable to load role analysis. Please return to the Results page."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Application error/i)).toBeNull();
+    expect(screen.queryByText(/<!doctype html>/i)).toBeNull();
+  });
+
   it("hides internal terms and metadata", async () => {
     renderStudio();
 
@@ -92,18 +295,83 @@ describe("Studio page UX", () => {
     expect(screen.queryByText(/^Confidence$/)).toBeNull();
   });
 
-  it("renders why-this-focus and download options for both generation panels", async () => {
+  it("shows evidence summary and corrected focus recommendation", async () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Why this focus")).toBeInTheDocument();
+      expect(screen.getByText("Evidence used for this resume")).toBeInTheDocument();
     });
 
+    expect(screen.getByText("Recommended: Leadership emphasis")).toBeInTheDocument();
+    expect(screen.queryByText("Lead narrative")).toBeNull();
+    expect(screen.getByText("View full baseline evidence")).toBeInTheDocument();
     expect(screen.getAllByText("Generate Resume").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Generate Cover Letter").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Download: DOCX | PDF")).toBeNull();
     expect(screen.queryByRole("button", { name: "Download DOCX" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
+  });
+
+  it("renders resume preview with stronger hierarchy and preview label after generation", async () => {
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/") && url.includes("/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+          return Promise.resolve(
+            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+          );
+        }
+        if (url.endsWith("/api/resume") && init?.method === "POST") {
+          return Promise.resolve(
+            createResponse({
+              status: "success",
+              generationStatus: "success",
+              exportReady: true,
+              exports: { docx: true, pdf: true },
+              preview: {
+                resume: {
+                  heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                  summary: "Support leader focused on scalable operations.",
+                  competencies: ["Incident Management", "Support Operations"],
+                  experience: [
+                    {
+                      company: "Cat Daddy Games",
+                      roleTitle: "Senior Producer",
+                      location: "Los Angeles, CA",
+                      dateRange: "2020 - Present",
+                      bullets: ["Led support operations programs.", "Built escalation workflows."],
+                    },
+                  ],
+                },
+              },
+            }),
+          );
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resume-preview")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Preview of tailored resume")).toBeInTheDocument();
+    expect(screen.getByText("Alex Candidate")).toBeInTheDocument();
+    expect(screen.getByText("Professional Experience")).toBeInTheDocument();
+    expect(screen.getByText("Cat Daddy Games")).toBeInTheDocument();
+    expect(screen.getByText("Senior Producer | Los Angeles, CA")).toBeInTheDocument();
+    expect(screen.getByText("2020 - Present")).toBeInTheDocument();
   });
 
   it("shows a blocked compliance card without rendering raw JSON payloads", async () => {
@@ -254,6 +522,135 @@ describe("Studio page UX", () => {
     expect(within(coverSection).getByRole("button", { name: "Download DOCX" })).toBeDisabled();
   });
 
+  it("shows retry UI when cover letter generation fails", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/") && url.includes("/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+          return Promise.resolve(
+            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+          );
+        }
+        if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
+          return Promise.reject(new Error("Service unavailable"));
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Cover Letter" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Cover Letter" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Cover letter generation failed")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Retry generation" })).toBeInTheDocument();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("supports inline resume editing with save, cancel, export, and regeneration warning", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/") && url.includes("/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        return Promise.resolve(
+          createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+        );
+      }
+      if (url.endsWith("/api/resume") && init?.method === "POST") {
+        return Promise.resolve(
+          createResponse({
+            status: "success",
+            generationStatus: "success",
+            exportReady: true,
+            exports: { docx: true, pdf: true },
+            preview: {
+              resume: {
+                heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
+                summary: "Support leader focused on scalable operations.",
+                experience: [
+                  {
+                    company: "Cat Daddy Games",
+                    roleTitle: "Senior Producer",
+                    bullets: ["Led support operations programs."],
+                  },
+                ],
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/export") && init?.method === "POST") {
+        return Promise.resolve(createResponse({}, true, 200));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Resume" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Resume" }));
+    const bulletEditor = await screen.findByLabelText("Resume bullet 1-1");
+    fireEvent.change(bulletEditor, { target: { value: "Led support operations across enterprise customers." } });
+    expect(screen.getByText("Unsaved edits")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel edits" }));
+    expect(screen.queryByLabelText("Resume bullet 1-1")).toBeNull();
+    expect(screen.getByText("Led support operations programs.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Resume" }));
+    fireEvent.change(await screen.findByLabelText("Resume bullet 1-1"), {
+      target: { value: "Led support operations across enterprise customers." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save edits" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Led support operations across enterprise customers.")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download DOCX" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/resume/export?format=docx",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    const exportCall = fetchMock.mock.calls.find(
+      ([url, requestInit]) => url === "/api/resume/export?format=docx" && requestInit?.method === "POST",
+    );
+    const exportBody = JSON.parse(String(exportCall?.[1]?.body)) as Record<string, unknown>;
+    expect(exportBody.editedResume).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+    expect(confirmSpy).toHaveBeenCalledWith("Regenerating will replace your saved edits for this version.");
+    confirmSpy.mockRestore();
+  });
+
   it("shows a resume generation error when API returns non-resume payload", async () => {
     setFetchImplementation(
       vi.fn((input: RequestInfo, init?: RequestInit) => {
@@ -294,7 +691,7 @@ describe("Studio page UX", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Resume unavailable")).toBeInTheDocument();
+      expect(screen.getByText("Additional baseline detail required")).toBeInTheDocument();
     });
     expect(
       screen.getByText("Resume generation returned an unexpected payload shape."),

@@ -285,8 +285,9 @@ export function presentResumeGeneration(payload: unknown): StudioGenerationPrese
       status: "error",
       hasExportableContent: false,
       display: mapSafeDisplay(readSafeDisplay(payload), {
-        title: "No evidence available",
-        description: "Resume generation needs more verified baseline evidence.",
+        title: "Additional baseline detail required",
+        description:
+          "We could not assemble strong role specific bullets from your baseline. You can still generate a draft using your existing verified experience.",
         reasons: ["Add or promote baseline evidence, then regenerate."],
       }),
     };

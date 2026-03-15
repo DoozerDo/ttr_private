@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetchJson, downloadBlob } from '../lib/api';
 import { Alert } from '@/components/Alert';
 import { EmptyState } from '@/components/EmptyState';
@@ -61,8 +61,8 @@ const STAGE_MEANINGS: Record<(typeof CANONICAL_STAGE_OPTIONS)[number]['value'], 
 };
 
 const VIEW_MODES = [
-  { id: 'table', label: 'Table' },
   { id: 'pipeline', label: 'Pipeline' },
+  { id: 'table', label: 'Table' },
 ] as const;
 
 type CanonicalStageValue = (typeof CANONICAL_STAGE_OPTIONS)[number]['value'];
@@ -169,6 +169,10 @@ function getEntrySummary(entry: JobTrackerEntry): EntrySummary {
   };
 }
 
+function normalizeOpportunityKey(company?: string | null, roleTitle?: string | null) {
+  return `${safeString(company).trim().toLowerCase()}::${safeString(roleTitle).trim().toLowerCase()}`;
+}
+
 export default function JobTrackerPage() {
   const [entries, setEntries] = useState<JobTrackerEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,14 +189,17 @@ export default function JobTrackerPage() {
   const [notes, setNotes] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [viewMode, setViewMode] = useState<ViewMode>('pipeline');
+  const [showForm, setShowForm] = useState(false);
   const [opportunityActions, setOpportunityActions] = useState<OpportunityActionCard[]>([]);
+  const [analyzedOpportunityKeys, setAnalyzedOpportunityKeys] = useState<Set<string>>(new Set());
   const [opportunitySummary, setOpportunitySummary] = useState({
     jobsAnalyzed: 0,
     strongTargets: 0,
     possibleTargets: 0,
     lowProbability: 0,
   });
+  const formRef = useRef<HTMLElement | null>(null);
 
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -219,6 +226,18 @@ export default function JobTrackerPage() {
       .sort((a, b) => (b.cxFitScore ?? 0) - (a.cxFitScore ?? 0))
       .slice(0, 3);
   }, [entries]);
+
+  const editingEntry = useMemo(
+    () => entries.find((entry) => entry.id === editingId) ?? null,
+    [editingId, entries],
+  );
+
+  const cxFitScoreLocked = Boolean(
+    editingEntry &&
+      analyzedOpportunityKeys.has(
+        normalizeOpportunityKey(editingEntry.company, editingEntry.roleTitle),
+      ),
+  );
 
   const pipelineStageGroups = useMemo(() => {
     const groups = CANONICAL_STAGE_OPTIONS.map((option) => ({
@@ -268,6 +287,13 @@ export default function JobTrackerPage() {
         const opportunities = groupedResult.value.flatMap((group) =>
           Array.isArray(group.opportunities) ? group.opportunities : [],
         );
+        setAnalyzedOpportunityKeys(
+          new Set(
+            opportunities.map((entry) =>
+              normalizeOpportunityKey(entry.companyName, entry.jobTitle),
+            ),
+          ),
+        );
         const jobsAnalyzed = opportunities.length;
         const strongTargets = opportunities.filter((entry) => entry.currentScore >= 85).length;
         const possibleTargets = opportunities.filter(
@@ -287,6 +313,7 @@ export default function JobTrackerPage() {
           possibleTargets: 0,
           lowProbability: 0,
         });
+        setAnalyzedOpportunityKeys(new Set());
       }
 
       if (actionsResult.status === 'fulfilled' && Array.isArray(actionsResult.value)) {
@@ -318,6 +345,15 @@ export default function JobTrackerPage() {
     setNotice('');
   }
 
+  function openForm(entry?: JobTrackerEntry) {
+    if (entry) {
+      loadIntoForm(entry);
+    } else {
+      clearForm();
+    }
+    setShowForm(true);
+  }
+
   function loadIntoForm(entry: JobTrackerEntry) {
     setEditingId(entry.id);
     setCompany(safeString(entry.company));
@@ -333,6 +369,12 @@ export default function JobTrackerPage() {
     setSourceUrl(entry.sourceUrl ?? '');
     setError('');
     setNotice('Loaded entry into form');
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    clearForm();
+    setShowForm(false);
   }
 
   async function submitEntry() {
@@ -352,7 +394,8 @@ export default function JobTrackerPage() {
       roleTitle: roleTitle.trim(),
       stage: stage.trim(),
       dateApplied: dateApplied.trim() || undefined,
-      cxFitScore: score,
+      cxFitScore:
+        editingId && cxFitScoreLocked ? editingEntry?.cxFitScore ?? score : score,
       notes: notes.trim() || undefined,
       sourceUrl: sourceUrl.trim() || undefined,
     };
@@ -372,7 +415,7 @@ export default function JobTrackerPage() {
         setNotice('Entry created');
       }
       await loadEntries();
-      clearForm();
+      closeForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save entry');
     } finally {
@@ -397,7 +440,7 @@ export default function JobTrackerPage() {
       setNotice('Entry deleted');
       await loadEntries();
       if (editingId === entryId) {
-        clearForm();
+        closeForm();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to delete entry');
@@ -436,6 +479,11 @@ export default function JobTrackerPage() {
 
   const formMode = editingId ? 'Update' : 'Create';
 
+  useEffect(() => {
+    if (!showForm) return;
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [showForm]);
+
   const entriesEmptyState = (
     <EmptyState
       title={loading ? 'Loading entries' : 'No entries yet'}
@@ -446,8 +494,8 @@ export default function JobTrackerPage() {
       }
       cta={
         !loading ? (
-          <FormButton variant="secondary" onClick={() => clearForm()}>
-            Add first entry
+          <FormButton variant="secondary" onClick={() => openForm()}>
+            Add opportunity
           </FormButton>
         ) : undefined
       }
@@ -460,7 +508,7 @@ export default function JobTrackerPage() {
       <div className="space-y-8">
         <PageHeader
           title="Opportunities"
-          description="Your canonical beta destination for managing active roles and next steps."
+          description="Track and manage the roles you are pursuing."
           rightSlot={
             <div className="flex flex-wrap gap-2">
               <FormButton
@@ -477,13 +525,6 @@ export default function JobTrackerPage() {
               >
                 Export CSV
               </FormButton>
-              <FormButton
-                variant="secondary"
-                disabled={busy}
-                onClick={() => clearForm()}
-              >
-                New Entry
-              </FormButton>
             </div>
           }
         />
@@ -495,58 +536,11 @@ export default function JobTrackerPage() {
           </div>
         )}
 
-        <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Canonical beta destination</p>
-            <h2 className="text-lg font-semibold text-slate-100">Manage every opportunity in one place</h2>
-            <p className="text-sm text-slate-300">
-              Keep stage, fit, source, and notes current so next actions stay obvious.
-            </p>
-          </div>
-          <div className="grid gap-2 md:grid-cols-2">
-            {CANONICAL_STAGE_OPTIONS.map((option) => (
-              <div key={option.value} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">{option.label}</p>
-                <p className="mt-1 text-xs text-slate-400">{STAGE_MEANINGS[option.value]}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Prioritization</p>
-            <h2 className="text-lg font-semibold text-slate-100">Your strongest opportunities</h2>
-            <p className="text-sm text-slate-300">
-              Ranked by CX Fit Score so high-potential roles stay visible first.
-            </p>
-          </div>
-          {strongestOpportunities.length ? (
-            <div className="space-y-2">
-              {strongestOpportunities.map((entry) => (
-                <div
-                  key={`strongest-${entry.id}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2"
-                >
-                  <p className="text-sm font-semibold text-slate-100">
-                    {safeString(entry.company) || 'Unknown company'} - {safeString(entry.roleTitle) || 'Untitled role'}
-                  </p>
-                  <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-                    Score {(entry.cxFitScore ?? 0).toFixed(1)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">Run compatibility scoring and add opportunities to rank them here.</p>
-          )}
-        </section>
-
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Opportunity signals</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Opportunity insights</h2>
             <p className="text-xs text-slate-400">
-              Prioritization context from analyzed roles, kept inside this same destination.
+              A quick read on how analyzed roles are stacking up right now.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -555,11 +549,11 @@ export default function JobTrackerPage() {
               <p className="mt-1 text-2xl font-semibold text-white">{opportunitySummary.jobsAnalyzed}</p>
             </div>
             <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/5 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Strong targets</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Strong matches</p>
               <p className="mt-1 text-2xl font-semibold text-emerald-200">{opportunitySummary.strongTargets}</p>
             </div>
             <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Possible targets</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Possible matches</p>
               <p className="mt-1 text-2xl font-semibold text-amber-200">{opportunitySummary.possibleTargets}</p>
             </div>
             <div className="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3">
@@ -584,6 +578,33 @@ export default function JobTrackerPage() {
             </div>
           ) : null}
         </section>
+
+        {entries.length >= 2 && strongestOpportunities.length >= 2 ? (
+          <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+            <div className="space-y-1">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Prioritization</p>
+              <h2 className="text-lg font-semibold text-slate-100">Your strongest opportunities</h2>
+              <p className="text-sm text-slate-300">
+                Ranked by CX Fit Score so your best opportunities stay visible first.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {strongestOpportunities.map((entry) => (
+                <div
+                  key={`strongest-${entry.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2"
+                >
+                  <p className="text-sm font-semibold text-slate-100">
+                    {safeString(entry.company) || 'Unknown company'} - {safeString(entry.roleTitle) || 'Untitled role'}
+                  </p>
+                  <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                    Score {(entry.cxFitScore ?? 0).toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -620,6 +641,17 @@ export default function JobTrackerPage() {
               </div>
             </div>
           </div>
+
+          {viewMode === 'pipeline' ? (
+            <div className="grid gap-2 md:grid-cols-2">
+              {CANONICAL_STAGE_OPTIONS.map((option) => (
+                <div key={option.value} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">{option.label}</p>
+                  <p className="mt-1 text-xs text-slate-400">{STAGE_MEANINGS[option.value]}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {viewMode === "table" ? (
             <div className="overflow-auto rounded-2xl border border-white/10 bg-slate-900/40">
@@ -828,13 +860,28 @@ export default function JobTrackerPage() {
         </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-100">Add opportunity</h2>
+              <p className="text-sm text-slate-300">
+                Add a new role when you want to track it manually or update an existing entry.
+              </p>
+            </div>
+            <FormButton variant="secondary" disabled={busy} onClick={() => openForm()}>
+              {showForm ? 'New Entry' : 'Add opportunity'}
+            </FormButton>
+          </div>
+        </section>
+
+        {showForm ? (
+          <section ref={formRef} className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-100">
                 {formMode} Entry
               </h2>
               <p className="text-xs text-slate-400">
-                Add a new opportunity or update an existing one from a single form.
+                Keep the entry focused on stage, score, source, and notes.
               </p>
             </div>
             <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
@@ -842,13 +889,14 @@ export default function JobTrackerPage() {
             </span>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="space-y-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
                   Company
                 </label>
                 <TextInput
+                  id="job-tracker-company"
                   value={company}
                   onChange={(event) => setCompany(event.target.value)}
                   placeholder="Company name"
@@ -860,6 +908,7 @@ export default function JobTrackerPage() {
                   Role title
                 </label>
                 <TextInput
+                  id="job-tracker-role-title"
                   value={roleTitle}
                   onChange={(event) => setRoleTitle(event.target.value)}
                   placeholder="Role title"
@@ -867,10 +916,14 @@ export default function JobTrackerPage() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                <label
+                  htmlFor="job-tracker-stage"
+                  className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400"
+                >
                   Stage
                 </label>
                 <select
+                  id="job-tracker-stage"
                   value={stage}
                   onChange={(event) => setStage(event.target.value)}
                   disabled={busy}
@@ -884,10 +937,14 @@ export default function JobTrackerPage() {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                <label
+                  htmlFor="job-tracker-date-applied"
+                  className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400"
+                >
                   Date applied
                 </label>
                 <input
+                  id="job-tracker-date-applied"
                   type="date"
                   value={dateApplied}
                   onChange={(event) => setDateApplied(event.target.value)}
@@ -897,29 +954,40 @@ export default function JobTrackerPage() {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                <label
+                  htmlFor="job-tracker-cx-fit-score"
+                  className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400"
+                >
                   CX Fit Score
                 </label>
                 <input
+                  id="job-tracker-cx-fit-score"
                   type="number"
                   min={0}
                   max={100}
                   value={cxFitScore}
                   onChange={(event) => setCxFitScore(event.target.value)}
                   disabled={busy}
+                  readOnly={cxFitScoreLocked}
                   className="w-full rounded-2xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 outline-none"
                 />
                 <p className="text-[11px] text-slate-500">
-                  0 = low fit, 100 = high fit.
+                  {cxFitScoreLocked
+                    ? 'Read-only because this score came from compatibility analysis.'
+                    : '0 = low fit, 100 = high fit.'}
                 </p>
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                <label
+                  htmlFor="job-tracker-source-url"
+                  className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400"
+                >
                   Source URL
                 </label>
                 <TextInput
+                  id="job-tracker-source-url"
                   value={sourceUrl}
                   onChange={(event) => setSourceUrl(event.target.value)}
                   placeholder="https://..."
@@ -927,10 +995,14 @@ export default function JobTrackerPage() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
+                <label
+                  htmlFor="job-tracker-notes"
+                  className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400"
+                >
                   Notes
                 </label>
                 <textarea
+                  id="job-tracker-notes"
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
                   rows={4}
@@ -945,14 +1017,15 @@ export default function JobTrackerPage() {
                 <FormButton
                   variant="secondary"
                   disabled={busy}
-                  onClick={() => clearForm()}
+                  onClick={() => closeForm()}
                 >
-                  Clear
+                  Cancel
                 </FormButton>
               </div>
             </div>
           </div>
-        </section>
+          </section>
+        ) : null}
       </div>
     </PageShell>
   );

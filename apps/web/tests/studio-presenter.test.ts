@@ -109,14 +109,15 @@ describe("studio presenter helpers", () => {
       status: "no_evidence",
       generationStatus: "error",
       safeDisplay: {
-        title: "No evidence available",
-        description: "Resume generation needs more verified baseline evidence.",
+        title: "Additional baseline detail required",
+        description:
+          "We could not assemble strong role specific bullets from your baseline. You can still generate a draft using your existing verified experience.",
       },
     };
 
     const presented = presentResumeGeneration(payload);
     expect(presented.status).toBe("error");
-    expect(presented.display?.title).toBe("No evidence available");
+    expect(presented.display?.title).toBe("Additional baseline detail required");
   });
 
   it("does not stringify arbitrary payload objects in preview text", () => {

@@ -33,7 +33,7 @@ import {
   type ResumeFocusOption,
 } from "@/src/lib/studio/helpers";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
-import { ResumePreview } from "./ResumePreview";
+import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePreview";
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 import { trackEvent } from "@/src/lib/analytics";
@@ -84,6 +84,9 @@ type LatestAnalysis = {
   jobTitle?: string | null;
   title?: string | null;
 };
+
+const ANALYSIS_LOAD_ERROR_MESSAGE =
+  "Unable to load role analysis. Please return to the Results page.";
 
 type DocumentState = {
   response: unknown | null;
@@ -218,19 +221,63 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
   };
 }
 
+function isHtmlLikePayload(payload: unknown): boolean {
+  if (typeof payload !== "string") return false;
+  const normalized = payload.trim().toLowerCase();
+  return (
+    normalized.startsWith("<!doctype html") ||
+    normalized.startsWith("<html") ||
+    normalized.includes("<body") ||
+    normalized.includes("<head")
+  );
+}
+
+function sanitizeAnalysisError(payload: unknown, fallback = ANALYSIS_LOAD_ERROR_MESSAGE) {
+  if (isHtmlLikePayload(payload)) return fallback;
+  const message = formatErrorMessage(payload, fallback);
+  if (isHtmlLikePayload(message)) return fallback;
+  return message;
+}
+
+function buildStudioAnalysisUrl(jobId: string, baselineId?: string) {
+  const normalizedJobId = jobId.trim();
+  const normalizedBaselineId = baselineId?.trim();
+  if (!normalizedJobId) return "";
+  if (normalizedBaselineId) {
+    return `/api/analysis/job/${encodeURIComponent(normalizedJobId)}/baseline/${encodeURIComponent(
+      normalizedBaselineId,
+    )}/latest`;
+  }
+  return `/api/analysis/job/${encodeURIComponent(normalizedJobId)}/latest`;
+}
+
 export default function StudioPage() {
   const isNonProduction = process.env.NODE_ENV !== "production";
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
   const trackedStudioOpenRef = useRef(false);
+  const generationSectionRef = useRef<HTMLElement | null>(null);
   const requestedJobId = useMemo(
     () => searchParams.get("jobId")?.trim() ?? "",
+    [searchParamValue],
+  );
+  const requestedBaselineId = useMemo(
+    () => searchParams.get("baselineId")?.trim() ?? "",
     [searchParamValue],
   );
   const requestedBaselineVersionId = useMemo(
     () => searchParams.get("baselineVersionId")?.trim() ?? "",
     [searchParamValue],
   );
+  const requestedStudioContext = useMemo(
+    () => ({
+      jobId: requestedJobId,
+      baselineId: requestedBaselineId,
+      baselineVersionId: requestedBaselineVersionId,
+    }),
+    [requestedBaselineId, requestedBaselineVersionId, requestedJobId],
+  );
+  const hasRequestedResultsContext = Boolean(requestedJobId && requestedBaselineId);
 
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
@@ -297,6 +344,7 @@ export default function StudioPage() {
   const [analysis, setAnalysis] = useState<LatestAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
   const [resumeGenerating, setResumeGenerating] = useState(false);
@@ -305,6 +353,10 @@ export default function StudioPage() {
   const [resumeWarningFlags, setResumeWarningFlags] = useState<ComplianceFlag[]>([]);
   const [, setResumeAuditId] = useState<string | undefined>();
   const [resumeFocus, setResumeFocus] = useState<ResumeFocusOption>("Auto (recommended)");
+  const [savedEditedResumeModel, setSavedEditedResumeModel] = useState<ResumeModel | null>(null);
+  const [draftResumeModel, setDraftResumeModel] = useState<ResumeModel | null>(null);
+  const [isResumeEditMode, setIsResumeEditMode] = useState(false);
+  const [resumeEditError, setResumeEditError] = useState<string | null>(null);
 
   const [coverState, setCoverState] = useState<DocumentState>(() => createDocumentState());
   const [coverGenerating, setCoverGenerating] = useState(false);
@@ -432,6 +484,18 @@ export default function StudioPage() {
     () => presentResumeGeneration(resumeState.response),
     [resumeState.response],
   );
+  const generatedResumeModel = useMemo(
+    () => readResumeModel(resumeState.response),
+    [resumeState.response],
+  );
+  const effectiveResumeModel = isResumeEditMode
+    ? draftResumeModel
+    : savedEditedResumeModel ?? generatedResumeModel;
+  const hasSavedResumeEdits = Boolean(savedEditedResumeModel);
+  const hasUnsavedResumeEdits =
+    isResumeEditMode &&
+    JSON.stringify(draftResumeModel ?? null) !==
+      JSON.stringify((savedEditedResumeModel ?? generatedResumeModel) ?? null);
   const hasResumeArtifact = resumePresenter.hasExportableContent;
   const canExportDocuments = readyForDocuments && isPro;
   const canExportResume =
@@ -461,39 +525,37 @@ export default function StudioPage() {
     Boolean(coverLetterComplianceBlocked) ||
     coverPresenter.status === "blocked" ||
     (coverPresenter.status === "success" && hasCoverLetterArtifact);
-  const positioningNarrative = useMemo(() => {
+  const fullBaselineEvidence = useMemo(() => {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return analysis.summary.trim();
     }
     return "Operational leadership in support organizations with verified cross-functional execution.";
   }, [analysis?.summary]);
-  const positioningBullets = useMemo(() => {
-    return [
-      "leadership scope",
-      "incident management programs",
-      "operational scaling",
+  const evidenceSummaryBullets = useMemo(() => {
+    const source = `${fullBaselineEvidence} ${(selectedJob?.title ?? "")}`.toLowerCase();
+    const bullets = [
+      /escalation|incident/.test(source)
+        ? "Escalation management programs"
+        : "Incident management workflows",
+      /engineering|infrastructure|platform/.test(source)
+        ? "Infrastructure operations scaling"
+        : "Cross-functional support leadership",
+      /scale|scaling|operations/.test(source)
+        ? "Operational scaling across support teams"
+        : "Customer support operating processes",
+      /customer|cx/.test(source)
+        ? "Customer support leadership"
+        : "Cross-functional support leadership",
     ];
-  }, []);
-  const whyThisFocus = useMemo(() => {
-    if (!positioningBullets.length) return null;
-    const focusLabel =
-      resumeFocus === "Auto (recommended)" ? "this role" : resumeFocus.toLowerCase();
-    const joinedSignals = positioningBullets.slice(0, 2).join(" and ");
-    return `This focus emphasizes ${joinedSignals} because those signals best support ${focusLabel}.`;
-  }, [positioningBullets, resumeFocus]);
-  const recommendedResumeFocus = useMemo<ResumeFocusOption>(() => {
-    const source = `${positioningNarrative} ${(selectedJob?.title ?? "").toLowerCase()}`.toLowerCase();
-    if (source.includes("technical") || source.includes("platform")) return "Technical Depth";
-    if (source.includes("customer")) return "Customer Experience Strategy";
-    if (source.includes("scale") || source.includes("scaling")) return "Scaling Operations";
-    return "Operational Leadership";
-  }, [positioningNarrative, selectedJob?.title]);
+    return Array.from(new Set(bullets)).slice(0, 4);
+  }, [fullBaselineEvidence, selectedJob?.title]);
+  const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
     () => [
       {
         value: "Auto (recommended)",
         label: "Auto",
-        definition: "Balances the strongest matching signals for this role.",
+        definition: "Uses the default generation mix for this role.",
       },
       {
         value: "Operational Leadership",
@@ -503,7 +565,7 @@ export default function StudioPage() {
       {
         value: "Technical Depth",
         label: "Technical depth",
-        definition: "Highlights systems, platforms, and implementation depth.",
+        definition: "Optional: highlights systems, platforms, and implementation depth.",
       },
       {
         value: "Customer Experience Strategy",
@@ -526,6 +588,21 @@ export default function StudioPage() {
     }),
     [analysisScore, hasCoverLetterArtifact, hasResumeArtifact],
   );
+  const hydratedFromResultsContext = useMemo(() => {
+    if (!hasRequestedResultsContext) return false;
+    if (!selectedJobId || !selectedBaselineId) return false;
+    if (selectedJobId !== requestedStudioContext.jobId) return false;
+    if (selectedBaselineId !== requestedStudioContext.baselineId) return false;
+    return Boolean(analysis && analysisScore !== null);
+  }, [
+    analysis,
+    analysisScore,
+    hasRequestedResultsContext,
+    requestedStudioContext.baselineId,
+    requestedStudioContext.jobId,
+    selectedBaselineId,
+    selectedJobId,
+  ]);
 
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
     if (resumeGenerating) return "generating";
@@ -591,8 +668,26 @@ export default function StudioPage() {
     if (resumeFocus !== "Auto (recommended)") {
       payload.resumeFocus = resumeFocus;
     }
+    if (savedEditedResumeModel) {
+      payload.editedResume = savedEditedResumeModel;
+    }
     return payload;
   }
+
+  useEffect(() => {
+    if (!generatedResumeModel) {
+      setSavedEditedResumeModel(null);
+      setDraftResumeModel(null);
+      setIsResumeEditMode(false);
+      setResumeEditError(null);
+      return;
+    }
+
+    if (!resumeGenerating && !hasSavedResumeEdits) {
+      setSavedEditedResumeModel(null);
+      setDraftResumeModel(generatedResumeModel);
+    }
+  }, [generatedResumeModel, hasSavedResumeEdits, resumeGenerating]);
 
   useEffect(() => {
     let canceled = false;
@@ -644,6 +739,12 @@ export default function StudioPage() {
           if (current && fetched.some((baseline) => baseline.id === current)) {
             return current;
           }
+          if (
+            requestedBaselineId &&
+            fetched.some((baseline) => baseline.id === requestedBaselineId)
+          ) {
+            return requestedBaselineId;
+          }
           return fetched[0]?.id ?? "";
         });
       } catch (error) {
@@ -661,7 +762,7 @@ export default function StudioPage() {
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [requestedBaselineId]);
 
   useEffect(() => {
     if (!selectedBaselineId) {
@@ -739,25 +840,31 @@ export default function StudioPage() {
     setAnalysisError(null);
     const loadAnalysis = async () => {
       try {
-        const response = await fetch(
-          `/api/analysis/job/${encodeURIComponent(selectedJobId)}/latest`,
-        );
+        const analysisUrl = buildStudioAnalysisUrl(selectedJobId, selectedBaselineId);
+        const response = await fetch(analysisUrl);
         const payload = await readResponsePayload(response);
         if (canceled) return;
         if (!response.ok) {
-          const message = formatErrorMessage(payload, "Fit analysis could not be loaded.");
+          const message = sanitizeAnalysisError(payload);
           setAnalysis(null);
           setAnalysisError(message);
+          return;
+        }
+        if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+          setAnalysis(null);
+          setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
           return;
         }
         setAnalysis(payload as LatestAnalysis);
         setAnalysisError(null);
       } catch (error) {
         if (canceled) return;
-        const message =
-          error instanceof Error ? error.message : "Fit analysis could not be loaded.";
         setAnalysis(null);
-        setAnalysisError(message);
+        setAnalysisError(
+          error instanceof Error && !isHtmlLikePayload(error.message)
+            ? error.message
+            : ANALYSIS_LOAD_ERROR_MESSAGE,
+        );
       } finally {
         if (!canceled) {
           setAnalysisLoading(false);
@@ -768,7 +875,57 @@ export default function StudioPage() {
     return () => {
       canceled = true;
     };
-  }, [selectedJobId]);
+  }, [selectedBaselineId, selectedJobId]);
+
+  useEffect(() => {
+    if (!hasRequestedResultsContext) {
+      setContextHydrationMessage(null);
+      return;
+    }
+    if (jobsLoading || baselinesLoading || analysisLoading) {
+      setContextHydrationMessage(null);
+      return;
+    }
+
+    if (!requestedJobId || !requestedBaselineId) {
+      setContextHydrationMessage(
+        "We could not load the selected role context. Please choose a baseline and job to continue.",
+      );
+      return;
+    }
+
+    const jobExists = jobs.some((job) => job.id === requestedJobId);
+    const baselineExists = baselines.some((baseline) => baseline.id === requestedBaselineId);
+    if (!jobExists || !baselineExists || analysisError) {
+      setContextHydrationMessage(
+        "We could not load the selected role context. Please choose a baseline and job to continue.",
+      );
+      return;
+    }
+
+    if (hydratedFromResultsContext) {
+      setContextHydrationMessage(null);
+      return;
+    }
+  }, [
+    analysisError,
+    analysisLoading,
+    baselines,
+    baselinesLoading,
+    hasRequestedResultsContext,
+    hydratedFromResultsContext,
+    jobs,
+    jobsLoading,
+    requestedBaselineId,
+    requestedBaselineVersionId,
+    requestedJobId,
+    versions,
+  ]);
+
+  useEffect(() => {
+    if (!hydratedFromResultsContext || !generationSectionRef.current) return;
+    generationSectionRef.current.scrollIntoView?.({ block: "start" });
+  }, [hydratedFromResultsContext]);
 
   useEffect(() => {
     if (!analysis?.baselineId) return;
@@ -785,6 +942,17 @@ export default function StudioPage() {
   }, [analysis?.baselineVersionId, versions]);
 
   const handleResumeDraft = async () => {
+    if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
+      const proceed =
+        typeof window !== "undefined"
+          ? window.confirm("Regenerating will replace your saved edits for this version.")
+          : true;
+      if (!proceed) return;
+      setSavedEditedResumeModel(null);
+      setDraftResumeModel(generatedResumeModel);
+      setIsResumeEditMode(false);
+      setResumeEditError(null);
+    }
     if (!canGenerateDocuments) {
       setResumeState((current) => ({
         ...current,
@@ -844,6 +1012,56 @@ export default function StudioPage() {
       setResumeGenerating(false);
     }
   };
+
+  const handleEnterResumeEditMode = useCallback(() => {
+    if (!effectiveResumeModel) {
+      setResumeEditError("Generate a resume before editing.");
+      return;
+    }
+    setDraftResumeModel(JSON.parse(JSON.stringify(effectiveResumeModel)) as ResumeModel);
+    setResumeEditError(null);
+    setIsResumeEditMode(true);
+  }, [effectiveResumeModel]);
+
+  const handleResumeSummaryChange = useCallback((value: string) => {
+    setDraftResumeModel((current) => {
+      if (!current) return current;
+      return { ...current, summary: value };
+    });
+  }, []);
+
+  const handleResumeBulletChange = useCallback(
+    (experienceIndex: number, bulletIndex: number, value: string) => {
+      setDraftResumeModel((current) => {
+        if (!current?.experience) return current;
+        const nextExperience = current.experience.map((entry, currentIndex) => {
+          if (currentIndex !== experienceIndex) return entry;
+          const nextBullets = [...(entry.bullets ?? [])];
+          nextBullets[bulletIndex] = value;
+          return { ...entry, bullets: nextBullets };
+        });
+        return { ...current, experience: nextExperience };
+      });
+    },
+    [],
+  );
+
+  const handleCancelResumeEdits = useCallback(() => {
+    setDraftResumeModel(savedEditedResumeModel ?? generatedResumeModel);
+    setIsResumeEditMode(false);
+    setResumeEditError(null);
+  }, [generatedResumeModel, savedEditedResumeModel]);
+
+  const handleSaveResumeEdits = useCallback(() => {
+    if (!draftResumeModel) {
+      setResumeEditError("No generated resume content is available to save.");
+      return;
+    }
+
+    setSavedEditedResumeModel(draftResumeModel);
+    setIsResumeEditMode(false);
+    setResumeEditError(null);
+  }, [draftResumeModel]);
 
   const exportResume = async (format: "docx" | "pdf") => {
     if (!canGenerateDocuments) {
@@ -982,6 +1200,7 @@ export default function StudioPage() {
       setCoverWarningFlags(extractComplianceWarnings(responsePayload));
       setCoverAuditId(normalizeAuditId(responsePayload));
     } catch (error) {
+      console.error("Cover letter generation failed", error);
       const message = error instanceof Error ? error.message : "Cover letter generation failed.";
       setCoverState((current) => ({ ...current, error: message }));
     } finally {
@@ -1044,6 +1263,7 @@ export default function StudioPage() {
       const blob = await response.blob();
       downloadBlob(blob, `cover-letter.${format}`);
     } catch (error) {
+      console.error("Cover letter export failed", error);
       const message = error instanceof Error ? error.message : "Cover letter export failed.";
       setCoverState((current) => ({ ...current, error: message }));
     } finally {
@@ -1077,6 +1297,24 @@ export default function StudioPage() {
         description="Generate, preview, and export tailored documents using your latest results."
       />
 
+      {hydratedFromResultsContext ? (
+        <section
+          className="space-y-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 shadow"
+          data-testid="studio-results-ready-banner"
+        >
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-200">
+            Studio ready
+          </p>
+          <p className="text-sm text-slate-100">Baseline and role context loaded.</p>
+        </section>
+      ) : null}
+
+      {!hydratedFromResultsContext && contextHydrationMessage ? (
+        <Alert intent="warning" title="Role context unavailable">
+          {contextHydrationMessage}
+        </Alert>
+      ) : null}
+
       {jobsError ? (
         <Alert intent="error" title="Jobs could not be loaded">
           {jobsError}
@@ -1088,7 +1326,7 @@ export default function StudioPage() {
         </Alert>
       ) : null}
       {analysisError ? (
-        <Alert intent="error" title="Unable to load fit score">
+        <Alert intent="error" title="Unable to load role analysis">
           {analysisError}
         </Alert>
       ) : null}
@@ -1110,14 +1348,10 @@ export default function StudioPage() {
         <p className="text-sm text-slate-300">
           Using resume <span className="font-semibold text-slate-100">{sourceResumeLabel}</span>
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+        <div>
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
             <p className="text-4xl font-semibold text-slate-100">{analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}</p>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Lead narrative</p>
-            <p className="text-sm font-semibold text-slate-100">{positioningNarrative}</p>
           </div>
         </div>
         <div className="space-y-1 pt-2">
@@ -1126,11 +1360,20 @@ export default function StudioPage() {
           <p className="text-sm text-slate-200">{readinessChecks.resumeAligned ? "✓" : "✗"} Resume generated</p>
           <p className="text-sm text-slate-200">{readinessChecks.coverLetterGenerated ? "✓" : "✗"} Cover letter generated</p>
         </div>
-        <ul className="space-y-1 text-sm text-slate-200">
-          {positioningBullets.map((bullet) => (
-            <li key={`top-positioning-${bullet}`}>• {bullet}</li>
-          ))}
-        </ul>
+        <div className="space-y-3 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+          <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
+          <ul className="space-y-1 text-sm text-slate-200">
+            {evidenceSummaryBullets.map((bullet) => (
+              <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
+            ))}
+          </ul>
+          <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-300">
+              View full baseline evidence
+            </summary>
+            <p className="mt-3 text-sm text-slate-300">{fullBaselineEvidence}</p>
+          </details>
+        </div>
       </section>
 
       <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
@@ -1139,6 +1382,7 @@ export default function StudioPage() {
         </h2>
         <label className="flex flex-col gap-2 text-sm text-slate-400">
           Resume Focus
+          <span className="text-sm text-slate-200">Recommended: Leadership emphasis</span>
           <select
             className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
             value={resumeFocus}
@@ -1146,8 +1390,7 @@ export default function StudioPage() {
           >
             {resumeFocusDefinitions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.value}
-                {option.value === recommendedResumeFocus ? " — Recommended for this role" : ""}
+                {option.label}
               </option>
             ))}
           </select>
@@ -1158,19 +1401,20 @@ export default function StudioPage() {
               <span className="font-semibold text-slate-100">{option.label}:</span> {option.definition}{" "}
               {option.value === recommendedResumeFocus ? (
                 <span className="font-semibold text-amber-200">Recommended for this role.</span>
+              ) : option.value === "Technical Depth" ? (
+                <span className="font-semibold text-slate-400">Optional.</span>
               ) : null}
             </p>
           ))}
         </div>
-        {whyThisFocus ? (
-          <div className="space-y-1 rounded-xl border border-white/10 bg-slate-900/40 p-3">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Why this focus</p>
-            <p className="text-sm text-slate-300">{whyThisFocus}</p>
-          </div>
-        ) : null}
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+      <section
+        ref={(node) => {
+          generationSectionRef.current = node;
+        }}
+        className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Generate Resume</h2>
@@ -1227,8 +1471,15 @@ export default function StudioPage() {
           </p>
         ) : null}
         {resumeState.error ? (
-          <Alert intent="error" title="Resume unavailable">
-            {resumeState.error}
+          <Alert intent="error" title="Additional baseline detail required">
+            {resumeState.error.includes("no verified baseline evidence could be assembled")
+              ? "We could not assemble strong role specific bullets from your baseline. You can still generate a draft using your existing verified experience."
+              : resumeState.error}
+          </Alert>
+        ) : null}
+        {resumeEditError ? (
+          <Alert intent="error" title="Resume edits unavailable">
+            {resumeEditError}
           </Alert>
         ) : null}
 
@@ -1296,23 +1547,30 @@ export default function StudioPage() {
               </p>
             ) : null}
             <div className="space-y-4 rounded-xl border border-white/10 bg-slate-950/40 p-3">
-              <ResumePreview payload={resumeState.response} fallbackText={resumePreviewText} />
+              <ResumePreview
+                payload={resumeState.response}
+                model={effectiveResumeModel}
+                fallbackText={resumePreviewText}
+                isEditing={isResumeEditMode}
+                hasUnsavedChanges={hasUnsavedResumeEdits}
+                onEnterEditMode={handleEnterResumeEditMode}
+                onSaveEdits={handleSaveResumeEdits}
+                onCancelEdits={handleCancelResumeEdits}
+                onSummaryChange={handleResumeSummaryChange}
+                onBulletChange={handleResumeBulletChange}
+              />
             </div>
             {trackerEntryId ? (
               <div className="rounded-2xl border border-amber-400/40 bg-amber-500/5 p-4">
                 <p className="text-xs uppercase tracking-[0.3em] text-amber-200">
-                  Next move
+                  Track this application
                 </p>
                 <p className="text-sm text-slate-100">
-                  Added to Opportunities as{' '}
-                  <span className="font-semibold text-white">
-                    {trackerStatus ?? 'Saved'}
-                  </span>
-                  .
+                  Save this role and update status after applying.
                 </p>
                 <div className="mt-3 flex justify-end">
                   <FormButton onClick={handleOpenTracker}>
-                    Open Opportunities
+                    Track Application
                   </FormButton>
                 </div>
               </div>
@@ -1414,11 +1672,7 @@ export default function StudioPage() {
             Verification signals detected. Personalization may be limited. See Results for details.
           </p>
         ) : null}
-        {coverState.error && !coverLetterComplianceBlocked ? (
-          <Alert intent="error" title="Cover letter unavailable">
-            {coverState.error}
-          </Alert>
-        ) : null}
+        {coverState.error && !coverLetterComplianceBlocked ? null : null}
 
         {coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
           <div className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
@@ -1486,10 +1740,22 @@ export default function StudioPage() {
               </div>
             </div>
           ) : (
-            <EmptyState
-              title="No cover letter generated yet"
-              body="Generate Cover Letter to preview it."
-            />
+            coverState.error ? (
+              <div className="space-y-3 rounded-2xl border border-rose-400/30 bg-rose-500/5 p-4">
+                <p className="text-sm font-semibold text-rose-100">Cover letter generation failed</p>
+                <p className="text-sm text-slate-200">{coverState.error}</p>
+                <div className="flex justify-end">
+                  <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
+                    Retry generation
+                  </FormButton>
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="No cover letter generated yet"
+                body="Generate Cover Letter to preview it."
+              />
+            )
           )
         ) : null}
       </section>

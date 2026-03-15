@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getApiBaseUrl,
-  relayApiResponse,
+  relayJsonResponse,
   requireAuthToken,
 } from "../../../../../../baselines/helpers";
 
@@ -45,5 +45,5 @@ export async function GET(
     },
   );
 
-  return relayApiResponse(response);
+  return relayJsonResponse(response);
 }

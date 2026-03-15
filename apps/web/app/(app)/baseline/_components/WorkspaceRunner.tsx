@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
+import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -78,6 +79,12 @@ type ResultsUrlArgs = {
   baselineId?: string | null;
 };
 
+type StudioUrlArgs = {
+  jobId?: string | null;
+  baselineId?: string | null;
+  baselineVersionId?: string | null;
+};
+
 type ScoreBandKey = "prime" | "strong" | "competitive" | "possible" | "low";
 
 type ScoreBandPresentation = {
@@ -93,7 +100,7 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
     return {
       key: "prime",
       label: "Prime Opportunity",
-      summary: "You are highly competitive for this role.",
+      summary: "You should be confident applying to this role.",
       accentClassName: "text-emerald-200",
       surfaceClassName: "border-emerald-300/20 bg-emerald-400/10",
     };
@@ -103,7 +110,7 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
     return {
       key: "strong",
       label: "Strong Match",
-      summary: "You are highly competitive for this role.",
+      summary: "You should be confident applying to this role.",
       accentClassName: "text-sky-200",
       surfaceClassName: "border-sky-300/20 bg-sky-400/10",
     };
@@ -250,7 +257,7 @@ type CriticalGapSignal = {
 };
 
 function normalizeDiagnosticLine(value: string): string {
-  return value.replace(/^[^:]+:\s*/, "").trim();
+  return sanitizeScoreExplanationLine(value, "supporting") ?? "";
 }
 
 function extractCriticalGaps(value: FitResultPayload | null): CriticalGapSignal[] {
@@ -300,8 +307,30 @@ function resolveGapSeverityLabel(severityScore?: number | null): string {
 }
 
 function getCompetitiveContext(score: number | null): string | null {
-  if (typeof score !== "number" || score < 80) return null;
-  return "You appear stronger than many typical applicants for this role.";
+  return null;
+}
+
+export function buildStudioUrl({
+  jobId,
+  baselineId,
+  baselineVersionId,
+}: StudioUrlArgs): string {
+  const params = new URLSearchParams();
+
+  if (jobId?.trim()) {
+    params.set("jobId", jobId.trim());
+  }
+
+  if (baselineId?.trim()) {
+    params.set("baselineId", baselineId.trim());
+  }
+
+  if (baselineVersionId?.trim()) {
+    params.set("baselineVersionId", baselineVersionId.trim());
+  }
+
+  const query = params.toString();
+  return query ? `/studio?${query}` : "/studio";
 }
 
 const extractErrorMessage = (payload: unknown): string | null => {
@@ -548,13 +577,23 @@ export function WorkspaceRunner({
       : evidenceLinesFromBreakdown;
   const strengthSignals = evidenceLines
     .map((line) => normalizeDiagnosticLine(line))
-    .filter(Boolean)
-    .slice(0, 3);
+    .filter(Boolean);
   const gapSignals = extractCriticalGaps(displayResult);
   const strengthFallbackSignals = extractStrengthFallbackFromGaps(gapSignals, score);
-  const visibleStrengthSignals =
-    strengthSignals.length > 0 ? strengthSignals : strengthFallbackSignals;
+  const visibleStrengthSignals = sanitizeScoreExplanationList(
+    strengthSignals.length > 0 ? strengthSignals : strengthFallbackSignals,
+    "strength",
+    3,
+  );
+  const visibleGapSignals = gapSignals
+    .map((gap) => ({
+      ...gap,
+      title: sanitizeScoreExplanationLine(gap.title, "gap"),
+    }))
+    .filter((gap): gap is CriticalGapSignal & { title: string } => Boolean(gap.title));
   const competitiveContext = getCompetitiveContext(score);
+  const isStrongScore = typeof score === "number" && score > 80;
+  const strongMatchSignals = sanitizeScoreExplanationList(visibleStrengthSignals, "supporting", 3);
   const scoreDisplayValue = showResult ? formatScoreValue(revealedScoreValue ?? score) : "--";
   const scoreBand = typeof score === "number" ? resolveScoreBandPresentation(score) : null;
   const resultsHref =
@@ -563,6 +602,12 @@ export function WorkspaceRunner({
       jobId: latestJobId,
       baselineId: latestBaselineId,
     }) ?? "/results";
+  const studioHref = buildStudioUrl({
+    jobId: latestJobId,
+    baselineId: latestBaselineId,
+    baselineVersionId:
+      asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
+  });
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
@@ -951,13 +996,29 @@ export function WorkspaceRunner({
                     {scoreBand.label}
                   </p>
                   <p className="mt-2 text-base text-slate-100">{scoreBand.summary}</p>
+                  <a
+                    href={resultsHref}
+                    className="mt-3 inline-flex text-sm font-medium text-slate-300 underline decoration-white/10 underline-offset-4 transition hover:text-white hover:decoration-white/30"
+                  >
+                    View detailed analysis
+                  </a>
                 </>
               ) : null}
               {competitiveContext ? (
                 <p className="mt-3 text-sm text-slate-300">{competitiveContext}</p>
               ) : null}
             </div>
-            {visibleStrengthSignals.length ? (
+            {isStrongScore && strongMatchSignals.length ? (
+              <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
+                <h3 className="text-base font-semibold text-white">Why this is a strong match</h3>
+                <ul className="mt-3 space-y-2 text-sm text-slate-200">
+                  {strongMatchSignals.map((line) => (
+                    <li key={line}>&bull; {line}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {!isStrongScore && visibleStrengthSignals.length ? (
               <div className="rounded-2xl border border-white/10 bg-slate-900/35 p-5">
                 <h3 className="text-base font-semibold text-white">Why this role fits you</h3>
                 <ul className="mt-3 space-y-2 text-sm text-slate-200">
@@ -967,11 +1028,11 @@ export function WorkspaceRunner({
                 </ul>
               </div>
             ) : null}
-            {gapSignals.length ? (
+            {!isStrongScore && visibleGapSignals.length ? (
               <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-5">
                 <h3 className="text-base font-semibold text-white">Where the gaps are</h3>
                 <div className="mt-3 space-y-3">
-                  {gapSignals.map((gap) => (
+                  {visibleGapSignals.map((gap) => (
                     <div
                       key={`${gap.title}-${gap.requirementEvidence ?? ""}`}
                       className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
@@ -980,18 +1041,23 @@ export function WorkspaceRunner({
                         {resolveGapSeverityLabel(gap.severityScore)}
                       </p>
                       <p className="mt-1 text-sm text-slate-200">
-                        &bull; {normalizeDiagnosticLine(gap.title)}
+                        &bull; {gap.title}
                       </p>
                     </div>
                   ))}
                 </div>
               </div>
             ) : null}
+            {isStrongScore ? (
+              <p className="text-sm font-medium text-slate-100">
+                Recommended next step: Generate tailored materials and apply.
+              </p>
+            ) : null}
             <a
-              href={resultsHref}
+              href={studioHref}
               className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
             >
-              Review Detailed Results
+              Generate Tailored Materials
             </a>
           </div>
         </div>

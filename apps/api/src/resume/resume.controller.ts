@@ -12,7 +12,9 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
+import type { NormalizedResumeDocument } from '../documents/normalized-document.models';
 import { ResumeService } from './resume.service';
+import type { GenerateResumeRequest } from './resume.service';
 import {
   Entitlements,
   FeatureKey,
@@ -29,6 +31,7 @@ interface ResumeRequestBody {
   jobId?: string;
   format?: ResumeExportFormat;
   oneTap?: boolean;
+  editedResume?: NormalizedResumeDocument;
 }
 
 type TieredResumeRequest = Request & {
@@ -94,7 +97,7 @@ export class ResumeController {
     return userId;
   }
 
-  private parsePayload(body: ResumeRequestBody) {
+  private parsePayload(body: ResumeRequestBody): GenerateResumeRequest {
     const baselineId = body.baselineId?.trim();
     const baselineVersionId = body.baselineVersionId?.trim();
     const jobId = body.jobId?.trim();
@@ -110,6 +113,7 @@ export class ResumeController {
       baselineVersionId,
       jobId,
       oneTap,
+      editedResume: body.editedResume,
     };
   }
 

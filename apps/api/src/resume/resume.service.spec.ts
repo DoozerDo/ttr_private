@@ -873,15 +873,13 @@ describe('ResumeService', () => {
       oneTap: false,
     });
 
-    expect(result.status).toBe('error');
-    expect((result.internal as any)?.resumeGenerationReason).toBe(
-      'no_valid_evidence_units',
+    expect(result.status).toBe('success');
+    const experienceSection = result.sections.find(
+      (section) => section.type === BaselineSectionType.EXPERIENCE,
     );
-    expect((result.internal as any)?.resumeGenerationStage).toBe(
-      'evidence_extraction',
-    );
-    expect(result.safeDisplay?.description).toContain(
-      'no verified baseline evidence could be assembled',
+    expect(experienceSection?.bullets?.length).toBeGreaterThan(0);
+    expect(experienceSection?.bullets?.[0]?.text).toContain(
+      'Experienced operations leader with verified planning',
     );
   });
 

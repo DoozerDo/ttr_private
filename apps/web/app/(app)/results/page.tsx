@@ -1,6 +1,5 @@
 ﻿"use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -11,7 +10,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { AnalyzeAnotherRoleBar } from "./components/AnalyzeAnotherRoleBar";
 import { OpportunityRadarChart } from "./components/OpportunityRadarChart";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
 import { CareerGravity } from "./components/CareerGravity";
@@ -23,6 +21,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import type { RiskFactor } from "@/lib/resultsInsights";
@@ -267,7 +266,7 @@ const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
 
 function normalizeOpportunityLine(value: string): string {
-  return value.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim();
+  return sanitizeScoreExplanationLine(value, "supporting") ?? "";
 }
 
 export function getOpportunityVerdict(score?: number | null): {
@@ -310,101 +309,28 @@ export function getOpportunityVerdict(score?: number | null): {
   };
 }
 
-export function getOpportunityNextMove(score?: number | null): {
-  title: string;
-  body: string;
-} {
-  if (typeof score !== "number") {
-    return {
-      title: "Run analysis",
-      body: "Complete an analysis first so you can turn this role into a clear decision.",
-    };
-  }
-  if (score >= 90) {
-    return {
-      title: "Apply now",
-      body: "Your background is already strong enough to pursue this role with confidence.",
-    };
-  }
-  if (score >= 80) {
-    return {
-      title: "Tailor and apply",
-      body: "Your background is strong enough to pursue this role with focused positioning.",
-    };
-  }
-  if (score >= 70) {
-    return {
-      title: "Tailor before applying",
-      body: "You have a viable path here, but sharper positioning will matter before you apply.",
-    };
-  }
-  if (score >= 60) {
-    return {
-      title: "Strengthen baseline before applying",
-      body: "The role has some overlap, but your current baseline does not yet make the strongest case.",
-    };
-  }
-  return {
-    title: "Consider skipping or repositioning",
-    body: "This role appears materially outside your strongest lane right now.",
-  };
-}
+export function buildStudioHrefFromResultsContext(input: {
+  jobId?: string | null;
+  baselineId?: string | null;
+  baselineVersionId?: string | null;
+}): string {
+  const jobId = input.jobId?.trim() ?? "";
+  if (!jobId) return "/studio";
 
-export function getFitLevel(score?: number | null): "High" | "Moderate" | "Low" {
-  if (typeof score !== "number") return "Low";
-  if (score >= 80) return "High";
-  if (score >= 70) return "Moderate";
-  return "Low";
-}
+  const params = new URLSearchParams();
+  params.set("jobId", jobId);
 
-export function getRiskLevel(
-  score?: number | null,
-  highestGapSeverity?: number | null,
-): "Low" | "Moderate" | "High" {
-  if (typeof highestGapSeverity === "number") {
-    if (highestGapSeverity >= 0.75) return "High";
-    if (highestGapSeverity >= 0.5) return "Moderate";
-    return typeof score === "number" && score >= 85 ? "Low" : "Moderate";
-  }
-  if (typeof score !== "number") return "High";
-  if (score >= 90) return "Low";
-  if (score >= 70) return "Moderate";
-  return "High";
-}
-
-export function getReadinessLevel(
-  score?: number | null,
-  confidenceLevel?: "High" | "Moderate" | "Low",
-): "High" | "Moderate" | "Low" {
-  if (typeof score !== "number") return "Low";
-  if (score >= 85 && confidenceLevel !== "Low") return "High";
-  if (score >= 70) return "Moderate";
-  return "Low";
-}
-
-function resolveConfidenceLevel(input: {
-  confidenceScore?: number | null;
-  scoreBreakdown?: ScoreBreakdownShape | null;
-  summary?: string | null;
-}): "High" | "Moderate" | "Low" {
-  if (typeof input.confidenceScore === "number") {
-    if (input.confidenceScore >= 80) return "High";
-    if (input.confidenceScore >= 50) return "Moderate";
-    return "Low";
+  const baselineId = input.baselineId?.trim() ?? "";
+  if (baselineId) {
+    params.set("baselineId", baselineId);
   }
 
-  const breakdownAverage =
-    input.scoreBreakdown?.dimensions?.length
-      ? input.scoreBreakdown.dimensions.reduce((sum, dimension) => {
-          const percent = dimension.weight > 0 ? (dimension.score / dimension.weight) * 100 : 0;
-          return sum + Math.max(0, Math.min(100, percent));
-        }, 0) / input.scoreBreakdown.dimensions.length
-      : 0;
-  const summaryLength = (input.summary ?? "").trim().length;
+  const baselineVersionId = input.baselineVersionId?.trim() ?? "";
+  if (baselineVersionId) {
+    params.set("baselineVersionId", baselineVersionId);
+  }
 
-  if (breakdownAverage >= 80 && summaryLength >= 80) return "High";
-  if (breakdownAverage >= 50) return "Moderate";
-  return "Low";
+  return `/studio?${params.toString()}`;
 }
 
 type ScoreDriver = {
@@ -430,24 +356,12 @@ type OpportunityMapSectionProps = {
     explanation: string;
   };
   advantageSignals: string[];
-  watchoutSignals: string[];
-  nextMove: {
-    title: string;
-    body: string;
-  };
-  compactIndicators: Array<{
-    label: string;
-    value: string;
-  }>;
 };
 
 export function OpportunityMapSection({
   score,
   verdict,
   advantageSignals,
-  watchoutSignals,
-  nextMove,
-  compactIndicators,
 }: OpportunityMapSectionProps) {
   return (
     <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
@@ -455,7 +369,7 @@ export function OpportunityMapSection({
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">Opportunity Map</p>
           <p className="mt-2 max-w-2xl text-sm text-slate-300">
-            Your executive summary for whether this role is worth pursuing.
+            Executive compatibility summary for this role.
           </p>
         </div>
 
@@ -485,36 +399,6 @@ export function OpportunityMapSection({
               <li>• Verified baseline advantages are not available for this run yet.</li>
             )}
           </ul>
-        </article>
-
-        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-          <h3 className="text-lg font-semibold text-slate-100">Watchouts</h3>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {watchoutSignals.length ? (
-              watchoutSignals.map((watchout) => <li key={watchout}>• {watchout}</li>)
-            ) : (
-              <li>• No major mismatch areas are surfaced for this run.</li>
-            )}
-          </ul>
-        </article>
-
-        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Best next move</p>
-          <p className="mt-4 text-2xl font-semibold text-white">{nextMove.title}</p>
-          <p className="mt-2 text-sm leading-relaxed text-slate-300">{nextMove.body}</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            {compactIndicators.map((indicator) => (
-              <div
-                key={indicator.label}
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-              >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  {indicator.label}
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-100">{indicator.value}</p>
-              </div>
-            ))}
-          </div>
         </article>
       </div>
     </section>
@@ -1140,18 +1024,8 @@ export default function ResultsPage() {
     [activeScore],
   );
 
-  const executionMode = typeof activeScore === "number" && activeScore > 70;
   const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
   const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
-  const confidenceLevel = useMemo(
-    () =>
-      resolveConfidenceLevel({
-        confidenceScore: latest?.confidenceScore ?? null,
-        scoreBreakdown,
-        summary: latest?.summary ?? null,
-      }),
-    [latest?.confidenceScore, latest?.summary, scoreBreakdown],
-  );
   const strategicStrengths = useMemo(() => {
     const fromNarrative = Array.isArray(latest?.narrative?.strengths) ? latest.narrative.strengths : [];
     const fromLatest = Array.isArray(latest?.strengths) ? latest.strengths : [];
@@ -1177,24 +1051,12 @@ export default function ResultsPage() {
   }, [latest?.recommendedActions]);
   const advantageSignals = useMemo(() => {
     const evidenceSignals = buildEvidenceLines(scoreBreakdown).map((line) => normalizeOpportunityLine(line));
-    return Array.from(
-      new Set(
-        [...strategicStrengths, ...evidenceSignals]
-          .map((item) => normalizeOpportunityLine(item))
-          .filter(Boolean),
-      ),
-    ).slice(0, 3);
-  }, [scoreBreakdown, strategicStrengths]);
-  const highestGapSeverity = useMemo(() => {
-    if (!criticalGapDetails.length) return null;
-    return criticalGapDetails.reduce<number | null>(
-      (highest, gap) =>
-        typeof gap.severityScore === "number" && (highest === null || gap.severityScore > highest)
-          ? gap.severityScore
-          : highest,
-      null,
+    return sanitizeScoreExplanationList(
+      [...strategicStrengths, ...evidenceSignals],
+      "strength",
+      3,
     );
-  }, [criticalGapDetails]);
+  }, [scoreBreakdown, strategicStrengths]);
   const strategicBrief = useMemo(
     () =>
       buildStrategicBrief({
@@ -1227,20 +1089,15 @@ export default function ResultsPage() {
   const watchoutSignals = useMemo(() => {
     const rankedCriticalGaps = [...criticalGapDetails]
       .sort((a, b) => (b.severityScore ?? 0) - (a.severityScore ?? 0))
-      .map((gap) => normalizeOpportunityLine(gap.title));
-    const fallbackRisks = riskItems.map((risk) => normalizeOpportunityLine(risk.title));
-    return Array.from(new Set([...rankedCriticalGaps, ...fallbackRisks].filter(Boolean))).slice(0, 3);
+      .map((gap) => gap.title);
+    const fallbackRisks = riskItems.map((risk) => risk.title);
+    return sanitizeScoreExplanationList(
+      [...rankedCriticalGaps, ...fallbackRisks],
+      "gap",
+      3,
+    );
   }, [criticalGapDetails, riskItems]);
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
-  const opportunityNextMove = useMemo(() => getOpportunityNextMove(activeScore), [activeScore]);
-  const compactIndicators = useMemo(
-    () => [
-      { label: "Fit", value: getFitLevel(activeScore) },
-      { label: "Risk", value: getRiskLevel(activeScore, highestGapSeverity) },
-      { label: "Readiness", value: getReadinessLevel(activeScore, confidenceLevel) },
-    ],
-    [activeScore, confidenceLevel, highestGapSeverity],
-  );
   const hiringManagerStrengths = useMemo(() => advantageSignals.slice(0, 3), [advantageSignals]);
   const hiringManagerQuestions = useMemo(() => watchoutSignals.slice(0, 3), [watchoutSignals]);
   const hiringManagerRecommendations = useMemo(
@@ -1253,7 +1110,6 @@ export default function ResultsPage() {
       }),
     [activeScore, hiringManagerQuestions, hiringManagerStrengths, recommendedActions],
   );
-  const isAuthenticatedContext = Boolean(latest?.baselineId);
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -1268,22 +1124,15 @@ export default function ResultsPage() {
     return `/fit-review?jobId=${encodeURIComponent(candidateJobId)}`;
   }, [jobId, latest?.jobId]);
 
-  const readyForDocument = useMemo(() => {
-    return analysisSource === "latest" && !!latest?.jobId && !!latest?.baselineVersionId;
-  }, [analysisSource, latest?.baselineVersionId, latest?.jobId]);
-
+  const latestBaselineId = latest?.baselineId?.trim() ?? "";
   const latestBaselineVersionId = latest?.baselineVersionId?.trim() ?? "";
   const studioHref = useMemo(() => {
-    const candidateJobId = latest?.jobId?.trim();
-    if (!candidateJobId) return "/studio";
-    const params = new URLSearchParams();
-    params.set("jobId", candidateJobId);
-    if (latestBaselineVersionId) {
-      params.set("baselineVersionId", latestBaselineVersionId);
-    }
-    params.set("entrySource", "results");
-    return `/studio?${params.toString()}`;
-  }, [latest?.jobId, latestBaselineVersionId]);
+    return buildStudioHrefFromResultsContext({
+      jobId: latest?.jobId,
+      baselineId: latestBaselineId,
+      baselineVersionId: latestBaselineVersionId,
+    });
+  }, [latest?.jobId, latestBaselineId, latestBaselineVersionId]);
 
   const navigateToStudio = useCallback(() => {
     void router.push(studioHref);
@@ -1376,7 +1225,7 @@ export default function ResultsPage() {
     });
   }, [activeScore, riskItems, strategicStrengths]);
 
-  const canOpenStudio = Boolean(latest?.jobId && latestBaselineVersionId);
+  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -1429,8 +1278,7 @@ export default function ResultsPage() {
   const showScoreDrivers =
     Boolean(scoringRubric && scoreDrivers.length) &&
     !isExceptionalScore &&
-    !isLowScore &&
-    !executionMode;
+    !isLowScore;
 
   const renderDriverGrid = (showExtraLine: boolean) => (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -1843,9 +1691,12 @@ export default function ResultsPage() {
                 score={activeScore}
                 verdict={opportunityVerdict}
                 advantageSignals={advantageSignals}
-                watchoutSignals={watchoutSignals}
-                nextMove={opportunityNextMove}
-                compactIndicators={compactIndicators}
+              />
+
+              <HiringManagerLensSection
+                strengths={hiringManagerStrengths}
+                questions={hiringManagerQuestions}
+                recommendations={hiringManagerRecommendations}
               />
 
               <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
@@ -1860,63 +1711,26 @@ export default function ResultsPage() {
                 <OpportunityRadarChart areas={compatibilityMapSignals} />
               </section>
 
-              <HiringManagerLensSection
-                strengths={hiringManagerStrengths}
-                questions={hiringManagerQuestions}
-                recommendations={hiringManagerRecommendations}
-              />
-
               <section className="rounded-2xl border border-white/10 bg-slate-900/45 p-6">
-                <h3 className="text-2xl font-semibold text-slate-100">
-                  {isAuthenticatedContext ? "Continue your workflow" : "Save this analysis and keep building"}
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Next Step</p>
+                <h3 className="mt-2 text-2xl font-semibold text-slate-100">
+                  Open tailored application workflow
                 </h3>
                 <p className="mt-2 text-[15px] leading-relaxed text-slate-300">
-                  {isAuthenticatedContext
-                    ? "Save this analysis, revisit comparisons, and move directly into tailored materials."
-                    : "Create a free account to save your compatibility results, revisit role comparisons, and continue into tailored materials."}
+                  Your profile is competitive for this role. Generate tailored application materials.
                 </p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  {isAuthenticatedContext ? (
-                    executionMode ? (
-                      <FormButton onClick={() => navigateToStudio()} disabled={!canOpenStudio}>
-                        Tailor Resume for This Role
-                      </FormButton>
-                    ) : (
-                      <FormButton onClick={() => void router.push(fitReviewPath)}>Open Fit Review</FormButton>
-                    )
-                  ) : (
-                    <Link
-                      href="/auth/signup"
-                      className="inline-flex items-center justify-center rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-primary-hover)]"
-                    >
-                      Create Free Account
-                    </Link>
-                  )}
-                  <Link
-                    href="/opportunities"
-                    className="inline-flex items-center justify-center rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-white/40 hover:text-white"
-                  >
-                    Continue Exploring
-                  </Link>
+                <div className="mt-4">
+                  <FormButton onClick={() => navigateToStudio()} disabled={!canOpenStudio}>
+                    Open Resume & Cover Letter Studio
+                  </FormButton>
                 </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <article className="rounded-xl bg-slate-950/60 p-4">
-                    <p className="text-base font-semibold text-slate-100">Save analysis history</p>
-                    <p className="mt-1 text-sm text-slate-400">Keep your role comparisons in one place.</p>
-                  </article>
-                  <article className="rounded-xl bg-slate-950/60 p-4">
-                    <p className="text-base font-semibold text-slate-100">Build tailored materials</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Turn strong fit roles into grounded resumes and cover letters.
-                    </p>
-                  </article>
-                  <article className="rounded-xl bg-slate-950/60 p-4">
-                    <p className="text-base font-semibold text-slate-100">Find better fit roles faster</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Use your results to focus where your profile is strongest.
-                    </p>
-                  </article>
+                <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                  <p className="text-sm font-semibold text-slate-100">Recommended next steps:</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    <li>&bull; Generate tailored resume</li>
+                    <li>&bull; Generate cover letter</li>
+                    <li>&bull; Prepare interview answers</li>
+                  </ul>
                 </div>
               </section>
 
@@ -1972,8 +1786,6 @@ export default function ResultsPage() {
             </div>
           )}
         </section>
-
-        <AnalyzeAnotherRoleBar baselineVersionId={latest?.baselineVersionId ?? null} />
 
         {error ? (
           <Alert intent="error" title="Uh oh">

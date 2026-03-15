@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { ResultsV2 } from "@/app/(app)/results/components/ResultsV2";
 
 describe("ResultsV2", () => {
-  it("renders fit evidence block when score signals exist", () => {
+  it("suppresses vague breakdown labels from the fit evidence block", () => {
     render(
       <ResultsV2
         heroHeading="Test"
@@ -43,7 +43,7 @@ describe("ResultsV2", () => {
       />,
     );
 
-    expect(screen.getByText("Why this role fits you")).toBeInTheDocument();
+    expect(screen.queryByText("Why this role fits you")).toBeNull();
     expect(screen.getAllByText("Director level support leadership").length).toBeGreaterThan(0);
   });
 

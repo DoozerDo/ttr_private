@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import type { ParsedComplianceError } from "@/lib/compliance/parseComplianceError";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
+import { sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 
 type ResultsV2Props = {
   heroHeading: string;
@@ -37,8 +38,10 @@ export function ResultsV2({
   primaryActionDisabled,
   scoreBreakdown,
 }: ResultsV2Props) {
-  const evidenceLines = buildEvidenceLines(scoreBreakdown).map((line) =>
-    line.replace(/^[^:]+:\s*/, "").replace(/[.]+$/, "").trim(),
+  const evidenceLines = sanitizeScoreExplanationList(
+    buildEvidenceLines(scoreBreakdown),
+    "strength",
+    3,
   );
 
   return (

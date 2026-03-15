@@ -115,24 +115,44 @@ export function BaselineWorkspace({
         </Alert>
       ) : null}
 
-      <div className="w-full grid grid-cols-1 gap-6">
-        <div className="w-full grid grid-cols-1 gap-6 lg:grid-cols-3 items-stretch">
+      <div
+        className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]"
+        data-testid="target-workspace-layout"
+      >
+        <section className="space-y-3 xl:min-w-0" data-testid="target-baseline-column">
+          <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+            Baseline
+          </p>
           <BaselineDashboard
             initialBaselines={initialBaselines}
             initialFetchError={initialFetchError}
             selectedBaselineId={baselineId}
           />
+          <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+            Your baseline defines the experience signals used for compatibility scoring and
+            resume generation.
+          </p>
+        </section>
 
+        <section className="space-y-3 xl:min-w-0" data-testid="target-job-column">
+          <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+            Job description
+          </p>
           <div className="flex h-full flex-col">
             <JobsHub selectedJobId={jobId} onJobMissing={handleJobMissing} />
           </div>
+        </section>
 
+        <section className="space-y-3 xl:min-w-0" data-testid="target-result-column">
+          <p className="px-1 text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">
+            Compatibility result
+          </p>
           <WorkspaceRunner
             baselineId={baselineId}
             jobId={jobId}
             onAutoRunComplete={clearSelections}
           />
-        </div>
+        </section>
       </div>
     </div>
   );

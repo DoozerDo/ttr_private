@@ -80,12 +80,20 @@ describe("BaselineWorkspace live score panel", () => {
                 jobId: "job-1",
                 score: 87,
                 strengths: [
+                  "At microsoft, our mission—to empower every person and every organization",
                   "Led global support operations at SentinelOne.",
+                  "Strong cross-functional influencing and collaboration skills that include fostering buy-in across multiple stakeholder groups.",
                   "Built escalation and incident management workflows.",
                 ],
                 criticalGaps: [
                   {
-                    title: "Direct firmware engineering experience",
+                    title: "At microsoft, our mission—to empower every person and every organization",
+                    requirementEvidence: "Mission statement",
+                    baselineEvidence: null,
+                    severityScore: 0.95,
+                  },
+                  {
+                    title: "Rust rtos’s and toolchains",
                     requirementEvidence: "Firmware engineering leadership",
                     baselineEvidence: null,
                     severityScore: 0.88,
@@ -103,12 +111,20 @@ describe("BaselineWorkspace live score panel", () => {
                 jobId: "job-1",
                 score: 87,
                 strengths: [
+                  "At microsoft, our mission—to empower every person and every organization",
                   "Led global support operations at SentinelOne.",
+                  "Strong cross-functional influencing and collaboration skills that include fostering buy-in across multiple stakeholder groups.",
                   "Built escalation and incident management workflows.",
                 ],
                 criticalGaps: [
                   {
-                    title: "Direct firmware engineering experience",
+                    title: "At microsoft, our mission—to empower every person and every organization",
+                    requirementEvidence: "Mission statement",
+                    baselineEvidence: null,
+                    severityScore: 0.95,
+                  },
+                  {
+                    title: "Rust rtos’s and toolchains",
                     requirementEvidence: "Firmware engineering leadership",
                     baselineEvidence: null,
                     severityScore: 0.88,
@@ -143,18 +159,33 @@ describe("BaselineWorkspace live score panel", () => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText(/Led global support operations at SentinelOne/i)).toBeInTheDocument();
+      expect(screen.getByText("You should be confident applying to this role.")).toBeInTheDocument();
+      expect(screen.getByText(/Led global support operations at sentinelone/i)).toBeInTheDocument();
+      expect(screen.getByText("Why this is a strong match")).toBeInTheDocument();
       expect(
-        screen.getByText(/Built escalation and incident management workflows/i),
+        screen.getByText("Recommended next step: Generate tailored materials and apply."),
       ).toBeInTheDocument();
-      expect(screen.getByText(/Direct firmware engineering experience/i)).toBeInTheDocument();
-      expect(screen.getByText("Why this role fits you")).toBeInTheDocument();
-      expect(screen.getByText("Where the gaps are")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Review Detailed Results" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "Generate Tailored Materials" }),
+      ).toHaveAttribute("href", "/studio?jobId=job-1&baselineId=base-1");
+      expect(screen.getByRole("link", { name: "View detailed analysis" })).toHaveAttribute(
+        "href",
+        "/results?assessmentId=assessment-1",
+      );
       expect(screen.queryByRole("button", { name: "Add to Opportunities" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Run Career Compatibility Analysis" }),
+      ).toBeNull();
+      expect(screen.queryByText("BASELINE READY")).toBeNull();
       expect(screen.queryByText("Why this score?")).toBeNull();
       expect(screen.queryByText("Evidence from your background")).toBeNull();
       expect(screen.queryByText("Tooling and Platform Experience")).toBeNull();
+      expect(screen.queryByText("Where the gaps are")).toBeNull();
+      expect(screen.queryByText("Areas outside your background")).toBeNull();
+      expect(screen.queryByText("Major gap")).toBeNull();
+      expect(screen.queryByText(/Rust RTOS and toolchains/i)).toBeNull();
+      expect(screen.queryByText(/our mission/i)).toBeNull();
+      expect(screen.queryByText(/Strong cross-functional influencing/i)).toBeNull();
     } finally {
       setTimeoutSpy.mockRestore();
     }
@@ -225,12 +256,48 @@ describe("BaselineWorkspace live score panel", () => {
         expect(screen.getByText("Strong Match")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Why this role fits you")).toBeInTheDocument();
+      expect(screen.getByText("Why this is a strong match")).toBeInTheDocument();
       expect(
-        screen.getByText(/Partnered with engineering teams to operate complex systems\./i),
+        screen.getByText(/Partnered with engineering teams to operate complex systems/i),
       ).toBeInTheDocument();
     } finally {
       setTimeoutSpy.mockRestore();
     }
+  });
+
+  it("keeps the target workspace horizontal on desktop with a wider baseline column", () => {
+    stubWindowState();
+
+    render(
+      <BaselineWorkspace
+        initialBaselines={[
+          {
+            id: "base-1",
+            originalFilename: "resume.pdf",
+            version: 1,
+          } as never,
+        ]}
+        initialFetchError={null}
+        initialBaselineId="base-1"
+        initialJobId="job-1"
+      />,
+    );
+
+    expect(screen.getByTestId("target-workspace-layout")).toHaveClass(
+      "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.35fr)_minmax(280px,1fr)]",
+    );
+    expect(screen.getByTestId("target-baseline-column")).toHaveClass("xl:min-w-0");
+    expect(screen.getByTestId("target-job-column")).toHaveClass("xl:min-w-0");
+    expect(screen.getByTestId("target-result-column")).toHaveClass("xl:min-w-0");
+    expect(screen.getByText("Baseline")).toBeInTheDocument();
+    expect(screen.getByText("Baseline Dashboard Mock")).toBeInTheDocument();
+    expect(screen.getByText("Job description")).toBeInTheDocument();
+    expect(screen.getByText("Jobs Hub Mock")).toBeInTheDocument();
+    expect(screen.getByText("Compatibility result")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Your baseline defines the experience signals used for compatibility scoring and resume generation.",
+      ),
+    ).toBeInTheDocument();
   });
 });

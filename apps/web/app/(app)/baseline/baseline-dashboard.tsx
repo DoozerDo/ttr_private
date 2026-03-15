@@ -423,9 +423,6 @@ export function BaselineDashboard({
             if (!activeBaselineId) return;
             router.push(getBaselineDetailsHref(activeBaselineId));
           }}
-          onRunAnalysis={() => {
-            router.push("/analyze");
-          }}
         />
       ) : null}
 
