@@ -48,6 +48,18 @@ export class Baseline {
   @Column({ type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;
 
+  @Column({ type: 'integer', nullable: true })
+  originalBaselineScore!: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  latestBaselineScore!: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstAnalyzedAt!: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lastAnalyzedAt!: Date | null;
+
   @OneToMany(() => BaselineSection, (section) => section.baseline, {
     cascade: true,
   })

@@ -1,22 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildBaselineScoreHistoryMap,
+  buildBaselineScoreHistoryFromBaseline,
   toBaselineScoreHistoryCardViewModel,
 } from "@/lib/baselineScoreHistory";
 
 describe("baseline score history", () => {
   it("sets original and current equally on first successful analysis", () => {
-    const map = buildBaselineScoreHistoryMap([
-      {
-        baselineId: "base-1",
-        status: "completed",
-        score: 71,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-    ]);
-
-    const vm = toBaselineScoreHistoryCardViewModel(map["base-1"]);
+    const vm = toBaselineScoreHistoryCardViewModel(
+      buildBaselineScoreHistoryFromBaseline({
+        originalBaselineScore: 71,
+        latestBaselineScore: 71,
+      }),
+    );
     expect(vm.hasSuccessfulAnalysis).toBe(true);
     expect(vm.originalScore).toBe(71);
     expect(vm.currentScore).toBe(71);
@@ -25,51 +21,25 @@ describe("baseline score history", () => {
   });
 
   it("keeps original score and updates current on later successful analyses", () => {
-    const map = buildBaselineScoreHistoryMap([
-      {
-        baselineId: "base-1",
-        status: "completed",
-        score: 71,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-      {
-        baselineId: "base-1",
-        status: "completed",
-        score: 79,
-        createdAt: "2026-01-03T00:00:00.000Z",
-      },
-    ]);
-
-    const vm = toBaselineScoreHistoryCardViewModel(map["base-1"]);
+    const vm = toBaselineScoreHistoryCardViewModel(
+      buildBaselineScoreHistoryFromBaseline({
+        originalBaselineScore: 71,
+        latestBaselineScore: 79,
+      }),
+    );
     expect(vm.originalScore).toBe(71);
     expect(vm.currentScore).toBe(79);
     expect(vm.scoreDelta).toBe(8);
     expect(vm.scoreDeltaDirection).toBe("up");
   });
 
-  it("does not let failed analyses overwrite score history", () => {
-    const map = buildBaselineScoreHistoryMap([
-      {
-        baselineId: "base-1",
-        status: "completed",
-        score: 79,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-      {
-        baselineId: "base-1",
-        status: "failed",
-        score: 40,
-        createdAt: "2026-01-02T00:00:00.000Z",
-      },
-      {
-        baselineId: "base-1",
-        status: "completed",
-        score: 74,
-        createdAt: "2026-01-03T00:00:00.000Z",
-      },
-    ]);
-
-    const vm = toBaselineScoreHistoryCardViewModel(map["base-1"]);
+  it("supports negative score deltas", () => {
+    const vm = toBaselineScoreHistoryCardViewModel(
+      buildBaselineScoreHistoryFromBaseline({
+        originalBaselineScore: 79,
+        latestBaselineScore: 74,
+      }),
+    );
     expect(vm.originalScore).toBe(79);
     expect(vm.currentScore).toBe(74);
     expect(vm.scoreDelta).toBe(-5);
@@ -77,16 +47,12 @@ describe("baseline score history", () => {
   });
 
   it("returns no score block view model when no successful analyses exist", () => {
-    const map = buildBaselineScoreHistoryMap([
-      {
-        baselineId: "base-1",
-        status: "failed",
-        score: 50,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-    ]);
-
-    const vm = toBaselineScoreHistoryCardViewModel(map["base-1"]);
+    const vm = toBaselineScoreHistoryCardViewModel(
+      buildBaselineScoreHistoryFromBaseline({
+        originalBaselineScore: null,
+        latestBaselineScore: null,
+      }),
+    );
     expect(vm.hasSuccessfulAnalysis).toBe(false);
     expect(vm.originalScore).toBeNull();
     expect(vm.currentScore).toBeNull();

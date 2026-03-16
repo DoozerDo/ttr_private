@@ -754,6 +754,33 @@ return {
     return baseline;
   }
 
+  async recordBaselineAnalysisScore(
+    userId: string,
+    baselineId: string,
+    score: number,
+  ) {
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    const normalizedScore = Math.max(0, Math.min(100, Math.round(score)));
+    const now = new Date();
+
+    if (baseline.originalBaselineScore === null || baseline.originalBaselineScore === undefined) {
+      baseline.originalBaselineScore = normalizedScore;
+      baseline.firstAnalyzedAt = now;
+    }
+
+    baseline.latestBaselineScore = normalizedScore;
+    baseline.lastAnalyzedAt = now;
+
+    return this.baselineRepository.save(baseline);
+  }
+
   async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
     const ingestion = await this.baselineIngestionService.ingest(file);
     const insufficientDetails = getInsufficientExtractedTextDetails(ingestion.rawText);

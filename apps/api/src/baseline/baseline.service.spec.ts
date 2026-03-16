@@ -458,3 +458,89 @@ describe('BaselineService - reparse ingestion source', () => {
     expect(result.rawText).toBe('fallback');
   });
 });
+
+describe('BaselineService - score history persistence', () => {
+  let service: BaselineService;
+  let baselineRepository: any;
+
+  beforeEach(async () => {
+    baselineRepository = {
+      findOne: jest.fn(),
+      save: jest.fn(async (value: any) => value),
+      manager: {
+        transaction: jest.fn(async (cb: any) =>
+          cb({
+            create: jest.fn((_: any, payload: any) => payload),
+            save: jest.fn(async (value: any) => value),
+            delete: jest.fn(),
+          }),
+        ),
+      },
+    };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        BaselineService,
+        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
+        { provide: getRepositoryToken(BaselineSection), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
+        {
+          provide: BaselineIngestionService,
+          useValue: {
+            ingest: jest.fn(),
+            ingestFromText: jest.fn(),
+          },
+        },
+        {
+          provide: EmbeddingService,
+          useValue: {
+            embedText: jest.fn().mockResolvedValue([]),
+            embedTexts: jest.fn().mockResolvedValue([]),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(BaselineService);
+  });
+
+  it('sets original and latest score on first successful analysis', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      originalBaselineScore: null,
+      latestBaselineScore: null,
+      firstAnalyzedAt: null,
+      lastAnalyzedAt: null,
+    });
+
+    const result = await service.recordBaselineAnalysisScore('user-1', 'b-1', 72);
+
+    expect(result.originalBaselineScore).toBe(72);
+    expect(result.latestBaselineScore).toBe(72);
+    expect(result.firstAnalyzedAt).toBeInstanceOf(Date);
+    expect(result.lastAnalyzedAt).toBeInstanceOf(Date);
+  });
+
+  it('preserves original score and updates latest on subsequent analyses', async () => {
+    const firstAnalyzedAt = new Date('2026-01-01T00:00:00.000Z');
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      originalBaselineScore: 72,
+      latestBaselineScore: 72,
+      firstAnalyzedAt,
+      lastAnalyzedAt: firstAnalyzedAt,
+    });
+
+    const result = await service.recordBaselineAnalysisScore('user-1', 'b-1', 78);
+
+    expect(result.originalBaselineScore).toBe(72);
+    expect(result.latestBaselineScore).toBe(78);
+    expect(result.firstAnalyzedAt).toBe(firstAnalyzedAt);
+    expect(result.lastAnalyzedAt).toBeInstanceOf(Date);
+    expect(result.lastAnalyzedAt.getTime()).toBeGreaterThanOrEqual(firstAnalyzedAt.getTime());
+  });
+});

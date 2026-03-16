@@ -169,6 +169,30 @@ export class BaselineController {
     return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
 
+  @Patch(':id/analysis-score')
+  async recordBaselineAnalysisScore(
+    @Param('id') id: string,
+    @Body() body: { score?: number },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    if (typeof body?.score !== 'number' || Number.isNaN(body.score)) {
+      throw new BadRequestException('score must be a number');
+    }
+
+    const baseline = await this.baselineService.recordBaselineAnalysisScore(
+      userId,
+      id,
+      body.score,
+    );
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+  }
+
   @Get(':id/versions')
   async listBaselineVersions(
     @Param('id') id: string,

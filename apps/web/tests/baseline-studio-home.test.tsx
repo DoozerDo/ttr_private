@@ -85,7 +85,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("CERTIFICATION IN PROGRESS")).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText("Career Gravity is locked")).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Career Gravity is locked")).not.toBeInTheDocument();
@@ -248,6 +248,15 @@ describe("BaselineStudioHome", () => {
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
+      if (url.includes("/api/baselines/base-1/analysis-score")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          originalBaselineScore: 72,
+          latestBaselineScore: 78,
+          firstAnalyzedAt: "2026-01-01T00:00:00.000Z",
+          lastAnalyzedAt: "2026-01-02T00:00:00.000Z",
+        });
+      }
       if (url.includes("/api/baselines/base-1")) {
         return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
       }
@@ -255,7 +264,7 @@ describe("BaselineStudioHome", () => {
     });
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
-    fireEvent.click(within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement).getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+    fireEvent.click(within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement).getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
       expect(screen.getByText(/% current/i)).toBeInTheDocument();
@@ -268,12 +277,7 @@ describe("BaselineStudioHome", () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
-        return createJsonResponse([
-          { baselineId: "base-1", status: "completed", score: 71, createdAt: "2026-01-01T00:00:00.000Z" },
-          { baselineId: "base-1", status: "completed", score: 79, createdAt: "2026-01-02T00:00:00.000Z" },
-          { baselineId: "base-2", status: "completed", score: 79, createdAt: "2026-01-01T00:00:00.000Z" },
-          { baselineId: "base-2", status: "completed", score: 74, createdAt: "2026-01-02T00:00:00.000Z" },
-        ]);
+        return createJsonResponse([]);
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -281,8 +285,16 @@ describe("BaselineStudioHome", () => {
     render(
       <BaselineStudioHome
         baselines={[
-          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "improved.pdf"),
-          createBaseline("base-2", "2026-01-02T00:00:00.000Z", "decreased.pdf"),
+          {
+            ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "improved.pdf"),
+            originalBaselineScore: 71,
+            latestBaselineScore: 79,
+          },
+          {
+            ...createBaseline("base-2", "2026-01-02T00:00:00.000Z", "decreased.pdf"),
+            originalBaselineScore: 79,
+            latestBaselineScore: 74,
+          },
         ]}
       />,
     );
@@ -324,6 +336,6 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByText("UPLOAD YOUR RESUME")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
   });
 });

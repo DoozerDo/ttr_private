@@ -23,9 +23,8 @@ import {
 import { formatDateTime } from "@/lib/format-date";
 import { buildBaselineCertification, buildCareerGravityUnlock } from "@/lib/baselineCertification";
 import {
-  buildBaselineScoreHistoryMap,
+  buildBaselineScoreHistoryFromBaseline,
   toBaselineScoreHistoryCardViewModel,
-  type BaselineScoreHistory,
 } from "@/lib/baselineScoreHistory";
 import {
   buildBaselineSignalGraph,
@@ -220,9 +219,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const [analysisStatusByBaselineId, setAnalysisStatusByBaselineId] = useState<
     Record<string, ResumeAnalysisStatus>
   >({});
-  const [scoreHistoryByBaselineId, setScoreHistoryByBaselineId] = useState<
-    Record<string, BaselineScoreHistory>
-  >({});
   const [approvedSignalAdditionsByBaselineId, setApprovedSignalAdditionsByBaselineId] = useState<
     Record<string, string[]>
   >({});
@@ -365,8 +361,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             : Array.isArray((payload as { history?: unknown[] })?.history)
               ? ((payload as { history?: unknown[] }).history as unknown[])
               : [];
-        const scoreHistoryMap = buildBaselineScoreHistoryMap(records);
-
         const completed = records.filter((record) => {
           if (!record || typeof record !== "object") return false;
           const status =
@@ -385,7 +379,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
         if (!cancelled) {
           setCompletedRoleAnalyses(completed);
-          setScoreHistoryByBaselineId((current) => ({ ...current, ...scoreHistoryMap }));
         }
       } catch {
         if (!cancelled) {
@@ -487,19 +480,34 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
             ...current,
             [baselineId]: (current[baselineId] ?? 0) + 1,
           }));
-          setScoreHistoryByBaselineId((current) => {
-            const existing = current[baselineId];
-            if (!existing) {
-              return {
+          try {
+            const scoreResponse = await fetch(
+              `/api/baselines/${encodeURIComponent(baselineId)}/analysis-score`,
+              {
+                method: "PATCH",
+                credentials: "include",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ score: scoredPercent }),
+              },
+            );
+
+            if (scoreResponse.ok) {
+              const persistedBaseline = (await scoreResponse.json()) as BaselineDto;
+              setBaselineDetails((current) => ({
                 ...current,
-                [baselineId]: { first: scoredPercent, latest: scoredPercent },
-              };
+                [baselineId]: { ...payload, ...persistedBaseline, sections: payload.sections },
+              }));
+              setBaselineList((current) =>
+                current.map((item) =>
+                  item.id === baselineId ? { ...item, ...persistedBaseline } : item,
+                ),
+              );
             }
-            return {
-              ...current,
-              [baselineId]: { first: existing.first, latest: scoredPercent },
-            };
-          });
+          } catch (scorePersistenceError) {
+            console.error("Unable to persist baseline score history", scorePersistenceError);
+          }
         }
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
 
@@ -815,6 +823,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     const isArchived = baseline.status === "ARCHIVED";
                     const canView = status === "ready";
                     const isLoading = loadingBaselineId === baseline.id;
+                    const scoreHistoryViewModel = toBaselineScoreHistoryCardViewModel(
+                      buildBaselineScoreHistoryFromBaseline(
+                        baselineDetails[baseline.id] ?? baseline,
+                      ),
+                    );
 
                     return (
                       <article
@@ -845,6 +858,27 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           <p className="text-xs text-slate-400">
                             Uploaded {formatDateTime(baseline.createdAt)}
                           </p>
+                          {scoreHistoryViewModel.hasSuccessfulAnalysis ? (
+                            <div className="rounded-[14px] border border-white/10 bg-white/[0.03] px-3 py-2 text-xs uppercase tracking-[0.12em] text-slate-300">
+                              <p>{scoreHistoryViewModel.currentScore}% current</p>
+                              <p className="mt-1">{scoreHistoryViewModel.originalScore}% original</p>
+                              {typeof scoreHistoryViewModel.scoreDelta === "number" &&
+                              scoreHistoryViewModel.scoreDelta !== 0 ? (
+                                <p
+                                  className={`mt-1 ${
+                                    scoreHistoryViewModel.scoreDeltaDirection === "up"
+                                      ? "text-emerald-200"
+                                      : scoreHistoryViewModel.scoreDeltaDirection === "down"
+                                        ? "text-amber-200"
+                                        : "text-slate-300"
+                                  }`}
+                                >
+                                  {scoreHistoryViewModel.scoreDelta > 0 ? "+" : ""}
+                                  {scoreHistoryViewModel.scoreDelta} since first analysis
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
 
                           <div className="flex flex-wrap gap-2">
                             <FormButton

@@ -42,6 +42,10 @@ export interface BaselineDto {
   hash: string | null;
   status: BaselineStatus;
   archivedAt: string | null;
+  originalBaselineScore?: number | null;
+  latestBaselineScore?: number | null;
+  firstAnalyzedAt?: string | null;
+  lastAnalyzedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   sections?: BaselineSectionDto[];

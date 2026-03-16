@@ -11,87 +11,33 @@ export type BaselineScoreHistoryCardViewModel = {
   scoreDeltaDirection: "up" | "down" | "flat" | null;
 };
 
-type AnalysisHistoryRecord = {
-  baselineId: string;
-  score: number | null;
-  isSuccessful: boolean;
-  createdAt: number;
+type BaselineScoreHistorySource = {
+  originalBaselineScore?: number | null;
+  latestBaselineScore?: number | null;
 };
 
-function coerceString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
+export function buildBaselineScoreHistoryFromBaseline(
+  baseline: BaselineScoreHistorySource | null | undefined,
+): BaselineScoreHistory | null {
+  if (!baseline) return null;
 
-function coerceNumber(value: unknown): number | null {
-  if (typeof value !== "number" || Number.isNaN(value)) return null;
-  return value;
-}
+  const original =
+    typeof baseline.originalBaselineScore === "number"
+      ? baseline.originalBaselineScore
+      : null;
+  const latest =
+    typeof baseline.latestBaselineScore === "number"
+      ? baseline.latestBaselineScore
+      : null;
 
-function parseCreatedAtMs(value: unknown): number {
-  if (typeof value !== "string" || !value.trim()) return Number.POSITIVE_INFINITY;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
-}
-
-function parseHistoryRecord(entry: unknown): AnalysisHistoryRecord | null {
-  if (!entry || typeof entry !== "object") return null;
-
-  const obj = entry as Record<string, unknown>;
-  const baselineId = coerceString(obj.baselineId ?? obj.baseline_id);
-  if (!baselineId) return null;
-
-  const score =
-    coerceNumber(obj.score) ??
-    coerceNumber(obj.overallScore) ??
-    coerceNumber(obj.compatibilityScore) ??
-    coerceNumber(obj.fitScore) ??
-    coerceNumber((obj.score_breakdown as { total_score?: unknown } | undefined)?.total_score);
-
-  if (score === null) {
-    return null;
-  }
-
-  const status = coerceString(obj.status)?.toLowerCase() ?? "";
-  const hasSuccessStatus = status.includes("complete") || status.includes("success");
-  const isSuccessful = status ? hasSuccessStatus : true;
-  if (!isSuccessful) {
+  if (original === null && latest === null) {
     return null;
   }
 
   return {
-    baselineId,
-    score,
-    isSuccessful,
-    createdAt: parseCreatedAtMs(obj.createdAt ?? obj.created_at),
+    first: original ?? latest ?? 0,
+    latest: latest ?? original ?? 0,
   };
-}
-
-export function buildBaselineScoreHistoryMap(historyPayload: unknown): Record<string, BaselineScoreHistory> {
-  const records = (Array.isArray(historyPayload) ? historyPayload : [])
-    .map(parseHistoryRecord)
-    .filter((record): record is AnalysisHistoryRecord => Boolean(record));
-
-  const grouped = new Map<string, AnalysisHistoryRecord[]>();
-  for (const record of records) {
-    const existing = grouped.get(record.baselineId) ?? [];
-    existing.push(record);
-    grouped.set(record.baselineId, existing);
-  }
-
-  const output: Record<string, BaselineScoreHistory> = {};
-  for (const [baselineId, baselineRecords] of grouped.entries()) {
-    const ordered = [...baselineRecords].sort((a, b) => a.createdAt - b.createdAt);
-    const first = ordered[0];
-    const last = ordered[ordered.length - 1];
-    if (!first || !last) continue;
-
-    output[baselineId] = {
-      first: first.score ?? 0,
-      latest: last.score ?? first.score ?? 0,
-    };
-  }
-
-  return output;
 }
 
 export function toBaselineScoreHistoryCardViewModel(
