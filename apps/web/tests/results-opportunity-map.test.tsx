@@ -13,16 +13,21 @@ describe("Results opportunity map", () => {
           "Built escalation and incident workflows",
           "Drove cross-functional CX systems",
         ]}
+        primaryCta={{ label: "Open Resume and Cover Letter Studio", href: "/studio" }}
+        scoreAnalysisHref="#advanced-insights"
       />,
     );
 
-    expect(screen.getByText("Opportunity Map")).toBeInTheDocument();
+    expect(screen.queryByText("Opportunity Map")).toBeNull();
     expect(
-      screen.getByText("Executive compatibility summary for this role."),
+      screen.getByText(
+        "A focused read on how strong this match is, why it holds up, and what you should do next.",
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Score and verdict")).toBeInTheDocument();
     expect(screen.getByText("Strong Match")).toBeInTheDocument();
-    expect(screen.getByText("Your advantage")).toBeInTheDocument();
+    expect(screen.getByText("YOUR ADVANTAGE")).toBeInTheDocument();
+    expect(screen.getByText("View score analysis")).toBeInTheDocument();
+    expect(screen.getByText("Open Resume and Cover Letter Studio")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();

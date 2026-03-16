@@ -1,0 +1,1348 @@
+
+"use client";
+
+import Link from "next/link";
+import {
+  type ChangeEvent,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import { Alert } from "@/components/Alert";
+import { FormButton } from "@/components/FormButton";
+import { InsufficientExtractedText } from "@/components/compliance/InsufficientExtractedText";
+import { archiveBaseline, deleteBaseline, type BaselineDto } from "@/lib/baselines";
+import {
+  parseComplianceError,
+  readResponsePayload,
+  type ParsedInsufficientExtractedTextError,
+} from "@/lib/compliance/parseComplianceError";
+import { formatDateTime } from "@/lib/format-date";
+import { buildBaselineCertification, buildCareerGravityUnlock } from "@/lib/baselineCertification";
+import {
+  buildBaselineSignalGraph,
+  type ProfessionalSignalId,
+  type SignalGraphViewModel,
+} from "@/lib/professionalSignals";
+import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
+import { CareerGravity } from "../results/components/CareerGravity";
+
+type BaselineStudioHomeProps = {
+  baselines: BaselineDto[];
+};
+
+type ResumeAnalysisStatus = "not_analyzed" | "loading" | "ready" | "failed";
+type BaselineStrengthState = "empty" | "needs_analysis" | "failed" | "ready";
+
+type BaselineScoreHistory = {
+  first: number;
+  latest: number;
+};
+
+type StrengtheningPrompt = {
+  question: string;
+  whyMatters: string;
+};
+
+const STRENGTHENING_PROMPTS: Record<ProfessionalSignalId, StrengtheningPrompt> = {
+  customer_operations_leadership: {
+    question: "What operational outcomes did you personally lead across customer operations?",
+    whyMatters: "Leadership signal helps the system model scope and decision ownership.",
+  },
+  support_process_design: {
+    question: "Describe a support process or workflow you designed and how it changed execution.",
+    whyMatters: "Process-design signal improves role fit for operations-heavy environments.",
+  },
+  incident_management: {
+    question: "Describe the most complex incident process you personally owned or improved.",
+    whyMatters: "Incident signal improves confidence for high-accountability operations roles.",
+  },
+  cross_functional_coordination: {
+    question: "Which cross-functional groups did you coordinate with, and what did you drive together?",
+    whyMatters: "Coordination signal improves transfer into multi-stakeholder roles.",
+  },
+  tooling_and_workflow_operations: {
+    question: "Which tooling or workflow systems did you own, configure, or evolve?",
+    whyMatters: "Tooling signal supports stronger platform and execution alignment.",
+  },
+  platform_ownership_scope: {
+    question: "What platform ownership scope did you hold, and what decisions were yours?",
+    whyMatters: "Ownership scope clarifies whether you operated the system or led it.",
+  },
+  organizational_scale: {
+    question: "What team size, customer volume, or operational scale did your work support?",
+    whyMatters: "Scale signal unlocks better senior-level and enterprise targeting confidence.",
+  },
+  change_leadership: {
+    question: "Describe a process, tooling, or support change you led and what changed because of it.",
+    whyMatters: "Change signal strengthens fit for transformation-oriented roles.",
+  },
+  quantified_business_impact: {
+    question:
+      "What measurable result came from your work, such as faster resolution, reduced backlog, improved CSAT, or better efficiency?",
+    whyMatters: "Quantified signal improves scoring confidence and personalization quality.",
+  },
+  domain_and_customer_context: {
+    question: "What customer segment or business context shaped your operational decisions?",
+    whyMatters: "Context signal helps align your baseline with role-specific business needs.",
+  },
+};
+
+function sortBaselinesNewestFirst(baselines: BaselineDto[]) {
+  return [...baselines].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function getMostRecentBaselineId(baselines: BaselineDto[]) {
+  return sortBaselinesNewestFirst(baselines).find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
+}
+
+function deriveBaselineStrengthPercent(
+  baseline: BaselineDto | null,
+  graph: SignalGraphViewModel,
+) {
+  if (!baseline?.sections?.length) return 24;
+  const scores = graph.strongSignals.concat(graph.developingSignals).map((signal) => signal.score);
+  if (!scores.length) return 24;
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return Math.max(28, Math.min(91, Math.round(average)));
+}
+
+function SignalPill({ label, tone }: { label: string; tone: "strong" | "developing" }) {
+  const toneClasses =
+    tone === "strong"
+      ? "border-emerald-300/15 bg-emerald-400/[0.08] text-slate-100"
+      : "border-white/10 bg-white/[0.04] text-slate-100";
+
+  return (
+    <article className={`rounded-[22px] border px-4 py-4 ${toneClasses}`}>
+      <p className="text-sm font-semibold">{label}</p>
+    </article>
+  );
+}
+
+function getDuplicateUploadMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const maybeCode = (data as { code?: unknown }).code;
+  const errorBody = (data as { error?: Record<string, unknown> }).error;
+  const duplicateCode =
+    (typeof maybeCode === "string" ? maybeCode : undefined) ??
+    (typeof errorBody?.code === "string" ? errorBody.code : undefined);
+  const topLevelMessage =
+    typeof (data as { message?: unknown }).message === "string"
+      ? ((data as { message?: unknown }).message as string)
+      : null;
+
+  if (
+    duplicateCode !== "BASELINE_DUPLICATE" &&
+    duplicateCode !== "CONFLICT" &&
+    topLevelMessage !== "This file has already been uploaded."
+  ) {
+    return null;
+  }
+
+  return (typeof errorBody?.message === "string" ? errorBody.message : topLevelMessage) ??
+    "This file has already been uploaded.";
+}
+
+function getStatusLabel(status: ResumeAnalysisStatus) {
+  switch (status) {
+    case "loading":
+      return "Analyzing";
+    case "ready":
+      return "Analysis ready";
+    case "failed":
+      return "Analysis failed";
+    default:
+      return "Not analyzed";
+  }
+}
+
+function getStatusTone(status: ResumeAnalysisStatus) {
+  switch (status) {
+    case "ready":
+      return "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100";
+    case "failed":
+      return "border-amber-300/15 bg-amber-400/[0.08] text-amber-100";
+    case "loading":
+      return "border-sky-300/15 bg-sky-400/[0.08] text-sky-100";
+    default:
+      return "border-white/10 bg-white/[0.05] text-slate-300";
+  }
+}
+
+function getStateMessage(state: BaselineStrengthState) {
+  if (state === "empty") return "Upload a resume to generate your baseline.";
+  if (state === "failed") return "We could not complete baseline analysis for this resume.";
+  return "Run baseline analysis to understand your professional signals.";
+}
+
+function createBaselineUpdateProposal(signalLabel: string, answer: string) {
+  return `${signalLabel}: ${answer.trim()}`;
+}
+
+function withApprovedSignalAdditions(
+  baseline: BaselineDto | null,
+  approvedAdditions: string[],
+): BaselineDto | null {
+  if (!baseline || approvedAdditions.length === 0) {
+    return baseline;
+  }
+
+  return {
+    ...baseline,
+    sections: [
+      ...(baseline.sections ?? []),
+      {
+        id: `approved-additions-${baseline.id}`,
+        baselineId: baseline.id,
+        sectionType: "SUMMARY",
+        title: "Approved signal refinements",
+        content: approvedAdditions.join("\n"),
+        includePolicy: "always",
+        order: (baseline.sections?.length ?? 0) + 1,
+        createdAt: baseline.updatedAt,
+        updatedAt: baseline.updatedAt,
+      },
+    ],
+  };
+}
+
+export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
+  const [baselineList, setBaselineList] = useState<BaselineDto[]>(baselines);
+  const [primaryBaselineId, setPrimaryBaselineId] = useState<string | null>(() =>
+    getMostRecentBaselineId(baselines),
+  );
+  const [baselineDetails, setBaselineDetails] = useState<Record<string, BaselineDto>>({});
+  const [analysisStatusByBaselineId, setAnalysisStatusByBaselineId] = useState<
+    Record<string, ResumeAnalysisStatus>
+  >({});
+  const [scoreHistoryByBaselineId, setScoreHistoryByBaselineId] = useState<
+    Record<string, BaselineScoreHistory>
+  >({});
+  const [approvedSignalAdditionsByBaselineId, setApprovedSignalAdditionsByBaselineId] = useState<
+    Record<string, string[]>
+  >({});
+  const [activeStrengtheningSignalId, setActiveStrengtheningSignalId] =
+    useState<ProfessionalSignalId | null>(null);
+  const [strengtheningAnswer, setStrengtheningAnswer] = useState("");
+  const [pendingStrengtheningProposal, setPendingStrengtheningProposal] = useState<string | null>(
+    null,
+  );
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null);
+  const [highlightedBaselineId, setHighlightedBaselineId] = useState<string | null>(null);
+  const [postUploadCtaBaselineId, setPostUploadCtaBaselineId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [insufficientTextError, setInsufficientTextError] =
+    useState<ParsedInsufficientExtractedTextError | null>(null);
+  const [archivingBaselineId, setArchivingBaselineId] = useState<string | null>(null);
+  const [deletingBaselineId, setDeletingBaselineId] = useState<string | null>(null);
+  const [loadingBaselineId, setLoadingBaselineId] = useState<string | null>(null);
+  const [analysisRunsByBaselineId, setAnalysisRunsByBaselineId] = useState<Record<string, number>>({});
+  const [completedRoleAnalyses, setCompletedRoleAnalyses] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const analysisSectionRef = useRef<HTMLDivElement | null>(null);
+  const analysisHeadingRef = useRef<HTMLHeadingElement | null>(null);
+
+  const allBaselines = useMemo(() => sortBaselinesNewestFirst(baselineList), [baselineList]);
+  const activeBaselines = useMemo(
+    () => allBaselines.filter((baseline) => baseline.status !== "ARCHIVED"),
+    [allBaselines],
+  );
+  const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
+
+  useEffect(() => {
+    if (!activeBaselines.length) {
+      setPrimaryBaselineId(null);
+      return;
+    }
+
+    setPrimaryBaselineId((current) => {
+      if (
+        current &&
+        activeBaselines.some((baseline) => baseline.id === current && baseline.status !== "ARCHIVED")
+      ) {
+        return current;
+      }
+      return activeBaselines[0]?.id ?? null;
+    });
+  }, [activeBaselines]);
+
+  const primaryBaseline = useMemo(() => {
+    if (!primaryBaselineId) return null;
+    return (
+      baselineDetails[primaryBaselineId] ??
+      allBaselines.find((item) => item.id === primaryBaselineId && item.status !== "ARCHIVED") ??
+      null
+    );
+  }, [allBaselines, baselineDetails, primaryBaselineId]);
+
+  const primaryAnalysisStatus = primaryBaselineId
+    ? analysisStatusByBaselineId[primaryBaselineId] ?? "not_analyzed"
+    : "not_analyzed";
+
+  const approvedSignalAdditions = useMemo(
+    () => (primaryBaselineId ? approvedSignalAdditionsByBaselineId[primaryBaselineId] ?? [] : []),
+    [approvedSignalAdditionsByBaselineId, primaryBaselineId],
+  );
+  const effectivePrimaryBaseline = useMemo(
+    () => withApprovedSignalAdditions(primaryBaseline, approvedSignalAdditions),
+    [approvedSignalAdditions, primaryBaseline],
+  );
+  const signalGraph = useMemo(
+    () => buildBaselineSignalGraph({ baseline: effectivePrimaryBaseline }),
+    [effectivePrimaryBaseline],
+  );
+  const baselineStrengthPercent = useMemo(
+    () => deriveBaselineStrengthPercent(effectivePrimaryBaseline, signalGraph),
+    [effectivePrimaryBaseline, signalGraph],
+  );
+  const gravitySummary = useMemo(
+    () => signalGraph.strongSignals.slice(0, 3).map((signal) => signal.label).join(", "),
+    [signalGraph.strongSignals],
+  );
+  const certification = useMemo(
+    () =>
+      buildBaselineCertification({
+        baseline: effectivePrimaryBaseline,
+        signalGraph,
+        baselineStrengthPercent,
+        analysisStatus: primaryAnalysisStatus,
+        analysesCompleted:
+          (primaryBaselineId ? analysisRunsByBaselineId[primaryBaselineId] ?? 0 : 0) +
+          (primaryAnalysisStatus === "ready" ? 1 : 0),
+      }),
+    [
+      analysisRunsByBaselineId,
+      baselineStrengthPercent,
+      effectivePrimaryBaseline,
+      primaryAnalysisStatus,
+      primaryBaselineId,
+      signalGraph,
+    ],
+  );
+  const baselineStrengthState: BaselineStrengthState = useMemo(() => {
+    if (activeBaselines.length === 0) return "empty";
+    if (primaryAnalysisStatus === "failed") return "failed";
+    if (!primaryBaselineId || primaryAnalysisStatus !== "ready" || !primaryBaseline?.sections?.length) {
+      return "needs_analysis";
+    }
+    return "ready";
+  }, [activeBaselines.length, primaryAnalysisStatus, primaryBaselineId, primaryBaseline]);
+  const analysisReady = baselineStrengthState === "ready";
+  const careerGravity = useMemo(
+    () => buildCareerGravityUnlock(completedRoleAnalyses),
+    [completedRoleAnalyses],
+  );
+  const activeStrengtheningSignal = useMemo(
+    () =>
+      activeStrengtheningSignalId
+        ? signalGraph.developingSignals.find((signal) => signal.id === activeStrengtheningSignalId) ?? null
+        : null,
+    [activeStrengtheningSignalId, signalGraph.developingSignals],
+  );
+
+  useEffect(() => {
+    if (!primaryBaselineId || !analysisReady) {
+      return;
+    }
+
+    setScoreHistoryByBaselineId((current) => {
+      const existing = current[primaryBaselineId];
+      if (!existing) {
+        return {
+          ...current,
+          [primaryBaselineId]: { first: baselineStrengthPercent, latest: baselineStrengthPercent },
+        };
+      }
+      if (existing.latest === baselineStrengthPercent) {
+        return current;
+      }
+      return {
+        ...current,
+        [primaryBaselineId]: { ...existing, latest: baselineStrengthPercent },
+      };
+    });
+  }, [analysisReady, baselineStrengthPercent, primaryBaselineId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const response = await fetch("/api/analysis/history", {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as unknown;
+        const records = Array.isArray(payload)
+          ? payload
+          : Array.isArray((payload as { items?: unknown[] })?.items)
+            ? ((payload as { items?: unknown[] }).items as unknown[])
+            : Array.isArray((payload as { history?: unknown[] })?.history)
+              ? ((payload as { history?: unknown[] }).history as unknown[])
+              : [];
+
+        const completed = records.filter((record) => {
+          if (!record || typeof record !== "object") return false;
+          const status =
+            typeof (record as { status?: unknown }).status === "string"
+              ? ((record as { status?: string }).status as string).toLowerCase()
+              : "";
+          if (status.includes("complete") || status.includes("success")) {
+            return true;
+          }
+          return (
+            typeof (record as { score?: unknown }).score === "number" ||
+            typeof (record as { compatibilityScore?: unknown }).compatibilityScore === "number" ||
+            typeof (record as { fitScore?: unknown }).fitScore === "number"
+          );
+        }).length;
+
+        if (!cancelled) {
+          setCompletedRoleAnalyses(completed);
+        }
+      } catch {
+        if (!cancelled) {
+          setCompletedRoleAnalyses(0);
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const scrollToAnalysis = useCallback(() => {
+    window.setTimeout(() => {
+      analysisSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      analysisHeadingRef.current?.focus();
+    }, 50);
+  }, []);
+
+  const refreshBaselineLibrary = useCallback(async () => {
+    const response = await fetch("/api/baselines?includeArchived=true", {
+      cache: "no-store",
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to refresh your Baseline Library right now.");
+    }
+
+    const payload = (await response.json()) as BaselineDto[];
+    setBaselineList(payload);
+    return payload;
+  }, []);
+
+  const closeStrengtheningModal = useCallback(() => {
+    setActiveStrengtheningSignalId(null);
+    setStrengtheningAnswer("");
+    setPendingStrengtheningProposal(null);
+  }, []);
+
+  const openStrengtheningModal = useCallback((signalId: ProfessionalSignalId) => {
+    setActiveStrengtheningSignalId(signalId);
+    setStrengtheningAnswer("");
+    setPendingStrengtheningProposal(null);
+  }, []);
+
+  const handleGenerateStrengtheningProposal = useCallback(() => {
+    if (!activeStrengtheningSignal) {
+      return;
+    }
+    const trimmed = strengtheningAnswer.trim();
+    if (!trimmed) {
+      return;
+    }
+    setPendingStrengtheningProposal(createBaselineUpdateProposal(activeStrengtheningSignal.label, trimmed));
+  }, [activeStrengtheningSignal, strengtheningAnswer]);
+
+  const handleApproveStrengtheningProposal = useCallback(() => {
+    if (!primaryBaselineId || !pendingStrengtheningProposal) {
+      return;
+    }
+    setApprovedSignalAdditionsByBaselineId((current) => ({
+      ...current,
+      [primaryBaselineId]: [...(current[primaryBaselineId] ?? []), pendingStrengtheningProposal],
+    }));
+    closeStrengtheningModal();
+  }, [closeStrengtheningModal, pendingStrengtheningProposal, primaryBaselineId]);
+
+  const fetchBaselineDetails = useCallback(
+    async (baselineId: string) => {
+      setPrimaryBaselineId(baselineId);
+      setLoadingBaselineId(baselineId);
+      setError(null);
+      setAnalysisStatusByBaselineId((current) => ({ ...current, [baselineId]: "loading" }));
+
+      try {
+        const response = await fetch(`/api/baselines/${encodeURIComponent(baselineId)}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load baseline analysis right now.");
+        }
+
+        const payload = (await response.json()) as BaselineDto;
+        const hasAnalysis = Boolean(payload.sections?.length);
+
+        setBaselineDetails((current) => ({ ...current, [baselineId]: payload }));
+        setAnalysisStatusByBaselineId((current) => ({
+          ...current,
+          [baselineId]: hasAnalysis ? "ready" : "failed",
+        }));
+        if (hasAnalysis) {
+          setAnalysisRunsByBaselineId((current) => ({
+            ...current,
+            [baselineId]: (current[baselineId] ?? 0) + 1,
+          }));
+        }
+        setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
+
+        if (!hasAnalysis) {
+          throw new Error("We could not complete baseline analysis for this resume.");
+        }
+
+        scrollToAnalysis();
+      } catch (fetchError) {
+        console.error("Unable to load baseline details", fetchError);
+        setAnalysisStatusByBaselineId((current) => ({ ...current, [baselineId]: "failed" }));
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Unable to load baseline analysis right now.",
+        );
+      } finally {
+        setLoadingBaselineId(null);
+      }
+    },
+    [scrollToAnalysis],
+  );
+
+  const handleUpload = useCallback(
+    async (file: File) => {
+      if (isUploading || uploadLimitReached) return;
+
+      setIsUploading(true);
+      setError(null);
+      setDuplicateError(null);
+      setInsufficientTextError(null);
+      setUploadSuccessId(null);
+      setHighlightedBaselineId(null);
+      setPostUploadCtaBaselineId(null);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch("/api/baselines", {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+        const payload = await readResponsePayload(response);
+
+        if (!response.ok) {
+          const compliance = parseComplianceError({ status: response.status, payload });
+          if (compliance?.type === "insufficient_extracted_text") {
+            setInsufficientTextError(compliance);
+            return;
+          }
+
+          const duplicateMessage = getDuplicateUploadMessage(payload);
+          if (duplicateMessage) {
+            try {
+              const latestBaselines = await refreshBaselineLibrary();
+              const matchingBaseline =
+                latestBaselines.find((baseline) => baseline.originalFilename === file.name) ??
+                latestBaselines[0] ??
+                null;
+
+              if (matchingBaseline) {
+                setHighlightedBaselineId(matchingBaseline.id);
+                if (matchingBaseline.status !== "ARCHIVED") {
+                  setPrimaryBaselineId(matchingBaseline.id);
+                }
+              }
+            } catch (refreshError) {
+              console.error("Unable to refresh Baseline Library after duplicate upload", refreshError);
+            }
+
+            setDuplicateError("This resume is already in your Baseline Library.");
+            return;
+          }
+
+          const fallbackMessage =
+            typeof payload === "object" && payload !== null
+              ? (payload as Record<string, unknown>).message ??
+                (payload as Record<string, unknown>).error
+              : undefined;
+          setError(
+            typeof fallbackMessage === "string"
+              ? fallbackMessage
+              : "Unable to upload resume right now.",
+          );
+          return;
+        }
+
+        const baselineRecord = payload as BaselineDto;
+        setBaselineList((current) => [
+          baselineRecord,
+          ...current.filter((item) => item.id !== baselineRecord.id),
+        ]);
+        setPrimaryBaselineId(baselineRecord.id);
+        setUploadSuccessId(baselineRecord.id);
+        setHighlightedBaselineId(baselineRecord.id);
+        setPostUploadCtaBaselineId(baselineRecord.id);
+        setAnalysisStatusByBaselineId((current) => ({
+          ...current,
+          [baselineRecord.id]: "not_analyzed",
+        }));
+      } catch (uploadError) {
+        console.error("Upload failed", uploadError);
+        setError("Unable to upload resume right now.");
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    [isUploading, uploadLimitReached],
+  );
+
+  const handleArchiveBaseline = useCallback(
+    async (baselineId: string) => {
+      if (archivingBaselineId === baselineId) return;
+      setArchivingBaselineId(baselineId);
+      setError(null);
+
+      try {
+        await archiveBaseline(baselineId);
+
+        const remainingBaselines = activeBaselines.filter((item) => item.id !== baselineId);
+        const nextPrimaryId =
+          primaryBaselineId === baselineId ? remainingBaselines[0]?.id ?? null : primaryBaselineId;
+
+        setBaselineList((current) =>
+          current.map((item) =>
+            item.id === baselineId
+              ? {
+                  ...item,
+                  status: "ARCHIVED",
+                  archivedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        );
+        setBaselineDetails((current) => {
+          const next = { ...current };
+          delete next[baselineId];
+          return next;
+        });
+        setAnalysisStatusByBaselineId((current) => {
+          const next = { ...current };
+          delete next[baselineId];
+          return next;
+        });
+        setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
+        setUploadSuccessId((current) => (current === baselineId ? null : current));
+        setPrimaryBaselineId(nextPrimaryId);
+      } catch (archiveError) {
+        console.error("Unable to delete baseline", archiveError);
+        setError(
+          archiveError instanceof Error
+            ? archiveError.message
+            : "Unable to delete this resume right now.",
+        );
+      } finally {
+        setArchivingBaselineId(null);
+      }
+    },
+    [activeBaselines, archivingBaselineId, primaryBaselineId],
+  );
+
+  const handleDeleteBaseline = useCallback(
+    async (baselineId: string) => {
+      if (deletingBaselineId === baselineId) return;
+      setDeletingBaselineId(baselineId);
+      setError(null);
+
+      try {
+        await deleteBaseline(baselineId);
+
+        const remainingBaselines = activeBaselines.filter((item) => item.id !== baselineId);
+        const nextPrimaryId =
+          primaryBaselineId === baselineId ? remainingBaselines[0]?.id ?? null : primaryBaselineId;
+
+        setBaselineList((current) => current.filter((item) => item.id !== baselineId));
+        setBaselineDetails((current) => {
+          const next = { ...current };
+          delete next[baselineId];
+          return next;
+        });
+        setAnalysisStatusByBaselineId((current) => {
+          const next = { ...current };
+          delete next[baselineId];
+          return next;
+        });
+        setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
+        setUploadSuccessId((current) => (current === baselineId ? null : current));
+        setPrimaryBaselineId(nextPrimaryId);
+      } catch (deleteError) {
+        console.error("Unable to permanently delete baseline", deleteError);
+        setError(
+          deleteError instanceof Error
+            ? deleteError.message
+            : "Unable to delete this baseline right now.",
+        );
+      } finally {
+        setDeletingBaselineId(null);
+      }
+    },
+    [activeBaselines, deletingBaselineId, primaryBaselineId],
+  );
+
+  const onDrop = useCallback(
+    async (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      if (uploadLimitReached || isUploading) return;
+      const file = event.dataTransfer.files?.[0];
+      if (!file) return;
+      await handleUpload(file);
+    },
+    [handleUpload, isUploading, uploadLimitReached],
+  );
+
+  const onFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      await handleUpload(file);
+    },
+    [handleUpload],
+  );
+
+  return (
+    <div className="mx-auto w-full max-w-7xl space-y-6">
+      <section className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.96))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.24)]">
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">
+              Baseline Studio
+            </p>
+            <h1 className="text-2xl font-semibold tracking-tight text-white">Professional baseline workbench</h1>
+            <p className="max-w-3xl text-sm leading-6 text-slate-300">
+              Understand your professional signals, strengthen developing signals, and improve targeting confidence before you move into roles.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <aside className="rounded-[20px] border border-white/10 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Baseline Strength
+              </p>
+              {baselineStrengthState !== "ready" ? (
+                <div className="mt-3 space-y-3">
+                  <p className="text-sm leading-6 text-slate-300">
+                    {getStateMessage(baselineStrengthState)}
+                  </p>
+                  {baselineStrengthState === "failed" && primaryBaselineId ? (
+                    <FormButton onClick={() => void fetchBaselineDetails(primaryBaselineId)}>
+                      TRY AGAIN
+                    </FormButton>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-end gap-3">
+                    <p className="text-5xl font-black leading-none tracking-[-0.06em] text-white">
+                      {baselineStrengthPercent}%
+                    </p>
+                    <p className="pb-1 text-xs uppercase tracking-[0.16em] text-slate-400">
+                      Operational signal quality
+                    </p>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-[var(--accent-primary)]"
+                      style={{ width: `${baselineStrengthPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </aside>
+
+            <aside className="rounded-[20px] border border-white/10 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                Certification Status
+              </p>
+              {baselineStrengthState === "failed" && primaryBaselineId ? (
+                <div className="mt-3 space-y-3">
+                  <span className="rounded-full border border-amber-300/15 bg-amber-400/[0.08] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-100">
+                    Analysis Failed
+                  </span>
+                  <p className="text-sm leading-6 text-slate-300">
+                    Certification is unavailable until baseline analysis completes successfully.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
+                      certification.status === "certified"
+                        ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
+                        : certification.status === "not_certified"
+                          ? "border-amber-300/15 bg-amber-400/[0.08] text-amber-100"
+                          : "border-white/10 bg-white/[0.05] text-slate-300"
+                    }`}
+                  >
+                    {certification.title}
+                  </span>
+                  <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
+                  <div className="grid gap-2">
+                    {certification.checklist.map((item) => (
+                      <p
+                        key={item.label}
+                        className={`rounded-[14px] border px-3 py-2 text-xs uppercase tracking-[0.11em] ${
+                          item.complete
+                            ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
+                            : "border-white/10 bg-white/[0.03] text-slate-300"
+                        }`}
+                      >
+                        {item.label}: {item.value}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.96))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
+        <header className="space-y-2 border-b border-white/10 pb-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+            UPLOAD YOUR RESUME
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+            Upload your resume to generate your professional baseline
+          </h2>
+          <p className="max-w-3xl text-sm leading-6 text-slate-300">
+            Upload your resume to generate your professional baseline. Most professionals refine
+            their baseline before targeting roles.
+          </p>
+        </header>
+
+        <div className="mt-5 space-y-4">
+          <div
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={onDrop}
+            className={`rounded-[24px] border border-dashed p-5 transition ${
+              uploadLimitReached
+                ? "border-white/10 bg-slate-950/30"
+                : "border-white/20 bg-slate-950/40"
+            }`}
+          >
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-slate-100">
+                Drag and drop a resume here, or choose a file
+              </p>
+              <p className="text-sm leading-6 text-slate-400">Accepted formats: PDF and DOCX</p>
+              <div className="flex flex-wrap gap-3">
+                <FormButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || uploadLimitReached}
+                >
+                  {isUploading ? "Uploading..." : "Choose Resume"}
+                </FormButton>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={onFileChange}
+                  disabled={isUploading || uploadLimitReached}
+                />
+                <span className="inline-flex items-center rounded-[var(--button-radius)] border border-white/10 px-3 py-2 text-sm text-slate-400">
+                  {activeBaselines.length} / {BETA_BASELINE_UPLOAD_LIMIT} resumes stored
+                </span>
+              </div>
+              {isUploading ? (
+                <div className="space-y-2">
+                  <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                    <div className="h-full w-2/3 animate-pulse rounded-full bg-[var(--accent-primary)]" />
+                  </div>
+                  <p className="text-sm text-slate-400">
+                    Uploading your resume and preparing baseline extraction...
+                  </p>
+                </div>
+              ) : null}
+              {uploadLimitReached ? (
+                <p className="text-sm text-slate-300">
+                  Beta accounts can store up to {BETA_BASELINE_UPLOAD_LIMIT} resumes.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          {postUploadCtaBaselineId ? (
+            <article className="rounded-[24px] border border-cyan-300/20 bg-cyan-400/[0.08] p-5 shadow-[0_18px_40px_rgba(8,47,73,0.22)]">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100/80">
+                    Resume uploaded
+                  </p>
+                  <p className="text-lg font-semibold text-white">
+                    Now determine your baseline strength.
+                  </p>
+                  <p className="text-sm leading-6 text-slate-200/90">
+                    Your uploaded resume is ready to become the primary source for baseline
+                    analysis.
+                  </p>
+                </div>
+                <FormButton onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}>
+                  DETERMINE BASELINE STRENGTH
+                </FormButton>
+              </div>
+            </article>
+          ) : null}
+
+          {uploadSuccessId && !postUploadCtaBaselineId ? (
+            <Alert intent="success" title="Resume uploaded">
+              <p className="text-sm text-current">
+                Your resume was stored successfully and is available in Baseline Library.
+              </p>
+            </Alert>
+          ) : null}
+
+          {duplicateError ? <p className="text-sm text-slate-300">{duplicateError}</p> : null}
+          {insufficientTextError ? <InsufficientExtractedText error={insufficientTextError} /> : null}
+          {error ? (
+            <Alert intent="error" title="Upload issue">
+              <p className="text-sm text-current">{error}</p>
+            </Alert>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-[28px] border border-white/10 bg-slate-900/35 p-5">
+        <header className="space-y-2 border-b border-white/10 pb-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+            BASELINE LIBRARY
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+            Stored baseline sources for this account
+          </h2>
+        </header>
+
+        <div className="mt-4 space-y-3">
+          {allBaselines.length === 0 ? (
+            <p className="text-sm leading-6 text-slate-300">
+              Upload a resume to generate your professional baseline.
+            </p>
+          ) : null}
+
+          {allBaselines.map((baseline) => {
+            const isPrimary = primaryBaselineId === baseline.id;
+            const status = analysisStatusByBaselineId[baseline.id] ?? "not_analyzed";
+            const isArchived = baseline.status === "ARCHIVED";
+            const canView = status === "ready";
+            const isLoading = loadingBaselineId === baseline.id;
+            const scoreHistory = scoreHistoryByBaselineId[baseline.id];
+            const scoreDelta = scoreHistory ? scoreHistory.latest - scoreHistory.first : 0;
+
+            return (
+              <article
+                key={baseline.id}
+                className={`rounded-[24px] border p-5 ${
+                  uploadSuccessId === baseline.id || highlightedBaselineId === baseline.id
+                    ? "border-cyan-300/25 bg-cyan-400/[0.06]"
+                    : "border-white/10 bg-slate-950/35"
+                }`}
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-base font-semibold text-slate-100">
+                        {baseline.originalFilename}
+                      </p>
+                      {isPrimary ? (
+                        <span className="rounded-full border border-cyan-300/15 bg-cyan-400/[0.08] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                          Primary
+                        </span>
+                      ) : null}
+                      {status === "ready" ? (
+                        <span className="rounded-full border border-emerald-300/15 bg-emerald-400/[0.08] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
+                          Analyzed
+                        </span>
+                      ) : null}
+                      {certification.isCertified && isPrimary ? (
+                        <span className="rounded-full border border-emerald-300/15 bg-emerald-400/[0.08] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
+                          Certified
+                        </span>
+                      ) : null}
+                      {isArchived ? (
+                        <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
+                          Archived
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getStatusTone(
+                          status,
+                        )}`}
+                      >
+                        {getStatusLabel(status)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-400">
+                      Uploaded {formatDateTime(baseline.createdAt)}
+                    </p>
+                    {scoreHistory ? (
+                      <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3 py-2">
+                        <p className="text-sm font-semibold text-slate-100">{scoreHistory.latest}% current</p>
+                        <p className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                          {scoreHistory.first}% first analysis
+                        </p>
+                        {scoreHistory.first !== scoreHistory.latest ? (
+                          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                            {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} since first analysis
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <FormButton
+                      onClick={() => {
+                        if (isArchived) {
+                          return;
+                        }
+                        if (canView) {
+                          setPrimaryBaselineId(baseline.id);
+                          setPostUploadCtaBaselineId(null);
+                          scrollToAnalysis();
+                          return;
+                        }
+                        void fetchBaselineDetails(baseline.id);
+                      }}
+                      disabled={isLoading}
+                    >
+                      {isLoading
+                        ? "Analyzing..."
+                        : canView
+                          ? "VIEW BASELINE ANALYSIS"
+                          : "DETERMINE BASELINE STRENGTH"}
+                    </FormButton>
+                    {!isPrimary && !isArchived ? (
+                      <FormButton
+                        variant="ghost"
+                        onClick={() => {
+                          setPrimaryBaselineId(baseline.id);
+                          setPostUploadCtaBaselineId((current) =>
+                            current === baseline.id ? current : null,
+                          );
+                        }}
+                      >
+                        Set as Primary
+                      </FormButton>
+                    ) : null}
+                    <FormButton
+                      variant="ghost"
+                      onClick={() => void handleArchiveBaseline(baseline.id)}
+                      disabled={archivingBaselineId === baseline.id || isArchived}
+                    >
+                      {isArchived
+                        ? "Archived"
+                        : archivingBaselineId === baseline.id
+                          ? "Archiving..."
+                          : "Archive"}
+                    </FormButton>
+                    <FormButton
+                      variant="ghost"
+                      onClick={() => void handleDeleteBaseline(baseline.id)}
+                      disabled={deletingBaselineId === baseline.id}
+                    >
+                      {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
+                    </FormButton>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <div ref={analysisSectionRef} className="space-y-6">
+        {!analysisReady ? (
+          <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.96))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
+            <header className="space-y-2 border-b border-white/10 pb-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                BASELINE ANALYSIS
+              </p>
+              <h2
+                ref={analysisHeadingRef}
+                tabIndex={-1}
+                className="text-2xl font-semibold tracking-tight text-slate-100 outline-none"
+              >
+                Determine baseline strength to generate your professional signals
+              </h2>
+            </header>
+
+            <div className="mt-6 rounded-[24px] border border-white/10 bg-slate-950/40 p-5 text-sm leading-6 text-slate-300">
+              <div className="space-y-4">
+                <p>{getStateMessage(baselineStrengthState)}</p>
+                {baselineStrengthState === "failed" && primaryBaselineId ? (
+                  <FormButton onClick={() => void fetchBaselineDetails(primaryBaselineId)}>
+                    Retry Analysis
+                  </FormButton>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.96))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
+              <header className="space-y-2 border-b border-white/10 pb-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  SIGNAL GRAPH
+                </p>
+                <h2
+                  ref={analysisHeadingRef}
+                  tabIndex={-1}
+                  className="text-2xl font-semibold tracking-tight text-slate-100 outline-none"
+                >
+                  Professional Signals Diagnosis
+                </h2>
+                <p className="max-w-3xl text-sm leading-6 text-slate-300">
+                  Your baseline emits a set of professional signals. Strong signals improve targeting outcomes while developing signals indicate where signal clarity should improve next.
+                </p>
+              </header>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <article className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Identified Signals</p>
+                  <p className="mt-2 text-3xl font-bold text-white">
+                    {signalGraph.strongSignals.length + signalGraph.developingSignals.length}
+                  </p>
+                </article>
+                <article className="rounded-[18px] border border-emerald-300/15 bg-emerald-400/[0.06] p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/80">Strong Signals</p>
+                  <p className="mt-2 text-3xl font-bold text-emerald-100">{signalGraph.strongSignals.length}</p>
+                </article>
+                <article className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Developing Signals</p>
+                  <p className="mt-2 text-3xl font-bold text-white">{signalGraph.developingSignals.length}</p>
+                </article>
+              </div>
+
+              <article className="mt-5 rounded-[24px] border border-white/10 bg-slate-950/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Developing Signals
+                </p>
+                {signalGraph.developingSignals.length > 0 ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {signalGraph.developingSignals.map((signal) => (
+                      <button
+                        key={signal.id}
+                        type="button"
+                        onClick={() => openStrengtheningModal(signal.id)}
+                        className="text-left"
+                      >
+                        <SignalPill label={signal.label} tone="developing" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-emerald-100">
+                    Your baseline signals are already well developed.
+                  </p>
+                )}
+              </article>
+            </section>
+
+            <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+              <article className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.94))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.2)]">
+                <header className="space-y-2 border-b border-white/10 pb-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                    Baseline Strengthening
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+                    Strengthen developing signals with structured input
+                  </h2>
+                </header>
+                <div className="mt-5 space-y-4">
+                  {signalGraph.developingSignals.length === 0 ? (
+                    <article className="rounded-[20px] border border-emerald-300/15 bg-emerald-400/[0.08] p-4">
+                      <p className="text-base font-semibold text-emerald-100">
+                        Your baseline signals are already well developed.
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-200">
+                        Reanalyze after future updates, or move into TARGET to apply your certified signal profile.
+                      </p>
+                    </article>
+                  ) : null}
+                  {signalGraph.developingSignals.map((signal) => (
+                    <article
+                      key={signal.id}
+                      className="rounded-[20px] border border-white/10 bg-slate-950/40 p-4"
+                    >
+                      <p className="text-base font-semibold text-slate-100">{signal.label}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        {STRENGTHENING_PROMPTS[signal.id].whyMatters}
+                      </p>
+                      <div className="mt-4">
+                        <FormButton onClick={() => openStrengtheningModal(signal.id)}>
+                          Strengthen This Signal
+                        </FormButton>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-[28px] border border-white/10 bg-slate-900/35 p-5">
+                <header className="space-y-2 border-b border-white/10 pb-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                    Career Gravity
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+                    Progressive insight
+                  </h2>
+                </header>
+                <div className="mt-5">
+                  {careerGravity.unlocked ? (
+                    <>
+                      <p className="text-sm leading-6 text-slate-300">Your experience clusters strongly around:</p>
+                      <div className="mt-4 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
+                        <p className="text-base font-semibold leading-7 text-slate-100">
+                          {gravitySummary || "Professional signal clarity is still forming."}
+                        </p>
+                      </div>
+                      <div className="mt-5">
+                        <CareerGravity />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
+                      <p className="text-sm font-semibold text-slate-100">Career Gravity is locked</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        Unlocks after 3 role analyses.
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-400">
+                        Run more role analyses to reveal where your background clusters most strongly in the market.
+                      </p>
+                      <p className="mt-2 text-xs uppercase tracking-[0.14em] text-slate-500">
+                        {careerGravity.progressText}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </article>
+            </section>
+          </>
+        )}
+      </div>
+
+      {activeStrengtheningSignal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Strengthen Signal"
+        >
+          <article className="w-full max-w-2xl rounded-[24px] border border-white/10 bg-slate-900 p-6 shadow-[0_30px_80px_rgba(2,6,23,0.5)]">
+            <header className="space-y-2 border-b border-white/10 pb-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+                Baseline Strengthening
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">
+                {activeStrengtheningSignal.label}
+              </h2>
+              <p className="text-sm leading-6 text-slate-300">
+                {STRENGTHENING_PROMPTS[activeStrengtheningSignal.id].question}
+              </p>
+            </header>
+
+            <div className="mt-4 space-y-4">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  Your input
+                </span>
+                <textarea
+                  value={strengtheningAnswer}
+                  onChange={(event) => setStrengtheningAnswer(event.target.value)}
+                  rows={5}
+                  className="mt-2 w-full rounded-[16px] border border-white/10 bg-slate-950/45 px-3 py-2 text-sm leading-6 text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-cyan-300/30"
+                  placeholder="Add concrete evidence to strengthen this professional signal."
+                />
+              </label>
+
+              {pendingStrengtheningProposal ? (
+                <div className="rounded-[18px] border border-cyan-300/20 bg-cyan-400/[0.08] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100/80">
+                    Proposed baseline update
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-100">
+                    {pendingStrengtheningProposal}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-3">
+                {!pendingStrengtheningProposal ? (
+                  <FormButton
+                    onClick={handleGenerateStrengtheningProposal}
+                    disabled={!strengtheningAnswer.trim()}
+                  >
+                    Generate Proposed Update
+                  </FormButton>
+                ) : (
+                  <FormButton onClick={handleApproveStrengtheningProposal}>Approve and Apply</FormButton>
+                )}
+                <FormButton variant="ghost" onClick={closeStrengtheningModal}>
+                  {pendingStrengtheningProposal ? "Cancel" : "Close"}
+                </FormButton>
+              </div>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.8),rgba(2,6,23,0.94))] p-6 shadow-[0_18px_50px_rgba(2,6,23,0.2)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+              Target CTA
+            </p>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+              Ready to target a role?
+            </h2>
+            <p className="max-w-2xl text-sm leading-6 text-slate-300">
+              {certification.isCertified
+                ? "Using certified baseline data should improve scoring confidence and document personalization as you move into targeting."
+                : "Baseline certification can improve scoring confidence and document personalization as you move into targeting."}
+            </p>
+          </div>
+          <Link
+            href="/target"
+            className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-5 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+          >
+            TARGET
+          </Link>
+        </div>
+      </section>
+    </div>
+  );
+}

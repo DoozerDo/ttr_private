@@ -1,6 +1,7 @@
 import { BaselineReadinessLevel } from "./types";
 
 export const BASELINE_USABLE_MIN_PERCENT = 41;
+export const BETA_BASELINE_UPLOAD_LIMIT = 3;
 
 export const BASELINE_READINESS_LABELS: Record<BaselineReadinessLevel, string> = {
   [BaselineReadinessLevel.INGESTED]: "Baseline imported",

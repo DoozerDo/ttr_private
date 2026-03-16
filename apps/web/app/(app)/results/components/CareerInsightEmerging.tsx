@@ -132,24 +132,26 @@ export function CareerInsightEmerging() {
     buildFallbackConfidence(totalAnalyses, history.alignmentPattern.averageScore);
 
   return (
-    <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-      <header className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-500">
-          Visible after 3 analyses
+    <section className="rounded-[24px] border border-white/10 bg-slate-900/40 p-5">
+      <header className="space-y-2 border-b border-white/10 pb-4">
+        <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-400">
+          Emerging Insight
         </p>
-        <h3 className="text-lg font-semibold text-neutral-900">Career Insight Emerging</h3>
+        <h3 className="text-2xl font-semibold tracking-tight text-slate-100">
+          Pattern taking shape
+        </h3>
       </header>
 
-      <p className="mt-3 text-sm text-neutral-700">{summary}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-300">{summary}</p>
 
-      <p className="mt-4 text-sm text-neutral-600">
-        Pattern Confidence: <span className="font-semibold text-neutral-900">{confidence}</span>
+      <p className="mt-4 text-sm text-slate-400">
+        Pattern Confidence: <span className="font-semibold text-slate-100">{confidence}</span>
       </p>
 
       {recurringPaths.length ? (
         <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-semibold text-neutral-900">Recurring alignment paths</h4>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-neutral-700">
+          <h4 className="text-sm font-semibold text-slate-100">Recurring alignment paths</h4>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
             {recurringPaths.map((path) => (
               <li key={path}>{path}</li>
             ))}
@@ -158,8 +160,8 @@ export function CareerInsightEmerging() {
       ) : null}
 
       <div className="mt-5 space-y-2">
-        <h4 className="text-sm font-semibold text-neutral-900">Explore More Roles In This Path</h4>
-        <p className="text-sm text-neutral-600">
+        <h4 className="text-sm font-semibold text-slate-100">Explore More Roles In This Path</h4>
+        <p className="text-sm text-slate-400">
           Run additional analyses to sharpen this pattern and compare adjacent role paths.
         </p>
         {recurringPaths.length ? (
@@ -168,7 +170,7 @@ export function CareerInsightEmerging() {
               <Link
                 key={`path-${path}`}
                 href={`/analyze?roleHint=${encodeURIComponent(path)}`}
-                className="rounded-full border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-900"
+                className="rounded-full border border-white/15 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-white/30 hover:text-white"
               >
                 {path}
               </Link>

@@ -14,14 +14,23 @@ export type RouteConfig = {
 const sidebarNavRoutes: RouteConfig[] = [
   {
     id: "baselines",
-    label: "TARGET",
+    label: "BASELINE STUDIO",
     href: "/baseline",
     requiresAuth: true,
-    subtext: "Set your baseline",
+    subtext: "Strengthen your profile before targeting roles",
+  },
+  {
+    id: "target",
+    label: "TARGET",
+    href: "/target",
+    requiresAuth: true,
+    requiresBaseline: true,
+    requiresJob: true,
+    subtext: "Select role targets for scoring",
   },
   {
     id: "results",
-    label: "Results",
+    label: "SCORE",
     href: "/results",
     requiresAuth: true,
     requiresBaseline: true,
@@ -30,7 +39,7 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "studio",
-    label: "Resume and Cover Letter Studio",
+    label: "DOCUMENT GENERATOR",
     href: "/studio",
     requiresAuth: true,
     requiresBaseline: true,
@@ -39,14 +48,14 @@ const sidebarNavRoutes: RouteConfig[] = [
   },
   {
     id: "jobTracker",
-    label: "Opportunities",
+    label: "OPPORTUNITIES",
     href: "/job-tracker",
     requiresAuth: true,
     subtext: "Manage active roles in one place",
   },
   {
     id: "interviewToolkit",
-    label: "Interview Toolkit",
+    label: "INTERVIEW TOOLKIT",
     href: "/interview-toolkit",
     requiresAuth: true,
     requiresJob: true,

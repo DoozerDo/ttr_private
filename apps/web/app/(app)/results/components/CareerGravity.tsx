@@ -70,18 +70,18 @@ export function CareerGravity() {
 
   if (loading) {
     return (
-      <section className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+      <section className="space-y-2 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
         <h3 className="text-lg font-semibold text-slate-100">Career Gravity</h3>
-        <p className="text-sm text-slate-400">Preparing compatibility report…</p>
+        <p className="text-sm text-slate-400">Preparing compatibility report...</p>
       </section>
     );
   }
 
   if (!insight) {
     return (
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+      <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
         <h3 className="text-lg font-semibold text-slate-100">Career Gravity</h3>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm leading-6 text-slate-400">
           Run several role analyses to identify where your strongest market alignment is emerging.
         </p>
         <Link
@@ -95,15 +95,18 @@ export function CareerGravity() {
   }
 
   return (
-    <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-      <header className="space-y-1">
-        <h3 className="text-lg font-semibold text-slate-100">Career Gravity</h3>
-        <p className="text-sm text-slate-400">
-          Where your strongest market alignment is emerging.
+    <section className="space-y-4 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
+      <header className="space-y-2 border-b border-white/10 pb-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+          Profile Direction
+        </p>
+        <h3 className="text-2xl font-semibold tracking-tight text-slate-100">Career Gravity</h3>
+        <p className="text-sm leading-6 text-slate-400">
+          Where your strongest market alignment is starting to consolidate.
         </p>
       </header>
 
-      <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+      <article className="space-y-3 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
         <p className="text-base leading-7 text-slate-100">{insight.summary}</p>
         <dl className="grid gap-3 border-t border-white/10 pt-3 text-sm text-slate-300 sm:grid-cols-3">
           <div>
@@ -122,7 +125,7 @@ export function CareerGravity() {
       </article>
 
       {insight.supportingSignals.length ? (
-        <article className="space-y-2 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+        <article className="space-y-2 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
           <h4 className="text-sm font-semibold text-slate-100">Supporting Signals</h4>
           <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
             {insight.supportingSignals.slice(0, 2).map((signal) => (

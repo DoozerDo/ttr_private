@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
   }
   if (!auth.token) return auth.error;
 
-  const response = await backendFetch(`${baseUrl}/baselines`, {
+  const search = req.nextUrl.search || "";
+  const response = await backendFetch(`${baseUrl}/baselines${search}`, {
     method: "GET",
     cache: "no-store",
     headers: { Authorization: `Bearer ${auth.token}` },

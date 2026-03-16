@@ -46,7 +46,10 @@ const PATHNAME_TO_STEP_MAP: Record<string, JourneyStepId> =
   navigationRoutes.reduce<Record<string, JourneyStepId>>((acc, route) => {
     acc[route.href] = route.id;
     return acc;
-  }, {});
+  }, {
+    "/score": "results" as JourneyStepId,
+    "/document-generator": "studio" as JourneyStepId,
+  });
 
 function normalizePathname(pathname?: string): string {
   if (!pathname || pathname === "/") return "/";

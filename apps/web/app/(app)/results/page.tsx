@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -10,10 +10,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
 import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
-import { OpportunityRadarChart } from "./components/OpportunityRadarChart";
 import { CareerAlignmentProgress } from "./components/CareerAlignmentProgress";
-import { CareerGravity } from "./components/CareerGravity";
-import { CareerInsightEmerging } from "./components/CareerInsightEmerging";
 import { FitImprovementOpportunities } from "./components/FitImprovementOpportunities";
 import {
   formatErrorMessage,
@@ -24,6 +21,7 @@ import {
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
+import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import type { RiskFactor } from "@/lib/resultsInsights";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
@@ -356,48 +354,216 @@ type OpportunityMapSectionProps = {
     explanation: string;
   };
   advantageSignals: string[];
+  primaryCta:
+    | {
+        label: string;
+        href: string;
+        disabled?: boolean;
+      }
+    | null;
+  scoreAnalysisHref: string;
 };
 
 export function OpportunityMapSection({
   score,
   verdict,
   advantageSignals,
+  primaryCta,
+  scoreAnalysisHref,
 }: OpportunityMapSectionProps) {
   return (
-    <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_24%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)]">
-      <div className="flex flex-col gap-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">Opportunity Map</p>
-          <p className="mt-2 max-w-2xl text-sm text-slate-300">
-            Executive compatibility summary for this role.
-          </p>
-        </div>
-
-        <article className="rounded-[24px] border border-white/10 bg-slate-950/45 p-5">
-          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Score and verdict</p>
-              <div className="mt-4 flex items-end gap-4">
-                <p className="text-[68px] font-black leading-none tracking-[-0.06em] text-white">
-                  {typeof score === "number" ? Math.round(score) : "--"}
+    <section className="overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-7 shadow-[0_26px_90px_rgba(2,6,23,0.38)]">
+      <div className="flex flex-col gap-7">
+        <header className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-3">
+            <p className="max-w-lg text-[15px] leading-7 text-slate-300">
+              A focused read on how strong this match is, why it holds up, and what you should do next.
+            </p>
+            <div className="flex items-end gap-4">
+              <p className="text-[76px] font-black leading-none tracking-[-0.07em] text-white">
+                {typeof score === "number" ? Math.round(score) : "--"}
+              </p>
+              <div className="space-y-1 pb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">
+                  Match strength
                 </p>
-                <div className="pb-2">
-                  <p className="text-2xl font-semibold text-white">{verdict.label}</p>
-                  <p className="mt-1 text-sm text-slate-300">{verdict.explanation}</p>
-                </div>
+                <p className="text-3xl font-semibold tracking-tight text-white">{verdict.label}</p>
+                <p className="max-w-sm text-sm leading-6 text-slate-300">{verdict.explanation}</p>
               </div>
             </div>
           </div>
+
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <a
+              href={scoreAnalysisHref}
+              className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+            >
+              View score analysis
+            </a>
+            {primaryCta ? (
+              primaryCta.disabled ? (
+                <span className="inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2.5 text-sm font-semibold text-slate-400">
+                  {primaryCta.label}
+                </span>
+              ) : (
+                <a
+                  href={primaryCta.href}
+                  className="inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+                >
+                  {primaryCta.label}
+                </a>
+              )
+            ) : null}
+          </div>
+        </header>
+
+        <article className="rounded-[26px] border border-white/10 bg-slate-950/38 p-6">
+          <h3 className="text-xl font-semibold uppercase tracking-[0.16em] text-slate-100">
+            YOUR ADVANTAGE
+          </h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+            The strongest evidence already working in your favor for this role.
+          </p>
+          <ul className="mt-4 grid gap-3 md:grid-cols-2">
+            {advantageSignals.length ? (
+              advantageSignals.map((strength) => (
+                <li
+                  key={strength}
+                  className="rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-200"
+                >
+                  {strength}
+                </li>
+              ))
+            ) : (
+              <li className="rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
+                Verified baseline advantages are not available for this run yet.
+              </li>
+            )}
+          </ul>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+type AdvancedInsightsCardProps = {
+  scoreBreakdown: ScoreBreakdownShape | null;
+  showScoreDrivers: boolean;
+  renderDriverGrid: (showExtraLine: boolean) => ReactNode;
+};
+
+type SignalAlignmentSectionProps = {
+  strongSignals: string[];
+  weakerSignals: string[];
+  summary: string;
+};
+
+function AdvancedInsightsCard({
+  scoreBreakdown,
+  showScoreDrivers,
+  renderDriverGrid,
+}: AdvancedInsightsCardProps) {
+  if (!showScoreDrivers && !scoreBreakdown) {
+    return null;
+  }
+
+  return (
+    <section
+      id="advanced-insights"
+      className="rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_22%),linear-gradient(180deg,rgba(15,23,42,0.94),rgba(2,6,23,0.98))] p-7 shadow-[0_20px_70px_rgba(2,6,23,0.3)]"
+    >
+      <header className="space-y-3 border-b border-white/10 pb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+          Advanced Insights
+        </p>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+          Deeper score analysis
+        </h2>
+        <p className="max-w-2xl text-sm leading-6 text-slate-300">
+          Deeper score analysis for when you want to inspect the contributing dimensions and the
+          highest-impact levers behind this result.
+        </p>
+      </header>
+
+      {showScoreDrivers ? <div className="mt-5">{renderDriverGrid(false)}</div> : null}
+
+      {scoreBreakdown ? (
+        <section className="mt-6 rounded-[24px] border border-white/10 bg-slate-950/38 p-5">
+          <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
+          <div className="mt-4 space-y-3">
+            {scoreBreakdown.dimensions.map((dimension) => {
+              const percent =
+                dimension.weight > 0
+                  ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
+                  : 0;
+              return (
+                <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-slate-200">{dimension.label}</span>
+                    <span className="font-semibold text-white">
+                      {dimension.score.toFixed(1)} / {dimension.weight}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded bg-white/10">
+                    <div className="h-1.5 rounded bg-cyan-200/70" style={{ width: `${percent}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+              <span className="font-semibold text-slate-200">Total</span>
+              <span className="font-semibold text-white">
+                {scoreBreakdown.total_score.toFixed(1)} / 100
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
+    </section>
+  );
+}
+
+function SignalAlignmentSection({
+  strongSignals,
+  weakerSignals,
+  summary,
+}: SignalAlignmentSectionProps) {
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.88),rgba(2,6,23,0.96))] p-6 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
+      <header className="space-y-2 border-b border-white/10 pb-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+          SIGNAL ALIGNMENT
+        </p>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+          Why this role scored the way it did
+        </h2>
+        <p className="max-w-3xl text-sm leading-6 text-slate-300">{summary}</p>
+      </header>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <article className="rounded-[22px] border border-emerald-300/15 bg-emerald-400/[0.06] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-100/80">
+            Strong For This Role
+          </p>
+          <ul className="mt-3 space-y-2 text-sm text-slate-200">
+            {strongSignals.map((signal) => (
+              <li key={signal} className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                {signal}
+              </li>
+            ))}
+          </ul>
         </article>
 
-        <article className="rounded-[24px] border border-white/10 bg-slate-950/35 p-5">
-          <h3 className="text-lg font-semibold text-slate-100">Your advantage</h3>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {advantageSignals.length ? (
-              advantageSignals.map((strength) => <li key={strength}>• {strength}</li>)
-            ) : (
-              <li>• Verified baseline advantages are not available for this run yet.</li>
-            )}
+        <article className="rounded-[22px] border border-amber-300/15 bg-amber-400/[0.05] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-100/80">
+            Weaker For This Role
+          </p>
+          <ul className="mt-3 space-y-2 text-sm text-slate-200">
+            {weakerSignals.map((signal) => (
+              <li key={signal} className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                {signal}
+              </li>
+            ))}
           </ul>
         </article>
       </div>
@@ -455,17 +621,20 @@ export function HiringManagerLensSection({
 }: HiringManagerLensSectionProps) {
   return (
     <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.98))] p-6 shadow-[0_18px_60px_rgba(2,6,23,0.28)]">
-      <header className="space-y-2">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">
+      <header className="space-y-2 border-b border-white/10 pb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
           Hiring Manager Lens
         </p>
-        <p className="max-w-2xl text-sm text-slate-300">
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
+          Why this match is credible
+        </h2>
+        <p className="max-w-2xl text-sm leading-6 text-slate-300">
           How a hiring manager is likely to view your profile for this role.
         </p>
       </header>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <article className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.06] p-5">
+        <article className="rounded-[22px] border border-emerald-400/15 bg-emerald-500/[0.06] p-5">
           <h3 className="text-base font-semibold text-slate-100">
             Strengths a hiring manager will notice
           </h3>
@@ -478,7 +647,7 @@ export function HiringManagerLensSection({
           </ul>
         </article>
 
-        <article className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.05] p-5">
+        <article className="rounded-[22px] border border-amber-400/15 bg-amber-500/[0.05] p-5">
           <h3 className="text-base font-semibold text-slate-100">
             Questions a hiring manager may have
           </h3>
@@ -491,7 +660,7 @@ export function HiringManagerLensSection({
           </ul>
         </article>
 
-        <article className="rounded-2xl border border-sky-400/15 bg-sky-500/[0.05] p-5">
+        <article className="rounded-[22px] border border-sky-400/15 bg-sky-500/[0.05] p-5">
           <h3 className="text-base font-semibold text-slate-100">How to strengthen your case</h3>
           <ul className="mt-3 space-y-2 text-sm text-slate-300">
             {recommendations.length ? (
@@ -1134,10 +1303,6 @@ export default function ResultsPage() {
     });
   }, [latest?.jobId, latestBaselineId, latestBaselineVersionId]);
 
-  const navigateToStudio = useCallback(() => {
-    void router.push(studioHref);
-  }, [router, studioHref]);
-
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
     [latest],
@@ -1168,64 +1333,24 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
-  const compatibilityMapSignals = useMemo(() => {
-    const strengthCorpus = strategicStrengths.join(" ").toLowerCase();
-    const gapCorpus = riskItems
-      .map((item) => `${item.title} ${item.detail ?? ""}`)
-      .join(" ")
-      .toLowerCase();
-
-    const base = typeof activeScore === "number" ? activeScore : 60;
-
-    const areas = [
-      {
-        id: "customer_support_leadership",
-        label: "Customer Support Leadership",
-        keywords: ["support", "leadership", "team", "manager", "director"],
-      },
-      {
-        id: "customer_operations",
-        label: "Customer Operations",
-        keywords: ["operations", "process", "workflow", "onboarding", "sla"],
-      },
-      {
-        id: "incident_management",
-        label: "Incident Management",
-        keywords: ["incident", "outage", "triage", "response", "reliability"],
-      },
-      {
-        id: "escalation_management",
-        label: "Escalation Management",
-        keywords: ["escalation", "severity", "complex", "risk", "critical"],
-      },
-      {
-        id: "support_programs",
-        label: "Support Programs",
-        keywords: ["program", "enablement", "kpi", "quality", "coaching"],
-      },
-      {
-        id: "cx_service_delivery",
-        label: "CX / Service Delivery",
-        keywords: ["customer experience", "cx", "service", "journey", "delivery"],
-      },
-    ] as const;
-
-    return areas.map((area) => {
-      const positiveMatches = area.keywords.filter((keyword) => strengthCorpus.includes(keyword)).length;
-      const negativeMatches = area.keywords.filter((keyword) => gapCorpus.includes(keyword)).length;
-      const estimatedScore = Math.max(
-        25,
-        Math.min(95, Math.round(base + positiveMatches * 7 - negativeMatches * 5)),
-      );
-      return {
-        id: area.id,
-        label: area.label,
-        score: estimatedScore,
-      };
-    });
-  }, [activeScore, riskItems, strategicStrengths]);
-
   const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
+  const primaryResultsCta = useMemo(() => {
+    if (typeof activeScore !== "number") return null;
+
+    if (activeScore >= 70) {
+      return {
+        label: "Open Resume and Cover Letter Studio",
+        href: studioHref,
+        disabled: !canOpenStudio,
+      };
+    }
+
+    return {
+      label: "Strengthen this match in Fit Review",
+      href: fitReviewPath,
+      disabled: false,
+    };
+  }, [activeScore, canOpenStudio, fitReviewPath, studioHref]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -1279,6 +1404,23 @@ export default function ResultsPage() {
     Boolean(scoringRubric && scoreDrivers.length) &&
     !isExceptionalScore &&
     !isLowScore;
+  const signalAlignment = useMemo(
+    () =>
+      buildResultsSignalAlignment({
+        strengths: advantageSignals,
+        criticalGapTitles: criticalGapDetails.map((gap) => gap.title),
+        recommendedActions,
+        scoreBreakdownDimensions: scoreBreakdown?.dimensions ?? [],
+        verdictLabel: opportunityVerdict.label,
+      }),
+    [
+      advantageSignals,
+      criticalGapDetails,
+      recommendedActions,
+      scoreBreakdown,
+      opportunityVerdict.label,
+    ],
+  );
 
   const renderDriverGrid = (showExtraLine: boolean) => (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -1318,10 +1460,6 @@ export default function ResultsPage() {
               <div>
                 <FormButton
                   onClick={() => {
-                    if (cta.href.startsWith("/studio")) {
-                      navigateToStudio();
-                      return;
-                    }
                     void router.push(cta.href);
                   }}
                   disabled={!!driver.ctaDisabled}
@@ -1665,7 +1803,7 @@ export default function ResultsPage() {
           description="Review your Compatibility Score and take the next step."
         />
 
-        <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <section className="space-y-6 rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-6 shadow-[0_16px_50px_rgba(2,6,23,0.18)]">
           {!latest ? (
             <EmptyState
               title="No compatibility analysis yet"
@@ -1686,103 +1824,45 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-6">
-              <OpportunityMapSection
-                score={activeScore}
-                verdict={opportunityVerdict}
-                advantageSignals={advantageSignals}
+            <div className="space-y-7">
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_340px] xl:items-start">
+                <div className="space-y-6">
+                  <OpportunityMapSection
+                    score={activeScore}
+                    verdict={opportunityVerdict}
+                    advantageSignals={advantageSignals}
+                    primaryCta={primaryResultsCta}
+                    scoreAnalysisHref="#advanced-insights"
+                  />
+
+                  <HiringManagerLensSection
+                    strengths={hiringManagerStrengths}
+                    questions={hiringManagerQuestions}
+                    recommendations={hiringManagerRecommendations}
+                  />
+
+                  <SignalAlignmentSection
+                    strongSignals={signalAlignment.strongForRole}
+                    weakerSignals={signalAlignment.weakerForRole}
+                    summary={signalAlignment.summary}
+                  />
+                </div>
+
+                <div className="space-y-4 xl:sticky xl:top-6">
+                  <FitImprovementOpportunities
+                    assessmentId={latest.assessmentId ?? null}
+                    actionHref={fitReviewPath}
+                    compact
+                  />
+                  <CareerAlignmentProgress showProgressSection={false} />
+                </div>
+              </div>
+
+              <AdvancedInsightsCard
+                scoreBreakdown={scoreBreakdown}
+                showScoreDrivers={showScoreDrivers}
+                renderDriverGrid={renderDriverGrid}
               />
-
-              <HiringManagerLensSection
-                strengths={hiringManagerStrengths}
-                questions={hiringManagerQuestions}
-                recommendations={hiringManagerRecommendations}
-              />
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-6">
-                <div className="mb-3">
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Opportunity Radar
-                  </p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    A quick visual of where your background looks strongest across adjacent areas.
-                  </p>
-                </div>
-                <OpportunityRadarChart areas={compatibilityMapSignals} />
-              </section>
-
-              <section className="rounded-2xl border border-white/10 bg-slate-900/45 p-6">
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">Next Step</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-100">
-                  Open tailored application workflow
-                </h3>
-                <p className="mt-2 text-[15px] leading-relaxed text-slate-300">
-                  Your profile is competitive for this role. Generate tailored application materials.
-                </p>
-                <div className="mt-4">
-                  <FormButton onClick={() => navigateToStudio()} disabled={!canOpenStudio}>
-                    Open Resume & Cover Letter Studio
-                  </FormButton>
-                </div>
-                <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                  <p className="text-sm font-semibold text-slate-100">Recommended next steps:</p>
-                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
-                    <li>&bull; Generate tailored resume</li>
-                    <li>&bull; Generate cover letter</li>
-                    <li>&bull; Prepare interview answers</li>
-                  </ul>
-                </div>
-              </section>
-
-              <FitImprovementOpportunities assessmentId={latest.assessmentId ?? null} />
-              <CareerAlignmentProgress showProgressSection={false} />
-
-              <details className="rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-                <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-                  Advanced Insights
-                </summary>
-                <div className="mt-4 space-y-4">
-                  <CareerInsightEmerging />
-                  <CareerGravity />
-                  <CareerAlignmentProgress showBadgesSection={false} />
-                {scoreBreakdown ? (
-                  <section className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
-                    <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
-                    <div className="mt-4 space-y-3">
-                      {scoreBreakdown.dimensions.map((dimension) => {
-                        const percent =
-                          dimension.weight > 0
-                            ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
-                            : 0;
-                        return (
-                          <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
-                            <div className="flex items-center justify-between gap-3 text-sm">
-                              <span className="text-slate-200">{dimension.label}</span>
-                              <span className="font-semibold text-white">
-                                {dimension.score.toFixed(1)} / {dimension.weight}
-                              </span>
-                            </div>
-                            <div className="h-1.5 w-full rounded bg-white/10">
-                              <div className="h-1.5 rounded bg-white/40" style={{ width: `${percent}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
-                        <span className="font-semibold text-slate-200">Total</span>
-                        <span className="font-semibold text-white">
-                          {scoreBreakdown.total_score.toFixed(1)} / 100
-                        </span>
-                      </div>
-                    </div>
-                  </section>
-                ) : (
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/30 p-4 text-sm text-slate-300">
-                    Supporting score breakdown is unavailable for this run.
-                  </div>
-                )}
-                </div>
-              </details>
             </div>
           )}
         </section>

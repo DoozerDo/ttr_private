@@ -29,16 +29,52 @@ const LOCKED_TOOLTIP = "Locked until previous steps are completed.";
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
+export const getJourneyStepIconKey = (stepId: JourneyStepId): string => {
+  if (stepId === "baselines") return "baseline-workbench";
+  if (stepId === "target") return "target-crosshair";
+  if (stepId === "results") return "score";
+  if (stepId === "studio") return "generator";
+  if (stepId === "jobTracker") return "opportunities";
+  if (stepId === "interviewToolkit") return "interview";
+  return "default";
+};
+
 const renderStepIcon = (stepId: JourneyStepId, isActive: boolean): ReactElement | null => {
-  if (stepId === "results") {
+  if (stepId === "baselines") {
     return (
-      <JourneyProgressIcon stage={2} active={isActive} className="h-full w-full" />
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.6"
+        stroke="currentColor"
+        fill="none"
+      >
+        <rect x="4" y="5" width="11" height="7" rx="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="9" y="12" width="11" height="7" rx="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M7 8h5M12 15h5" strokeLinecap="round" />
+      </svg>
     );
   }
 
-  if (stepId === "baselines") {
+  if (stepId === "target") {
     return (
-      <JourneyProgressIcon stage={1} active={isActive} className="h-full w-full" />
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        strokeWidth="1.6"
+        stroke="currentColor"
+        fill="none"
+      >
+        <circle cx="12" cy="12" r="6" />
+        <circle cx="12" cy="12" r="2.5" />
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (stepId === "results") {
+    return (
+      <JourneyProgressIcon stage={2} active={isActive} className="h-full w-full" />
     );
   }
 
@@ -165,7 +201,11 @@ export function JourneyNavV1({
               const stepContent = (
                 <>
                   <span className={iconAreaClass}>
-                    <span className="journey-nav-icon-target" aria-hidden>
+                    <span
+                      className="journey-nav-icon-target"
+                      aria-hidden
+                      data-icon-key={getJourneyStepIconKey(step.id)}
+                    >
                       {renderStepIcon(step.id, isActive)}
                     </span>
                   </span>
@@ -333,7 +373,7 @@ export function JourneyNavV1({
           color: inherit;
           font-size: 0.76rem;
           letter-spacing: 0.02em;
-          text-transform: none;
+          text-transform: uppercase;
           min-width: 0;
           padding: 0;
           margin: 0;
@@ -438,6 +478,7 @@ export function JourneyNavV1({
           font-weight: 600;
           line-height: 1;
           text-align: center;
+          letter-spacing: 0.12em;
           color: var(--text-muted-primary, rgba(226, 232, 240, 0.75));
         }
       `}</style>

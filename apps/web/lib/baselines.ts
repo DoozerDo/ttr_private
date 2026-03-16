@@ -186,6 +186,14 @@ export async function restoreBaseline(id: string) {
   return ensureJsonResponse(response, "Restore");
 }
 
+export async function deleteBaseline(id: string) {
+  const response = await fetch(`${BASELINE_API_PATH}/${encodeURIComponent(id)}/delete`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return ensureJsonPayload<{ success?: boolean; message?: string }>(response, "Delete baseline");
+}
+
 export async function getBaselineBlocks(
   baselineId: string,
   baselineVersionId: string,

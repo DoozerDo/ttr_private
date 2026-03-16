@@ -102,9 +102,9 @@ export function CareerAlignmentProgress({
 
   if (loading) {
     return (
-      <section className="space-y-2 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+      <section className="space-y-2 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
         <h3 className="text-lg font-semibold text-slate-100">
-          {showProgressSection ? "Career Alignment Progress" : "Achievement Badges"}
+          {showProgressSection ? "Analysis Momentum" : "Signals Worth Keeping"}
         </h3>
         <p className="text-sm text-slate-400">Preparing compatibility report…</p>
       </section>
@@ -113,9 +113,9 @@ export function CareerAlignmentProgress({
 
   if (showProgressSection && sortedRecentAnalyses.length < 2) {
     return (
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
-        <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
-        <p className="text-sm text-slate-400">
+      <section className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
+        <h3 className="text-lg font-semibold text-slate-100">Analysis Momentum</h3>
+        <p className="text-sm leading-6 text-slate-400">
           Run additional role analyses to begin identifying alignment patterns in your career.
         </p>
         <Link
@@ -133,18 +133,21 @@ export function CareerAlignmentProgress({
   }
 
   return (
-    <section className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/30 p-5">
+    <section className="space-y-4 rounded-[24px] border border-white/10 bg-slate-900/30 p-5">
       {showProgressSection ? (
         <>
-          <header className="space-y-1">
-            <h3 className="text-lg font-semibold text-slate-100">Career Alignment Progress</h3>
-            <p className="text-sm text-slate-400">
-              Insights derived from your recent role compatibility analyses.
+          <header className="space-y-2 border-b border-white/10 pb-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+              Progress and History
+            </p>
+            <h3 className="text-2xl font-semibold tracking-tight text-slate-100">Analysis Momentum</h3>
+            <p className="text-sm leading-6 text-slate-400">
+              See how recent score history is shaping your strongest profile patterns.
             </p>
           </header>
 
-          <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-            <h4 className="text-base font-semibold text-slate-100">Recent Analyses</h4>
+          <article className="space-y-3 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
+            <h4 className="text-base font-semibold text-slate-100">Recent score history</h4>
             <ul className="space-y-3">
               {sortedRecentAnalyses.map((analysis) => (
                 <li key={analysis.analysisId} className="space-y-1">
@@ -158,10 +161,10 @@ export function CareerAlignmentProgress({
             </ul>
           </article>
 
-          <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-            <h4 className="text-base font-semibold text-slate-100">Strongest Alignment Pattern</h4>
-            <p className="text-sm text-slate-300">
-              Your strongest compatibility appears in these role paths.
+          <article className="space-y-3 rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
+            <h4 className="text-base font-semibold text-slate-100">Strongest recurring path</h4>
+            <p className="text-sm leading-6 text-slate-300">
+              Your strongest recent compatibility appears in these adjacent role directions.
             </p>
             {history.alignmentPattern.strongestAlignmentRoles.length ? (
               <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
@@ -182,13 +185,18 @@ export function CareerAlignmentProgress({
       ) : null}
 
       {showBadgesSection && history.badges.length ? (
-        <article className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-          <h4 className="text-base font-semibold text-slate-100">Achievement Badges</h4>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <article className="space-y-3 rounded-[24px] border border-white/10 bg-slate-950/40 p-5">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
+              Quiet reinforcement
+            </p>
+            <h4 className="text-lg font-semibold text-slate-100">Signals worth keeping in view</h4>
+          </div>
+          <div className="grid gap-3">
             {history.badges.map((badge) => (
-              <div key={badge.id} className="rounded-xl border border-white/10 bg-slate-900/40 p-3">
+              <div key={badge.id} className="rounded-[18px] border border-white/10 bg-slate-900/35 p-4">
                 <p className="text-sm font-semibold text-slate-100">{badge.title}</p>
-                <p className="mt-1 text-sm text-slate-300">{badge.description}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-400">{badge.description}</p>
               </div>
             ))}
           </div>
