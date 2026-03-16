@@ -147,6 +147,23 @@ function getDuplicateUploadMessage(data: unknown): string | null {
     "This file has already been uploaded.";
 }
 
+function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
+  if (!data || typeof data !== "object") return null;
+  const payload = data as Record<string, unknown>;
+  const direct = payload as unknown as BaselineDto;
+  if (typeof direct.id === "string" && direct.id.trim().length > 0) {
+    return direct;
+  }
+
+  const nested = payload.baseline;
+  if (!nested || typeof nested !== "object") return null;
+  const baseline = nested as BaselineDto;
+  if (typeof baseline.id !== "string" || baseline.id.trim().length === 0) {
+    return null;
+  }
+  return baseline;
+}
+
 function getStatusLabel(status: ResumeAnalysisStatus) {
   switch (status) {
     case "loading":
@@ -597,7 +614,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           return;
         }
 
-        const baselineRecord = payload as BaselineDto;
+        const baselineRecord = getUploadedBaselineRecord(payload);
+        if (!baselineRecord) {
+          setError("Unable to upload resume right now.");
+          return;
+        }
         setBaselineList((current) => [
           baselineRecord,
           ...current.filter((item) => item.id !== baselineRecord.id),

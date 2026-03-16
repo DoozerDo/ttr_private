@@ -338,4 +338,43 @@ describe("BaselineStudioHome", () => {
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ANALYZE" })).toBeInTheDocument();
   });
+
+  it("uploads successfully from wrapped API payload and does not persist score history prematurely", async () => {
+    let analysisScoreCalled = false;
+
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines") && init?.method === "POST") {
+        return createJsonResponse({
+          baseline: createBaseline("uploaded-1", "2026-01-10T00:00:00.000Z", "uploaded.pdf"),
+          baselineId: "uploaded-1",
+          schemaVersion: "baseline_schema_v1",
+          userVerified: false,
+          rolesCount: 0,
+          toolsCount: 0,
+          flagsSummary: { missingFields: 0, lowConfidence: 0 },
+        });
+      }
+      if (url.includes("/analysis-score")) {
+        analysisScoreCalled = true;
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { container } = render(<BaselineStudioHome baselines={[]} />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).not.toBeNull();
+
+    const file = new File(["resume content"], "uploaded.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("uploaded.pdf")).toBeInTheDocument();
+    });
+    expect(analysisScoreCalled).toBe(false);
+  });
 });
