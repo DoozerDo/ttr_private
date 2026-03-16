@@ -73,12 +73,17 @@ function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
 type Job = Awaited<ReturnType<typeof listJobs>>[number];
 
 type LatestAnalysis = {
+  id?: string | null;
+  assessmentId?: string | null;
+  jobId?: string | null;
   score?: number | string | null;
   overallScore?: number | string | null;
   verdict?: string | null;
   summary?: string | null;
   baselineId?: string;
   baselineVersionId?: string;
+  supportingSignals?: unknown;
+  baselineEvidence?: unknown;
   company?: string | null;
   companyName?: string | null;
   jobTitle?: string | null;
@@ -86,7 +91,7 @@ type LatestAnalysis = {
 };
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
-  "Unable to load role analysis. Please return to the Results page.";
+  "Unable to load role analysis. Please return to Results and reopen the document generator.";
 
 type DocumentState = {
   response: unknown | null;
@@ -239,16 +244,47 @@ function sanitizeAnalysisError(payload: unknown, fallback = ANALYSIS_LOAD_ERROR_
   return message;
 }
 
-function buildStudioAnalysisUrl(jobId: string, baselineId?: string) {
-  const normalizedJobId = jobId.trim();
-  const normalizedBaselineId = baselineId?.trim();
-  if (!normalizedJobId) return "";
-  if (normalizedBaselineId) {
-    return `/api/analysis/job/${encodeURIComponent(normalizedJobId)}/baseline/${encodeURIComponent(
-      normalizedBaselineId,
-    )}/latest`;
+function buildAssessmentAnalysisUrl(analysisId: string) {
+  const normalizedAnalysisId = analysisId.trim();
+  if (!normalizedAnalysisId) return "";
+  return `/api/analysis/fit-assessments/${encodeURIComponent(normalizedAnalysisId)}`;
+}
+
+function trimString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function collectEvidenceItems(analysis: LatestAnalysis | null): string[] {
+  if (!analysis) return [];
+  const candidates: string[] = [];
+  const supportingSignals = analysis.supportingSignals;
+  if (Array.isArray(supportingSignals)) {
+    for (const signal of supportingSignals) {
+      if (typeof signal === "string" && signal.trim()) {
+        candidates.push(signal.trim());
+      } else if (signal && typeof signal === "object") {
+        const label = trimString((signal as { label?: unknown }).label);
+        const name = trimString((signal as { name?: unknown }).name);
+        if (label) candidates.push(label);
+        else if (name) candidates.push(name);
+      }
+    }
   }
-  return `/api/analysis/job/${encodeURIComponent(normalizedJobId)}/latest`;
+
+  const baselineEvidence = analysis.baselineEvidence;
+  if (Array.isArray(baselineEvidence)) {
+    for (const entry of baselineEvidence) {
+      if (typeof entry === "string" && entry.trim()) {
+        candidates.push(entry.trim());
+      } else if (entry && typeof entry === "object") {
+        const text = trimString((entry as { text?: unknown }).text);
+        const title = trimString((entry as { title?: unknown }).title);
+        if (text) candidates.push(text);
+        else if (title) candidates.push(title);
+      }
+    }
+  }
+  return Array.from(new Set(candidates)).slice(0, 5);
 }
 
 export default function StudioPage() {
@@ -269,16 +305,13 @@ export default function StudioPage() {
     () => searchParams.get("baselineVersionId")?.trim() ?? "",
     [searchParamValue],
   );
-  const requestedStudioContext = useMemo(
-    () => ({
-      jobId: requestedJobId,
-      baselineId: requestedBaselineId,
-      baselineVersionId: requestedBaselineVersionId,
-    }),
-    [requestedBaselineId, requestedBaselineVersionId, requestedJobId],
+  const requestedAnalysisId = useMemo(
+    () =>
+      searchParams.get("analysisId")?.trim() ??
+      searchParams.get("assessmentId")?.trim() ??
+      "",
+    [searchParamValue],
   );
-  const hasRequestedResultsContext = Boolean(requestedJobId && requestedBaselineId);
-
   useEffect(() => {
     if (trackedStudioOpenRef.current) {
       return;
@@ -462,23 +495,38 @@ export default function StudioPage() {
     }
     return null;
   }, [analysis]);
+  const effectiveJobId = selectedJobId || trimString(analysis?.jobId);
+  const effectiveBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
+  const effectiveBaselineVersionId =
+    selectedBaselineVersionId || trimString(analysis?.baselineVersionId);
+  const hasLoadedAnalysis = Boolean(
+    requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
+  );
   const generationMessage = useMemo(() => {
-    if (!selectedBaselineVersionId) {
-      return "Artifacts are not ready yet. Complete interview promotion, then return here.";
+    if (!requestedAnalysisId) {
+      return "Run a role compatibility analysis first.";
+    }
+    if (analysisError) {
+      return ANALYSIS_LOAD_ERROR_MESSAGE;
+    }
+    if (!effectiveBaselineVersionId) {
+      return "Resume snapshot is still loading for this analysis.";
     }
     if (analysisScore === null) {
-      return "Run the compatibility check before generating a resume or cover letter.";
+      return "Fit score is unavailable for this role analysis.";
     }
     return null;
-  }, [analysisScore, selectedBaselineVersionId]);
+  }, [analysisError, analysisScore, effectiveBaselineVersionId, requestedAnalysisId]);
 
   const readyForDocuments =
-    Boolean(selectedJobId && selectedBaselineId && selectedBaselineVersionId) &&
+    Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
     analysisScore !== null;
   const canGenerateDocuments =
-    Boolean(selectedJobId && selectedBaselineId) &&
+    Boolean(effectiveJobId && effectiveBaselineId) &&
     analysisScore !== null &&
-    (Boolean(selectedBaselineVersionId) || isNonProduction);
+    (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
+    Boolean(requestedAnalysisId) &&
+    !analysisError;
 
   const resumePresenter = useMemo(
     () => presentResumeGeneration(resumeState.response),
@@ -529,26 +577,18 @@ export default function StudioPage() {
     if (typeof analysis?.summary === "string" && analysis.summary.trim().length) {
       return analysis.summary.trim();
     }
-    return "Operational leadership in support organizations with verified cross-functional execution.";
+    return "Evidence is derived from your latest role analysis and baseline signals.";
   }, [analysis?.summary]);
   const evidenceSummaryBullets = useMemo(() => {
-    const source = `${fullBaselineEvidence} ${(selectedJob?.title ?? "")}`.toLowerCase();
-    const bullets = [
-      /escalation|incident/.test(source)
-        ? "Escalation management programs"
-        : "Incident management workflows",
-      /engineering|infrastructure|platform/.test(source)
-        ? "Infrastructure operations scaling"
-        : "Cross-functional support leadership",
-      /scale|scaling|operations/.test(source)
-        ? "Operational scaling across support teams"
-        : "Customer support operating processes",
-      /customer|cx/.test(source)
-        ? "Customer support leadership"
-        : "Cross-functional support leadership",
-    ];
-    return Array.from(new Set(bullets)).slice(0, 4);
-  }, [fullBaselineEvidence, selectedJob?.title]);
+    const items = collectEvidenceItems(analysis);
+    if (items.length) {
+      return items;
+    }
+    if (hasLoadedAnalysis) {
+      return ["Baseline evidence loaded for this role analysis."];
+    }
+    return [];
+  }, [analysis, hasLoadedAnalysis]);
   const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
     () => [
@@ -580,28 +620,13 @@ export default function StudioPage() {
     ],
     [],
   );
-  const readinessChecks = useMemo(
-    () => ({
-      resumeAligned: hasResumeArtifact,
-      coverLetterGenerated: hasCoverLetterArtifact,
-      fitScoreAboveThreshold: typeof analysisScore === "number" && analysisScore >= 70,
-    }),
-    [analysisScore, hasCoverLetterArtifact, hasResumeArtifact],
-  );
   const hydratedFromResultsContext = useMemo(() => {
-    if (!hasRequestedResultsContext) return false;
-    if (!selectedJobId || !selectedBaselineId) return false;
-    if (selectedJobId !== requestedStudioContext.jobId) return false;
-    if (selectedBaselineId !== requestedStudioContext.baselineId) return false;
-    return Boolean(analysis && analysisScore !== null);
+    if (!requestedAnalysisId) return false;
+    return hasLoadedAnalysis;
   }, [
-    analysis,
     analysisScore,
-    hasRequestedResultsContext,
-    requestedStudioContext.baselineId,
-    requestedStudioContext.jobId,
-    selectedBaselineId,
-    selectedJobId,
+    hasLoadedAnalysis,
+    requestedAnalysisId,
   ]);
 
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
@@ -641,14 +666,14 @@ export default function StudioPage() {
 
   function buildCoverLetterPayload(oneTap: boolean): CoverLetterPayload {
     const payload: CoverLetterPayload = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
+      jobId: effectiveJobId,
+      baselineId: effectiveBaselineId,
       closingTemplateKey: defaultClosingTemplateKey,
       documentType: "cover_letter",
       oneTap,
     };
-    if (selectedBaselineVersionId) {
-      payload.baselineVersionId = selectedBaselineVersionId;
+    if (effectiveBaselineVersionId) {
+      payload.baselineVersionId = effectiveBaselineVersionId;
     }
     if (coverLetterJobContext) {
       payload.jobContext = coverLetterJobContext;
@@ -658,12 +683,12 @@ export default function StudioPage() {
 
   function buildResumePayload(oneTap: boolean) {
     const payload: Record<string, unknown> = {
-      jobId: selectedJobId,
-      baselineId: selectedBaselineId,
+      jobId: effectiveJobId,
+      baselineId: effectiveBaselineId,
       oneTap,
     };
-    if (selectedBaselineVersionId) {
-      payload.baselineVersionId = selectedBaselineVersionId;
+    if (effectiveBaselineVersionId) {
+      payload.baselineVersionId = effectiveBaselineVersionId;
     }
     if (resumeFocus !== "Auto (recommended)") {
       payload.resumeFocus = resumeFocus;
@@ -830,9 +855,10 @@ export default function StudioPage() {
   }, [selectedBaselineId, requestedBaselineVersionId, versionRefreshSignal]);
 
   useEffect(() => {
-    if (!selectedJobId) {
+    if (!requestedAnalysisId) {
       setAnalysis(null);
       setAnalysisError(null);
+      setAnalysisLoading(false);
       return;
     }
     let canceled = false;
@@ -840,7 +866,7 @@ export default function StudioPage() {
     setAnalysisError(null);
     const loadAnalysis = async () => {
       try {
-        const analysisUrl = buildStudioAnalysisUrl(selectedJobId, selectedBaselineId);
+        const analysisUrl = buildAssessmentAnalysisUrl(requestedAnalysisId);
         const response = await fetch(analysisUrl);
         const payload = await readResponsePayload(response);
         if (canceled) return;
@@ -855,8 +881,23 @@ export default function StudioPage() {
           setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
           return;
         }
-        setAnalysis(payload as LatestAnalysis);
+        const nextAnalysis = payload as LatestAnalysis;
+        setAnalysis(nextAnalysis);
         setAnalysisError(null);
+        const analysisJobId = trimString((payload as { jobId?: unknown }).jobId);
+        const analysisBaselineId = trimString((payload as { baselineId?: unknown }).baselineId);
+        const analysisBaselineVersionId = trimString(
+          (payload as { baselineVersionId?: unknown }).baselineVersionId,
+        );
+        if (analysisJobId) {
+          setSelectedJobId(analysisJobId);
+        }
+        if (analysisBaselineId) {
+          setSelectedBaselineId(analysisBaselineId);
+        }
+        if (analysisBaselineVersionId) {
+          setSelectedBaselineVersionId(analysisBaselineVersionId);
+        }
       } catch (error) {
         if (canceled) return;
         setAnalysis(null);
@@ -875,10 +916,10 @@ export default function StudioPage() {
     return () => {
       canceled = true;
     };
-  }, [selectedBaselineId, selectedJobId]);
+  }, [requestedAnalysisId]);
 
   useEffect(() => {
-    if (!hasRequestedResultsContext) {
+    if (!requestedAnalysisId) {
       setContextHydrationMessage(null);
       return;
     }
@@ -887,16 +928,7 @@ export default function StudioPage() {
       return;
     }
 
-    if (!requestedJobId || !requestedBaselineId) {
-      setContextHydrationMessage(
-        "We could not load the selected role context. Please choose a baseline and job to continue.",
-      );
-      return;
-    }
-
-    const jobExists = jobs.some((job) => job.id === requestedJobId);
-    const baselineExists = baselines.some((baseline) => baseline.id === requestedBaselineId);
-    if (!jobExists || !baselineExists || analysisError) {
+    if (analysisError) {
       setContextHydrationMessage(
         "We could not load the selected role context. Please choose a baseline and job to continue.",
       );
@@ -912,13 +944,10 @@ export default function StudioPage() {
     analysisLoading,
     baselines,
     baselinesLoading,
-    hasRequestedResultsContext,
     hydratedFromResultsContext,
     jobs,
     jobsLoading,
-    requestedBaselineId,
-    requestedBaselineVersionId,
-    requestedJobId,
+    requestedAnalysisId,
     versions,
   ]);
 
@@ -1293,8 +1322,8 @@ export default function StudioPage() {
   return (
     <PageShell className="space-y-6">
       <PageHeader
-        title="Resume and Cover Letter Studio"
-        description="Generate, preview, and export tailored documents using your latest results."
+        title="Document Generator"
+        description="Generate, preview, and export tailored documents using your latest role analysis."
       />
 
       {hydratedFromResultsContext ? (
@@ -1325,7 +1354,12 @@ export default function StudioPage() {
           {baselinesError}
         </Alert>
       ) : null}
-      {analysisError ? (
+      {!requestedAnalysisId ? (
+        <Alert intent="info" title="Role analysis required">
+          Select a role from Results to generate documents.
+        </Alert>
+      ) : null}
+      {requestedAnalysisId && analysisError ? (
         <Alert intent="error" title="Unable to load role analysis">
           {analysisError}
         </Alert>
@@ -1351,22 +1385,24 @@ export default function StudioPage() {
         <div>
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
-            <p className="text-4xl font-semibold text-slate-100">{analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}</p>
+            <p className="text-4xl font-semibold text-slate-100">
+              {analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
+            </p>
           </div>
-        </div>
-        <div className="space-y-1 pt-2">
-          <p className="text-sm font-semibold text-slate-100">Application readiness</p>
-          <p className="text-sm text-slate-200">{readinessChecks.fitScoreAboveThreshold ? "✓" : "✗"} Fit score above threshold</p>
-          <p className="text-sm text-slate-200">{readinessChecks.resumeAligned ? "✓" : "✗"} Resume generated</p>
-          <p className="text-sm text-slate-200">{readinessChecks.coverLetterGenerated ? "✓" : "✗"} Cover letter generated</p>
         </div>
         <div className="space-y-3 rounded-xl border border-white/10 bg-slate-900/40 p-3">
           <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
-          <ul className="space-y-1 text-sm text-slate-200">
-            {evidenceSummaryBullets.map((bullet) => (
-              <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
-            ))}
-          </ul>
+          {evidenceSummaryBullets.length ? (
+            <ul className="space-y-1 text-sm text-slate-200">
+              {evidenceSummaryBullets.map((bullet) => (
+                <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-300">
+              Role analysis evidence will appear here after loading context from Results.
+            </p>
+          )}
           <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
             <summary className="cursor-pointer text-sm font-medium text-slate-300">
               View full baseline evidence
@@ -1455,7 +1491,7 @@ export default function StudioPage() {
         ) : null}
 
         {generationMessage ? (
-          <Alert intent="warning" title="Prerequisites missing">
+          <Alert intent="warning" title="Generation prerequisites">
             {generationMessage}
           </Alert>
         ) : null}
@@ -1619,7 +1655,7 @@ export default function StudioPage() {
         ) : null}
 
         {generationMessage ? (
-          <Alert intent="warning" title="Prerequisites missing">
+          <Alert intent="warning" title="Generation prerequisites">
             {generationMessage}
           </Alert>
         ) : null}

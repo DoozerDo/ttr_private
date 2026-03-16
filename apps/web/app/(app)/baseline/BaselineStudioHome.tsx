@@ -24,6 +24,11 @@ import {
 import { formatDateTime } from "@/lib/format-date";
 import { buildBaselineCertification, buildCareerGravityUnlock } from "@/lib/baselineCertification";
 import {
+  buildBaselineScoreHistoryMap,
+  toBaselineScoreHistoryCardViewModel,
+  type BaselineScoreHistory,
+} from "@/lib/baselineScoreHistory";
+import {
   buildBaselineSignalGraph,
   type ProfessionalSignalId,
   type SignalGraphViewModel,
@@ -33,15 +38,12 @@ import { CareerGravity } from "../results/components/CareerGravity";
 
 type BaselineStudioHomeProps = {
   baselines: BaselineDto[];
+  // Baseline Studio is editable. Future surfaces can render read-only library cards.
+  libraryMode?: "editable" | "readonly";
 };
 
 type ResumeAnalysisStatus = "not_analyzed" | "loading" | "ready" | "failed";
 type BaselineStrengthState = "empty" | "needs_analysis" | "failed" | "ready";
-
-type BaselineScoreHistory = {
-  first: number;
-  latest: number;
-};
 
 type StrengtheningPrompt = {
   question: string;
@@ -211,7 +213,7 @@ function withApprovedSignalAdditions(
   };
 }
 
-export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
+export function BaselineStudioHome({ baselines, libraryMode = "editable" }: BaselineStudioHomeProps) {
   const [baselineList, setBaselineList] = useState<BaselineDto[]>(baselines);
   const [primaryBaselineId, setPrimaryBaselineId] = useState<string | null>(() =>
     getMostRecentBaselineId(baselines),
@@ -255,6 +257,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
     [allBaselines],
   );
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
+  const isEditableLibrary = libraryMode === "editable";
 
   useEffect(() => {
     if (!activeBaselines.length) {
@@ -348,29 +351,6 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
   );
 
   useEffect(() => {
-    if (!primaryBaselineId || !analysisReady) {
-      return;
-    }
-
-    setScoreHistoryByBaselineId((current) => {
-      const existing = current[primaryBaselineId];
-      if (!existing) {
-        return {
-          ...current,
-          [primaryBaselineId]: { first: baselineStrengthPercent, latest: baselineStrengthPercent },
-        };
-      }
-      if (existing.latest === baselineStrengthPercent) {
-        return current;
-      }
-      return {
-        ...current,
-        [primaryBaselineId]: { ...existing, latest: baselineStrengthPercent },
-      };
-    });
-  }, [analysisReady, baselineStrengthPercent, primaryBaselineId]);
-
-  useEffect(() => {
     let cancelled = false;
     const run = async () => {
       try {
@@ -387,6 +367,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
             : Array.isArray((payload as { history?: unknown[] })?.history)
               ? ((payload as { history?: unknown[] }).history as unknown[])
               : [];
+        const scoreHistoryMap = buildBaselineScoreHistoryMap(records);
 
         const completed = records.filter((record) => {
           if (!record || typeof record !== "object") return false;
@@ -406,6 +387,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
 
         if (!cancelled) {
           setCompletedRoleAnalyses(completed);
+          setScoreHistoryByBaselineId((current) => ({ ...current, ...scoreHistoryMap }));
         }
       } catch {
         if (!cancelled) {
@@ -501,10 +483,25 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
           [baselineId]: hasAnalysis ? "ready" : "failed",
         }));
         if (hasAnalysis) {
+          const scoredGraph = buildBaselineSignalGraph({ baseline: payload });
+          const scoredPercent = deriveBaselineStrengthPercent(payload, scoredGraph);
           setAnalysisRunsByBaselineId((current) => ({
             ...current,
             [baselineId]: (current[baselineId] ?? 0) + 1,
           }));
+          setScoreHistoryByBaselineId((current) => {
+            const existing = current[baselineId];
+            if (!existing) {
+              return {
+                ...current,
+                [baselineId]: { first: scoredPercent, latest: scoredPercent },
+              };
+            }
+            return {
+              ...current,
+              [baselineId]: { first: existing.first, latest: scoredPercent },
+            };
+          });
         }
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
 
@@ -734,8 +731,8 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
-      <section className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.96))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.24)]">
-        <div className="space-y-4">
+      <section className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.96))] p-4 shadow-[0_16px_45px_rgba(2,6,23,0.24)]">
+        <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">
               Baseline Studio
@@ -830,6 +827,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
         </div>
       </section>
 
+      {isEditableLibrary ? (
       <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.96))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
         <header className="space-y-2 border-b border-white/10 pb-5">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
@@ -935,15 +933,17 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
           ) : null}
         </div>
       </section>
+      ) : null}
 
       <section className="rounded-[28px] border border-white/10 bg-slate-900/35 p-5">
         <header className="space-y-2 border-b border-white/10 pb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
             BASELINE LIBRARY
           </p>
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-            Stored baseline sources for this account
-          </h2>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-100">Stored baseline records</h2>
+          <p className="text-sm leading-6 text-slate-300">
+            Source history for your professional baseline and analysis progress.
+          </p>
         </header>
 
         <div className="mt-4 space-y-3">
@@ -960,7 +960,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
             const canView = status === "ready";
             const isLoading = loadingBaselineId === baseline.id;
             const scoreHistory = scoreHistoryByBaselineId[baseline.id];
-            const scoreDelta = scoreHistory ? scoreHistory.latest - scoreHistory.first : 0;
+            const scoreCard = toBaselineScoreHistoryCardViewModel(scoreHistory);
 
             return (
               <article
@@ -1008,15 +1008,23 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
                     <p className="text-sm text-slate-400">
                       Uploaded {formatDateTime(baseline.createdAt)}
                     </p>
-                    {scoreHistory ? (
+                    {scoreCard.hasSuccessfulAnalysis ? (
                       <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3 py-2">
-                        <p className="text-sm font-semibold text-slate-100">{scoreHistory.latest}% current</p>
+                        <p className="text-sm font-semibold text-slate-100">{scoreCard.currentScore}% current</p>
                         <p className="text-xs uppercase tracking-[0.12em] text-slate-400">
-                          {scoreHistory.first}% first analysis
+                          {scoreCard.originalScore}% original
                         </p>
-                        {scoreHistory.first !== scoreHistory.latest ? (
-                          <p className="text-xs uppercase tracking-[0.12em] text-slate-400">
-                            {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} since first analysis
+                        {scoreCard.scoreDelta !== null && scoreCard.scoreDelta !== 0 ? (
+                          <p
+                            className={`text-xs uppercase tracking-[0.12em] ${
+                              scoreCard.scoreDeltaDirection === "up"
+                                ? "text-emerald-200"
+                                : scoreCard.scoreDeltaDirection === "down"
+                                  ? "text-amber-200"
+                                  : "text-slate-400"
+                            }`}
+                          >
+                            {scoreCard.scoreDelta > 0 ? `+${scoreCard.scoreDelta}` : scoreCard.scoreDelta} since first analysis
                           </p>
                         ) : null}
                       </div>
@@ -1045,7 +1053,7 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
                           ? "VIEW BASELINE ANALYSIS"
                           : "DETERMINE BASELINE STRENGTH"}
                     </FormButton>
-                    {!isPrimary && !isArchived ? (
+                    {isEditableLibrary && !isPrimary && !isArchived ? (
                       <FormButton
                         variant="ghost"
                         onClick={() => {
@@ -1058,24 +1066,28 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
                         Set as Primary
                       </FormButton>
                     ) : null}
-                    <FormButton
-                      variant="ghost"
-                      onClick={() => void handleArchiveBaseline(baseline.id)}
-                      disabled={archivingBaselineId === baseline.id || isArchived}
-                    >
-                      {isArchived
-                        ? "Archived"
-                        : archivingBaselineId === baseline.id
-                          ? "Archiving..."
-                          : "Archive"}
-                    </FormButton>
-                    <FormButton
-                      variant="ghost"
-                      onClick={() => void handleDeleteBaseline(baseline.id)}
-                      disabled={deletingBaselineId === baseline.id}
-                    >
-                      {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
-                    </FormButton>
+                    {isEditableLibrary ? (
+                      <>
+                        <FormButton
+                          variant="ghost"
+                          onClick={() => void handleArchiveBaseline(baseline.id)}
+                          disabled={archivingBaselineId === baseline.id || isArchived}
+                        >
+                          {isArchived
+                            ? "Archived"
+                            : archivingBaselineId === baseline.id
+                              ? "Archiving..."
+                              : "Archive"}
+                        </FormButton>
+                        <FormButton
+                          variant="ghost"
+                          onClick={() => void handleDeleteBaseline(baseline.id)}
+                          disabled={deletingBaselineId === baseline.id}
+                        >
+                          {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
+                        </FormButton>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </article>
@@ -1132,18 +1144,18 @@ export function BaselineStudioHome({ baselines }: BaselineStudioHomeProps) {
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <article className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Identified Signals</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Signals Detected</p>
                   <p className="mt-2 text-3xl font-bold text-white">
-                    {signalGraph.strongSignals.length + signalGraph.developingSignals.length}
+                    {signalGraph.identifiedSignalCount}
                   </p>
                 </article>
                 <article className="rounded-[18px] border border-emerald-300/15 bg-emerald-400/[0.06] p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-emerald-100/80">Strong Signals</p>
-                  <p className="mt-2 text-3xl font-bold text-emerald-100">{signalGraph.strongSignals.length}</p>
+                  <p className="mt-2 text-3xl font-bold text-emerald-100">{signalGraph.strongSignalCount}</p>
                 </article>
                 <article className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Developing Signals</p>
-                  <p className="mt-2 text-3xl font-bold text-white">{signalGraph.developingSignals.length}</p>
+                  <p className="mt-2 text-3xl font-bold text-white">{signalGraph.developingSignalCount}</p>
                 </article>
               </div>
 

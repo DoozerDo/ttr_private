@@ -20,10 +20,10 @@ describe("Results opportunity map", () => {
 
     expect(screen.queryByText("Opportunity Map")).toBeNull();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "A focused read on how strong this match is, why it holds up, and what you should do next.",
       ),
-    ).toBeInTheDocument();
+    ).toBeNull();
     expect(screen.getByText("Strong Match")).toBeInTheDocument();
     expect(screen.getByText("YOUR ADVANTAGE")).toBeInTheDocument();
     expect(screen.getByText("View score analysis")).toBeInTheDocument();
@@ -33,6 +33,21 @@ describe("Results opportunity map", () => {
     expect(screen.queryByText("Fit")).toBeNull();
     expect(screen.queryByText("Risk")).toBeNull();
     expect(screen.queryByText("Readiness")).toBeNull();
+  });
+
+  it("suppresses the advantage section when no verified advantages exist", () => {
+    render(
+      <OpportunityMapSection
+        score={74}
+        verdict={getOpportunityVerdict(74)}
+        advantageSignals={[]}
+        primaryCta={{ label: "Open Resume and Cover Letter Studio", href: "/studio" }}
+        scoreAnalysisHref="#advanced-insights"
+      />,
+    );
+
+    expect(screen.queryByText("YOUR ADVANTAGE")).toBeNull();
+    expect(screen.queryByText("Verified baseline advantages are not available for this run yet.")).toBeNull();
   });
 
   it("maps score bands to the expected verdict", () => {

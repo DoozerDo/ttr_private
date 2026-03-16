@@ -22,7 +22,6 @@ import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/li
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
-import type { RiskFactor } from "@/lib/resultsInsights";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 
 type FitDimensionScores = {
@@ -311,12 +310,18 @@ export function buildStudioHrefFromResultsContext(input: {
   jobId?: string | null;
   baselineId?: string | null;
   baselineVersionId?: string | null;
+  analysisId?: string | null;
 }): string {
   const jobId = input.jobId?.trim() ?? "";
-  if (!jobId) return "/studio";
-
   const params = new URLSearchParams();
-  params.set("jobId", jobId);
+  if (jobId) {
+    params.set("jobId", jobId);
+  }
+
+  const analysisId = input.analysisId?.trim() ?? "";
+  if (analysisId) {
+    params.set("analysisId", analysisId);
+  }
 
   const baselineId = input.baselineId?.trim() ?? "";
   if (baselineId) {
@@ -326,6 +331,10 @@ export function buildStudioHrefFromResultsContext(input: {
   const baselineVersionId = input.baselineVersionId?.trim() ?? "";
   if (baselineVersionId) {
     params.set("baselineVersionId", baselineVersionId);
+  }
+
+  if (!params.toString()) {
+    return "/studio";
   }
 
   return `/studio?${params.toString()}`;
@@ -376,9 +385,6 @@ export function OpportunityMapSection({
       <div className="flex flex-col gap-7">
         <header className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-3">
-            <p className="max-w-lg text-[15px] leading-7 text-slate-300">
-              A focused read on how strong this match is, why it holds up, and what you should do next.
-            </p>
             <div className="flex items-end gap-4">
               <p className="text-[76px] font-black leading-none tracking-[-0.07em] text-white">
                 {typeof score === "number" ? Math.round(score) : "--"}
@@ -417,30 +423,26 @@ export function OpportunityMapSection({
           </div>
         </header>
 
-        <article className="rounded-[26px] border border-white/10 bg-slate-950/38 p-6">
-          <h3 className="text-xl font-semibold uppercase tracking-[0.16em] text-slate-100">
-            YOUR ADVANTAGE
-          </h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-            The strongest evidence already working in your favor for this role.
-          </p>
-          <ul className="mt-4 grid gap-3 md:grid-cols-2">
-            {advantageSignals.length ? (
-              advantageSignals.map((strength) => (
+        {advantageSignals.length ? (
+          <article className="rounded-[26px] border border-white/10 bg-slate-950/38 p-6">
+            <h3 className="text-xl font-semibold uppercase tracking-[0.16em] text-slate-100">
+              YOUR ADVANTAGE
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+              The strongest evidence already working in your favor for this role.
+            </p>
+            <ul className="mt-4 grid gap-3 md:grid-cols-2">
+              {advantageSignals.map((strength) => (
                 <li
                   key={strength}
                   className="rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-200"
                 >
                   {strength}
                 </li>
-              ))
-            ) : (
-              <li className="rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-300">
-                Verified baseline advantages are not available for this run yet.
-              </li>
-            )}
-          </ul>
-        </article>
+              ))}
+            </ul>
+          </article>
+        ) : null}
       </div>
     </section>
   );
@@ -523,7 +525,7 @@ function AdvancedInsightsCard({
   );
 }
 
-function SignalAlignmentSection({
+export function SignalAlignmentSection({
   strongSignals,
   weakerSignals,
   summary,
@@ -564,110 +566,6 @@ function SignalAlignmentSection({
                 {signal}
               </li>
             ))}
-          </ul>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-type HiringManagerLensSectionProps = {
-  strengths: string[];
-  questions: string[];
-  recommendations: string[];
-};
-
-export function getHiringManagerCaseRecommendations(input: {
-  score?: number | null;
-  recommendedActions?: string[];
-  strengths?: string[];
-  watchouts?: string[];
-}): string[] {
-  const explicitActions = (input.recommendedActions ?? [])
-    .map((action) => normalizeOpportunityLine(action))
-    .filter(Boolean);
-
-  if (explicitActions.length >= 2) {
-    return explicitActions.slice(0, 2);
-  }
-
-  const recommendations = new Set<string>(explicitActions);
-  const watchoutCorpus = (input.watchouts ?? []).join(" ").toLowerCase();
-  const strengthsCorpus = (input.strengths ?? []).join(" ").toLowerCase();
-
-  if (/(engineering|firmware|embedded|platform|infrastructure|technical)/.test(watchoutCorpus)) {
-    recommendations.add("Highlight collaboration with infrastructure or platform engineering");
-  }
-
-  if (/(operations|workflow|incident|escalation|systems|cross-functional)/.test(strengthsCorpus)) {
-    recommendations.add("Emphasize operational ownership of complex technical systems");
-  }
-
-  if (typeof input.score === "number" && input.score >= 80) {
-    recommendations.add("Lead with the strongest role-specific wins in your resume summary");
-  } else if (typeof input.score === "number" && input.score >= 70) {
-    recommendations.add("Tailor your resume bullets to connect adjacent experience to the role requirements");
-  } else {
-    recommendations.add("Reposition your experience toward the closest adjacent requirements before applying");
-  }
-
-  return Array.from(recommendations).slice(0, 2);
-}
-
-export function HiringManagerLensSection({
-  strengths,
-  questions,
-  recommendations,
-}: HiringManagerLensSectionProps) {
-  return (
-    <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.98))] p-6 shadow-[0_18px_60px_rgba(2,6,23,0.28)]">
-      <header className="space-y-2 border-b border-white/10 pb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-          Hiring Manager Lens
-        </p>
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-          Why this match is credible
-        </h2>
-        <p className="max-w-2xl text-sm leading-6 text-slate-300">
-          How a hiring manager is likely to view your profile for this role.
-        </p>
-      </header>
-
-      <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <article className="rounded-[22px] border border-emerald-400/15 bg-emerald-500/[0.06] p-5">
-          <h3 className="text-base font-semibold text-slate-100">
-            Strengths a hiring manager will notice
-          </h3>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {strengths.length ? (
-              strengths.map((item) => <li key={item}>&bull; {item}</li>)
-            ) : (
-              <li>&bull; Clear standout baseline signals are not available yet.</li>
-            )}
-          </ul>
-        </article>
-
-        <article className="rounded-[22px] border border-amber-400/15 bg-amber-500/[0.05] p-5">
-          <h3 className="text-base font-semibold text-slate-100">
-            Questions a hiring manager may have
-          </h3>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {questions.length ? (
-              questions.map((item) => <li key={item}>&bull; {item}</li>)
-            ) : (
-              <li>&bull; No major hiring concerns are surfaced from this run.</li>
-            )}
-          </ul>
-        </article>
-
-        <article className="rounded-[22px] border border-sky-400/15 bg-sky-500/[0.05] p-5">
-          <h3 className="text-base font-semibold text-slate-100">How to strengthen your case</h3>
-          <ul className="mt-3 space-y-2 text-sm text-slate-300">
-            {recommendations.length ? (
-              recommendations.map((item) => <li key={item}>&bull; {item}</li>)
-            ) : (
-              <li>&bull; Tailor your resume around the strongest verified evidence for this role.</li>
-            )}
           </ul>
         </article>
       </div>
@@ -1241,44 +1139,7 @@ export default function ResultsPage() {
       criticalGapDetails,
     ],
   );
-  const riskItems: RiskFactor[] =
-    strategicBrief.whatMayHurtYou.length > 0
-      ? strategicBrief.whatMayHurtYou
-      : [
-          {
-            id: "risk-fallback-1",
-            title: "Top role risks unavailable",
-            riskType: "Evidence Gap",
-            detail:
-              "Run a fresh analysis to surface role-specific risks and evidence-level gaps.",
-            isCriticalRequirement: false,
-            impactLine: undefined,
-          },
-        ];
-  const watchoutSignals = useMemo(() => {
-    const rankedCriticalGaps = [...criticalGapDetails]
-      .sort((a, b) => (b.severityScore ?? 0) - (a.severityScore ?? 0))
-      .map((gap) => gap.title);
-    const fallbackRisks = riskItems.map((risk) => risk.title);
-    return sanitizeScoreExplanationList(
-      [...rankedCriticalGaps, ...fallbackRisks],
-      "gap",
-      3,
-    );
-  }, [criticalGapDetails, riskItems]);
   const opportunityVerdict = useMemo(() => getOpportunityVerdict(activeScore), [activeScore]);
-  const hiringManagerStrengths = useMemo(() => advantageSignals.slice(0, 3), [advantageSignals]);
-  const hiringManagerQuestions = useMemo(() => watchoutSignals.slice(0, 3), [watchoutSignals]);
-  const hiringManagerRecommendations = useMemo(
-    () =>
-      getHiringManagerCaseRecommendations({
-        score: activeScore,
-        recommendedActions,
-        strengths: hiringManagerStrengths,
-        watchouts: hiringManagerQuestions,
-      }),
-    [activeScore, hiringManagerQuestions, hiringManagerStrengths, recommendedActions],
-  );
   const interviewToolkitHref = useMemo(() => {
     const params = new URLSearchParams({ source: "results" });
     if (resultsAssessmentId) {
@@ -1300,8 +1161,9 @@ export default function ResultsPage() {
       jobId: latest?.jobId,
       baselineId: latestBaselineId,
       baselineVersionId: latestBaselineVersionId,
+      analysisId: latest?.assessmentId ?? null,
     });
-  }, [latest?.jobId, latestBaselineId, latestBaselineVersionId]);
+  }, [latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -1835,17 +1697,13 @@ export default function ResultsPage() {
                     scoreAnalysisHref="#advanced-insights"
                   />
 
-                  <HiringManagerLensSection
-                    strengths={hiringManagerStrengths}
-                    questions={hiringManagerQuestions}
-                    recommendations={hiringManagerRecommendations}
-                  />
-
-                  <SignalAlignmentSection
-                    strongSignals={signalAlignment.strongForRole}
-                    weakerSignals={signalAlignment.weakerForRole}
-                    summary={signalAlignment.summary}
-                  />
+                  {signalAlignment.renderable ? (
+                    <SignalAlignmentSection
+                      strongSignals={signalAlignment.strongForRole}
+                      weakerSignals={signalAlignment.weakerForRole}
+                      summary={signalAlignment.summary}
+                    />
+                  ) : null}
                 </div>
 
                 <div className="space-y-4 xl:sticky xl:top-6">

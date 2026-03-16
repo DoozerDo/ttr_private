@@ -45,6 +45,7 @@ export type RoleSignalAlignmentViewModel = {
   strongForRole: string[];
   weakerForRole: string[];
   summary: string;
+  renderable: boolean;
   fallbackUsed: boolean;
 };
 
@@ -257,21 +258,21 @@ export function buildResultsSignalAlignment(
     .slice(0, 3)
     .map((signal) => signal.label);
 
-  const safeStrong = strongForRole.length ? strongForRole : ["Professional signals are still being interpreted"];
-  const safeWeak =
-    weakerForRole.length > 0
-      ? weakerForRole
-      : ["Signal clarity is still limited for the highest-leverage requirements"];
+  const dedupedStrong = Array.from(new Set(strongForRole));
+  const strongSet = new Set(dedupedStrong);
+  const dedupedWeak = Array.from(new Set(weakerForRole)).filter((signal) => !strongSet.has(signal));
+  const renderable = dedupedStrong.length > 0 && dedupedWeak.length > 0;
 
   const summary =
-    strongForRole.length || weakerForRole.length
-      ? `This role aligns strongly with ${safeStrong[0].toLowerCase()}${safeStrong[1] ? ` and ${safeStrong[1].toLowerCase()}` : ""}, but appears to require stronger ${safeWeak[0].toLowerCase()}${safeWeak[1] ? ` and ${safeWeak[1].toLowerCase()}` : ""}.`
+    renderable
+      ? `This role aligns strongly with ${dedupedStrong[0].toLowerCase()}${dedupedStrong[1] ? ` and ${dedupedStrong[1].toLowerCase()}` : ""}, but appears to require stronger ${dedupedWeak[0].toLowerCase()}${dedupedWeak[1] ? ` and ${dedupedWeak[1].toLowerCase()}` : ""}.`
       : "This score reflects how clearly your baseline signal transfers into the requirements of this role.";
 
   return {
-    strongForRole: safeStrong,
-    weakerForRole: safeWeak,
+    strongForRole: dedupedStrong,
+    weakerForRole: dedupedWeak,
     summary,
-    fallbackUsed: strongForRole.length === 0 && weakerForRole.length === 0,
+    renderable,
+    fallbackUsed: !renderable,
   };
 }

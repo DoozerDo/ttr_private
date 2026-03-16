@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
 import StudioPage from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
@@ -79,8 +79,18 @@ function createResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
 }
 
 describe("Studio page UX", () => {
-  it("hydrates Studio from Results query params and shows the ready banner", async () => {
+  beforeEach(() => {
     overrideSearchParams({
+      analysisId: "analysis-1",
+      jobId: "job-1",
+      baselineId: "base-1",
+      baselineVersionId: "base-version-1",
+    });
+  });
+
+  it("hydrates Studio from Results analysisId and shows the ready banner", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-2",
       jobId: "job-2",
       baselineId: "base-2",
       baselineVersionId: "base-version-2",
@@ -120,14 +130,16 @@ describe("Studio page UX", () => {
           createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]),
         );
       }
-      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+      if (url.includes("/api/analysis/fit-assessments/analysis-2")) {
         return Promise.resolve(
           createResponse({
             score: 84,
+            jobId: "job-2",
             baselineId: "base-2",
             baselineVersionId: "base-version-2",
             company: "Orbit",
             jobTitle: "Head of Customer Operations",
+            supportingSignals: ["Incident Management", "Cross Functional Coordination"],
           }),
         );
       }
@@ -145,34 +157,29 @@ describe("Studio page UX", () => {
     expect(screen.getByText("Baseline and role context loaded.")).toBeInTheDocument();
     expect(screen.getByText("Orbit — Head of Customer Operations")).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Platform Resume");
-    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/job/job-2/baseline/base-2/latest");
+    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/analysis-2");
   });
 
-  it("falls back gracefully when Results query params do not match available context", async () => {
-    overrideSearchParams({
-      jobId: "missing-job",
-      baselineId: "missing-base",
-      baselineVersionId: "missing-version",
-    });
+  it("shows guidance when analysisId is missing", async () => {
+    overrideSearchParams({});
 
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Role context unavailable")).toBeInTheDocument();
+      expect(screen.getByText("Role analysis required")).toBeInTheDocument();
     });
 
     expect(
       screen.getByText(
-        "We could not load the selected role context. Please choose a baseline and job to continue.",
+        "Select a role from Results to generate documents.",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByTestId("studio-results-ready-banner")).toBeNull();
+    expect(screen.getAllByText("Run a role compatibility analysis first.").length).toBeGreaterThan(0);
   });
 
-  it("hydrates Studio from Results context without baselineVersionId", async () => {
+  it("renders fit score when a valid analysisId is provided", async () => {
     overrideSearchParams({
-      jobId: "job-2",
-      baselineId: "base-2",
+      analysisId: "analysis-2",
     });
     vi.mocked(listJobs).mockResolvedValueOnce([
       {
@@ -195,10 +202,11 @@ describe("Studio page UX", () => {
       if (url.includes("/api/baselines/base-2/versions")) {
         return Promise.resolve(createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]));
       }
-      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+      if (url.includes("/api/analysis/fit-assessments/analysis-2")) {
         return Promise.resolve(
           createResponse({
             score: 84,
+            jobId: "job-2",
             baselineId: "base-2",
             company: "Orbit",
             jobTitle: "Head of Customer Operations",
@@ -215,15 +223,51 @@ describe("Studio page UX", () => {
       expect(screen.getByTestId("studio-results-ready-banner")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("Role context unavailable")).toBeNull();
     expect(screen.getByText("84.0")).toBeInTheDocument();
+  });
+
+  it("enables document generation when role analysis is loaded", async () => {
+    overrideSearchParams({
+      analysisId: "analysis-2",
+      jobId: "job-2",
+      baselineId: "base-2",
+      baselineVersionId: "base-version-2",
+    });
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-2/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-2")) {
+        return Promise.resolve(
+          createResponse({
+            score: 84,
+            jobId: "job-2",
+            baselineId: "base-2",
+            baselineVersionId: "base-version-2",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    const resumeButton = await screen.findByRole("button", { name: "Generate Resume" });
+    const coverLetterButton = await screen.findByRole("button", {
+      name: "Generate Cover Letter",
+    });
+    await waitFor(() => {
+      expect(resumeButton).toBeEnabled();
+      expect(coverLetterButton).toBeEnabled();
+    });
   });
 
   it("shows a concise analysis error when the analysis endpoint returns html", async () => {
     overrideSearchParams({
-      jobId: "job-2",
-      baselineId: "base-2",
-      baselineVersionId: "base-version-2",
+      analysisId: "analysis-2",
     });
     vi.mocked(listJobs).mockResolvedValueOnce([
       {
@@ -248,7 +292,7 @@ describe("Studio page UX", () => {
           createResponse([{ id: "base-version-2", fileHash: "hash-2", versionNumber: 2 }]),
         );
       }
-      if (url.includes("/api/analysis/job/job-2/baseline/base-2/latest")) {
+      if (url.includes("/api/analysis/fit-assessments/analysis-2")) {
         return Promise.resolve({
           ok: false,
           status: 502,
@@ -274,10 +318,18 @@ describe("Studio page UX", () => {
     });
 
     expect(
-      screen.getByText("Unable to load role analysis. Please return to the Results page."),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        "Unable to load role analysis. Please return to Results and reopen the document generator.",
+      ).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText(/Application error/i)).toBeNull();
     expect(screen.queryByText(/<!doctype html>/i)).toBeNull();
+  });
+
+  it("renders the Document Generator header", async () => {
+    overrideSearchParams({});
+    renderStudio();
+    expect(screen.getByText("Document Generator")).toBeInTheDocument();
   });
 
   it("hides internal terms and metadata", async () => {
@@ -321,9 +373,14 @@ describe("Studio page UX", () => {
             createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
           );
         }
-        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
           return Promise.resolve(
-            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+            createResponse({
+              score: 82,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
           );
         }
         if (url.endsWith("/api/resume") && init?.method === "POST") {
@@ -383,9 +440,14 @@ describe("Studio page UX", () => {
             createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
           );
         }
-        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
           return Promise.resolve(
-            createResponse({ score: 78, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+            createResponse({
+              score: 78,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
           );
         }
         if (url.endsWith("/api/resume")) {
@@ -438,9 +500,14 @@ describe("Studio page UX", () => {
             createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
           );
         }
-        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
           return Promise.resolve(
-            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+            createResponse({
+              score: 82,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
           );
         }
         if (url.endsWith("/api/resume") && init?.method === "POST") {
@@ -532,9 +599,14 @@ describe("Studio page UX", () => {
             createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
           );
         }
-        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
           return Promise.resolve(
-            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+            createResponse({
+              score: 82,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
           );
         }
         if (url.endsWith("/api/cover-letters") && init?.method === "POST") {
@@ -568,9 +640,14 @@ describe("Studio page UX", () => {
           createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
         );
       }
-      if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
         return Promise.resolve(
-          createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+          createResponse({
+            score: 82,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
         );
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
@@ -660,9 +737,14 @@ describe("Studio page UX", () => {
             createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
           );
         }
-        if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
           return Promise.resolve(
-            createResponse({ score: 82, baselineId: "base-1", baselineVersionId: "base-version-1" }),
+            createResponse({
+              score: 82,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
           );
         }
         if (url.endsWith("/api/resume") && init?.method === "POST") {
@@ -705,8 +787,8 @@ describe("Studio page UX", () => {
       if (url.includes("/api/baselines/") && url.includes("/versions")) {
         return Promise.resolve(createResponse([]));
       }
-      if (url.includes("/api/analysis/job/") && url.includes("/latest")) {
-        return Promise.resolve(createResponse({ score: 82, baselineId: "base-1" }));
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(createResponse({ score: 82, jobId: "job-1", baselineId: "base-1" }));
       }
       if (url.endsWith("/api/resume") && init?.method === "POST") {
         return Promise.resolve(
@@ -731,7 +813,7 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getAllByText("Prerequisites missing").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Generation prerequisites").length).toBeGreaterThanOrEqual(1);
     });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
@@ -753,5 +835,36 @@ describe("Studio page UX", () => {
     expect(typeof requestBody).toBe("string");
     const parsedBody = JSON.parse(requestBody as string) as Record<string, unknown>;
     expect(parsedBody.baselineVersionId).toBeUndefined();
+  });
+
+  it("supports assessmentId query param as a backward-compatible fallback", async () => {
+    overrideSearchParams({ assessmentId: "assessment-legacy" });
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/assessment-legacy")) {
+        return Promise.resolve(
+          createResponse({
+            score: 81,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("81.0")).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/assessment-legacy");
   });
 });

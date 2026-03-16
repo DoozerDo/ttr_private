@@ -41,6 +41,9 @@ describe("professional signals", () => {
     expect(graph.identifiedSignalCount).toBeGreaterThanOrEqual(7);
     expect(graph.strongSignalCount).toBeGreaterThan(0);
     expect(graph.developingSignalCount).toBeGreaterThan(0);
+    expect(graph.strongSignalCount + graph.developingSignalCount).toBe(graph.identifiedSignalCount);
+    expect(graph.strongSignals.length).toBeLessThanOrEqual(graph.strongSignalCount);
+    expect(graph.developingSignals.length).toBeLessThanOrEqual(graph.developingSignalCount);
     expect(graph.effectLines.length).toBeGreaterThan(0);
   });
 
@@ -69,8 +72,25 @@ describe("professional signals", () => {
       verdictLabel: "Strong Match",
     });
 
+    expect(alignment.renderable).toBe(true);
     expect(alignment.strongForRole.length).toBeGreaterThan(0);
     expect(alignment.weakerForRole.length).toBeGreaterThan(0);
+    const overlap = alignment.strongForRole.filter((signal) =>
+      alignment.weakerForRole.includes(signal),
+    );
+    expect(overlap).toHaveLength(0);
     expect(alignment.summary).toMatch(/role aligns strongly/i);
+  });
+
+  it("suppresses alignment when distinct strong and weak buckets cannot be formed", () => {
+    const alignment = buildResultsSignalAlignment({
+      strengths: ["operations", "incident", "tooling"],
+      criticalGapTitles: [],
+      recommendedActions: [],
+      scoreBreakdownDimensions: [],
+      verdictLabel: "Competitive Match",
+    });
+
+    expect(alignment.renderable).toBe(false);
   });
 });

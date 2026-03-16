@@ -91,8 +91,8 @@ describe("BaselineStudioHome", () => {
       expect(screen.getByText("CERTIFICATION IN PROGRESS")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Signals strong:/i)).toBeInTheDocument();
-    expect(screen.getByText(/Identified signals:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Strong signals:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Signals detected:/i)).toBeInTheDocument();
     expect(screen.getByText(/Developing signals:/i)).toBeInTheDocument();
     expect(screen.getByText(/Quantified impact:/i)).toBeInTheDocument();
     expect(screen.getByText(/Analyses completed:/i)).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("BaselineStudioHome", () => {
       expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Identified Signals")).toBeInTheDocument();
+    expect(screen.getByText("Signals Detected")).toBeInTheDocument();
     expect(screen.getByText("Strong Signals")).toBeInTheDocument();
     expect(screen.getAllByText("Developing Signals").length).toBeGreaterThan(0);
     expect(screen.queryByText("Signal Effect")).not.toBeInTheDocument();
@@ -163,6 +163,36 @@ describe("BaselineStudioHome", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Strengthen Signal" })).not.toBeInTheDocument();
     });
+  });
+
+  it("opens the matching strengthening flow when clicking a developing signal chip", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change Leadership" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Strengthen Signal" })).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText("Describe a process, tooling, or support change you led and what changed because of it."),
+    ).toBeInTheDocument();
   });
 
   it("shows career gravity locked under 3 completed role analyses", async () => {
@@ -231,6 +261,69 @@ describe("BaselineStudioHome", () => {
       expect(screen.getByText(/% current/i)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/% first analysis/i)).toBeInTheDocument();
+    expect(screen.getByText(/% original/i)).toBeInTheDocument();
+  });
+
+  it("renders positive and negative score deltas from baseline history", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([
+          { baselineId: "base-1", status: "completed", score: 71, createdAt: "2026-01-01T00:00:00.000Z" },
+          { baselineId: "base-1", status: "completed", score: 79, createdAt: "2026-01-02T00:00:00.000Z" },
+          { baselineId: "base-2", status: "completed", score: 79, createdAt: "2026-01-01T00:00:00.000Z" },
+          { baselineId: "base-2", status: "completed", score: 74, createdAt: "2026-01-02T00:00:00.000Z" },
+        ]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          createBaseline("base-1", "2026-01-01T00:00:00.000Z", "improved.pdf"),
+          createBaseline("base-2", "2026-01-02T00:00:00.000Z", "decreased.pdf"),
+        ]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("+8 since first analysis")).toBeInTheDocument();
+      expect(screen.getByText("-5 since first analysis")).toBeInTheDocument();
+    });
+  });
+
+  it("suppresses score history block when no successful analysis exists", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([{ baselineId: "base-1", status: "failed", score: 12 }]);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/% current/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it("supports editable vs read-only baseline library rendering modes", () => {
+    render(
+      <BaselineStudioHome
+        baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]}
+        libraryMode="readonly"
+      />,
+    );
+
+    expect(screen.queryByText("UPLOAD YOUR RESUME")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DETERMINE BASELINE STRENGTH" })).toBeInTheDocument();
   });
 });

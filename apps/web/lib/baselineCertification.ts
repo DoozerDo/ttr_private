@@ -81,11 +81,11 @@ export function buildBaselineCertification(
         "Analysis is required before certification can be evaluated.",
       ],
       checklist: [
-        { label: "Signals strong", value: "0 / 5 required", complete: false },
-        { label: "Identified signals", value: "0 / 7 required", complete: false },
-        { label: "Developing signals", value: "0 / max 2", complete: false },
+        { label: "Strong signals", value: "0, minimum 5 required", complete: false },
+        { label: "Signals detected", value: "0, minimum 7 required", complete: false },
+        { label: "Developing signals", value: "0, maximum 2 allowed", complete: false },
         { label: "Quantified impact", value: "Missing", complete: false },
-        { label: "Analyses completed", value: `0 / 2`, complete: false },
+        { label: "Analyses completed", value: "0 of 2 required", complete: false },
       ],
       isCertified: false,
     };
@@ -107,18 +107,18 @@ export function buildBaselineCertification(
 
   const checklist: BaselineCertificationViewModel["checklist"] = [
     {
-      label: "Signals strong",
-      value: `${input.signalGraph.strongSignalCount} / 5 required`,
+      label: "Strong signals",
+      value: `${input.signalGraph.strongSignalCount}, minimum 5 required`,
       complete: input.signalGraph.strongSignalCount >= 5,
     },
     {
-      label: "Identified signals",
-      value: `${input.signalGraph.identifiedSignalCount} / 7 required`,
+      label: "Signals detected",
+      value: `${input.signalGraph.identifiedSignalCount}, minimum 7 required`,
       complete: input.signalGraph.identifiedSignalCount >= 7,
     },
     {
       label: "Developing signals",
-      value: `${input.signalGraph.developingSignalCount} / max 2`,
+      value: `${input.signalGraph.developingSignalCount}, maximum 2 allowed`,
       complete: input.signalGraph.developingSignalCount <= 2,
     },
     {
@@ -128,7 +128,7 @@ export function buildBaselineCertification(
     },
     {
       label: "Analyses completed",
-      value: `${input.analysesCompleted} / 2`,
+      value: `${input.analysesCompleted} of 2 required`,
       complete: analysesMature,
     },
   ];
@@ -139,7 +139,7 @@ export function buildBaselineCertification(
       title: "CERTIFIED BASELINE",
       summary: "Trusted for stronger scoring and personalized documents.",
       detail:
-        "This primary baseline has enough structured evidence and signal clarity to support higher-confidence scoring and more personalized generation.",
+        "Your baseline now meets the trust threshold for stronger scoring and document generation.",
       supportingPoints: [
         "Structural baseline parsing is complete.",
         "Signal coverage and quantification thresholds are met.",
