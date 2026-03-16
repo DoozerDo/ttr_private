@@ -860,7 +860,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                               }}
                               disabled={isLoading}
                             >
-                              {isLoading ? "Analyzing..." : canView ? "VIEW ANALYSIS" : "DETERMINE STRENGTH"}
+                              {isLoading
+                                ? "Analyzing..."
+                                : canView
+                                  ? "VIEW BASELINE ANALYSIS"
+                                  : "ANALYZE"}
                             </FormButton>
                           </div>
                         </div>
@@ -948,15 +952,13 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100/80">
                             Resume uploaded
                           </p>
-                          <p className="text-lg font-semibold text-white">
-                            Now determine your baseline strength.
-                          </p>
+                          <p className="text-lg font-semibold text-white">Now analyze your baseline.</p>
                           <p className="text-sm leading-6 text-slate-200/90">
                             Your uploaded resume is ready to become the primary source for baseline analysis.
                           </p>
                         </div>
                         <FormButton onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}>
-                          DETERMINE BASELINE STRENGTH
+                          ANALYZE
                         </FormButton>
                       </div>
                     </article>
