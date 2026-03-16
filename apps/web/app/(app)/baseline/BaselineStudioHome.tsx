@@ -866,6 +866,28 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                                   ? "VIEW BASELINE ANALYSIS"
                                   : "ANALYZE"}
                             </FormButton>
+                            {isEditableLibrary ? (
+                              <>
+                                <FormButton
+                                  variant="ghost"
+                                  onClick={() => void handleArchiveBaseline(baseline.id)}
+                                  disabled={archivingBaselineId === baseline.id || isArchived}
+                                >
+                                  {isArchived
+                                    ? "Archived"
+                                    : archivingBaselineId === baseline.id
+                                      ? "Archiving..."
+                                      : "Archive"}
+                                </FormButton>
+                                <FormButton
+                                  variant="ghost"
+                                  onClick={() => void handleDeleteBaseline(baseline.id)}
+                                  disabled={deletingBaselineId === baseline.id}
+                                >
+                                  {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
+                                </FormButton>
+                              </>
+                            ) : null}
                           </div>
                         </div>
                       </article>
