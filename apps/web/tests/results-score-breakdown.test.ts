@@ -1,6 +1,19 @@
 import { resolveDisplayedFitScore } from "@/app/(app)/results/page";
 
 describe("results score breakdown display", () => {
+  it("prefers adjusted score when present", () => {
+    const score = resolveDisplayedFitScore({
+      baselineId: "b-1",
+      jobId: "j-1",
+      rawScore: 88,
+      adjustedScore: 60,
+      overallScore: 60,
+      score: 60,
+    });
+
+    expect(score).toBe(60);
+  });
+
   it("prefers score_breakdown total for displayed fit score", () => {
     const score = resolveDisplayedFitScore({
       baselineId: "b-1",

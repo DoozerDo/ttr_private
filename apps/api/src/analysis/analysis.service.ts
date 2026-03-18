@@ -56,6 +56,10 @@ import {
   scoreCxFitV2,
   computeConfidenceScore,
 } from './cx-fit-scoring-v2';
+import {
+  applyFitScoreAdjustment,
+  type ScoreAdjustmentType,
+} from './fit-score-adjustment';
 import { buildResultsNarrative } from './results-narrative.builder';
 import { selectBaselineTextForScoring } from './baseline-selection';
 import type {
@@ -245,6 +249,12 @@ type CompatibilityRunDebugPayload = {
 type FitScoreResponse = {
   fit_score: number;
   overall_score: number;
+  rawScore?: number;
+  adjustedScore?: number;
+  scoreAdjustmentApplied?: boolean;
+  scoreAdjustmentReasons?: string[];
+  scoreAdjustmentSummary?: string | null;
+  scoreAdjustmentType?: ScoreAdjustmentType;
   verdict: FitScoreVerdictLabel | FitScoreRubricJson['verdict'];
   breakdown: {
     experience_alignment: number;
@@ -313,6 +323,12 @@ type RunFitAssessmentComplianceBlockedResponse = {
   score: number;
   overall_score: number;
   overallScore: number;
+  rawScore?: number;
+  adjustedScore?: number;
+  scoreAdjustmentApplied?: boolean;
+  scoreAdjustmentReasons?: string[];
+  scoreAdjustmentSummary?: string | null;
+  scoreAdjustmentType?: ScoreAdjustmentType;
   verdict: 'blocked';
   breakdown: {
     experience_alignment: number;
@@ -359,6 +375,15 @@ type RunFitAssessmentPayload = RunFitAssessmentDto & {
   job_id?: string;
   baseline_id?: string;
   baseline_version_id?: number | string;
+};
+
+type ScoreAdjustmentPayload = {
+  rawScore: number;
+  adjustedScore: number;
+  scoreAdjustmentApplied: boolean;
+  scoreAdjustmentReasons: string[];
+  scoreAdjustmentSummary: string | null;
+  scoreAdjustmentType: ScoreAdjustmentType;
 };
 
 @Injectable()
@@ -539,6 +564,24 @@ export class AnalysisService {
     if (score >= 85) return 'Apply';
     if (score >= 70) return 'Consider';
     return 'Skip';
+  }
+
+  private buildScoreAdjustmentPayload(input: {
+    rawScore: number;
+    adjustedScore: number;
+    scoreAdjustmentApplied: boolean;
+    scoreAdjustmentReasons: string[];
+    scoreAdjustmentSummary: string | null;
+    scoreAdjustmentType: ScoreAdjustmentType;
+  }): ScoreAdjustmentPayload {
+    return {
+      rawScore: input.rawScore,
+      adjustedScore: input.adjustedScore,
+      scoreAdjustmentApplied: input.scoreAdjustmentApplied,
+      scoreAdjustmentReasons: input.scoreAdjustmentReasons,
+      scoreAdjustmentSummary: input.scoreAdjustmentSummary,
+      scoreAdjustmentType: input.scoreAdjustmentType,
+    };
   }
 
   private mapAssessmentDimensionPercents(
@@ -1727,10 +1770,17 @@ export class AnalysisService {
 
     const legacyDimensionScores =
       this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
-    const responseVerdict =
-      this.deriveFitScoreVerdictLabelFromScore(scoringV2.score);
+    const scoreAdjustment = applyFitScoreAdjustment({
+      rawScore: scoringV2.score,
+      jobTitle: jobPayload.title ?? undefined,
+      jobDescription: canonicalJobForHash.rawDescription,
+      normalizedResponsibilities: normalizedJobResponsibilities,
+      normalizedRequirements: normalizedJobRequirements,
+    });
+    const finalScore = scoreAdjustment.adjustedScore;
+    const responseVerdict = this.deriveFitScoreVerdictLabelFromScore(finalScore);
     const persistenceVerdict =
-      this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
+      this.deriveFitAssessmentVerdictFromScore(finalScore);
 
     const scoring =
       allowDebug
@@ -1757,7 +1807,7 @@ export class AnalysisService {
     const strengths = gapInsights.strengths;
     const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
     const complianceFlags = scoring?.complianceFlags ?? [];
-    const finalScore = scoringV2.score;
+    const scoreAdjustmentPayload = this.buildScoreAdjustmentPayload(scoreAdjustment);
 
     const generatedSectionsForCompliance = normalizedJobDescription
       ? [{ title: 'Job Description', content: normalizedJobDescription }]
@@ -1875,6 +1925,7 @@ export class AnalysisService {
       status: 'ok',
       fit_score: finalScore,
       overall_score: finalScore,
+      ...scoreAdjustmentPayload,
       verdict: responseVerdict,
       breakdown,
       strengths,
@@ -2270,10 +2321,17 @@ export class AnalysisService {
 
       const legacyDimensionScores =
         this.mapCxFitV2ToLegacyDimensionScores(scoringV2);
-      const responseVerdict =
-        this.deriveFitScoreVerdictLabelFromScore(scoringV2.score);
+      const scoreAdjustment = applyFitScoreAdjustment({
+        rawScore: scoringV2.score,
+        jobTitle: job?.title ?? undefined,
+        jobDescription: canonicalJobForHash.rawDescription,
+        normalizedResponsibilities: normalizedJobResponsibilities,
+        normalizedRequirements: normalizedJobRequirements,
+      });
+      const finalScore = scoreAdjustment.adjustedScore;
+      const responseVerdict = this.deriveFitScoreVerdictLabelFromScore(finalScore);
       const persistenceVerdict =
-        this.deriveFitAssessmentVerdictFromScore(scoringV2.score);
+        this.deriveFitAssessmentVerdictFromScore(finalScore);
 
       const debugScoring =
         allowDebug
@@ -2299,7 +2357,7 @@ export class AnalysisService {
       const strengths = gapInsights.strengths;
       const gaps = gapInsights.criticalGaps.map((gap) => gap.title);
       const complianceFlags = debugScoring?.complianceFlags ?? [];
-      const finalScore = scoringV2.score;
+      const scoreAdjustmentPayload = this.buildScoreAdjustmentPayload(scoreAdjustment);
 
       const breakdown = {
         experience_alignment: legacyDimensionScores.experienceAlignment,
@@ -2401,6 +2459,7 @@ export class AnalysisService {
         score: finalScore,
         overall_score: finalScore,
         overallScore: finalScore,
+        ...scoreAdjustmentPayload,
         verdict: 'blocked',
         breakdown,
         dimensionScores: legacyDimensionScores,
@@ -2476,6 +2535,7 @@ export class AnalysisService {
         status: 'ok',
         fit_score: finalScore,
         overall_score: finalScore,
+        ...scoreAdjustmentPayload,
         verdict: responseVerdict,
         breakdown,
         strengths,
@@ -2788,10 +2848,18 @@ export class AnalysisService {
         assessment.dimensionScores?.strategicTacticalFit ?? 0,
     };
     const narrative = buildResultsNarrative({
-      overallScore: assessment.scoringV2?.score ?? assessment.overallScore,
+      overallScore: assessment.overallScore,
       dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
     });
     const scoreBreakdown = this.buildScoreBreakdown(assessment);
+    const rawScore =
+      typeof assessment.scoringV2?.score === 'number'
+        ? assessment.scoringV2.score
+        : assessment.overallScore;
+    const adjustmentApplied = rawScore !== assessment.overallScore;
+    const reconstructedAdjustment = applyFitScoreAdjustment({
+      rawScore,
+    });
 
     return {
       ok: true,
@@ -2802,6 +2870,22 @@ export class AnalysisService {
       baselineVersion: assessment.baselineVersion,
       overallScore: assessment.overallScore,
       score: assessment.overallScore,
+      rawScore,
+      adjustedScore: assessment.overallScore,
+      scoreAdjustmentApplied: adjustmentApplied,
+      scoreAdjustmentReasons: adjustmentApplied
+        ? [
+            'Raw overlap scored higher, but this role was adjusted for realistic role alignment.',
+          ]
+        : [],
+      scoreAdjustmentSummary: adjustmentApplied
+        ? 'Raw overlap scored higher, but this role was adjusted for realistic role alignment.'
+        : null,
+      scoreAdjustmentType: adjustmentApplied
+        ? reconstructedAdjustment.scoreAdjustmentType === 'none'
+          ? 'combined'
+          : reconstructedAdjustment.scoreAdjustmentType
+        : 'none',
       verdict: assessment.verdict,
       dimensionScores: assessment.dimensionScores,
       strengths: gapInsights.strengths,

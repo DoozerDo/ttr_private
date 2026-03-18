@@ -104,6 +104,19 @@ type LatestAnalysis = {
   company?: string | null;
   assessmentId?: string | null;
   score?: number | null;
+  rawScore?: number | null;
+  adjustedScore?: number | null;
+  scoreAdjustmentApplied?: boolean;
+  scoreAdjustmentReasons?: string[] | null;
+  scoreAdjustmentSummary?: string | null;
+  scoreAdjustmentType?:
+    | "none"
+    | "role_track_cap"
+    | "core_function_cap"
+    | "seniority_cap"
+    | "domain_penalty"
+    | "combined"
+    | null;
   auditId?: string | null;
   audit_id?: string | null;
   dimensionScores?: FitDimensionScores | null;
@@ -153,6 +166,8 @@ type LatestAnalysis = {
 
 export function resolveDisplayedFitScore(latest: LatestAnalysis | null): number | null {
   if (!latest) return null;
+  const adjustedScore = latest.adjustedScore;
+  if (typeof adjustedScore === "number") return adjustedScore;
   const breakdownTotal = latest.score_breakdown?.total_score;
   if (typeof breakdownTotal === "number") return breakdownTotal;
   const scoringV2Score = latest.scoring_v2?.score;
@@ -358,6 +373,13 @@ type ScoreDriver = {
 
 type OpportunityMapSectionProps = {
   score: number | null;
+  adjustment: {
+    applied: boolean;
+    rawScore: number | null;
+    adjustedScore: number | null;
+    summary: string | null;
+    reasons: string[];
+  } | null;
   verdict: {
     label: string;
     explanation: string;
@@ -375,6 +397,7 @@ type OpportunityMapSectionProps = {
 
 export function OpportunityMapSection({
   score,
+  adjustment,
   verdict,
   advantageSignals,
   primaryCta,
@@ -395,6 +418,30 @@ export function OpportunityMapSection({
                 </p>
                 <p className="text-3xl font-semibold tracking-tight text-white">{verdict.label}</p>
                 <p className="max-w-sm text-sm leading-6 text-slate-300">{verdict.explanation}</p>
+                {adjustment?.applied ? (
+                  <div className="max-w-sm rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-200">
+                    <p>
+                      {adjustment.summary ??
+                        "Raw overlap scored higher, but this role was adjusted for role alignment."}
+                    </p>
+                    {typeof adjustment.rawScore === "number" &&
+                    typeof adjustment.adjustedScore === "number" ? (
+                      <p className="mt-1 text-slate-300">
+                        Raw {Math.round(adjustment.rawScore)}. Adjusted {Math.round(adjustment.adjustedScore)}.
+                      </p>
+                    ) : null}
+                    {adjustment.reasons.length ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-slate-300">Why adjusted?</summary>
+                        <ul className="mt-1 list-disc space-y-1 pl-4 text-slate-300">
+                          {adjustment.reasons.map((reason, index) => (
+                            <li key={`adjustment-reason-${index}`}>{reason}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1034,6 +1081,26 @@ export default function ResultsPage() {
 
   const activeScore = useMemo(() => {
     return resolveDisplayedFitScore(latest);
+  }, [latest]);
+  const scoreAdjustmentInfo = useMemo(() => {
+    if (!latest) return null;
+    return {
+      applied: Boolean(latest.scoreAdjustmentApplied),
+      rawScore: typeof latest.rawScore === "number" ? latest.rawScore : null,
+      adjustedScore:
+        typeof latest.adjustedScore === "number"
+          ? latest.adjustedScore
+          : typeof latest.overallScore === "number"
+          ? latest.overallScore
+          : null,
+      summary:
+        typeof latest.scoreAdjustmentSummary === "string"
+          ? latest.scoreAdjustmentSummary
+          : null,
+      reasons: Array.isArray(latest.scoreAdjustmentReasons)
+        ? latest.scoreAdjustmentReasons.filter((value) => typeof value === "string")
+        : [],
+    };
   }, [latest]);
 
   const scoreBreakdown = useMemo(() => {
@@ -1691,6 +1758,7 @@ export default function ResultsPage() {
                 <div className="space-y-6">
                   <OpportunityMapSection
                     score={activeScore}
+                    adjustment={scoreAdjustmentInfo}
                     verdict={opportunityVerdict}
                     advantageSignals={advantageSignals}
                     primaryCta={primaryResultsCta}
