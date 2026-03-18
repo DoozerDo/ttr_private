@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { JourneyNavV1 } from "./JourneyNavV1";
@@ -8,6 +8,7 @@ import { TopNavAccountArea } from "./TopNavAccountArea";
 import { JourneyNavState } from "@/src/lib/journeyNav";
 import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
+import { subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 
 const isDev = process.env.NODE_ENV === "development";
 const isDebugBuildIdEnabled = process.env.NEXT_PUBLIC_DEBUG_BUILD_ID === "true";
@@ -76,6 +77,7 @@ function isStepCompleted(state: unknown): boolean {
 }
 
 export function AppShell({ children, userEmail }: AppShellProps) {
+  const router = useRouter();
   const pathname = usePathname() ?? "/";
   const isBaseline = pathname.startsWith("/baseline");
   const [, setHasBaseline] = useState(false);
@@ -208,6 +210,15 @@ export function AppShell({ children, userEmail }: AppShellProps) {
       window.fetch = originalFetch;
     };
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBaselineUpdated(async () => {
+      await refreshContext();
+      router.refresh();
+    });
+
+    return unsubscribe;
+  }, [refreshContext, router]);
 
   useEffect(() => {
     if (!isDebugBuildIdEnabled) return;

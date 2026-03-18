@@ -5,7 +5,7 @@ import StudioPage from "@/app/(app)/studio/page";
 import { listBaselines } from "@/lib/baselines";
 import { listJobs } from "@/lib/jobsClient";
 import { EntitlementsProvider } from "@/src/lib/entitlements";
-import { overrideSearchParams, setFetchImplementation } from "./setup";
+import { mockRouterPush, overrideSearchParams, setFetchImplementation } from "./setup";
 
 vi.mock("@/app/(app)/studio/BaselineBlockPolicyPanel", () => ({
   BaselineBlockPolicyPanel: () => null,
@@ -154,10 +154,41 @@ describe("Studio page UX", () => {
     });
 
     expect(screen.getByText("Studio ready")).toBeInTheDocument();
-    expect(screen.getByText("Baseline and role context loaded.")).toBeInTheDocument();
+    expect(screen.getByText("Context loaded")).toBeInTheDocument();
     expect(screen.getByText("Orbit — Head of Customer Operations")).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Platform Resume");
     expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/analysis-2");
+  });
+
+  it("uses top-band streamlined generation CTA when score is 90+", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            company: "Acme",
+            title: "Director of Support",
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    expect(await screen.findByRole("button", { name: "Generate My Application" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).not.toBeInTheDocument();
   });
 
   it("shows guidance when analysisId is missing", async () => {
@@ -336,7 +367,7 @@ describe("Studio page UX", () => {
     renderStudio();
 
     await waitFor(() => {
-      expect(screen.getByText("Targeting")).toBeInTheDocument();
+      expect(screen.getByText("Targeting and Evidence")).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/^Job$/)).toBeNull();
@@ -779,6 +810,68 @@ describe("Studio page UX", () => {
       screen.getByText("Resume generation returned an unexpected payload shape."),
     ).toBeInTheDocument();
     expect(screen.queryByText("No resume generated yet")).toBeInTheDocument();
+  });
+
+  it("reframes insufficient baseline evidence as a guided progression state", async () => {
+    setFetchImplementation(
+      vi.fn((input: RequestInfo, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input?.url ?? "";
+        if (url.includes("/api/baselines/") && url.includes("/versions")) {
+          return Promise.resolve(
+            createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+          );
+        }
+        if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+          return Promise.resolve(
+            createResponse({
+              score: 78,
+              jobId: "job-1",
+              baselineId: "base-1",
+              baselineVersionId: "base-version-1",
+            }),
+          );
+        }
+        if (url.endsWith("/api/resume") && init?.method === "POST") {
+          return Promise.resolve(
+            createResponse(
+              {
+                message:
+                  "Resume could not be generated because no verified baseline evidence could be assembled into role relevant experience bullets.",
+              },
+              false,
+              400,
+            ),
+          );
+        }
+        return Promise.resolve(createResponse({}));
+      }),
+    );
+
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Generate Resume" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Resume" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("More detail needed to generate a strong resume"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("You're close - a few more details will unlock a strong resume."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add detail to generate resume" })).toBeInTheDocument();
+    expect(screen.getByText("Generate a basic draft anyway")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Generate Resume$/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add detail to generate resume" }));
+    expect(mockRouterPush).toHaveBeenCalledWith(
+      "/baseline?analysisId=analysis-1&jobId=job-1&baselineId=base-1&baselineVersionId=base-version-1",
+    );
+    expect(
+      screen.queryByText("Resume failed due to system error"),
+    ).not.toBeInTheDocument();
   });
 
   it("allows generation in non-production when promotion artifacts are not ready", async () => {

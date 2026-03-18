@@ -42,6 +42,7 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
+import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 
 type ComplianceFlag = {
   code?: string;
@@ -913,6 +914,7 @@ export default function InterviewSessionPage() {
           : null,
       );
       setReviewMessage("Accepted additions promoted to a new baseline version.");
+      publishBaselineUpdated({ baselineId: session?.baselineId ?? null, source: "interview" });
     } catch (promoteError) {
       setPromotionError(
         promoteError instanceof Error ? promoteError.message : "Unable to promote additions.",

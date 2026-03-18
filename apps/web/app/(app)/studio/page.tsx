@@ -37,6 +37,7 @@ import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePrevie
 import { listJobs } from "@/lib/jobsClient";
 import { useEntitlements } from "@/src/lib/entitlements";
 import { trackEvent } from "@/src/lib/analytics";
+import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
 function LockIcon(props: { className?: string; "aria-hidden"?: boolean }) {
   const className = props.className ?? "h-5 w-5";
@@ -242,6 +243,15 @@ function sanitizeAnalysisError(payload: unknown, fallback = ANALYSIS_LOAD_ERROR_
   const message = formatErrorMessage(payload, fallback);
   if (isHtmlLikePayload(message)) return fallback;
   return message;
+}
+
+function isInsufficientBaselineEvidenceMessage(message: string | null): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("no verified baseline evidence could be assembled") ||
+    normalized.includes("no valid evidence units")
+  );
 }
 
 function buildAssessmentAnalysisUrl(analysisId: string) {
@@ -495,6 +505,11 @@ export default function StudioPage() {
     }
     return null;
   }, [analysis]);
+  const scoreBand = useMemo(() => {
+    if (analysisScore === null) return null;
+    return getScoreBand(analysisScore);
+  }, [analysisScore]);
+  const isTopBand = scoreBand === ScoreBand.TOP;
   const effectiveJobId = selectedJobId || trimString(analysis?.jobId);
   const effectiveBaselineId = selectedBaselineId || trimString(analysis?.baselineId);
   const effectiveBaselineVersionId =
@@ -527,6 +542,17 @@ export default function StudioPage() {
     (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
     Boolean(requestedAnalysisId) &&
     !analysisError;
+  const canRunTopBandGeneration =
+    isTopBand && canGenerateDocuments && !resumeGenerating && !coverGenerating;
+  const improveBaselineHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
+    if (effectiveJobId) params.set("jobId", effectiveJobId);
+    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+    if (effectiveBaselineVersionId) params.set("baselineVersionId", effectiveBaselineVersionId);
+    const query = params.toString();
+    return query ? `/baseline?${query}` : "/baseline";
+  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
 
   const resumePresenter = useMemo(
     () => presentResumeGeneration(resumeState.response),
@@ -630,8 +656,10 @@ export default function StudioPage() {
   ]);
 
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
+    const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
     if (resumeGenerating) return "generating";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
+    if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
     if (resumePresenter.status === "success" && hasResumeArtifact) {
       return "generated_successfully";
@@ -644,6 +672,7 @@ export default function StudioPage() {
     resumePresenter.status,
     resumeState.error,
   ]);
+  const resumeNeedsBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
 
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
@@ -1237,6 +1266,46 @@ export default function StudioPage() {
     }
   };
 
+  const handleResumeBasicDraft = async () => {
+    if (!canGenerateDocuments) {
+      setResumeState((current) => ({
+        ...current,
+        error: generationMessage ?? "Review prerequisites before generating a resume.",
+      }));
+      return;
+    }
+    setResumeGenerating(true);
+    setResumeState(createDocumentState());
+    setResumeWarningFlags([]);
+    setResumeAuditId(undefined);
+    const payload = buildResumePayload(true);
+    try {
+      const response = await fetch("/api/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await readResponsePayload(response);
+      if (!response.ok) {
+        throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
+      }
+      setResumeState((current) => ({ ...current, response: responsePayload }));
+      setResumeWarningFlags(extractComplianceWarnings(responsePayload));
+      setResumeAuditId(normalizeAuditId(responsePayload));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Resume generation failed.";
+      setResumeState((current) => ({ ...current, error: message }));
+    } finally {
+      setResumeGenerating(false);
+    }
+  };
+
+  const handleGenerateMyApplication = async () => {
+    if (!canGenerateDocuments || resumeGenerating || coverGenerating) return;
+    await handleResumeDraft();
+    await handleCoverDraft();
+  };
+
   const exportCoverLetter = async (format: "docx" | "pdf") => {
     if (!canGenerateDocuments) {
       setCoverState((current) => ({
@@ -1312,6 +1381,8 @@ export default function StudioPage() {
         return `${documentName} generated successfully`;
       case "blocked_by_compliance":
         return `${documentName} blocked by compliance`;
+      case "needs_more_baseline_detail":
+        return "More detail needed";
       case "failed_due_to_system_error":
         return `${documentName} failed due to system error`;
       default:
@@ -1320,22 +1391,20 @@ export default function StudioPage() {
   }
 
   return (
-    <PageShell className="space-y-6">
+    <PageShell className="space-y-4 pb-4">
       <PageHeader
         title="Document Generator"
         description="Generate, preview, and export tailored documents using your latest role analysis."
       />
 
       {hydratedFromResultsContext ? (
-        <section
-          className="space-y-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 shadow"
+        <div
+          className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200"
           data-testid="studio-results-ready-banner"
         >
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-200">
-            Studio ready
-          </p>
-          <p className="text-sm text-slate-100">Baseline and role context loaded.</p>
-        </section>
+          <span>Studio ready</span>
+          <span className="normal-case tracking-normal text-emerald-100">Context loaded</span>
+        </div>
       ) : null}
 
       {!hydratedFromResultsContext && contextHydrationMessage ? (
@@ -1370,86 +1439,27 @@ export default function StudioPage() {
         </Alert>
       ) : null}
 
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
-          Targeting
-        </h2>
-        <p className="text-sm text-slate-300">
-          <span className="font-semibold text-slate-100">
-            {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} — {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
-          </span>
-        </p>
-        <p className="text-sm text-slate-300">
-          Using resume <span className="font-semibold text-slate-100">{sourceResumeLabel}</span>
-        </p>
-        <div>
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
-            <p className="text-4xl font-semibold text-slate-100">
-              {analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
-            </p>
+      {isTopBand ? (
+        <section className="space-y-2 rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-3 shadow">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-200">
+            Top Band
+          </p>
+          <p className="text-sm text-slate-100">
+            Your score is in the top band. Generate your application package now.
+          </p>
+          <div className="flex justify-start">
+            <FormButton onClick={handleGenerateMyApplication} disabled={!canRunTopBandGeneration}>
+              {(resumeGenerating || coverGenerating) ? "Generating..." : "Generate My Application"}
+            </FormButton>
           </div>
-        </div>
-        <div className="space-y-3 rounded-xl border border-white/10 bg-slate-900/40 p-3">
-          <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
-          {evidenceSummaryBullets.length ? (
-            <ul className="space-y-1 text-sm text-slate-200">
-              {evidenceSummaryBullets.map((bullet) => (
-                <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-slate-300">
-              Role analysis evidence will appear here after loading context from Results.
-            </p>
-          )}
-          <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-            <summary className="cursor-pointer text-sm font-medium text-slate-300">
-              View full baseline evidence
-            </summary>
-            <p className="mt-3 text-sm text-slate-300">{fullBaselineEvidence}</p>
-          </details>
-        </div>
-      </section>
-
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
-          Role Positioning
-        </h2>
-        <label className="flex flex-col gap-2 text-sm text-slate-400">
-          Resume Focus
-          <span className="text-sm text-slate-200">Recommended: Leadership emphasis</span>
-          <select
-            className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
-            value={resumeFocus}
-            onChange={(event) => setResumeFocus(event.target.value as ResumeFocusOption)}
-          >
-            {resumeFocusDefinitions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3 text-sm text-slate-300">
-          {resumeFocusDefinitions.map((option) => (
-            <p key={`focus-def-${option.value}`}>
-              <span className="font-semibold text-slate-100">{option.label}:</span> {option.definition}{" "}
-              {option.value === recommendedResumeFocus ? (
-                <span className="font-semibold text-amber-200">Recommended for this role.</span>
-              ) : option.value === "Technical Depth" ? (
-                <span className="font-semibold text-slate-400">Optional.</span>
-              ) : null}
-            </p>
-          ))}
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section
         ref={(node) => {
           generationSectionRef.current = node;
         }}
-        className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow"
+        className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1459,9 +1469,11 @@ export default function StudioPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
-              {resumeGenerating ? "Generating..." : "Generate Resume"}
-            </FormButton>
+            {!isTopBand && !resumeNeedsBaselineDetail ? (
+              <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
+                {resumeGenerating ? "Generating..." : "Generate Resume"}
+              </FormButton>
+            ) : null}
             {showResumeDownloadActions ? (
               <>
                 <FormButton
@@ -1506,11 +1518,48 @@ export default function StudioPage() {
             Verification signals detected. Personalization may be limited. See Results for details.
           </p>
         ) : null}
-        {resumeState.error ? (
+        {resumeNeedsBaselineDetail ? (
+          <div className="space-y-3 rounded-2xl border border-sky-300/35 bg-sky-500/10 p-4">
+            <p className="text-sm font-semibold text-slate-100">
+              More detail needed to generate a strong resume
+            </p>
+            <p className="text-sm text-slate-200">
+              We couldn&apos;t find enough verified experience tied to this role to generate strong bullets.
+            </p>
+            <p className="text-sm font-medium text-slate-100">
+              You&apos;re close - a few more details will unlock a strong resume.
+            </p>
+            <p className="text-sm text-slate-300">
+              We only generate content backed by your real experience.
+            </p>
+            {typeof analysisScore === "number" ? (
+              <p className="text-sm text-slate-200">
+                You&apos;re a strong match ({Math.round(analysisScore)}), but we need more detail to reflect that in your resume.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <FormButton onClick={() => void router.push(improveBaselineHref)}>
+                Add detail to generate resume
+              </FormButton>
+              <FormButton
+                variant="secondary"
+                className="text-xs"
+                onClick={() => void handleResumeBasicDraft()}
+                disabled={!canGenerateDocuments || resumeGenerating}
+              >
+                {resumeGenerating ? "Generating..." : "Generate a basic draft anyway"}
+              </FormButton>
+            </div>
+            <details className="rounded-lg border border-white/10 bg-slate-950/40 p-3">
+              <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-slate-400">
+                Technical detail
+              </summary>
+              <p className="mt-2 text-xs text-slate-300">{resumeState.error}</p>
+            </details>
+          </div>
+        ) : resumeState.error ? (
           <Alert intent="error" title="Additional baseline detail required">
-            {resumeState.error.includes("no verified baseline evidence could be assembled")
-              ? "We could not assemble strong role specific bullets from your baseline. You can still generate a draft using your existing verified experience."
-              : resumeState.error}
+            {resumeState.error}
           </Alert>
         ) : null}
         {resumeEditError ? (
@@ -1618,7 +1667,7 @@ export default function StudioPage() {
         )}
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Generate Cover Letter</h2>
@@ -1627,9 +1676,11 @@ export default function StudioPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
-              {coverGenerating ? "Generating..." : "Generate Cover Letter"}
-            </FormButton>
+            {!isTopBand ? (
+              <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
+                {coverGenerating ? "Generating..." : "Generate Cover Letter"}
+              </FormButton>
+            ) : null}
             {showCoverDownloadActions ? (
               <>
                 <FormButton
@@ -1795,6 +1846,83 @@ export default function StudioPage() {
           )
         ) : null}
       </section>
+
+      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Targeting and Evidence
+        </summary>
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-slate-300">
+            <span className="font-semibold text-slate-100">
+              {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} — {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+            </span>
+          </p>
+          <p className="text-sm text-slate-300">
+            Using resume <span className="font-semibold text-slate-100">{sourceResumeLabel}</span>
+          </p>
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Fit Score</p>
+            <p className="text-3xl font-semibold text-slate-100">
+              {analysisLoading ? "Loading..." : analysisScore !== null ? analysisScore.toFixed(1) : "n/a"}
+            </p>
+          </div>
+          <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+            <p className="text-sm font-semibold text-slate-100">Evidence used for this resume</p>
+            {evidenceSummaryBullets.length ? (
+              <ul className="space-y-1 text-sm text-slate-200">
+                {evidenceSummaryBullets.map((bullet) => (
+                  <li key={`evidence-summary-${bullet}`}>• {bullet}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-300">
+                Role analysis evidence will appear here after loading context from Results.
+              </p>
+            )}
+            <details className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-300">
+                View full baseline evidence
+              </summary>
+              <p className="mt-3 text-sm text-slate-300">{fullBaselineEvidence}</p>
+            </details>
+          </div>
+        </div>
+      </details>
+
+      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
+          Role Positioning
+        </summary>
+        <div className="mt-3 space-y-3">
+          <label className="flex flex-col gap-2 text-sm text-slate-400">
+            Resume Focus
+            <span className="text-sm text-slate-200">Recommended: Leadership emphasis</span>
+            <select
+              className="rounded-2xl border border-white/10 bg-slate-800/60 px-3 py-2 text-sm text-white"
+              value={resumeFocus}
+              onChange={(event) => setResumeFocus(event.target.value as ResumeFocusOption)}
+            >
+              {resumeFocusDefinitions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="space-y-2 rounded-xl border border-white/10 bg-slate-900/40 p-3 text-sm text-slate-300">
+            {resumeFocusDefinitions.map((option) => (
+              <p key={`focus-def-${option.value}`}>
+                <span className="font-semibold text-slate-100">{option.label}:</span> {option.definition}{" "}
+                {option.value === recommendedResumeFocus ? (
+                  <span className="font-semibold text-amber-200">Recommended for this role.</span>
+                ) : option.value === "Technical Depth" ? (
+                  <span className="font-semibold text-slate-400">Optional.</span>
+                ) : null}
+              </p>
+            ))}
+          </div>
+        </div>
+      </details>
 
       {selectedBaselineId && selectedBaselineVersionId ? (
         <details className="space-y-4">

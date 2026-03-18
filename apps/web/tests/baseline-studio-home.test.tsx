@@ -124,16 +124,46 @@ describe("BaselineStudioHome", () => {
   });
 
   it("renders strengthening entries from developing signals and supports modal proposal review", async () => {
-    setFetchImplementation(async (input: RequestInfo) => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          sections: [
+            ...(createAnalyzedBaseline("base-1", "resume-1.pdf").sections ?? []),
+            {
+              id: "section-strengthening-1",
+              baselineId: "base-1",
+              sectionType: "OTHER",
+              title: "Approved signal refinements",
+              content: "Change Leadership: I led the escalation process redesign and reduced incident resolution time by 18%.",
+              includePolicy: "always",
+              order: 10,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          originalBaselineScore: 79,
+          latestBaselineScore: 81,
+        });
       }
       if (url.includes("/api/baselines/base-1")) {
         return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
+    setFetchImplementation(fetchMock);
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
     fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
@@ -163,6 +193,13 @@ describe("BaselineStudioHome", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Strengthen Signal" })).not.toBeInTheDocument();
     });
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, requestInit]) =>
+        typeof url === "string" &&
+        url.includes("/api/baselines/base-1/strengthening-additions") &&
+        requestInit?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
   });
 
   it("opens the matching strengthening flow when clicking a developing signal chip", async () => {
@@ -271,6 +308,164 @@ describe("BaselineStudioHome", () => {
     });
 
     expect(screen.getByText(/% original/i)).toBeInTheDocument();
+  });
+
+  it("keeps workbench strength and stored card current value synchronized after update", async () => {
+    setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([
+          {
+            ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]);
+      }
+      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          originalBaselineScore: 79,
+          latestBaselineScore: 81,
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Baseline updated. Strength improved from 79% to 81%."),
+      ).toBeInTheDocument();
+    });
+
+    const strengthSection = screen.getByText("Baseline Strength").closest("section") as HTMLElement;
+    expect(within(strengthSection).getByText("81%")).toBeInTheDocument();
+
+    const recordCard = screen.getByText("resume-1.pdf").closest("article") as HTMLElement;
+    expect(within(recordCard).getByText("81% current")).toBeInTheDocument();
+    expect(within(recordCard).getByText("79% original")).toBeInTheDocument();
+  });
+
+  it("persists submitted detail, renders it back, and confirms unchanged score when recompute is flat", async () => {
+    const persistedRefinementSection = {
+      id: "section-strengthening-2",
+      baselineId: "base-1",
+      sectionType: "OTHER" as const,
+      title: "Approved signal refinements",
+      content: "Change Leadership: Led cross-functional change rollout with adoption milestones.",
+      includePolicy: "always" as const,
+      order: 11,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/analysis/history")) {
+        return createJsonResponse([]);
+      }
+      if (url.includes("/api/baselines/base-1/strengthening-additions") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          sections: [
+            ...(createAnalyzedBaseline("base-1", "resume-1.pdf").sections ?? []),
+            persistedRefinementSection,
+          ],
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      if (url.includes("/api/baselines/base-1")) {
+        return createJsonResponse({
+          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+          sections: [
+            ...(createAnalyzedBaseline("base-1", "resume-1.pdf").sections ?? []),
+            persistedRefinementSection,
+          ],
+          originalBaselineScore: 79,
+          latestBaselineScore: 79,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    setFetchImplementation(fetchMock);
+
+    render(
+      <BaselineStudioHome
+        baselines={[
+          {
+            ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
+            originalBaselineScore: 79,
+            latestBaselineScore: 79,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+    await waitFor(() => {
+      expect(screen.getByText("Baseline Strengthening")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Strengthen This Signal" })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Strengthen Signal" })).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Led cross-functional change rollout with adoption milestones." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate Proposed Update" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Baseline updated. Saved successfully. Strength unchanged at 79%."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("Saved baseline updates")).toBeInTheDocument();
+    const savedUpdatesSection = screen.getByText("Saved baseline updates").closest("article") as HTMLElement;
+    expect(
+      within(savedUpdatesSection).getByText(/Led cross-functional change rollout with adoption milestones\./i),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, requestInit]) =>
+          typeof url === "string" &&
+          url.includes("/api/baselines/base-1/analysis-score") &&
+          requestInit?.method === "PATCH",
+      ),
+    ).toBe(true);
   });
 
   it("renders positive and negative score deltas from baseline history", async () => {

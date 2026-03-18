@@ -24,7 +24,7 @@ describe("Results opportunity map", () => {
         "A focused read on how strong this match is, why it holds up, and what you should do next.",
       ),
     ).toBeNull();
-    expect(screen.getByText("Strong Match")).toBeInTheDocument();
+    expect(screen.getByText("Competitive Match")).toBeInTheDocument();
     expect(screen.getByText("YOUR ADVANTAGE")).toBeInTheDocument();
     expect(screen.getByText("View score analysis")).toBeInTheDocument();
     expect(screen.getByText("Open Resume and Cover Letter Studio")).toBeInTheDocument();
@@ -52,9 +52,9 @@ describe("Results opportunity map", () => {
 
   it("maps score bands to the expected verdict", () => {
     expect(getOpportunityVerdict(92)).toMatchObject({ label: "Prime Opportunity" });
-    expect(getOpportunityVerdict(84)).toMatchObject({ label: "Strong Match" });
     expect(getOpportunityVerdict(75)).toMatchObject({ label: "Competitive Match" });
-    expect(getOpportunityVerdict(64)).toMatchObject({ label: "Possible Fit" });
+    expect(getOpportunityVerdict(84)).toMatchObject({ label: "Competitive Match" });
+    expect(getOpportunityVerdict(64)).toMatchObject({ label: "Low Match" });
     expect(getOpportunityVerdict(52)).toMatchObject({ label: "Low Match" });
   });
 });

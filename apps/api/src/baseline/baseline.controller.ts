@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   Controller,
+  HttpException,
   Get,
+  Logger,
   Patch,
   Param,
   Post,
@@ -40,6 +42,8 @@ const stripBaselineVersioning = <T extends Record<string, unknown>>(baseline: T)
 @Controller('baselines')
 @UseGuards(AuthGuard('jwt'))
 export class BaselineController {
+  private readonly logger = new Logger(BaselineController.name);
+
   constructor(
     private readonly baselineService: BaselineService,
     private readonly baselineVersionService: BaselineVersionService,
@@ -191,6 +195,64 @@ export class BaselineController {
       body.score,
     );
     return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+  }
+
+  @Patch(':id/strengthening-additions')
+  async appendStrengtheningAddition(
+    @Param('id') id: string,
+    @Body() body: { detail?: string },
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    const detail = typeof body?.detail === 'string' ? body.detail : '';
+    const trimmedDetail = detail.trim();
+
+    this.logger.log(
+      `PATCH /baselines/${id}/strengthening-additions userId=${userId ?? 'missing'} detailLength=${trimmedDetail.length}`,
+    );
+
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    if (!trimmedDetail) {
+      this.logger.warn(
+        `PATCH /baselines/${id}/strengthening-additions validation failed: detail is required`,
+      );
+      throw new BadRequestException('detail is required');
+    }
+
+    try {
+      const baseline = await this.baselineService.appendStrengtheningAddition(
+        userId,
+        id,
+        trimmedDetail,
+      );
+      this.logger.log(
+        `PATCH /baselines/${id}/strengthening-additions succeeded baselineId=${baseline.id}`,
+      );
+      return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `PATCH /baselines/${id}/strengthening-additions failed userId=${userId} detailLength=${trimmedDetail.length} message=${message}`,
+        stack,
+      );
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException({
+        error: {
+          code: 'BASELINE_UPDATE_REJECTED',
+          message: `This update couldn't be applied because: ${message}`,
+          details: {
+            baselineId: id,
+            reason: message,
+          },
+        },
+      });
+    }
   }
 
   @Get(':id/versions')

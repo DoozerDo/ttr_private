@@ -8,6 +8,7 @@ import {
   BaselineVersionDto,
 } from "@/lib/baselines";
 import { BaselineBlockPolicyList } from "@/components/BaselineBlockPolicyList";
+import { publishBaselineUpdated } from "@/src/lib/baseline-sync";
 
 type BaselinePolicyEditorProps = {
   baselineId: string;
@@ -159,6 +160,7 @@ export function BaselinePolicyEditor({
       await refreshVersions();
       await loadBlocks(newVersionId);
       setSuccess(true);
+      publishBaselineUpdated({ baselineId, source: "policy" });
     } catch (saveError) {
       setError(
         saveError instanceof Error

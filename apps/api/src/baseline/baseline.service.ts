@@ -781,6 +781,72 @@ return {
     return this.baselineRepository.save(baseline);
   }
 
+  async appendStrengtheningAddition(
+    userId: string,
+    baselineId: string,
+    detail: string,
+  ) {
+    const normalizedDetail = detail.trim();
+    if (!normalizedDetail) {
+      throw new BadRequestException('detail is required');
+    }
+
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      relations: ['sections'],
+      order: { sections: { order: 'ASC' } },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    const sectionTitle = 'Approved signal refinements';
+    const existingSection = (baseline.sections ?? []).find(
+      (section) =>
+        section.sectionType === BaselineSectionType.OTHER &&
+        (section.title ?? '').trim().toLowerCase() === sectionTitle.toLowerCase(),
+    );
+
+    if (existingSection) {
+      const existingContent =
+        typeof existingSection.content === 'string' ? existingSection.content : '';
+      const existingLines = existingContent
+        .split('\n')
+        .map((line) => line.trim().replace(/^[-*\u2022]\s*/, ''))
+        .filter(Boolean);
+      const alreadyPresent = existingLines.some((line) => line === normalizedDetail);
+      if (!alreadyPresent) {
+        existingSection.content = existingContent.trim()
+          ? `${existingContent.trim()}\n${normalizedDetail}`
+          : normalizedDetail;
+        existingSection.updatedAt = new Date();
+        await this.baselineSectionRepository.save(existingSection);
+      }
+    } else {
+      const nextOrder =
+        (baseline.sections ?? []).reduce(
+          (maxOrder, section) => Math.max(maxOrder, section.order ?? 0),
+          -1,
+        ) + 1;
+
+      const newSection = this.baselineSectionRepository.create({
+        baselineId: baseline.id,
+        sectionType: BaselineSectionType.OTHER,
+        title: sectionTitle,
+        content: normalizedDetail,
+        includePolicy: BaselineIncludePolicy.ALWAYS,
+        order: nextOrder,
+      });
+      await this.attachEmbeddingsToSections([newSection]);
+      await this.baselineSectionRepository.save(newSection);
+    }
+
+    baseline.updatedAt = new Date();
+    await this.baselineRepository.save(baseline);
+    return this.getBaselineByIdForUser(baselineId, userId);
+  }
+
   async buildSectionsFromFile(file: Express.Multer.File): Promise<BaselineFileParseResult> {
     const ingestion = await this.baselineIngestionService.ingest(file);
     const insufficientDetails = getInsufficientExtractedTextDetails(ingestion.rawText);

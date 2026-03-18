@@ -544,3 +544,90 @@ describe('BaselineService - score history persistence', () => {
     expect(result.lastAnalyzedAt.getTime()).toBeGreaterThanOrEqual(firstAnalyzedAt.getTime());
   });
 });
+
+describe('BaselineService - strengthening additions', () => {
+  let service: BaselineService;
+  let baselineRepository: any;
+  let baselineSectionRepository: any;
+
+  beforeEach(async () => {
+    baselineRepository = {
+      findOne: jest.fn(),
+      save: jest.fn(async (value: any) => value),
+      manager: {
+        transaction: jest.fn(async (cb: any) =>
+          cb({
+            create: jest.fn((_: any, payload: any) => payload),
+            save: jest.fn(async (value: any) => value),
+            delete: jest.fn(),
+          }),
+        ),
+      },
+    };
+
+    baselineSectionRepository = {
+      find: jest.fn(),
+      save: jest.fn(async (value: any) => value),
+      create: jest.fn((payload: any) => payload),
+    };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        BaselineService,
+        { provide: getRepositoryToken(Baseline), useValue: baselineRepository },
+        { provide: getRepositoryToken(BaselineSection), useValue: baselineSectionRepository },
+        { provide: getRepositoryToken(BaselineVersion), useValue: { findOne: jest.fn(), find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineBlockPolicy), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(BaselineParsed), useValue: { findOne: jest.fn() } },
+        {
+          provide: BaselineIngestionService,
+          useValue: {
+            ingest: jest.fn(),
+            ingestFromText: jest.fn(),
+          },
+        },
+        {
+          provide: EmbeddingService,
+          useValue: {
+            embedText: jest.fn().mockResolvedValue([]),
+            embedTexts: jest.fn().mockResolvedValue([]),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(BaselineService);
+  });
+
+  it('appends approved detail when existing refinement section content is null', async () => {
+    baselineRepository.findOne.mockResolvedValue({
+      id: 'b-1',
+      userId: 'user-1',
+      sections: [
+        {
+          id: 'section-1',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.OTHER,
+          title: 'Approved signal refinements',
+          content: null,
+          includePolicy: BaselineIncludePolicy.ALWAYS,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+
+    jest.spyOn(service, 'getBaselineByIdForUser').mockResolvedValue({ id: 'b-1' } as Baseline);
+
+    await expect(
+      service.appendStrengtheningAddition('user-1', 'b-1', 'Added leadership evidence'),
+    ).resolves.toBeDefined();
+
+    expect(baselineSectionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'Added leadership evidence',
+      }),
+    );
+  });
+});

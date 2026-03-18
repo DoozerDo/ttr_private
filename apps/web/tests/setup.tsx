@@ -19,6 +19,8 @@ const mockSearchParams = vi.fn<[], MockSearchParams>(() => ({
 }));
 
 export const mockRouterPush = vi.fn();
+export const mockRouterReplace = vi.fn();
+export const mockRouterRefresh = vi.fn();
 export const mockPathname = vi.fn(() => "/");
 export const mockUseParams = vi.fn(() => ({}));
 export const mockNotFound = vi.fn();
@@ -70,6 +72,8 @@ vi.mock("next/link", () => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: mockRouterPush,
+    replace: mockRouterReplace,
+    refresh: mockRouterRefresh,
   }),
   useSearchParams: () => mockSearchParams(),
   usePathname: () => mockPathname(),
@@ -159,6 +163,8 @@ export function setFetchImplementation(custom: typeof defaultFetch) {
 afterEach(() => {
   defaultFetch.mockClear();
   mockRouterPush.mockClear();
+  mockRouterReplace.mockClear();
+  mockRouterRefresh.mockClear();
   mockPathname.mockClear();
   mockPathname.mockReturnValue("/");
   resetSearchParams();

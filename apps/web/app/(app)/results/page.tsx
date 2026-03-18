@@ -23,6 +23,7 @@ import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
+import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
 type FitDimensionScores = {
   experienceAlignment?: number;
@@ -255,7 +256,6 @@ const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
   change_leadership_and_customer_advocacy: "Change and Customer Impact",
 };
 
-const LOW_EXPERIENCE_THRESHOLD = 70;
 const COMPATIBILITY_ANALYSIS_ERROR =
   "We couldn't complete the compatibility analysis. Please try running the analysis again.";
 
@@ -276,28 +276,17 @@ export function getOpportunityVerdict(score?: number | null): {
       explanation: "Run an analysis to see how strong this role looks for you.",
     };
   }
-  if (score >= 90) {
+  const band = getScoreBand(score);
+  if (band === ScoreBand.TOP) {
     return {
       label: "Prime Opportunity",
       explanation: "You are exceptionally well aligned for this role.",
     };
   }
-  if (score >= 80) {
-    return {
-      label: "Strong Match",
-      explanation: "You are highly competitive for this role.",
-    };
-  }
-  if (score >= 70) {
+  if (band === ScoreBand.MID) {
     return {
       label: "Competitive Match",
       explanation: "You have a realistic shot if you tailor carefully.",
-    };
-  }
-  if (score >= 60) {
-    return {
-      label: "Possible Fit",
-      explanation: "You may need stronger positioning before applying.",
     };
   }
   return {
@@ -381,15 +370,15 @@ export function OpportunityMapSection({
   scoreAnalysisHref,
 }: OpportunityMapSectionProps) {
   return (
-    <section className="overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-7 shadow-[0_26px_90px_rgba(2,6,23,0.38)]">
-      <div className="flex flex-col gap-7">
-        <header className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-start sm:justify-between">
+    <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-5 shadow-[0_20px_70px_rgba(2,6,23,0.34)]">
+      <div className="flex flex-col gap-5">
+        <header className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-3">
             <div className="flex items-end gap-4">
-              <p className="text-[76px] font-black leading-none tracking-[-0.07em] text-white">
+              <p className="text-[60px] font-black leading-none tracking-[-0.06em] text-white">
                 {typeof score === "number" ? Math.round(score) : "--"}
               </p>
-              <div className="space-y-1 pb-2">
+              <div className="space-y-1 pb-1">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">
                   Match strength
                 </p>
@@ -424,7 +413,7 @@ export function OpportunityMapSection({
         </header>
 
         {advantageSignals.length ? (
-          <article className="rounded-[26px] border border-white/10 bg-slate-950/38 p-6">
+          <article className="rounded-[22px] border border-white/10 bg-slate-950/38 p-4">
             <h3 className="text-xl font-semibold uppercase tracking-[0.16em] text-slate-100">
               YOUR ADVANTAGE
             </h3>
@@ -987,6 +976,7 @@ export default function ResultsPage() {
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   const lastAssessmentHydrationAttempted = useRef(false);
   const trackedCompletionKeysRef = useRef<Set<string>>(new Set());
+  const autoLoadPairRef = useRef<string | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1090,9 +1080,13 @@ export default function ResultsPage() {
     () => getDecisionFromFitScore(activeScore),
     [activeScore],
   );
+  const scoreBand = useMemo(
+    () => (typeof activeScore === "number" ? getScoreBand(activeScore) : null),
+    [activeScore],
+  );
 
-  const isLowScore = typeof activeScore === "number" && activeScore < LOW_EXPERIENCE_THRESHOLD;
-  const isExceptionalScore = typeof activeScore === "number" && activeScore >= 90;
+  const isLowScore = scoreBand === ScoreBand.LOW;
+  const isExceptionalScore = scoreBand === ScoreBand.TOP;
   const strategicStrengths = useMemo(() => {
     const fromNarrative = Array.isArray(latest?.narrative?.strengths) ? latest.narrative.strengths : [];
     const fromLatest = Array.isArray(latest?.strengths) ? latest.strengths : [];
@@ -1197,22 +1191,36 @@ export default function ResultsPage() {
   }, [scoringRubric]);
   const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
   const primaryResultsCta = useMemo(() => {
-    if (typeof activeScore !== "number") return null;
-
-    if (activeScore >= 70) {
+    if (scoreBand === ScoreBand.TOP) {
       return {
-        label: "Open Resume and Cover Letter Studio",
+        label: "Generate My Application",
         href: studioHref,
         disabled: !canOpenStudio,
       };
     }
 
+    if (scoreBand === ScoreBand.MID) {
+      return {
+        label: "Strengthen this match in Fit Review",
+        href: fitReviewPath,
+        disabled: false,
+      };
+    }
+
+    if (scoreBand === ScoreBand.LOW) {
+      return {
+        label: "Strengthen this match in Fit Review",
+        href: fitReviewPath,
+        disabled: false,
+      };
+    }
+
     return {
-      label: "Strengthen this match in Fit Review",
-      href: fitReviewPath,
-      disabled: false,
+      label: "Open Resume and Cover Letter Studio",
+      href: studioHref,
+      disabled: !canOpenStudio,
     };
-  }, [activeScore, canOpenStudio, fitReviewPath, studioHref]);
+  }, [scoreBand, canOpenStudio, fitReviewPath, studioHref]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -1428,6 +1436,10 @@ export default function ResultsPage() {
   }, [keyTermDetails]);
 
   const debugMode = debugUiEnabled;
+  const hasJobBaselineContext = useMemo(
+    () => Boolean(jobId.trim() && baselineId.trim()),
+    [jobId, baselineId],
+  );
 
   const latestStatusMessage = useMemo(() => {
     if (loadingLatest) return "Loading latest analysis...";
@@ -1509,19 +1521,29 @@ export default function ResultsPage() {
     ],
   );
 
-  async function loadLatest() {
+  async function loadLatest(options?: {
+    jobIdOverride?: string;
+    baselineIdOverride?: string;
+    allowCreate?: boolean;
+    interactive?: boolean;
+  }) {
     if (loadingLatest) return;
-    if (!jobId) {
+    const targetJobId = options?.jobIdOverride?.trim() || jobId.trim();
+    const targetBaselineId = options?.baselineIdOverride?.trim() || baselineId.trim();
+    const allowCreate = options?.allowCreate ?? false;
+    const interactive = options?.interactive ?? false;
+
+    if (!targetJobId) {
       setError("Job ID is required to load analysis.");
       return;
     }
-    if (!baselineId) {
+    if (!targetBaselineId) {
       setError("Baseline ID is required to load analysis.");
       return;
     }
 
-    const hasManualSelection = baselineId.trim().length > 0 || jobId.trim().length > 0;
-    const shouldConfirm = analysisSource === "manual" && hasManualSelection;
+    const hasManualSelection = targetBaselineId.length > 0 || targetJobId.length > 0;
+    const shouldConfirm = interactive && analysisSource === "manual" && hasManualSelection;
 
     if (shouldConfirm) {
       const proceed =
@@ -1540,11 +1562,58 @@ export default function ResultsPage() {
 
     try {
       const res = await fetch(
-        `/api/analysis/job/${encodeURIComponent(jobId)}/baseline/${encodeURIComponent(baselineId)}/latest`,
+        `/api/analysis/job/${encodeURIComponent(targetJobId)}/baseline/${encodeURIComponent(targetBaselineId)}/latest`,
         { cache: "no-store" },
       );
 
       const payload = await readResponsePayload(res.clone());
+
+      if (res.status === 404 && allowCreate) {
+        const runResponse = await fetch("/api/analysis/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            jobId: targetJobId,
+            baselineId: targetBaselineId,
+          }),
+        });
+
+        const runPayload = await readResponsePayload(runResponse.clone());
+        if (!runResponse.ok) {
+          const compliance = parseComplianceError({
+            status: runResponse.status,
+            payload: runPayload,
+          });
+          if (compliance) {
+            setComplianceError(compliance);
+            return;
+          }
+          const message = formatErrorMessage(runPayload, "Unable to run compatibility analysis.");
+          throw new Error(message);
+        }
+
+        const runObject =
+          runPayload && typeof runPayload === "object"
+            ? (runPayload as Record<string, unknown>)
+            : null;
+        const createdAssessmentId =
+          (typeof runObject?.assessmentId === "string" ? runObject.assessmentId : null) ??
+          (typeof runObject?.id === "string" ? runObject.id : null);
+
+        if (!createdAssessmentId) {
+          throw new Error("Compatibility analysis run did not return an assessment ID.");
+        }
+
+        const params = new URLSearchParams(searchParams?.toString() ?? "");
+        params.delete("jobId");
+        params.delete("baselineId");
+        params.set("assessmentId", createdAssessmentId);
+        const query = params.toString();
+        const path = query ? `/results?${query}` : "/results";
+        await router.replace(path);
+        return;
+      }
 
       if (!res.ok) {
         const compliance = parseComplianceError({ status: res.status, payload });
@@ -1591,12 +1660,37 @@ export default function ResultsPage() {
   useEffect(() => {
     const job = searchParams?.get("jobId");
     if (job) setManualJobId(job);
+    const baseline = searchParams?.get("baselineId");
+    if (baseline) setManualBaselineId(baseline);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    if (runIdentifier) return;
+    const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
+    const queryBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
+    if (!queryJobId || !queryBaselineId) return;
+
+    const pairKey = `${queryJobId}:${queryBaselineId}`;
+    if (autoLoadPairRef.current === pairKey) return;
+    autoLoadPairRef.current = pairKey;
+
+    setManualJobId(queryJobId);
+    setManualBaselineId(queryBaselineId);
+    void loadLatest({
+      jobIdOverride: queryJobId,
+      baselineIdOverride: queryBaselineId,
+      allowCreate: true,
+      interactive: false,
+    });
+  }, [runIdentifier, searchParams]);
+
+  useEffect(() => {
     if (runIdentifier || lastAssessmentHydrationAttempted.current) return;
     if (typeof window === "undefined") return;
+    const queryJobId = searchParams?.get("jobId")?.trim() ?? "";
+    const queryBaselineId = searchParams?.get("baselineId")?.trim() ?? "";
+    if (queryJobId && queryBaselineId) return;
 
     lastAssessmentHydrationAttempted.current = true;
 
@@ -1632,7 +1726,7 @@ export default function ResultsPage() {
     };
 
     void hydrateLastAssessment();
-  }, [runIdentifier, router]);
+  }, [runIdentifier, router, searchParams]);
 
   useEffect(() => {
     if (!latest || typeof activeScore !== "number") {
@@ -1659,34 +1753,38 @@ export default function ResultsPage() {
 
   return (
     <PageShell className="results-page-theme">
-      <div className="space-y-8">
+      <div className="space-y-5">
         <PageHeader
           title="Results"
           description="Review your Compatibility Score and take the next step."
         />
 
-        <section className="space-y-6 rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-6 shadow-[0_16px_50px_rgba(2,6,23,0.18)]">
+        <section className="space-y-4 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4 shadow-[0_14px_40px_rgba(2,6,23,0.16)]">
           {!latest ? (
             <EmptyState
               title="No compatibility analysis yet"
               body={
                 loadingLatest
                   ? "Preparing compatibility report…"
-                  : "Load the latest Compatibility Analysis to reveal your Fit Verdict and Compatibility Score."
+                  : hasJobBaselineContext
+                    ? "Preparing your Compatibility Analysis automatically…"
+                    : "Load the latest Compatibility Analysis to reveal your Fit Verdict and Compatibility Score."
               }
               cta={
-                <FormButton
-                  variant="ghost"
-                  onClick={() => void loadLatest()}
-                  disabled={!jobId || loading || loadingLatest}
-                >
-                  {loadingLatest ? "Preparing report..." : "Load Compatibility Analysis"}
-                </FormButton>
+                !hasJobBaselineContext ? (
+                  <FormButton
+                    variant="ghost"
+                    onClick={() => void loadLatest({ interactive: true, allowCreate: true })}
+                    disabled={!jobId || !baselineId || loading || loadingLatest}
+                  >
+                    {loadingLatest ? "Preparing report..." : "Load Compatibility Analysis"}
+                  </FormButton>
+                ) : null
               }
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-7">
+            <div className="space-y-4">
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_340px] xl:items-start">
                 <div className="space-y-6">
                   <OpportunityMapSection
@@ -1707,11 +1805,13 @@ export default function ResultsPage() {
                 </div>
 
                 <div className="space-y-4 xl:sticky xl:top-6">
-                  <FitImprovementOpportunities
-                    assessmentId={latest.assessmentId ?? null}
-                    actionHref={fitReviewPath}
-                    compact
-                  />
+                  {scoreBand !== ScoreBand.TOP ? (
+                    <FitImprovementOpportunities
+                      assessmentId={latest.assessmentId ?? null}
+                      actionHref={fitReviewPath}
+                      compact
+                    />
+                  ) : null}
                   <CareerAlignmentProgress showProgressSection={false} />
                 </div>
               </div>

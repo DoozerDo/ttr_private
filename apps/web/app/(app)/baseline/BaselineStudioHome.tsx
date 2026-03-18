@@ -31,6 +31,7 @@ import {
   type ProfessionalSignalId,
   type SignalGraphViewModel,
 } from "@/lib/professionalSignals";
+import { publishBaselineUpdated, subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
 import { BETA_BASELINE_UPLOAD_LIMIT } from "@/src/features/baseline/constants";
 import { CareerGravity } from "../results/components/CareerGravity";
 
@@ -108,6 +109,19 @@ function deriveBaselineStrengthPercent(
   if (!scores.length) return 24;
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
   return Math.max(28, Math.min(91, Math.round(average)));
+}
+
+function buildBaselineUpdatedMessage(previousScore: number | null, nextScore: number) {
+  if (previousScore === null) {
+    return `Baseline updated. Saved successfully. Strength is ${nextScore}%.`;
+  }
+  if (previousScore === nextScore) {
+    return `Baseline updated. Saved successfully. Strength unchanged at ${nextScore}%.`;
+  }
+  if (nextScore > previousScore) {
+    return `Baseline updated. Strength improved from ${previousScore}% to ${nextScore}%.`;
+  }
+  return `Baseline updated. Strength changed from ${previousScore}% to ${nextScore}%.`;
 }
 
 function SignalPill({ label, tone }: { label: string; tone: "strong" | "developing" }) {
@@ -200,31 +214,23 @@ function createBaselineUpdateProposal(signalLabel: string, answer: string) {
   return `${signalLabel}: ${answer.trim()}`;
 }
 
-function withApprovedSignalAdditions(
-  baseline: BaselineDto | null,
-  approvedAdditions: string[],
-): BaselineDto | null {
-  if (!baseline || approvedAdditions.length === 0) {
-    return baseline;
-  }
+function extractApprovedSignalAdditions(baseline: BaselineDto | null): string[] {
+  if (!baseline?.sections?.length) return [];
+  const refinementSections = baseline.sections
+    .filter((section) => (section.title ?? "").trim().toLowerCase() === "approved signal refinements")
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  if (!refinementSections.length) return [];
 
-  return {
-    ...baseline,
-    sections: [
-      ...(baseline.sections ?? []),
-      {
-        id: `approved-additions-${baseline.id}`,
-        baselineId: baseline.id,
-        sectionType: "SUMMARY",
-        title: "Approved signal refinements",
-        content: approvedAdditions.join("\n"),
-        includePolicy: "always",
-        order: (baseline.sections?.length ?? 0) + 1,
-        createdAt: baseline.updatedAt,
-        updatedAt: baseline.updatedAt,
-      },
-    ],
-  };
+  const lines: string[] = [];
+  for (const section of refinementSections) {
+    const content = typeof section.content === "string" ? section.content : "";
+    content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => lines.push(line.replace(/^[-*•]\s*/, "")));
+  }
+  return lines;
 }
 
 export function BaselineStudioHome({ baselines, libraryMode = "editable" }: BaselineStudioHomeProps) {
@@ -236,19 +242,19 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const [analysisStatusByBaselineId, setAnalysisStatusByBaselineId] = useState<
     Record<string, ResumeAnalysisStatus>
   >({});
-  const [approvedSignalAdditionsByBaselineId, setApprovedSignalAdditionsByBaselineId] = useState<
-    Record<string, string[]>
-  >({});
   const [activeStrengtheningSignalId, setActiveStrengtheningSignalId] =
     useState<ProfessionalSignalId | null>(null);
   const [strengtheningAnswer, setStrengtheningAnswer] = useState("");
   const [pendingStrengtheningProposal, setPendingStrengtheningProposal] = useState<string | null>(
     null,
   );
+  const [savingStrengtheningProposal, setSavingStrengtheningProposal] = useState(false);
+  const [strengtheningSaveError, setStrengtheningSaveError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null);
   const [highlightedBaselineId, setHighlightedBaselineId] = useState<string | null>(null);
   const [postUploadCtaBaselineId, setPostUploadCtaBaselineId] = useState<string | null>(null);
+  const [baselineUpdatedNotice, setBaselineUpdatedNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [insufficientTextError, setInsufficientTextError] =
@@ -301,20 +307,28 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     : "not_analyzed";
 
   const approvedSignalAdditions = useMemo(
-    () => (primaryBaselineId ? approvedSignalAdditionsByBaselineId[primaryBaselineId] ?? [] : []),
-    [approvedSignalAdditionsByBaselineId, primaryBaselineId],
-  );
-  const effectivePrimaryBaseline = useMemo(
-    () => withApprovedSignalAdditions(primaryBaseline, approvedSignalAdditions),
-    [approvedSignalAdditions, primaryBaseline],
+    () => extractApprovedSignalAdditions(primaryBaseline),
+    [primaryBaseline],
   );
   const signalGraph = useMemo(
-    () => buildBaselineSignalGraph({ baseline: effectivePrimaryBaseline }),
-    [effectivePrimaryBaseline],
+    () => buildBaselineSignalGraph({ baseline: primaryBaseline }),
+    [primaryBaseline],
+  );
+  const primaryScoreHistoryViewModel = useMemo(
+    () =>
+      toBaselineScoreHistoryCardViewModel(
+        buildBaselineScoreHistoryFromBaseline(
+          primaryBaselineId ? baselineDetails[primaryBaselineId] ?? primaryBaseline : primaryBaseline,
+        ),
+      ),
+    [baselineDetails, primaryBaseline, primaryBaselineId],
   );
   const baselineStrengthPercent = useMemo(
-    () => deriveBaselineStrengthPercent(effectivePrimaryBaseline, signalGraph),
-    [effectivePrimaryBaseline, signalGraph],
+    () =>
+      typeof primaryScoreHistoryViewModel.currentScore === "number"
+        ? primaryScoreHistoryViewModel.currentScore
+        : deriveBaselineStrengthPercent(primaryBaseline, signalGraph),
+    [primaryBaseline, primaryScoreHistoryViewModel.currentScore, signalGraph],
   );
   const gravitySummary = useMemo(
     () => signalGraph.strongSignals.slice(0, 3).map((signal) => signal.label).join(", "),
@@ -323,7 +337,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   const certification = useMemo(
     () =>
       buildBaselineCertification({
-        baseline: effectivePrimaryBaseline,
+        baseline: primaryBaseline,
         signalGraph,
         baselineStrengthPercent,
         analysisStatus: primaryAnalysisStatus,
@@ -334,7 +348,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     [
       analysisRunsByBaselineId,
       baselineStrengthPercent,
-      effectivePrimaryBaseline,
+      primaryBaseline,
       primaryAnalysisStatus,
       primaryBaselineId,
       signalGraph,
@@ -435,6 +449,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     setActiveStrengtheningSignalId(null);
     setStrengtheningAnswer("");
     setPendingStrengtheningProposal(null);
+    setStrengtheningSaveError(null);
   }, []);
 
   const openStrengtheningModal = useCallback((signalId: ProfessionalSignalId) => {
@@ -453,17 +468,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     }
     setPendingStrengtheningProposal(createBaselineUpdateProposal(activeStrengtheningSignal.label, trimmed));
   }, [activeStrengtheningSignal, strengtheningAnswer]);
-
-  const handleApproveStrengtheningProposal = useCallback(() => {
-    if (!primaryBaselineId || !pendingStrengtheningProposal) {
-      return;
-    }
-    setApprovedSignalAdditionsByBaselineId((current) => ({
-      ...current,
-      [primaryBaselineId]: [...(current[primaryBaselineId] ?? []), pendingStrengtheningProposal],
-    }));
-    closeStrengtheningModal();
-  }, [closeStrengtheningModal, pendingStrengtheningProposal, primaryBaselineId]);
 
   const fetchBaselineDetails = useCallback(
     async (baselineId: string) => {
@@ -493,6 +497,35 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         if (hasAnalysis) {
           const scoredGraph = buildBaselineSignalGraph({ baseline: payload });
           const scoredPercent = deriveBaselineStrengthPercent(payload, scoredGraph);
+          const previousScore = (() => {
+            const existingRecord =
+              baselineDetails[baselineId] ?? baselineList.find((entry) => entry.id === baselineId) ?? null;
+            if (existingRecord && typeof existingRecord.latestBaselineScore === "number") {
+              return existingRecord.latestBaselineScore;
+            }
+            return null;
+          })();
+          const existingOriginal = (() => {
+            const existingRecord =
+              baselineDetails[baselineId] ?? baselineList.find((entry) => entry.id === baselineId) ?? null;
+            if (existingRecord && typeof existingRecord.originalBaselineScore === "number") {
+              return existingRecord.originalBaselineScore;
+            }
+            return null;
+          })();
+          const optimisticOriginalScore = existingOriginal ?? scoredPercent;
+          const optimisticBaseline = {
+            ...payload,
+            originalBaselineScore: optimisticOriginalScore,
+            latestBaselineScore: scoredPercent,
+          } as BaselineDto;
+
+          setBaselineDetails((current) => ({ ...current, [baselineId]: optimisticBaseline }));
+          setBaselineList((current) =>
+            current.map((item) => (item.id === baselineId ? { ...item, ...optimisticBaseline } : item)),
+          );
+          setBaselineUpdatedNotice(buildBaselineUpdatedMessage(previousScore, scoredPercent));
+
           setAnalysisRunsByBaselineId((current) => ({
             ...current,
             [baselineId]: (current[baselineId] ?? 0) + 1,
@@ -512,6 +545,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
             if (scoreResponse.ok) {
               const persistedBaseline = (await scoreResponse.json()) as BaselineDto;
+              const persistedLatestScore =
+                typeof persistedBaseline.latestBaselineScore === "number"
+                  ? persistedBaseline.latestBaselineScore
+                  : scoredPercent;
               setBaselineDetails((current) => ({
                 ...current,
                 [baselineId]: { ...payload, ...persistedBaseline, sections: payload.sections },
@@ -520,6 +557,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 current.map((item) =>
                   item.id === baselineId ? { ...item, ...persistedBaseline } : item,
                 ),
+              );
+              setBaselineUpdatedNotice(
+                buildBaselineUpdatedMessage(previousScore, persistedLatestScore),
               );
             }
           } catch (scorePersistenceError) {
@@ -545,8 +585,60 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setLoadingBaselineId(null);
       }
     },
-    [scrollToAnalysis],
+    [baselineDetails, baselineList, scrollToAnalysis],
   );
+
+  const handleApproveStrengtheningProposal = useCallback(async () => {
+    if (!primaryBaselineId || !pendingStrengtheningProposal) {
+      return;
+    }
+    setSavingStrengtheningProposal(true);
+    setStrengtheningSaveError(null);
+
+    try {
+      const response = await fetch(
+        `/api/baselines/${encodeURIComponent(primaryBaselineId)}/strengthening-additions`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ detail: pendingStrengtheningProposal }),
+        },
+      );
+
+      const payload = await readResponsePayload(response);
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          typeof (payload as Record<string, unknown>).message === "string"
+            ? ((payload as Record<string, unknown>).message as string)
+            : "Unable to save this baseline update right now.";
+        throw new Error(message);
+      }
+
+      const persistedBaseline = payload as BaselineDto;
+      setBaselineDetails((current) => ({ ...current, [primaryBaselineId]: persistedBaseline }));
+      setBaselineList((current) =>
+        current.map((item) => (item.id === primaryBaselineId ? { ...item, ...persistedBaseline } : item)),
+      );
+
+      publishBaselineUpdated({ baselineId: primaryBaselineId, source: "baseline" });
+      closeStrengtheningModal();
+
+      try {
+        await fetchBaselineDetails(primaryBaselineId);
+      } catch {
+        setBaselineUpdatedNotice("Baseline updated. Saved successfully. Recompute unavailable right now.");
+      }
+    } catch (saveError) {
+      const message =
+        saveError instanceof Error ? saveError.message : "Unable to save this baseline update right now.";
+      setStrengtheningSaveError(message);
+    } finally {
+      setSavingStrengtheningProposal(false);
+    }
+  }, [closeStrengtheningModal, fetchBaselineDetails, pendingStrengtheningProposal, primaryBaselineId]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -755,6 +847,42 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     },
     [handleUpload],
   );
+
+  useEffect(() => {
+    const unsubscribe = subscribeBaselineUpdated(async (detail) => {
+      try {
+        const latestBaselines = await refreshBaselineLibrary();
+        const targetBaselineId = detail.baselineId?.trim() ?? "";
+        const hasTarget = targetBaselineId
+          ? latestBaselines.some((baseline) => baseline.id === targetBaselineId)
+          : false;
+        const fallbackBaselineId =
+          latestBaselines.find((baseline) => baseline.status !== "ARCHIVED")?.id ?? null;
+
+        if (hasTarget && targetBaselineId) {
+          await fetchBaselineDetails(targetBaselineId);
+        } else if (
+          primaryBaselineId &&
+          latestBaselines.some((baseline) => baseline.id === primaryBaselineId)
+        ) {
+          await fetchBaselineDetails(primaryBaselineId);
+        } else if (fallbackBaselineId) {
+          await fetchBaselineDetails(fallbackBaselineId);
+        }
+
+      } catch (syncError) {
+        console.error("Unable to synchronize baseline updates", syncError);
+      }
+    });
+
+    return unsubscribe;
+  }, [fetchBaselineDetails, primaryBaselineId, refreshBaselineLibrary]);
+
+  useEffect(() => {
+    if (!baselineUpdatedNotice) return;
+    const timer = window.setTimeout(() => setBaselineUpdatedNotice(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [baselineUpdatedNotice]);
 
   return (
     <div className="mx-auto w-full max-w-[1600px] px-6 2xl:px-10">
@@ -1051,6 +1179,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
                   {duplicateError ? <p className="text-sm text-slate-300">{duplicateError}</p> : null}
                   {insufficientTextError ? <InsufficientExtractedText error={insufficientTextError} /> : null}
+                  {baselineUpdatedNotice ? (
+                    <Alert intent="success" title="Baseline updated">
+                      <p className="text-sm text-current">{baselineUpdatedNotice}</p>
+                    </Alert>
+                  ) : null}
                   {error ? (
                     <Alert intent="error" title="Upload issue">
                       <p className="text-sm text-current">{error}</p>
@@ -1209,6 +1342,18 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                   </h2>
                 </header>
                 <div className="mt-5 space-y-4">
+                  {approvedSignalAdditions.length ? (
+                    <article className="rounded-[20px] border border-cyan-300/20 bg-cyan-400/[0.08] p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100/80">
+                        Saved baseline updates
+                      </p>
+                      <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-100">
+                        {approvedSignalAdditions.slice(-4).reverse().map((entry, index) => (
+                          <li key={`${entry}-${index}`}>• {entry}</li>
+                        ))}
+                      </ul>
+                    </article>
+                  ) : null}
                   {signalGraph.developingSignals.length === 0 ? (
                     <article className="rounded-[20px] border border-emerald-300/15 bg-emerald-400/[0.08] p-4">
                       <p className="text-base font-semibold text-emerald-100">
@@ -1326,19 +1471,26 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     </p>
                   </div>
                 ) : null}
+                {strengtheningSaveError ? (
+                  <Alert intent="error" title="Unable to save update">
+                    <p className="text-sm text-current">{strengtheningSaveError}</p>
+                  </Alert>
+                ) : null}
 
                 <div className="flex flex-wrap gap-3">
                   {!pendingStrengtheningProposal ? (
                     <FormButton
                       onClick={handleGenerateStrengtheningProposal}
-                      disabled={!strengtheningAnswer.trim()}
+                      disabled={!strengtheningAnswer.trim() || savingStrengtheningProposal}
                     >
                       Generate Proposed Update
                     </FormButton>
                   ) : (
-                    <FormButton onClick={handleApproveStrengtheningProposal}>Approve and Apply</FormButton>
+                    <FormButton onClick={() => void handleApproveStrengtheningProposal()} disabled={savingStrengtheningProposal}>
+                      {savingStrengtheningProposal ? "Saving..." : "Approve and Apply"}
+                    </FormButton>
                   )}
-                  <FormButton variant="ghost" onClick={closeStrengtheningModal}>
+                  <FormButton variant="ghost" onClick={closeStrengtheningModal} disabled={savingStrengtheningProposal}>
                     {pendingStrengtheningProposal ? "Cancel" : "Close"}
                   </FormButton>
                 </div>
