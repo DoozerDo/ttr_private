@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { requestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { initSentry } from './common/sentry';
 
 type ExpressLayer = {
   name?: string;
@@ -83,6 +84,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  initSentry(config);
 
   app.use(requestLoggerMiddleware);
   app.use(cookieParser());

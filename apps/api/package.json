@@ -33,6 +33,7 @@
     "@nestjs/passport": "^11.0.0",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/typeorm": "^11.0.0",
+    "@sentry/node": "^10.44.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
     "baseline-browser-mapping": "2.9.14",

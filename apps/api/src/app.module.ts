@@ -26,6 +26,7 @@ import { AccessGuard } from './auth/guards/access.guard';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PreviewModule } from './preview/preview.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { PreviewModule } from './preview/preview.module';
     StarStoriesModule,
     AnalyticsModule,
     PreviewModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [

@@ -7,3 +7,7 @@
 - The same build also logs `[baseline-browser-mapping] The data in this module is over two months old`.
 - The message comes from Next.js' dependency on `baseline-browser-mapping` (under `node_modules/baseline-browser-mapping`) warning that its static dataset is older than two months; it appears before the downstream build error triggered by the workspace root issue.
 - The warning is informational only; Next still runs using the packaged data, so no additional work is needed unless we deliberately update that dependency.
+
+# API lockfile drift
+- After editing `apps/api/package.json` (or any dependency referenced by the backend), regenerate the workspace-local lockfile with `cd apps/api && npm install --no-workspaces --package-lock-only` and commit the resulting `apps/api/package-lock.json`.
+- Verify the Docker workflow by rerunning `docker build -f infra/docker/api.Dockerfile ...` locally so the lockfile stays compatible with the copy step that feeds `npm ci`.

@@ -9,6 +9,10 @@ import { JourneyNavState } from "@/src/lib/journeyNav";
 import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
 import { subscribeBaselineUpdated } from "@/src/lib/baseline-sync";
+import {
+  ReportBugProvider,
+  ReportBugTrigger,
+} from "@/src/components/support/ReportBugProvider";
 
 const isDev = process.env.NODE_ENV === "development";
 const isDebugBuildIdEnabled = process.env.NEXT_PUBLIC_DEBUG_BUILD_ID === "true";
@@ -245,34 +249,47 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   );
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
-      <div className="flex min-h-screen flex-1 flex-col">
-        <main
-          className={`flex-1 overflow-y-auto bg-[var(--bg-app)] pt-10 pb-8 ${
-            isBaseline ? "w-full px-8 xl:px-16" : "px-6"
-          }`}
-        >
-          <div
-            className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2 pr-24 md:pr-28 relative"
-            data-testid="journey-nav"
-            style={{
-              backgroundColor: "var(--bg-app)",
-              backgroundImage: "none",
-              boxShadow: "none",
-              filter: "none",
-              backdropFilter: "none",
-            }}
+    <ReportBugProvider userEmail={userEmail}>
+      <div className="flex min-h-screen bg-[var(--bg-app)] text-[var(--text-primary)]">
+        <div className="flex min-h-screen flex-1 flex-col">
+          <main
+            className={`flex-1 overflow-y-auto bg-[var(--bg-app)] pt-10 pb-8 ${
+              isBaseline ? "w-full px-8 xl:px-16" : "px-6"
+            }`}
           >
-            <div className="absolute right-0 top-0 z-50">
-              <TopNavAccountArea initialEmail={userEmail} />
+            <div
+              className="sticky top-0 z-40 mb-6 border-b border-[var(--border-strong)] bg-[var(--bg-app)] py-2 pr-24 md:pr-28 relative"
+              data-testid="journey-nav"
+              style={{
+                backgroundColor: "var(--bg-app)",
+                backgroundImage: "none",
+                boxShadow: "none",
+                filter: "none",
+                backdropFilter: "none",
+              }}
+            >
+              <div className="absolute right-0 top-0 z-50 flex items-center gap-3">
+                <ReportBugTrigger className="text-xs font-semibold text-slate-200 hover:text-white" />
+                <TopNavAccountArea initialEmail={userEmail} />
+              </div>
+              <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
             </div>
-            <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
-          </div>
 
-          {children}
-        </main>
+            {children}
+          </main>
+          <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <p>Need help? Report a bug and we will investigate with context.</p>
+              <ReportBugTrigger
+                className="rounded-full border border-white/10 px-3 py-1 text-[0.75rem] text-white hover:border-white/40"
+                label="Report a bug"
+              />
+            </div>
+            <p className="mt-2 text-[0.65rem] text-slate-500">Build {shortBuildSha}</p>
+          </footer>
+        </div>
       </div>
-    </div>
+    </ReportBugProvider>
   );
 }
 

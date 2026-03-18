@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useEntitlements } from "@/src/lib/entitlements";
@@ -224,6 +225,15 @@ export function SettingsPanel({ onClose, compact = false }: SettingsPanelProps) 
           <span>Plan</span>
           <span className="font-semibold">{planLabel}</span>
         </div>
+      </div>
+      <div className="mt-6 space-y-1 border-t border-white/10 pt-4 text-sm text-slate-200">
+        <p>See the bugs you have submitted and their current status.</p>
+        <Link
+          href="/support/history"
+          className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.3em] text-amber-300 transition hover:text-amber-200"
+        >
+          View support history
+        </Link>
       </div>
     </div>
   );
