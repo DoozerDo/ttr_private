@@ -73,7 +73,7 @@ describe("BaselineStudioHome", () => {
   });
 
   it("renders certification progress checklist when baseline is not yet certified", async () => {
-    setFetchImplementation(async (input: RequestInfo) => {
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
@@ -83,6 +83,7 @@ describe("BaselineStudioHome", () => {
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
+    setFetchImplementation(fetchMock);
 
     render(<BaselineStudioHome baselines={[createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf")]} />);
     fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
@@ -96,6 +97,11 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText(/Developing signals:/i)).toBeInTheDocument();
     expect(screen.getByText(/Quantified impact:/i)).toBeInTheDocument();
     expect(screen.getByText(/Analyses completed:/i)).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => typeof url === "string" && url.includes("/api/baselines/base-1"),
+      ),
+    ).toBe(true);
   });
 
   it("renders developing-only diagnosis area and no signal effect panel", async () => {
@@ -200,6 +206,13 @@ describe("BaselineStudioHome", () => {
         requestInit?.method === "PATCH",
     );
     expect(patchCall).toBeDefined();
+    const patchBody =
+      patchCall && patchCall[1]?.body && typeof patchCall[1].body === "string"
+        ? (JSON.parse(patchCall[1].body) as Record<string, unknown>)
+        : null;
+    expect(typeof patchBody?.signalType).toBe("string");
+    expect(typeof patchBody?.rawText).toBe("string");
+    expect(String(patchBody?.rawText ?? "")).toContain("reduced incident resolution time by 18%");
   });
 
   it("opens the matching strengthening flow when clicking a developing signal chip", async () => {

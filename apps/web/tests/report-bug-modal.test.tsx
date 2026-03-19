@@ -15,6 +15,9 @@ describe("ReportBugModal", () => {
   it("shows a reference when the backend returns an issue number", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: true });
+      }
       if (url.includes("/api/support/report-bug")) {
         return createResponse({ issueNumber: 123 });
       }
@@ -32,5 +35,24 @@ describe("ReportBugModal", () => {
     await waitFor(() => {
       expect(screen.getByText(/Reference: #123/)).toBeInTheDocument();
     });
+  });
+
+  it("disables submission when support config reports bug reporting unavailable", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/support/config")) {
+        return createResponse({ githubConfigured: false });
+      }
+      return createResponse({});
+    });
+
+    render(<ReportBugModal open onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/temporarily unavailable/i)).toBeInTheDocument();
+    });
+
+    const button = screen.getByRole("button", { name: /bug reporting unavailable/i });
+    expect(button).toBeDisabled();
   });
 });

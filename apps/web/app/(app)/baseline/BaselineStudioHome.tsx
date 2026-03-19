@@ -234,6 +234,7 @@ function extractApprovedSignalAdditions(baseline: BaselineDto | null): string[] 
 }
 
 export function BaselineStudioHome({ baselines, libraryMode = "editable" }: BaselineStudioHomeProps) {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [baselineList, setBaselineList] = useState<BaselineDto[]>(baselines);
   const [primaryBaselineId, setPrimaryBaselineId] = useState<string | null>(() =>
     getMostRecentBaselineId(baselines),
@@ -275,6 +276,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   );
   const uploadLimitReached = activeBaselines.length >= BETA_BASELINE_UPLOAD_LIMIT;
   const isEditableLibrary = libraryMode === "editable";
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (!activeBaselines.length) {
@@ -602,7 +607,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ detail: pendingStrengtheningProposal }),
+          body: JSON.stringify({
+            signalType: activeStrengtheningSignal?.id ?? null,
+            rawText: strengtheningAnswer.trim() || pendingStrengtheningProposal,
+          }),
         },
       );
 
@@ -638,7 +646,14 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     } finally {
       setSavingStrengtheningProposal(false);
     }
-  }, [closeStrengtheningModal, fetchBaselineDetails, pendingStrengtheningProposal, primaryBaselineId]);
+  }, [
+    activeStrengtheningSignal?.id,
+    closeStrengtheningModal,
+    fetchBaselineDetails,
+    pendingStrengtheningProposal,
+    primaryBaselineId,
+    strengtheningAnswer,
+  ]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -913,7 +928,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         {getStateMessage(baselineStrengthState)}
                       </p>
                       {baselineStrengthState === "failed" && primaryBaselineId ? (
-                        <FormButton onClick={() => void fetchBaselineDetails(primaryBaselineId)}>
+                        <FormButton
+                          onClick={() => void fetchBaselineDetails(primaryBaselineId)}
+                          disabled={!isHydrated}
+                        >
                           TRY AGAIN
                         </FormButton>
                       ) : null}
@@ -1041,7 +1059,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                                 }
                                 void fetchBaselineDetails(baseline.id);
                               }}
-                              disabled={isLoading}
+                              disabled={isLoading || !isHydrated}
                             >
                               {isLoading
                                 ? "Analyzing..."
@@ -1162,7 +1180,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             Your uploaded resume is ready to become the primary source for baseline analysis.
                           </p>
                         </div>
-                        <FormButton onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}>
+                        <FormButton
+                          onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}
+                          disabled={!isHydrated}
+                        >
                           ANALYZE
                         </FormButton>
                       </div>

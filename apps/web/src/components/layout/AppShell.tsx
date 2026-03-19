@@ -49,6 +49,7 @@ const getStoredContext = (): StoredContext => {
 type AppShellProps = {
   children: ReactNode;
   userEmail?: string | null;
+  userId?: string | null;
 };
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -80,7 +81,28 @@ function isStepCompleted(state: unknown): boolean {
   return false;
 }
 
-export function AppShell({ children, userEmail }: AppShellProps) {
+type AutoErrorType = "runtime" | "promise" | "api";
+
+type AutoErrorPayload = {
+  errorType: AutoErrorType;
+  message: string;
+  stack?: string;
+  route?: string;
+  endpoint?: string;
+  method?: string;
+  status?: number;
+  baselineId?: string;
+  jobId?: string;
+  analysisId?: string;
+  releaseId?: string;
+  timestamp: string;
+  diagnostics?: Record<string, unknown>;
+};
+
+const AUTO_ERROR_RECENT_LIMIT = 12;
+const AUTO_ERROR_LOCAL_DEDUPE_WINDOW_MS = 60_000;
+
+export function AppShell({ children, userEmail, userId }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const isBaseline = pathname.startsWith("/baseline");
@@ -189,31 +211,166 @@ export function AppShell({ children, userEmail }: AppShellProps) {
   }, [pathname]);
 
   useEffect(() => {
-    if (!isDev || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
 
-    const originalFetch = window.fetch;
+    const originalFetch = window.fetch.bind(window);
+    const diagnosticsBuffer: Array<Record<string, unknown>> = [];
+    const localFingerprintTimestamps = new Map<string, number>();
+
+    const appendDiagnostic = (entry: Record<string, unknown>) => {
+      diagnosticsBuffer.push(entry);
+      while (diagnosticsBuffer.length > AUTO_ERROR_RECENT_LIMIT) diagnosticsBuffer.shift();
+    };
+
+    const getContext = () => {
+      const stored = readLastAnalysis();
+      const url = new URL(window.location.href);
+      return {
+        route: `${window.location.pathname}${window.location.search}`,
+        baselineId: stored?.baselineId?.trim() || undefined,
+        jobId: stored?.jobId?.trim() || undefined,
+        analysisId: url.searchParams.get("analysisId")?.trim() || undefined,
+        diagnostics: {
+          recent: diagnosticsBuffer.slice(-AUTO_ERROR_RECENT_LIMIT),
+          userId: userId ?? undefined,
+        },
+      };
+    };
+
+    const postAutoError = async (payload: AutoErrorPayload) => {
+      const summary = `${payload.errorType}|${payload.message}|${payload.route ?? ""}|${payload.endpoint ?? ""}`;
+      const fingerprint = summary.toLowerCase().replace(/\s+/g, " ").slice(0, 240);
+      const now = Date.now();
+      const lastSent = localFingerprintTimestamps.get(fingerprint) ?? 0;
+      if (now - lastSent < AUTO_ERROR_LOCAL_DEDUPE_WINDOW_MS) return;
+      localFingerprintTimestamps.set(fingerprint, now);
+
+      try {
+        await originalFetch("/api/support/auto-error", {
+          method: "POST",
+          credentials: "include",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        if (isDev) {
+          console.debug("Auto error submission failed", error);
+        }
+      }
+    };
+
+    const handleCapture = (payload: Omit<AutoErrorPayload, "timestamp">) => {
+      const context = getContext();
+      void postAutoError({
+        ...payload,
+        route: payload.route ?? context.route,
+        baselineId: payload.baselineId ?? context.baselineId,
+        jobId: payload.jobId ?? context.jobId,
+        analysisId: payload.analysisId ?? context.analysisId,
+        releaseId: shortBuildSha,
+        diagnostics: payload.diagnostics ?? context.diagnostics,
+        timestamp: new Date().toISOString(),
+      });
+    };
+
+    const onWindowError = (event: ErrorEvent) => {
+      const message = event.message || "Unknown runtime error";
+      appendDiagnostic({
+        source: "window.onerror",
+        message,
+        at: new Date().toISOString(),
+      });
+      handleCapture({
+        errorType: "runtime",
+        message,
+        stack: event.error instanceof Error ? event.error.stack : undefined,
+      });
+    };
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof reason === "string"
+            ? reason
+            : "Unhandled promise rejection";
+      appendDiagnostic({
+        source: "unhandledrejection",
+        message,
+        at: new Date().toISOString(),
+      });
+      handleCapture({
+        errorType: "promise",
+        message,
+        stack: reason instanceof Error ? reason.stack : undefined,
+      });
+    };
 
     window.fetch = async (...args) => {
+      const requestInput = args[0];
+      const requestInit = args[1];
+      const method = (requestInit?.method || "GET").toUpperCase();
+      const rawUrl =
+        typeof requestInput === "string"
+          ? requestInput
+          : requestInput instanceof URL
+            ? requestInput.toString()
+            : requestInput?.url || "";
+      const endpoint = rawUrl.slice(0, 240);
+      const isAutoErrorEndpoint = endpoint.includes("/api/support/auto-error");
+
       try {
         const response = await originalFetch(...args);
-        if (!response.ok) {
-          console.debug("Fetch failed", {
-            url: args[0],
+        if (response.status >= 500 && !isAutoErrorEndpoint) {
+          appendDiagnostic({
+            source: "fetch",
+            method,
+            endpoint,
             status: response.status,
-            route: window.location.pathname,
+            at: new Date().toISOString(),
+          });
+          handleCapture({
+            errorType: "api",
+            message: `API ${method} ${endpoint} failed with ${response.status}`,
+            endpoint,
+            method,
+            status: response.status,
           });
         }
         return response;
       } catch (error) {
-        console.error("Fetch error", error);
+        if (!isAutoErrorEndpoint) {
+          const message =
+            error instanceof Error ? error.message : "Network request failed";
+          appendDiagnostic({
+            source: "fetch-exception",
+            method,
+            endpoint,
+            message,
+            at: new Date().toISOString(),
+          });
+          handleCapture({
+            errorType: "api",
+            message: `API ${method} ${endpoint} threw: ${message}`,
+            endpoint,
+            method,
+          });
+        }
         throw error;
       }
     };
 
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
     return () => {
       window.fetch = originalFetch;
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const unsubscribe = subscribeBaselineUpdated(async () => {

@@ -75,6 +75,13 @@ export default function BugReportingAdminPage() {
           config?.projectAssignmentEnabled ?? null,
         )}
       </div>
+
+      <a
+        href="/admin/error-health"
+        className="inline-flex rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white hover:border-white/40"
+      >
+        Open Error Health
+      </a>
     </section>
   );
 }

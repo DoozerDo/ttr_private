@@ -15,6 +15,10 @@ import {
   ParsedSection,
 } from './baseline-parser.service';
 import { BaselineTextExtractor } from './baseline-text-extractor.service';
+import {
+  CriticalFlowEventType,
+  CriticalFlowTrackerService,
+} from '../support/critical-flow-tracker.service';
 
 export type BaselineSourceFormat = 'docx' | 'pdf';
 
@@ -42,40 +46,65 @@ export class BaselineIngestionService {
   constructor(
     private readonly baselineParser: BaselineParserService,
     private readonly baselineTextExtractor: BaselineTextExtractor,
+    private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
   ) {}
 
   async ingest(file: Express.Multer.File): Promise<BaselineIngestionResult> {
-    const sourceFormat = this.detectFormat(file);
-    const rawText = await this.baselineTextExtractor.extractText(file);
-    const parsedSections = this.baselineParser.parseBaseline(rawText);
+    try {
+      const sourceFormat = this.detectFormat(file);
+      const rawText = await this.baselineTextExtractor.extractText(file);
+      const parsedSections = this.baselineParser.parseBaseline(rawText);
 
-    const canonical = this.buildCanonical(rawText, parsedSections);
+      const canonical = this.buildCanonical(rawText, parsedSections);
 
-    this.logger.debug(
-      `Baseline ingested (${sourceFormat}); missing_fields=${canonical.system_generated_read_only.missing_fields.length}`,
-    );
+      this.logger.debug(
+        `Baseline ingested (${sourceFormat}); missing_fields=${canonical.system_generated_read_only.missing_fields.length}`,
+      );
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
+        areaOrRoute: 'baseline',
+      });
 
-    return {
-      rawText,
-      parsedSections,
-      canonical,
-      sourceFormat,
-    };
+      return {
+        rawText,
+        parsedSections,
+        canonical,
+        sourceFormat,
+      };
+    } catch (error) {
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
+        areaOrRoute: 'baseline',
+      });
+      throw error;
+    }
   }
 
   async ingestFromText(
     rawText: string,
     sourceFormat: BaselineSourceFormat,
   ): Promise<BaselineIngestionResult> {
-    const parsedSections = this.baselineParser.parseBaseline(rawText);
-    const canonical = this.buildCanonical(rawText, parsedSections);
+    try {
+      const parsedSections = this.baselineParser.parseBaseline(rawText);
+      const canonical = this.buildCanonical(rawText, parsedSections);
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.BASELINE_PARSED_SUCCESS,
+        areaOrRoute: 'baseline',
+      });
 
-    return {
-      rawText,
-      parsedSections,
-      canonical,
-      sourceFormat,
-    };
+      return {
+        rawText,
+        parsedSections,
+        canonical,
+        sourceFormat,
+      };
+    } catch (error) {
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.BASELINE_PARSED_FAILURE,
+        areaOrRoute: 'baseline',
+      });
+      throw error;
+    }
   }
 
   private detectFormat(file: Express.Multer.File): BaselineSourceFormat {

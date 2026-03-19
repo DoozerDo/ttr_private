@@ -39,6 +39,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
   const payload = decodeJwt(token);
   const email = payload?.email ?? null;
+  const userId = payload?.sub ?? null;
 
   const tier = normalizeTier(payload?.subscriptionTier);
 
@@ -65,7 +66,9 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <EntitlementsProvider entitlements={safeProfile}>
-      <AppShell userEmail={email}>{children}</AppShell>
+      <AppShell userEmail={email} userId={userId}>
+        {children}
+      </AppShell>
     </EntitlementsProvider>
   );
 }

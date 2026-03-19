@@ -39,6 +39,98 @@ const stripBaselineVersioning = <T extends Record<string, unknown>>(baseline: T)
   return rest;
 };
 
+type StrengtheningBody = {
+  rawText?: unknown;
+  detail?: unknown;
+  signalType?: unknown;
+  value?: unknown;
+  teamSize?: unknown;
+  customerCount?: unknown;
+  scopeType?: unknown;
+  isEstimate?: unknown;
+};
+
+const parsePositiveInt = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const digits = value.replace(/[^0-9]/g, '');
+  if (!digits) {
+    return null;
+  }
+  const parsed = Number.parseInt(digits, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const buildInvalidUpdateError = (reason: string, received: unknown) =>
+  new BadRequestException({
+    error: 'INVALID_BASELINE_UPDATE',
+    reason,
+    received: received ?? null,
+  });
+
+const normalizeStrengtheningDetail = (
+  body: StrengtheningBody,
+  logger: Logger,
+): string => {
+  const rawText =
+    typeof body.rawText === 'string' && body.rawText.trim().length > 0
+      ? body.rawText.trim()
+      : typeof body.detail === 'string' && body.detail.trim().length > 0
+        ? body.detail.trim()
+        : '';
+
+  if (!rawText) {
+    throw buildInvalidUpdateError('Missing required field: rawText', body);
+  }
+
+  const signalType =
+    typeof body.signalType === 'string' && body.signalType.trim().length > 0
+      ? body.signalType.trim()
+      : null;
+
+  const valueObject =
+    body.value && typeof body.value === 'object'
+      ? (body.value as Record<string, unknown>)
+      : {};
+  const teamSize = parsePositiveInt(valueObject.teamSize ?? body.teamSize);
+  const customerCount = parsePositiveInt(
+    valueObject.customerCount ?? body.customerCount,
+  );
+
+  if (
+    signalType === 'organizational_scale' &&
+    teamSize === null &&
+    customerCount === null
+  ) {
+    logger.warn(
+      `PATCH /baselines strengthening-additions parsing warning: organizational_scale payload has no parsed numeric fields; accepting rawText`,
+    );
+  }
+
+  const metadataParts: string[] = [];
+  if (teamSize !== null) metadataParts.push(`teamSize=${teamSize}+`);
+  if (customerCount !== null) metadataParts.push(`customerCount=${customerCount}+`);
+  const scopeType =
+    typeof body.scopeType === 'string' && body.scopeType.trim().length > 0
+      ? body.scopeType.trim()
+      : null;
+  if (scopeType) metadataParts.push(`scopeType=${scopeType}`);
+  const isEstimateValue = valueObject.isEstimate ?? body.isEstimate;
+  if (typeof isEstimateValue === 'boolean' && isEstimateValue) {
+    metadataParts.push('isEstimate=true');
+  }
+
+  const prefix = signalType ? `${signalType}: ` : '';
+  if (!metadataParts.length) {
+    return `${prefix}${rawText}`;
+  }
+  return `${prefix}${rawText} (${metadataParts.join(', ')})`;
+};
+
 @Controller('baselines')
 @UseGuards(AuthGuard('jwt'))
 export class BaselineController {
@@ -200,12 +292,22 @@ export class BaselineController {
   @Patch(':id/strengthening-additions')
   async appendStrengtheningAddition(
     @Param('id') id: string,
-    @Body() body: { detail?: string },
+    @Body() body: StrengtheningBody,
     @Req() request: Request & { user?: { id?: string } },
   ) {
     const userId = request.user?.id;
-    const detail = typeof body?.detail === 'string' ? body.detail : '';
-    const trimmedDetail = detail.trim();
+    let trimmedDetail = '';
+    try {
+      trimmedDetail = normalizeStrengtheningDetail(body ?? {}, this.logger);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `PATCH /baselines/${id}/strengthening-additions rejected payload userId=${userId ?? 'missing'} reason=${message} body=${JSON.stringify(
+          body ?? {},
+        )}`,
+      );
+      throw error;
+    }
 
     this.logger.log(
       `PATCH /baselines/${id}/strengthening-additions userId=${userId ?? 'missing'} detailLength=${trimmedDetail.length}`,
@@ -219,8 +321,12 @@ export class BaselineController {
       this.logger.warn(
         `PATCH /baselines/${id}/strengthening-additions validation failed: detail is required`,
       );
-      throw new BadRequestException('detail is required');
+      throw buildInvalidUpdateError('Missing required field: rawText', body);
     }
+
+    this.logger.log(
+      `PATCH /baselines/${id}/strengthening-additions accepted rawText="${trimmedDetail.slice(0, 120)}"`,
+    );
 
     try {
       const baseline = await this.baselineService.appendStrengtheningAddition(

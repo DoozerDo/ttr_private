@@ -19,6 +19,7 @@ import { GapAnalysisService } from './gap-analysis.service';
 import { AlignmentHistoryService } from './services/alignment-history.service';
 import { CareerGravityService } from './services/career-gravity.service';
 import { ScoreSimulatorService } from './services/score-simulator.service';
+import { SupportModule } from '../support/support.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ScoreSimulatorService } from './services/score-simulator.service';
       User,
     ]),
     ComplianceModule,
+    SupportModule,
   ],
   controllers: [AnalysisController, CalibrationController, FitScoresController],
   providers: [

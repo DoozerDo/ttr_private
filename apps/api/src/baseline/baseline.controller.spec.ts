@@ -21,7 +21,66 @@ describe('BaselineController - strengthening additions', () => {
         { detail: '   ' },
         { user: { id: 'user-1' } } as any,
       ),
-    ).rejects.toThrow('detail is required');
+    ).rejects.toMatchObject({
+      response: {
+        error: 'INVALID_BASELINE_UPDATE',
+        reason: 'Missing required field: rawText',
+      },
+    });
+  });
+
+  it('accepts structured organizational_scale payload and forwards normalized detail', async () => {
+    const baselineService = {
+      appendStrengtheningAddition: jest.fn().mockResolvedValue({ id: 'baseline-1' }),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    await controller.appendStrengtheningAddition(
+      'baseline-1',
+      {
+        signalType: 'organizational_scale',
+        rawText: 'Led support ops at enterprise scale',
+        value: { teamSize: '50+', customerCount: '10,000+', isEstimate: true },
+      },
+      { user: { id: 'user-1' } } as any,
+    );
+
+    expect(baselineService.appendStrengtheningAddition).toHaveBeenCalledWith(
+      'user-1',
+      'baseline-1',
+      expect.stringContaining(
+        'organizational_scale: Led support ops at enterprise scale (teamSize=50+, customerCount=10000+, isEstimate=true)',
+      ),
+    );
+  });
+
+  it('accepts organizational_scale payload without parsed numeric fields when rawText is provided', async () => {
+    const baselineService = {
+      appendStrengtheningAddition: jest.fn().mockResolvedValue({ id: 'baseline-1' }),
+    } as any;
+    const controller = new BaselineController(
+      baselineService,
+      baselineVersionService,
+    );
+
+    await controller.appendStrengtheningAddition(
+      'baseline-1',
+      {
+        signalType: 'organizational_scale',
+        rawText: 'Owned operational scale improvements across support teams.',
+        value: { isEstimate: true },
+      },
+      { user: { id: 'user-1' } } as any,
+    );
+
+    expect(baselineService.appendStrengtheningAddition).toHaveBeenCalledWith(
+      'user-1',
+      'baseline-1',
+      expect.stringContaining('organizational_scale: Owned operational scale improvements across support teams.'),
+    );
   });
 
   it('returns structured rejection payload for non-http errors', async () => {

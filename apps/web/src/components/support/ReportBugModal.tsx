@@ -20,6 +20,10 @@ type ReportBugModalProps = {
   initialEmail?: string;
 };
 
+type SupportConfigResponse = {
+  githubConfigured?: boolean;
+};
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -54,6 +58,7 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
   const [storedAnalysis, setStoredAnalysis] = useState<StoredAnalysisRecord | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [reportingUnavailable, setReportingUnavailable] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -69,7 +74,36 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
     setStatus("idle");
     setStatusMessage(null);
     setStoredAnalysis(readLastAnalysis());
+    setReportingUnavailable(false);
   }, [initialEmail, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    const loadConfig = async () => {
+      try {
+        const response = await fetch("/api/support/config", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json().catch(() => null)) as SupportConfigResponse | null;
+        if (!cancelled && payload?.githubConfigured === false) {
+          setReportingUnavailable(true);
+          setStatus("error");
+          setStatusMessage("Bug reporting is temporarily unavailable right now.");
+        }
+      } catch {
+        // Leave the form usable if config check fails.
+      }
+    };
+
+    void loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const pageUrl = useMemo(() => (typeof window !== "undefined" ? window.location.href : undefined), []);
   const userAgent = useMemo(() => (typeof navigator !== "undefined" ? navigator.userAgent : undefined), []);
@@ -110,7 +144,7 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!message.trim() || status === "loading") {
+      if (!message.trim() || status === "loading" || reportingUnavailable) {
         return;
       }
 
@@ -162,6 +196,11 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
 
         if (!response.ok) {
           const errorPayload = (await response.json().catch(() => null)) as { message?: string } | null;
+          const code = (errorPayload as { code?: string } | null)?.code;
+          if (response.status === 503 || code === "support_config_unavailable") {
+            setReportingUnavailable(true);
+            throw new Error("Bug reporting is temporarily unavailable right now.");
+          }
           throw new Error(errorPayload?.message ?? "Unable to submit bug report right now.");
         }
 
@@ -285,10 +324,14 @@ export function ReportBugModal({ open, onClose, initialEmail }: ReportBugModalPr
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={status === "loading"}
+            disabled={status === "loading" || reportingUnavailable}
             className="flex-1 rounded-2xl border border-amber-400/60 bg-amber-400/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-400/90 hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "loading" ? "Reporting..." : "Send bug report"}
+            {reportingUnavailable
+              ? "Bug reporting unavailable"
+              : status === "loading"
+                ? "Reporting..."
+                : "Send bug report"}
           </button>
           <span
             className={`text-xs ${

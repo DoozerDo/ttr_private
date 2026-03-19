@@ -467,6 +467,7 @@ describe('BaselineService - score history persistence', () => {
     baselineRepository = {
       findOne: jest.fn(),
       save: jest.fn(async (value: any) => value),
+      update: jest.fn(async () => ({ affected: 1 })),
       manager: {
         transaction: jest.fn(async (cb: any) =>
           cb({
@@ -554,6 +555,7 @@ describe('BaselineService - strengthening additions', () => {
     baselineRepository = {
       findOne: jest.fn(),
       save: jest.fn(async (value: any) => value),
+      update: jest.fn(async () => ({ affected: 1 })),
       manager: {
         transaction: jest.fn(async (cb: any) =>
           cb({
@@ -568,6 +570,7 @@ describe('BaselineService - strengthening additions', () => {
     baselineSectionRepository = {
       find: jest.fn(),
       save: jest.fn(async (value: any) => value),
+      update: jest.fn(async () => ({ affected: 1 })),
       create: jest.fn((payload: any) => payload),
     };
 
@@ -624,9 +627,11 @@ describe('BaselineService - strengthening additions', () => {
       service.appendStrengtheningAddition('user-1', 'b-1', 'Added leadership evidence'),
     ).resolves.toBeDefined();
 
-    expect(baselineSectionRepository.save).toHaveBeenCalledWith(
+    expect(baselineSectionRepository.update).toHaveBeenCalledWith(
+      { id: 'section-1', baselineId: 'b-1' },
       expect.objectContaining({
         content: 'Added leadership evidence',
+        updatedAt: expect.any(Date),
       }),
     );
   });

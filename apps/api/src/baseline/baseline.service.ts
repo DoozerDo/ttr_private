@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  InternalServerErrorException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -122,6 +124,8 @@ const normalizeExtractedToCanonicalV1 = (
 
 @Injectable()
 export class BaselineService {
+  private readonly logger = new Logger(BaselineService.name);
+
   constructor(
     @InjectRepository(Baseline)
     private readonly baselineRepository: Repository<Baseline>,
@@ -817,11 +821,41 @@ return {
         .filter(Boolean);
       const alreadyPresent = existingLines.some((line) => line === normalizedDetail);
       if (!alreadyPresent) {
-        existingSection.content = existingContent.trim()
+        const nextContent = existingContent.trim()
           ? `${existingContent.trim()}\n${normalizedDetail}`
           : normalizedDetail;
-        existingSection.updatedAt = new Date();
-        await this.baselineSectionRepository.save(existingSection);
+        const updatePayload = {
+          content: nextContent,
+          updatedAt: new Date(),
+        };
+        try {
+          // Use scoped update to avoid relation hydration edge cases nulling baselineId.
+          await this.baselineSectionRepository.update(
+            { id: existingSection.id, baselineId: baseline.id },
+            updatePayload,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? error.stack : undefined;
+          this.logger.error(
+            `Failed updating baseline refinement section baselineId=${baseline.id} sectionId=${existingSection.id} userId=${userId} payload=${JSON.stringify(
+              { ...updatePayload, contentLength: nextContent.length },
+            )} message=${message}`,
+            stack,
+          );
+          throw new InternalServerErrorException({
+            error: {
+              code: 'BASELINE_UPDATE_PERSISTENCE_FAILED',
+              message: 'Unable to persist baseline strengthening update.',
+              reason: message,
+              details: {
+                baselineId,
+                sectionId: existingSection.id,
+                operation: 'update_refinement_section',
+              },
+            },
+          });
+        }
       }
     } else {
       const nextOrder =
@@ -838,12 +872,63 @@ return {
         includePolicy: BaselineIncludePolicy.ALWAYS,
         order: nextOrder,
       });
-      await this.attachEmbeddingsToSections([newSection]);
-      await this.baselineSectionRepository.save(newSection);
+      try {
+        await this.attachEmbeddingsToSections([newSection]);
+        await this.baselineSectionRepository.save(newSection);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        this.logger.error(
+          `Failed creating baseline refinement section baselineId=${baseline.id} userId=${userId} payload=${JSON.stringify(
+            {
+              baselineId: newSection.baselineId,
+              sectionType: newSection.sectionType,
+              includePolicy: newSection.includePolicy,
+              order: newSection.order,
+              contentLength: newSection.content?.length ?? 0,
+            },
+          )} message=${message}`,
+          stack,
+        );
+        throw new InternalServerErrorException({
+          error: {
+            code: 'BASELINE_UPDATE_PERSISTENCE_FAILED',
+            message: 'Unable to persist baseline strengthening update.',
+            reason: message,
+            details: {
+              baselineId,
+              operation: 'create_refinement_section',
+            },
+          },
+        });
+      }
     }
 
-    baseline.updatedAt = new Date();
-    await this.baselineRepository.save(baseline);
+    try {
+      const updatedAt = new Date();
+      await this.baselineRepository.update(
+        { id: baseline.id, userId },
+        { updatedAt },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `Failed updating baseline timestamp baselineId=${baseline.id} userId=${userId} message=${message}`,
+        stack,
+      );
+      throw new InternalServerErrorException({
+        error: {
+          code: 'BASELINE_UPDATE_PERSISTENCE_FAILED',
+          message: 'Unable to persist baseline strengthening update.',
+          reason: message,
+          details: {
+            baselineId,
+            operation: 'update_baseline_timestamp',
+          },
+        },
+      });
+    }
     return this.getBaselineByIdForUser(baselineId, userId);
   }
 

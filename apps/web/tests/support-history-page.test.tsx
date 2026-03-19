@@ -16,6 +16,7 @@ const sampleItem = {
   issueNumber: 11,
   title: "Results crash",
   state: "open",
+  status: "Investigating",
   labels: ["bug", "area:results", "severity:high"],
   createdAt: "2026-03-01T12:00:00.000Z",
   updatedAt: "2026-03-02T13:00:00.000Z",
@@ -23,6 +24,7 @@ const sampleItem = {
   area: "Results (Route includes \"results\")",
   reporterMessagePreview: "App crashes when loading results.",
   sentryEventId: "sentry-abc",
+  resolutionNote: null,
 };
 
 describe("SupportHistoryPage", () => {
@@ -59,6 +61,75 @@ describe("SupportHistoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/You have not reported any bugs yet/i)).toBeInTheDocument();
     });
+  });
+
+  it("renders mapped statuses and resolution note", async () => {
+    setFetchImplementation(async (input: RequestInfo) => {
+      if (typeof input === "string" && input.includes("/api/support/history")) {
+        return createResponse({
+          items: [
+            sampleItem,
+            {
+              ...sampleItem,
+              issueNumber: 12,
+              title: "Resolved upload bug",
+              state: "closed",
+              status: "Resolved",
+              resolutionNote: "Fix shipped in the latest beta release.",
+            },
+          ],
+        });
+      }
+
+      return createResponse({});
+    });
+
+    render(<SupportHistoryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Issue #11")).toBeInTheDocument();
+      expect(screen.getByText("Issue #12")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Investigating")).toBeInTheDocument();
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
+    expect(screen.getByText(/Fix shipped in the latest beta release/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /still seeing this issue/i })).toBeInTheDocument();
+  });
+
+  it("posts still-seeing signal for resolved issues", async () => {
+    const calls: string[] = [];
+    setFetchImplementation(async (input: RequestInfo) => {
+      if (typeof input === "string") {
+        calls.push(input);
+        if (input.includes("/api/support/history/still-seeing")) {
+          return createResponse({ issueNumber: 44, count: 1 });
+        }
+        if (input.includes("/api/support/history")) {
+          return createResponse({
+            items: [{ ...sampleItem, issueNumber: 44, state: "closed", status: "Resolved" }],
+          });
+        }
+      }
+
+      return createResponse({});
+    });
+
+    render(<SupportHistoryPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Issue #44")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /still seeing this issue/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Thanks. We recorded that you're still seeing this issue/i),
+      ).toBeInTheDocument();
+    });
+
+    expect(calls.some((value) => value.includes("/api/support/history/still-seeing"))).toBe(true);
   });
 
   it("shows an error and allows retry", async () => {

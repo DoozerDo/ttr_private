@@ -36,6 +36,7 @@ import { ApplicationsService } from '../applications/applications.service';
 import type { CxFitScoreSnapshot } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
+import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import '../docx-templates/templates';
 import {
   ResumeExportSection,
@@ -142,6 +143,7 @@ export class ResumeService {
     private readonly applicationsService: ApplicationsService,
     private readonly opportunitiesService: OpportunitiesService,
     private readonly gapAnalysisService: GapAnalysisService,
+    private readonly criticalFlowTrackerService: CriticalFlowTrackerService,
   ) {}
 
   private async findLatestAssessment(
@@ -929,26 +931,35 @@ export class ResumeService {
     request: GenerateResumeRequest,
     options?: GenerateResumeOptions,
   ) {
-    const baselineId = request.baselineId?.trim();
-    const baselineVersionId = request.baselineVersionId?.trim();
-    const jobId = request.jobId?.trim();
+    const recordResumeEvent = (success: boolean) => {
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: success
+          ? CriticalFlowEventType.RESUME_GENERATED_SUCCESS
+          : CriticalFlowEventType.RESUME_GENERATED_FAILURE,
+        areaOrRoute: 'resume',
+      });
+    };
+    try {
+      const baselineId = request.baselineId?.trim();
+      const baselineVersionId = request.baselineVersionId?.trim();
+      const jobId = request.jobId?.trim();
 
-    if (!baselineId) {
-      throw new BadRequestException('baselineId is required');
-    }
-    if (!baselineVersionId) {
-      throw new BadRequestException('baselineVersionId is required');
-    }
+      if (!baselineId) {
+        throw new BadRequestException('baselineId is required');
+      }
+      if (!baselineVersionId) {
+        throw new BadRequestException('baselineVersionId is required');
+      }
 
-    const baseline = await this.baselineRepository.findOne({
+      const baseline = await this.baselineRepository.findOne({
       where: { id: baselineId, userId },
       relations: ['sections', 'parsedRecords'],
       order: { sections: { order: 'ASC' }, parsedRecords: { createdAt: 'DESC' } },
     });
 
-    if (!baseline) {
-      throw new NotFoundException('Baseline not found');
-    }
+      if (!baseline) {
+        throw new NotFoundException('Baseline not found');
+      }
 
     const baselineVersion = await this.baselineVersionRepository.findOne({
       where: { id: baselineVersionId, baselineId: baseline.id },
@@ -1141,6 +1152,7 @@ export class ResumeService {
           href: '/results',
         },
       };
+      recordResumeEvent(false);
       return {
         ok: false,
         status: 'error',
@@ -1398,6 +1410,7 @@ export class ResumeService {
 
     const display = this.buildSuccessDisplayPayload();
     const exports: DocumentGenerationExports = { docx: true, pdf: true };
+    recordResumeEvent(true);
     return {
       ok: true,
       status: 'success',
@@ -1436,6 +1449,10 @@ export class ResumeService {
         normalizationDiagnostics: experienceDiagnostics,
       },
     };
+    } catch (error) {
+      recordResumeEvent(false);
+      throw error;
+    }
   }
 
   private buildCxFitScoreSnapshot(

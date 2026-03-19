@@ -27,6 +27,7 @@ import { InterviewsController } from './interviews.controller';
 import { InterviewsService } from './interviews.service';
 import { StarStory } from '../star-stories/star-story.entity';
 import { BaselineVersionService } from '../baseline/baseline-version.service';
+import { SupportModule } from '../support/support.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { BaselineVersionService } from '../baseline/baseline-version.service';
       StarStory,
     ]),
     ComplianceModule,
+    SupportModule,
   ],
   controllers: [
     InterviewsController,

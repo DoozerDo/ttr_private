@@ -16,6 +16,7 @@ import {
   sanitizeLinkedInJobText,
   shouldApplyLinkedInSanitizer,
 } from '../jobs/linkedin-sanitize';
+import { CriticalFlowEventType, CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 
 export type FitScoringInput = FitScoreInput;
 export type DimensionWeightOverrides = FitScoreDimensionWeightOverrides;
@@ -38,7 +39,7 @@ const MIN_TEXT_LENGTH = 200;
 export class FitScoringService {
   private readonly engine: FitScoreEngine;
 
-  constructor() {
+  constructor(private readonly criticalFlowTrackerService: CriticalFlowTrackerService) {
     this.engine = new FitScoreEngine();
   }
 
@@ -47,102 +48,108 @@ export class FitScoringService {
     dimensionWeights?: DimensionWeightOverrides | null,
     options?: { debug?: boolean },
   ): Promise<FitScoringResult> {
-    const { jobTextUsed, jobTextSha256, jobTextCharCount } =
-      canonicalizeJobText(input.job);
-    const jobTextOverride = jobTextUsed;
-
-    const hasRawText = (input.job.rawDescription ?? '').trim().length > 0;
-
-    const engineJob = {
-      ...input.job,
-      normalizedResponsibilities: hasRawText
-        ? []
-        : (input.job.normalizedResponsibilities ?? []),
-      normalizedRequirements: hasRawText
-        ? []
-        : (input.job.normalizedRequirements ?? []),
-      jobTextOverride,
-    };
-
-    const enginePayload = {
-      job: engineJob,
-      baseline: {
-        version: input.baseline.version,
-        sections: input.baseline.sections,
-      },
-    };
-
-    let baseResult: FitScoreResult;
-
     try {
-      baseResult = await this.engine.score(enginePayload, {
+      const { jobTextUsed, jobTextSha256, jobTextCharCount } =
+        canonicalizeJobText(input.job);
+      const jobTextOverride = jobTextUsed;
+
+      const hasRawText = (input.job.rawDescription ?? '').trim().length > 0;
+
+      const engineJob = {
+        ...input.job,
+        normalizedResponsibilities: hasRawText
+          ? []
+          : (input.job.normalizedResponsibilities ?? []),
+        normalizedRequirements: hasRawText
+          ? []
+          : (input.job.normalizedRequirements ?? []),
+        jobTextOverride,
+      };
+
+      const enginePayload = {
+        job: engineJob,
+        baseline: {
+          version: input.baseline.version,
+          sections: input.baseline.sections,
+        },
+      };
+
+      const baseResult = await this.engine.score(enginePayload, {
         weights: dimensionWeights,
         debug: options?.debug,
       });
+
+      const baselineText = input.baseline.sections
+        .map((section) => section.content)
+        .join('\n');
+      const baselineTextSha256 = sha256Text(baselineText);
+
+      const complianceFlags = this.computeComplianceFlags(
+        jobTextUsed,
+        baselineText,
+        input.job.sourceUrl,
+      );
+
+      const additions = (input.verifiedAdditions ?? [])
+        .map((entry) => entry?.trim())
+        .filter((entry): entry is string => Boolean(entry));
+
+      let expandedDimensionScores: FitScoreDimensionScores | null = null;
+      let expandedScore = baseResult.overallScore;
+
+      if (additions.length) {
+        const additionSections = additions.map((content, index) => ({
+          type: 'OTHER',
+          content,
+          id: `addition-${index}`,
+        }));
+
+        const expandedPayload = {
+          job: engineJob,
+          baseline: {
+            version: input.baseline.version,
+            sections: [...input.baseline.sections, ...additionSections],
+          },
+        };
+
+        const expanded = await this.engine.score(expandedPayload, {
+          weights: dimensionWeights,
+        });
+
+        expandedDimensionScores = expanded.dimensionScores;
+        expandedScore = expanded.overallScore;
+      }
+
+      const delta = expandedScore - baseResult.overallScore;
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.SCORE_GENERATED_SUCCESS,
+        areaOrRoute: 'scoring',
+      });
+
+      return {
+        ...baseResult,
+        complianceFlags,
+        originalScore: baseResult.overallScore,
+        expandedScore,
+        delta,
+        expandedDimensionScores,
+        appliedAdditions: additions,
+        jobTextSha256,
+        jobTextCharCount,
+        baselineTextSha256,
+        overallScore: baseResult.overallScore,
+        verdict: baseResult.verdict,
+      };
     } catch (error) {
+      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+        flow: CriticalFlowEventType.SCORE_GENERATED_FAILURE,
+        areaOrRoute: 'scoring',
+      });
       if (error instanceof FitScoreInputError) {
         throw new BadRequestException(error.message);
       }
       throw error;
     }
-
-    const baselineText = input.baseline.sections
-      .map((section) => section.content)
-      .join('\n');
-    const baselineTextSha256 = sha256Text(baselineText);
-
-    const complianceFlags = this.computeComplianceFlags(
-      jobTextUsed,
-      baselineText,
-      input.job.sourceUrl,
-    );
-
-    const additions = (input.verifiedAdditions ?? [])
-      .map((entry) => entry?.trim())
-      .filter((entry): entry is string => Boolean(entry));
-
-    let expandedDimensionScores: FitScoreDimensionScores | null = null;
-    let expandedScore = baseResult.overallScore;
-
-    if (additions.length) {
-      const additionSections = additions.map((content, index) => ({
-        type: 'OTHER',
-        content,
-        id: `addition-${index}`,
-      }));
-
-      const expandedPayload = {
-        job: engineJob,
-        baseline: {
-          version: input.baseline.version,
-          sections: [...input.baseline.sections, ...additionSections],
-        },
-      };
-
-      const expanded = await this.engine.score(expandedPayload, {
-        weights: dimensionWeights,
-      });
-
-      expandedDimensionScores = expanded.dimensionScores;
-      expandedScore = expanded.overallScore;
-    }
-
-    const delta = expandedScore - baseResult.overallScore;
-
-    return {
-      ...baseResult,
-      complianceFlags,
-      originalScore: baseResult.overallScore,
-      expandedScore,
-      delta,
-      expandedDimensionScores,
-      appliedAdditions: additions,
-      jobTextSha256,
-      jobTextCharCount,
-      baselineTextSha256,
-      overallScore: baseResult.overallScore,
-      verdict: baseResult.verdict,
-    };
   }
 
   private computeComplianceFlags(

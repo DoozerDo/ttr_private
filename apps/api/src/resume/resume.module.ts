@@ -10,6 +10,7 @@ import { GapAnalysisService } from '../analysis/gap-analysis.service';
 import { Job } from '../jobs/job.entity';
 import { ApplicationsModule } from '../applications/applications.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
+import { SupportModule } from '../support/support.module';
 import { ResumeController } from './resume.controller';
 import { ResumeService } from './resume.service';
 
@@ -26,6 +27,7 @@ import { ResumeService } from './resume.service';
     ComplianceModule,
     ApplicationsModule,
     OpportunitiesModule,
+    SupportModule,
   ],
   controllers: [ResumeController],
   providers: [ResumeService, GapAnalysisService],
