@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
+import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import {
@@ -517,12 +518,19 @@ export default function StudioPage() {
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
+  const generationReadiness = useMemo(
+    () => getGenerationReadiness(analysis, null),
+    [analysis],
+  );
   const generationMessage = useMemo(() => {
     if (!requestedAnalysisId) {
       return "Run a role compatibility analysis first.";
     }
     if (analysisError) {
       return ANALYSIS_LOAD_ERROR_MESSAGE;
+    }
+    if (generationReadiness.blocked) {
+      return "Document generation is blocked by verification issues. Review compliance in Results.";
     }
     if (!effectiveBaselineVersionId) {
       return "Resume snapshot is still loading for this analysis.";
@@ -531,7 +539,7 @@ export default function StudioPage() {
       return "Fit score is unavailable for this role analysis.";
     }
     return null;
-  }, [analysisError, analysisScore, effectiveBaselineVersionId, requestedAnalysisId]);
+  }, [analysisError, analysisScore, effectiveBaselineVersionId, generationReadiness.blocked, requestedAnalysisId]);
 
   const readyForDocuments =
     Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
@@ -541,7 +549,8 @@ export default function StudioPage() {
     analysisScore !== null &&
     (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
     Boolean(requestedAnalysisId) &&
-    !analysisError;
+    !analysisError &&
+    !generationReadiness.blocked;
   const canRunTopBandGeneration =
     isTopBand && canGenerateDocuments && !resumeGenerating && !coverGenerating;
   const improveBaselineHref = useMemo(() => {
@@ -658,6 +667,7 @@ export default function StudioPage() {
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
     const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
     if (resumeGenerating) return "generating";
+    if (generationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
@@ -667,6 +677,7 @@ export default function StudioPage() {
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
   }, [
     canGenerateDocuments,
+    generationReadiness.blocked,
     hasResumeArtifact,
     resumeGenerating,
     resumePresenter.status,
@@ -676,6 +687,7 @@ export default function StudioPage() {
 
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
+    if (generationReadiness.blocked) return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
     }
@@ -688,6 +700,7 @@ export default function StudioPage() {
     canGenerateDocuments,
     coverGenerating,
     coverLetterComplianceBlocked,
+    generationReadiness.blocked,
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,

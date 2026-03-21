@@ -18,6 +18,7 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
+import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
@@ -1084,6 +1085,10 @@ export default function ResultsPage() {
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : null),
     [activeScore],
   );
+  const generationReadiness = useMemo(
+    () => getGenerationReadiness(latest, null),
+    [latest],
+  );
 
   const isLowScore = scoreBand === ScoreBand.LOW;
   const isExceptionalScore = scoreBand === ScoreBand.TOP;
@@ -1189,9 +1194,16 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
-  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
+  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId) && !generationReadiness.blocked;
   const primaryResultsCta = useMemo(() => {
     if (scoreBand === ScoreBand.TOP) {
+      if (generationReadiness.blocked) {
+        return {
+          label: "Review blockers in Results",
+          href: "#advanced-insights",
+          disabled: false,
+        };
+      }
       return {
         label: "Generate My Application",
         href: studioHref,
@@ -1215,12 +1227,20 @@ export default function ResultsPage() {
       };
     }
 
+    if (generationReadiness.blocked) {
+      return {
+        label: "Review blockers in Results",
+        href: "#advanced-insights",
+        disabled: false,
+      };
+    }
+
     return {
       label: "Open Resume and Cover Letter Studio",
       href: studioHref,
       disabled: !canOpenStudio,
     };
-  }, [scoreBand, canOpenStudio, fitReviewPath, studioHref]);
+  }, [scoreBand, canOpenStudio, fitReviewPath, generationReadiness.blocked, studioHref]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;

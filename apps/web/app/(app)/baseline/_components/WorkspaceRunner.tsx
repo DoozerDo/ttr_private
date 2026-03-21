@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
+import { getGenerationReadiness } from "@/lib/generationReadiness";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
@@ -80,6 +81,7 @@ type ResultsUrlArgs = {
 };
 
 type StudioUrlArgs = {
+  assessmentId?: string | null;
   jobId?: string | null;
   baselineId?: string | null;
   baselineVersionId?: string | null;
@@ -311,11 +313,16 @@ function getCompetitiveContext(score: number | null): string | null {
 }
 
 export function buildStudioUrl({
+  assessmentId,
   jobId,
   baselineId,
   baselineVersionId,
 }: StudioUrlArgs): string {
   const params = new URLSearchParams();
+
+  if (assessmentId?.trim()) {
+    params.set("analysisId", assessmentId.trim());
+  }
 
   if (jobId?.trim()) {
     params.set("jobId", jobId.trim());
@@ -603,11 +610,13 @@ export function WorkspaceRunner({
       baselineId: latestBaselineId,
     }) ?? "/results";
   const studioHref = buildStudioUrl({
+    assessmentId: asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? null,
     jobId: latestJobId,
     baselineId: latestBaselineId,
     baselineVersionId:
       asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
   });
+  const { blocked: isGenerationBlocked } = getGenerationReadiness(displayResult, runState);
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
@@ -1050,14 +1059,16 @@ export function WorkspaceRunner({
             ) : null}
             {isStrongScore ? (
               <p className="text-sm font-medium text-slate-100">
-                Recommended next step: Generate tailored materials and apply.
+                {isGenerationBlocked
+                  ? "This role scored well, but tailored materials are blocked until verification issues are resolved."
+                  : "Recommended next step: Generate tailored materials and apply."}
               </p>
             ) : null}
             <a
-              href={studioHref}
+              href={isGenerationBlocked ? resultsHref : studioHref}
               className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
             >
-              Generate Tailored Materials
+              {isGenerationBlocked ? "Review blockers in Results" : "Generate Tailored Materials"}
             </a>
           </div>
         </div>
