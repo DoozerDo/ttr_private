@@ -7,6 +7,10 @@ import {
 type ComplianceEvidence = {
   baseline?: string;
   generated?: string;
+  generatedClaim?: {
+    text?: string;
+    type?: 'company' | 'technology' | 'concept' | 'derived' | 'operational_descriptor';
+  };
   reason?: string;
   similarity?: number;
 };
@@ -73,9 +77,11 @@ function asEvidence(flag: ComplianceFlag): ComplianceEvidence[] {
   return flag.evidence.map((entry) => ({
     baseline: String((entry as { baseline?: string })?.baseline ?? ''),
     generated: String((entry as { generated?: string })?.generated ?? ''),
-    reason: String((entry as { reason?: string })?.reason ?? ''),
-    similarity:
-      typeof (entry as { similarity?: number })?.similarity === 'number'
+      reason: String((entry as { reason?: string })?.reason ?? ''),
+      generatedClaim: (entry as { generatedClaim?: ComplianceEvidence['generatedClaim'] })
+        ?.generatedClaim,
+      similarity:
+        typeof (entry as { similarity?: number })?.similarity === 'number'
         ? (entry as { similarity?: number }).similarity
         : undefined,
   }));
@@ -85,6 +91,13 @@ function mapFlagToUiReason(flag: ComplianceFlag): string {
   const code = String(flag.code ?? '').toLowerCase();
   const baseReason = UI_REASON_LABELS[code] ?? 'Some content could not be verified against your baseline.';
   const evidence = asEvidence(flag);
+  const hasCompanyTypedClaim = evidence.some(
+    (entry) => entry.generatedClaim?.type === 'company',
+  );
+
+  if (flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY && hasCompanyTypedClaim) {
+    return 'One or more company references could not be verified against your baseline employment history.';
+  }
 
   if (flag.code === ComplianceFlagCode.SCOPE_INFLATION) {
     const examples = dedupe(

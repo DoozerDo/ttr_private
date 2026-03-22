@@ -29,6 +29,7 @@ import { AUTO_GENERATE_THRESHOLD } from '../config/autoGenerateThreshold';
 import { Job, JobIngestionMethod } from '../jobs/job.entity';
 import { ApplicationsService } from '../applications/applications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { CriticalFlowTrackerService } from '../support/critical-flow-tracker.service';
 import { ResumeService, GenerateResumeRequest } from './resume.service';
 import * as resumeDraftBullets from './resume-draft-bullets';
 
@@ -161,6 +162,7 @@ const baseRequest: GenerateResumeRequest = {
   baselineId: 'baseline-1',
   baselineVersionId: 'baseline-version-1',
   jobId: 'job-1',
+  analysisId: 'analysis-1',
   oneTap: true,
 };
 
@@ -229,7 +231,11 @@ const buildService = (
   });
   const fitAssessmentRepository = buildRepository<FitAssessment>({
     findOne: jest.fn().mockResolvedValue({
-      id: 'fit-1',
+      id: 'analysis-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'baseline-1',
+      baselineVersion: mockBaselineVersion.versionNumber,
       overallScore: fitScore,
     } as FitAssessment),
   });
@@ -254,6 +260,9 @@ const buildService = (
   const gapAnalysisService = {
     analyze: jest.fn().mockReturnValue(null),
   } as Partial<GapAnalysisService>;
+  const criticalFlowTrackerService = {
+    recordCriticalFlowEvent: jest.fn().mockResolvedValue(undefined),
+  } as Partial<CriticalFlowTrackerService>;
 
   const service = new ResumeService(
     baselineRepository,
@@ -265,6 +274,7 @@ const buildService = (
     applicationsService as ApplicationsService,
     opportunitiesService as OpportunitiesService,
     gapAnalysisService as GapAnalysisService,
+    criticalFlowTrackerService as CriticalFlowTrackerService,
   );
 
   return {
@@ -2524,6 +2534,311 @@ Additional context line to ensure extracted text length remains above validation
     expect((result.internal as any)?.complianceDiagnostics?.[0]?.rawReasons).toContain(
       'extreme_scale_without_baseline_match',
     );
+  });
+
+  it('passes real baseline evidence into scope inflation detection during resume generation', async () => {
+    const detectScopeInflation = jest.fn().mockResolvedValue([]);
+    const { service } = buildService(95, [], mockBaselineVersion, {
+      detectScopeInflation,
+    });
+
+    await service.generateResume('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(detectScopeInflation).toHaveBeenCalled();
+    const detectorPayload = detectScopeInflation.mock.calls[0]?.[0] as {
+      baselineSections?: Array<{ content?: string; sectionType?: string }>;
+      generatedSections?: Array<{ content?: string; sentenceSources?: unknown[] }>;
+    };
+
+    const baselineSections = detectorPayload?.baselineSections ?? [];
+    const generatedSections = detectorPayload?.generatedSections ?? [];
+
+    expect(baselineSections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.stringContaining('John Candidate'),
+          sectionType: BaselineSectionType.EXPERIENCE,
+        }),
+      ]),
+    );
+    expect(generatedSections.length).toBeGreaterThan(0);
+    expect(
+      generatedSections.some((section) => Array.isArray(section.sentenceSources)),
+    ).toBe(true);
+    expect(generatedSections).not.toBe(baselineSections);
+  });
+
+  it('enforces analysis context and succeeds when job/baseline/baselineVersion match', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      compliance_blocked: false,
+    });
+  });
+
+  it('fails resume generation when jobId mismatches analysis context', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const fitAssessmentRepository = (service as any).fitAssessmentRepository as {
+      findOne: jest.Mock;
+    };
+    fitAssessmentRepository.findOne.mockResolvedValueOnce({
+      id: 'analysis-1',
+      userId: 'user-1',
+      jobId: 'job-other',
+      baselineId: 'baseline-1',
+      baselineVersion: mockBaselineVersion.versionNumber,
+      overallScore: 95,
+    });
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { jobId: 'job-other' },
+            received: { jobId: 'job-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('fails resume generation when baselineVersionId mismatches analysis context', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const baselineVersionRepository = (service as any).baselineVersionRepository as {
+      findOne: jest.Mock;
+    };
+    baselineVersionRepository.findOne
+      .mockResolvedValueOnce(mockBaselineVersion)
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        baselineVersionId: 'baseline-version-2',
+        oneTap: false,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { baselineVersionId: null },
+            received: { baselineVersionId: 'baseline-version-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('fails resume generation when baselineId mismatches analysis context', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const fitAssessmentRepository = (service as any).fitAssessmentRepository as {
+      findOne: jest.Mock;
+    };
+    fitAssessmentRepository.findOne.mockResolvedValueOnce({
+      id: 'analysis-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'baseline-other',
+      baselineVersion: mockBaselineVersion.versionNumber,
+      overallScore: 95,
+    });
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { baselineId: 'baseline-other' },
+            received: { baselineId: 'baseline-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('fails resume export when analysis context mismatches requested baseline version', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const baselineVersionRepository = (service as any).baselineVersionRepository as {
+      findOne: jest.Mock;
+    };
+    baselineVersionRepository.findOne
+      .mockResolvedValueOnce(mockBaselineVersion)
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.exportResume(
+        'user-1',
+        {
+          ...baseRequest,
+          baselineVersionId: 'baseline-version-2',
+          oneTap: false,
+        },
+        'pdf',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { baselineVersionId: null },
+            received: { baselineVersionId: 'baseline-version-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('fails resume generation when analysis ownership does not match requester', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const fitAssessmentRepository = (service as any).fitAssessmentRepository as {
+      findOne: jest.Mock;
+    };
+    fitAssessmentRepository.findOne.mockResolvedValueOnce({
+      id: 'analysis-1',
+      userId: 'another-user',
+      jobId: 'job-1',
+      baselineId: 'baseline-1',
+      baselineVersion: mockBaselineVersion.versionNumber,
+      overallScore: 95,
+    });
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_not_owned',
+          details: { analysisId: 'analysis-1' },
+        },
+      },
+    });
+  });
+
+  it('fails resume generation when analysis does not exist', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+    const fitAssessmentRepository = (service as any).fitAssessmentRepository as {
+      findOne: jest.Mock;
+    };
+    fitAssessmentRepository.findOne.mockResolvedValueOnce(null);
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_not_found',
+          details: { analysisId: 'analysis-1' },
+        },
+      },
+    });
+  });
+
+  it('reports blocked readiness when compliance preflight would block generation', async () => {
+    const blockingFlag: ComplianceFlag = {
+      code: 'invented_metric',
+      message: 'Metric cannot be verified.',
+      severity: 'block',
+      confidence: 0.96,
+      evidence: [],
+    };
+    const { service } = buildService(95, [blockingFlag], mockBaselineVersion);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(readiness.status).toBe('blocked');
+    expect(readiness.blocked).toBe(true);
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).resolves.toMatchObject({ status: 'blocked' });
+  });
+
+  it('reports limited readiness when compliance has warnings only', async () => {
+    const warningFlag: ComplianceFlag = {
+      code: 'light_personalization_risk',
+      message: 'Personalization constrained by available evidence.',
+      severity: 'warn',
+      confidence: 0.7,
+      evidence: [],
+    };
+    const { service } = buildService(95, [], mockBaselineVersion, {
+      enforceResumeWritingRules: jest.fn().mockReturnValue([]),
+      validateAndAudit: jest.fn().mockResolvedValue({
+        complianceFlags: [warningFlag],
+        blocked: false,
+        audit: {
+          id: 'audit-readiness-limited',
+          baselineVersionId: mockBaselineVersion.id,
+          baselineVersionHash: mockBaselineVersion.fileHash,
+          outputHash: '',
+          action: ComplianceAction.RESUME_GENERATION,
+          actorId: 'user-1',
+          jobId: mockJob.id,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    });
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(readiness.status).toBe('limited');
+    expect(readiness.blocked).toBe(false);
+  });
+
+  it('reports ready readiness when compliance has no issues and matches generation outcome', async () => {
+    const { service } = buildService(95, [], mockBaselineVersion);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+    expect(readiness.status).toBe('ready');
+    expect(readiness.blocked).toBe(false);
+
+    await expect(
+      service.generateResume('user-1', {
+        ...baseRequest,
+        oneTap: false,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      compliance_blocked: false,
+    });
   });
 
   it('does not emit scope inflation when semantic baseline evidence supports phrasing variation', async () => {

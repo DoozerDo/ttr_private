@@ -2,11 +2,12 @@ import {
   ComplianceTextSection,
   GeneratedTextSourceType,
 } from './compliance.types';
-import { extractClaimUnitsFromSections } from './claim-units';
+import { extractClaimUnitsFromSections, type EntityType } from './claim-units';
 import { ResumeLineType } from './resume-line-classifier';
 
 export type ComparableComplianceUnit = {
   text: string;
+  claim: { text: string; type: EntityType };
   normalized: string;
   sourceType: GeneratedTextSourceType;
   sectionTitle?: string | null;
@@ -61,6 +62,7 @@ export function buildComparableComplianceUnits(
 
     const comparable: ComparableComplianceUnit = {
       text: unit.text,
+      claim: unit.claim,
       normalized,
       sourceType: unit.sourceType,
       sectionTitle: unit.sectionTitle,

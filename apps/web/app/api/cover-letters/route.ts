@@ -11,6 +11,7 @@ type CoverLetterRouteBody = {
   jobId?: string;
   baselineId?: string;
   baselineVersionId?: string;
+  analysisId?: string;
   closingTemplateKey?: string;
   oneTap?: boolean;
   jobContext?: {

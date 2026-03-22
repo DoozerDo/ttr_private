@@ -94,6 +94,15 @@ export class CoverLettersController {
     return this.handleExport(body, request, res, format);
   }
 
+  @Post('readiness')
+  async getGenerationReadiness(
+    @Body() body: GenerateCoverLetterDto,
+    @Req() request: TieredRequest,
+  ) {
+    const userId = this.requireUserId(request);
+    return this.coverLettersService.getGenerationReadiness(userId, body);
+  }
+
   private normalizeFormat(value: string): CoverLetterExportFormat {
     const normalized = (value ?? '').toLowerCase().trim();
     if (normalized === 'pdf') return 'pdf';

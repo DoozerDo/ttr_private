@@ -18,7 +18,12 @@ import {
   readResponsePayload,
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
-import { getGenerationReadiness } from "@/lib/generationReadiness";
+import {
+  combineGenerationReadinessFromServer,
+  type GenerationReadiness,
+  deriveVerificationCoverage,
+  type VerificationCoverage,
+} from "@/lib/generationReadiness";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
@@ -213,6 +218,7 @@ function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[
 }
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
+const RESULTS_BLOCKER_DETAILS_ANCHOR = "#generation-readiness-details";
 
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
 
@@ -259,6 +265,21 @@ const PUBLIC_DIMENSION_LABELS: Record<ScoringContractV1DimensionKey, string> = {
 
 const COMPATIBILITY_ANALYSIS_ERROR =
   "We couldn't complete the compatibility analysis. Please try running the analysis again.";
+
+const READINESS_LOADING_STATE: GenerationReadiness = {
+  status: "limited",
+  blocked: false,
+  reasonCodes: ["readiness_pending"],
+  reasons: [
+    {
+      code: "personalization_limitation",
+      message: "Verifying generation readiness against compliance rules for this analyzed context.",
+    },
+  ],
+  badgeLabel: "LIMITED",
+  summary: "Fit score and generation readiness are separate. Tailored generation is currently limited.",
+  verificationIssues: [],
+};
 
 const formatPercentValue = (value?: number | null) =>
   typeof value === "number" ? `${value.toFixed(1)}%` : "n/a";
@@ -361,7 +382,76 @@ type OpportunityMapSectionProps = {
       }
     | null;
   scoreAnalysisHref: string;
+  readiness: GenerationReadiness;
+  verificationCoverage: VerificationCoverage;
 };
+
+type PrimaryResultsCtaInput = {
+  scoreBand: ScoreBand | null;
+  verificationCoverage: VerificationCoverage;
+  studioHref: string;
+  canOpenStudio: boolean;
+  fitReviewPath: string;
+};
+
+type PrimaryResultsCtaOutput = {
+  label: string;
+  href: string;
+  disabled: boolean;
+};
+
+export function getPrimaryResultsCta({
+  scoreBand,
+  verificationCoverage,
+  studioHref,
+  canOpenStudio,
+  fitReviewPath,
+}: PrimaryResultsCtaInput): PrimaryResultsCtaOutput {
+  if (verificationCoverage.status === "weak") {
+    return {
+      label: "Review Verification Gaps",
+      href: RESULTS_BLOCKER_DETAILS_ANCHOR,
+      disabled: false,
+    };
+  }
+
+  if (scoreBand === null) {
+    return {
+      label: "Strengthen this match in Fit Review",
+      href: fitReviewPath,
+      disabled: false,
+    };
+  }
+
+  if (scoreBand === ScoreBand.TOP) {
+    if (verificationCoverage.status === "partial") {
+      return {
+        label: "Open Studio (limited generation)",
+        href: studioHref,
+        disabled: !canOpenStudio,
+      };
+    }
+    return {
+      label: "Generate My Application",
+      href: studioHref,
+      disabled: !canOpenStudio,
+    };
+  }
+
+  if (scoreBand === ScoreBand.MID || scoreBand === ScoreBand.LOW) {
+    return {
+      label: "Strengthen this match in Fit Review",
+      href: fitReviewPath,
+      disabled: false,
+    };
+  }
+
+  return {
+    label: "Open Resume and Cover Letter Studio",
+    href: studioHref,
+    disabled: !canOpenStudio,
+  };
+}
 
 export function OpportunityMapSection({
   score,
@@ -369,7 +459,15 @@ export function OpportunityMapSection({
   advantageSignals,
   primaryCta,
   scoreAnalysisHref,
+  readiness,
+  verificationCoverage,
 }: OpportunityMapSectionProps) {
+  const readinessToneClass =
+    readiness.status === "blocked"
+      ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
+      : readiness.status === "limited"
+        ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
+        : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100";
   return (
     <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-5 shadow-[0_20px_70px_rgba(2,6,23,0.34)]">
       <div className="flex flex-col gap-5">
@@ -390,6 +488,27 @@ export function OpportunityMapSection({
           </div>
 
           <div className="flex flex-col items-start gap-3 sm:items-end">
+            <div
+              id="generation-readiness-details"
+              className={`w-full rounded-2xl border px-3 py-2 sm:max-w-sm ${readinessToneClass}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+                Generation Readiness: {readiness.badgeLabel}
+              </p>
+              <p className="mt-1 text-sm leading-5 text-slate-100">{readiness.summary}</p>
+              {readiness.reasons[0] ? (
+                <p className="mt-1 text-xs leading-5 text-slate-200">{readiness.reasons[0].message}</p>
+              ) : null}
+            </div>
+            <div className="w-full rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 sm:max-w-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
+                Verification Coverage: {verificationCoverage.status.toUpperCase()}
+              </p>
+              <p className="mt-1 text-sm leading-5 text-slate-100">{verificationCoverage.summary}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-200">
+                Supported claims: {verificationCoverage.supportedClaims} / {verificationCoverage.totalClaims}
+              </p>
+            </div>
             <a
               href={scoreAnalysisHref}
               className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
@@ -975,6 +1094,8 @@ export default function ResultsPage() {
   const [analysisSource, setAnalysisSource] = useState<"manual" | "latest">("manual");
   const [lastLoadedRunIdentifier, setLastLoadedRunIdentifier] = useState<string | null>(null);
   const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
+  const [generationReadiness, setGenerationReadiness] =
+    useState<GenerationReadiness>(READINESS_LOADING_STATE);
   const lastAssessmentHydrationAttempted = useRef(false);
   const trackedCompletionKeysRef = useRef<Set<string>>(new Set());
   const autoLoadPairRef = useRef<string | null>(null);
@@ -1085,10 +1206,65 @@ export default function ResultsPage() {
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : null),
     [activeScore],
   );
-  const generationReadiness = useMemo(
-    () => getGenerationReadiness(latest, null),
-    [latest],
-  );
+  useEffect(() => {
+    const analysisId = latest?.assessmentId?.trim() ?? "";
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    const baselineVersionIdValue = latest?.baselineVersionId?.trim() ?? "";
+
+    if (!analysisId || !jobIdValue || !baselineIdValue || !baselineVersionIdValue) {
+      setGenerationReadiness(READINESS_LOADING_STATE);
+      return;
+    }
+
+    let cancelled = false;
+    setGenerationReadiness(READINESS_LOADING_STATE);
+
+    const body = {
+      analysisId,
+      jobId: jobIdValue,
+      baselineId: baselineIdValue,
+      baselineVersionId: baselineVersionIdValue,
+    };
+
+    void (async () => {
+      try {
+        const [resumeResponse, coverResponse] = await Promise.all([
+          fetch("/api/resume/readiness", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          fetch("/api/cover-letters/readiness", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        ]);
+        const resumePayload = (await readResponsePayload(resumeResponse)) as
+          | Record<string, unknown>
+          | null;
+        const coverPayload = (await readResponsePayload(coverResponse)) as
+          | Record<string, unknown>
+          | null;
+        if (!resumeResponse.ok || !coverResponse.ok) {
+          if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+          return;
+        }
+        const resolved = combineGenerationReadinessFromServer(
+          resumePayload as any,
+          coverPayload as any,
+        );
+        if (!cancelled) setGenerationReadiness(resolved);
+      } catch {
+        if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
 
   const isLowScore = scoreBand === ScoreBand.LOW;
   const isExceptionalScore = scoreBand === ScoreBand.TOP;
@@ -1194,53 +1370,22 @@ export default function ResultsPage() {
         typeof scoringRubric.weights[key] === "number" ? scoringRubric.weights[key] : null,
     }));
   }, [scoringRubric]);
-  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId) && !generationReadiness.blocked;
-  const primaryResultsCta = useMemo(() => {
-    if (scoreBand === ScoreBand.TOP) {
-      if (generationReadiness.blocked) {
-        return {
-          label: "Review blockers in Results",
-          href: "#advanced-insights",
-          disabled: false,
-        };
-      }
-      return {
-        label: "Generate My Application",
-        href: studioHref,
-        disabled: !canOpenStudio,
-      };
-    }
-
-    if (scoreBand === ScoreBand.MID) {
-      return {
-        label: "Strengthen this match in Fit Review",
-        href: fitReviewPath,
-        disabled: false,
-      };
-    }
-
-    if (scoreBand === ScoreBand.LOW) {
-      return {
-        label: "Strengthen this match in Fit Review",
-        href: fitReviewPath,
-        disabled: false,
-      };
-    }
-
-    if (generationReadiness.blocked) {
-      return {
-        label: "Review blockers in Results",
-        href: "#advanced-insights",
-        disabled: false,
-      };
-    }
-
-    return {
-      label: "Open Resume and Cover Letter Studio",
-      href: studioHref,
-      disabled: !canOpenStudio,
-    };
-  }, [scoreBand, canOpenStudio, fitReviewPath, generationReadiness.blocked, studioHref]);
+  const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
+  const verificationCoverage = useMemo(
+    () => deriveVerificationCoverage(generationReadiness),
+    [generationReadiness],
+  );
+  const primaryResultsCta = useMemo(
+    () =>
+      getPrimaryResultsCta({
+        scoreBand,
+        verificationCoverage,
+        studioHref,
+        canOpenStudio,
+        fitReviewPath,
+      }),
+    [scoreBand, verificationCoverage, studioHref, canOpenStudio, fitReviewPath],
+  );
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -1813,6 +1958,8 @@ export default function ResultsPage() {
                     advantageSignals={advantageSignals}
                     primaryCta={primaryResultsCta}
                     scoreAnalysisHref="#advanced-insights"
+                    readiness={generationReadiness}
+                    verificationCoverage={verificationCoverage}
                   />
 
                   {signalAlignment.renderable ? (

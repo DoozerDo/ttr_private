@@ -2,8 +2,21 @@ import { validateStatementIntegrity } from './statement-integrity';
 import { ComplianceTextSection, GeneratedTextSourceType } from './compliance.types';
 import { classifyResumeLine, ResumeLineType } from './resume-line-classifier';
 
+export type EntityType =
+  | 'company'
+  | 'technology'
+  | 'concept'
+  | 'derived'
+  | 'operational_descriptor';
+
+export type StructuredClaim = {
+  text: string;
+  type: EntityType;
+};
+
 export type ClaimUnit = {
   text: string;
+  claim: StructuredClaim;
   sourceType: GeneratedTextSourceType;
   sectionTitle?: string | null;
   integrityValid: boolean;
@@ -16,7 +29,83 @@ type ClaimUnitOptions = {
   enforceIntegrityForBaseline?: boolean;
   includeBaselineEvidenceFragments?: boolean;
   includeSkillStacks?: boolean;
+  entityTypeResolver?: (text: string) => EntityType;
 };
+
+const INVALID_SINGLE_TOKEN_DESCRIPTORS = new Set([
+  'scalable',
+  'strategic',
+  'high-impact',
+  'impactful',
+  'collaborative',
+  'dynamic',
+]);
+
+const INVALID_HYPHENATED_DESCRIPTOR_PATTERNS: RegExp[] = [
+  /^[a-z0-9]+-impacting$/i,
+  /^[a-z0-9]+-focused$/i,
+  /^[a-z0-9]+-driven$/i,
+  /^[a-z0-9]+-facing$/i,
+  /^[a-z0-9]+-team$/i,
+  /^[a-z0-9]+-response$/i,
+  /^[a-z0-9]+-volume$/i,
+  /^[a-z0-9]+-channel$/i,
+];
+const OPERATIONAL_DESCRIPTOR_PATTERNS: RegExp[] = [
+  /^[a-z0-9]+-response$/i,
+  /^[a-z0-9]+-volume$/i,
+  /^[a-z0-9]+-team$/i,
+  /^[a-z0-9]+-facing$/i,
+  /^[a-z0-9]+-channel$/i,
+];
+const OPERATIONAL_DESCRIPTOR_PHRASES = new Set([
+  'first response',
+  'high volume',
+  'cross team',
+  'customer facing',
+]);
+
+const KNOWN_TOOL_ENABLED_PHRASES = new Set([
+  'salesforce-enabled',
+  'zendesk-enabled',
+  'servicenow-enabled',
+  'five9-enabled',
+  'kubernetes-enabled',
+]);
+
+export function isValidClaim(claim: string): boolean {
+  const normalized = String(claim ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+
+  const lower = normalized.toLowerCase();
+  if (isOperationalDescriptor(lower)) return false;
+  if (INVALID_SINGLE_TOKEN_DESCRIPTORS.has(lower)) return false;
+  if (INVALID_HYPHENATED_DESCRIPTOR_PATTERNS.some((pattern) => pattern.test(lower))) {
+    return false;
+  }
+
+  if ((/-enabled$/i.test(normalized) || /\benabled$/i.test(normalized)) && !KNOWN_TOOL_ENABLED_PHRASES.has(lower)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function isOperationalDescriptor(claim: string): boolean {
+  const normalized = String(claim ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) return false;
+  if (OPERATIONAL_DESCRIPTOR_PHRASES.has(normalized)) return true;
+  if (OPERATIONAL_DESCRIPTOR_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
+  return false;
+}
+
+function classifyClaimEntityType(claim: string): EntityType {
+  if (isOperationalDescriptor(claim)) return 'operational_descriptor';
+  if (isValidClaim(claim)) return 'derived';
+  return 'derived';
+}
 
 function splitTextIntoUnits(text: string): string[] {
   return String(text ?? '')
@@ -82,6 +171,7 @@ export function extractClaimUnitsFromSections(
 
       const normalized = candidate.text.replace(/\s+/g, ' ').trim();
       if (!normalized) continue;
+      if (!isValidClaim(normalized)) continue;
       const lineType = classifyResumeLine(normalized);
 
       if (lineType === ResumeLineType.NOISE) {
@@ -131,6 +221,12 @@ export function extractClaimUnitsFromSections(
 
       units.push({
         text: normalized,
+        claim: {
+          text: normalized,
+          type: options?.entityTypeResolver
+            ? options.entityTypeResolver(normalized)
+            : classifyClaimEntityType(normalized),
+        },
         sourceType: candidate.sourceType,
         sectionTitle: section.title,
         integrityValid,

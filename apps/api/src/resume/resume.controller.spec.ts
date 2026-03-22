@@ -19,11 +19,13 @@ type TestTieredResumeRequest = Request & {
 type TestResumeService = {
   generateResume: jest.Mock;
   exportResume: jest.Mock;
+  getGenerationReadiness: jest.Mock;
 };
 
 const resumeService = {
   generateResume: jest.fn(),
   exportResume: jest.fn(),
+  getGenerationReadiness: jest.fn(),
 } satisfies TestResumeService;
 
 function ensureRecord(
@@ -92,6 +94,7 @@ describe('ResumeController tier gating', () => {
         baselineId: 'baseline-1',
         baselineVersionId: 'version-1',
         jobId: 'job-1',
+        analysisId: 'analysis-1',
       },
       request,
     );
@@ -110,6 +113,7 @@ describe('ResumeController tier gating', () => {
           baselineId: 'baseline-1',
           baselineVersionId: 'version-1',
           jobId: 'job-1',
+          analysisId: 'analysis-1',
         },
         request,
         res,
@@ -149,6 +153,7 @@ describe('ResumeController tier gating', () => {
         baselineId: 'baseline-1',
         baselineVersionId: 'version-1',
         jobId: 'job-1',
+        analysisId: 'analysis-1',
       },
       request,
       res,

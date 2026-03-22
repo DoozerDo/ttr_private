@@ -83,6 +83,7 @@ import type {
   DocumentGenerationExports,
   UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
+import { validateAnalysisContext } from '../common/analysis-context-binding';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -328,6 +329,36 @@ export class CoverLettersService {
     };
   }
 
+  async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) {
+    const draft = await this.buildCoverLetterDraft(userId, input);
+    const flags = draft.complianceResult.complianceFlags ?? [];
+    const blocked = draft.complianceResult.blocked === true;
+    const warningFlags = flags.filter((flag) => flag.severity === 'warn');
+    return {
+      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
+      blocked,
+      compliance_flags: flags,
+      reasons:
+        blocked
+          ? [
+              {
+                code: 'full_block',
+                message:
+                  'Some claims required for tailored generation could not be verified against your baseline.',
+              },
+            ]
+          : warningFlags.length > 0
+            ? [
+                {
+                  code: 'personalization_limitation',
+                  message:
+                    'This role scored highly, but document generation is currently limited by verification constraints.',
+                },
+              ]
+            : [],
+    };
+  }
+
   private async buildCoverLetterDraft(
     userId: string,
     input: GenerateCoverLetterDto,
@@ -338,6 +369,26 @@ export class CoverLettersService {
 
     if (!input.baselineVersionId?.trim()) {
       throw new BadRequestException('baselineVersionId is required');
+    }
+    if (!input.analysisId?.trim()) {
+      throw new BadRequestException({
+        error: {
+          code: 'analysis_context_mismatch',
+          message: 'Generation request does not match the analyzed context.',
+          details: {
+            expected: {
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+              baselineVersionId: input.baselineVersionId,
+            },
+            received: {
+              jobId: input.jobId,
+              baselineId: input.baselineId,
+              baselineVersionId: input.baselineVersionId,
+            },
+          },
+        },
+      });
     }
 
     const baseline = await this.baselineRepository.findOne({
@@ -368,6 +419,16 @@ export class CoverLettersService {
     if (!baselineVersion.hash) {
       throw new BadRequestException('Baseline version hash missing');
     }
+
+    await validateAnalysisContext({
+      analysisRepository: this.fitAssessmentRepository,
+      baselineVersionRepository: this.baselineVersionRepository,
+      analysisId: input.analysisId.trim(),
+      userId,
+      jobId: job.id,
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+    });
 
     const policies = await this.baselineBlockPolicyRepository.find({
       where: { baselineVersionId: baselineVersion.id },

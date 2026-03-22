@@ -11,6 +11,7 @@ import type { BaselineAllowlistSnapshot } from './baseline-allowlist.types';
 import { BaselineSectionType } from '../baseline/baseline-section.entity';
 import { buildComparableComplianceUnits } from './comparable-units';
 import { ResumeLineType } from './resume-line-classifier';
+import { isOperationalDescriptor, type EntityType } from './claim-units';
 
 type DetectorPayload = {
   baselineSections?: ComplianceTextSection[] | null;
@@ -489,6 +490,7 @@ type SourcedCandidate = {
 
 type SourcedTextSpan = {
   text: string;
+  claim: { text: string; type: EntityType };
   sourceType?: GeneratedTextSourceType | null;
 };
 
@@ -519,8 +521,9 @@ function collectSourcedTextSpans(
   return units
     .filter((unit) => allowedLineTypes.includes(unit.lineType))
     .map((unit) => ({
-    text: unit.text,
-    sourceType: unit.sourceType,
+      text: unit.text,
+      claim: unit.claim,
+      sourceType: unit.sourceType,
     }));
 }
 
@@ -1922,8 +1925,224 @@ export function detectInventedRole(payload: DetectorPayload): ComplianceFlag[] {
 }
 
 const TECHNOLOGY_TOKEN_PATTERN = /\b[A-Za-z0-9][-A-Za-z0-9.#_+]{1,}\b/g;
+const STRICT_TECHNOLOGY_TERMS = new Set<string>([
+  'salesforce',
+  'five9',
+  'servicenow',
+  'zendesk',
+  'talkdesk',
+  'kubernetes',
+  'snowflake',
+]);
+
+type ClaimClassification = 'hard' | 'soft' | 'derived';
+
+const SOFT_CONCEPT_TERMS = new Set<string>([
+  'saas',
+  'ai-enabled',
+  'ai powered',
+  'ai-powered',
+  'revenue-impacting',
+  'revenue-impact',
+  'enterprise-scale',
+  'enterprise',
+  'customer-operations',
+  'customer operations',
+]);
+
+const DERIVED_DESCRIPTOR_TERMS = new Set<string>([
+  'scalable',
+  'strategic',
+  'high-impact',
+  'impactful',
+  'robust',
+  'innovative',
+  'dynamic',
+  'collaborative',
+  'enterprise',
+  'revenue',
+]);
+
+function normalizeClaimToken(value: string): string {
+  return normalizeCandidate(value).toLowerCase();
+}
+
+function canonicalEntityKey(value: string): string {
+  return normalizeCandidate(value).replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+export function classifyClaimType(token: string): ClaimClassification {
+  const normalized = normalizeClaimToken(token);
+  if (!normalized) return 'derived';
+  if (normalized.endsWith('-enabled') || normalized.endsWith(' enabled')) {
+    return 'soft';
+  }
+  if (SOFT_CONCEPT_TERMS.has(normalized)) return 'soft';
+  if (DERIVED_DESCRIPTOR_TERMS.has(normalized)) return 'derived';
+  return 'hard';
+}
+
+function looksCompanyLikeToken(token: string): boolean {
+  const normalized = normalizeCandidate(token);
+  if (!normalized) return false;
+  if (normalized.split(/\s+/).length >= 2) return true;
+  return /^[A-Z][A-Za-z0-9]+$/.test(normalized);
+}
+
+function buildEmployerCanonicalSet(payload: DetectorPayload): Set<string> {
+  const set = new Set<string>();
+  const baselineCompanies = payload.baselineAllowlist?.allowedCompanies?.length
+    ? payload.baselineAllowlist.allowedCompanies
+    : extractBaselineCompanyTokens(payload.baselineSections);
+  for (const company of baselineCompanies) {
+    const canonical = canonicalEntityKey(company);
+    if (canonical) set.add(canonical);
+    const normalized = normalizeCompanyTokenForComparison(company);
+    if (normalized) set.add(canonicalEntityKey(normalized));
+  }
+  return set;
+}
+
+function resolveEntityType(
+  claimText: string,
+  baselineContext: {
+    employerCanonicalSet: Set<string>;
+  },
+): { text: string; type: EntityType; verifiedCompany: boolean } {
+  const canonical = canonicalEntityKey(claimText);
+  if (canonical && baselineContext.employerCanonicalSet.has(canonical)) {
+    return { text: normalizeCandidate(claimText), type: 'company', verifiedCompany: true };
+  }
+  const normalized = normalizeClaimToken(claimText);
+  if (isOperationalDescriptor(normalized)) {
+    return {
+      text: normalizeCandidate(claimText),
+      type: 'operational_descriptor',
+      verifiedCompany: false,
+    };
+  }
+  const claimType = classifyClaimType(claimText);
+  if (claimType === 'soft' || claimType === 'derived') {
+    return {
+      text: normalizeCandidate(claimText),
+      type: claimType === 'derived' ? 'derived' : 'concept',
+      verifiedCompany: false,
+    };
+  }
+  if (looksCompanyLikeToken(claimText) && !STRICT_TECHNOLOGY_TERMS.has(normalized)) {
+    return { text: normalizeCandidate(claimText), type: 'company', verifiedCompany: false };
+  }
+  return { text: normalizeCandidate(claimText), type: 'technology', verifiedCompany: false };
+}
+
+function collectBaselineSemanticEvidence(
+  sections: ComplianceTextSection[] | null | undefined,
+): string[] {
+  const evidence: string[] = [];
+  for (const section of sections ?? []) {
+    if (section.title) evidence.push(section.title);
+    if (section.content) evidence.push(section.content);
+  }
+  return evidence
+    .map((value) => String(value ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function expandDerivedConceptQueries(token: string): string[] {
+  const normalized = normalizeClaimToken(token);
+  if (normalized === 'saas') {
+    return ['saas', 'software as a service', 'subscription platform', 'subscription business'];
+  }
+  if (normalized.includes('revenue')) {
+    return ['revenue impact', 'revenue growth', 'business impact'];
+  }
+  if (normalized.includes('customer') || normalized.includes('operations')) {
+    return ['customer operations', 'customer support operations', 'service operations'];
+  }
+  if (normalized.includes('enterprise')) {
+    return ['enterprise scale', 'large enterprise', 'enterprise environment'];
+  }
+  return [normalized];
+}
+
+function hasDerivedSemanticSupport(
+  token: string,
+  baselineSections: ComplianceTextSection[] | null | undefined,
+): boolean {
+  const evidencePool = collectBaselineSemanticEvidence(baselineSections);
+  if (!evidencePool.length) return false;
+  const normalizedEvidence = evidencePool.join(' ').toLowerCase();
+  const queries = expandDerivedConceptQueries(token);
+  for (const query of queries) {
+    const q = query.toLowerCase().trim();
+    if (!q) continue;
+    if (normalizedEvidence.includes(q)) {
+      return true;
+    }
+    const queryTokens = q.split(/\s+/).filter((t) => t.length >= 4);
+    if (
+      queryTokens.length >= 2 &&
+      queryTokens.every((queryToken) => normalizedEvidence.includes(queryToken))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const EQUIVALENT_CAPABILITY_DOMAINS: Record<string, string> = {
+  salesforce: 'customer_support_platform',
+  zendesk: 'customer_support_platform',
+  five9: 'customer_support_platform',
+};
+
+function hasEquivalentCapability(
+  claim: string,
+  baselineSections: ComplianceTextSection[] | null | undefined,
+): boolean {
+  const normalizedClaim = normalizeClaimToken(claim);
+  const domain = EQUIVALENT_CAPABILITY_DOMAINS[normalizedClaim];
+  if (!domain) return false;
+
+  const baselineText = collectBaselineSemanticEvidence(baselineSections)
+    .join(' ')
+    .toLowerCase();
+  if (!baselineText) return false;
+
+  if (domain === 'customer_support_platform') {
+    const leadershipSignals = [
+      'support org',
+      'support organization',
+      'customer operations leadership',
+      'led support',
+      'head of support',
+      'director of support',
+      'cx operations',
+    ];
+    const opsSignals = [
+      'incident management',
+      'escalation management',
+      'tooling ownership',
+      'support platform',
+      'service operations',
+      'customer operations',
+    ];
+
+    const hasLeadershipSignal = leadershipSignals.some((signal) =>
+      baselineText.includes(signal),
+    );
+    const hasOpsSignal = opsSignals.some((signal) =>
+      baselineText.includes(signal),
+    );
+    return hasLeadershipSignal && hasOpsSignal;
+  }
+
+  return false;
+}
 
 function isTechnologyTokenCandidate(value: string): boolean {
+  const normalized = normalizeCandidate(value).toLowerCase();
+  if (STRICT_TECHNOLOGY_TERMS.has(normalized)) return true;
   const cleaned = value.replace(/[^A-Za-z0-9]/g, '');
   if (cleaned.length < 3) return false;
 
@@ -1940,7 +2159,21 @@ function isTechnologyTokenCandidate(value: string): boolean {
 export function collectTechnologyTokensFromSections(
   sections: ComplianceTextSection[] | null | undefined,
 ): Map<string, string> {
+  return new Map(
+    [...collectTechnologyClaimsFromSections(sections).entries()].map(
+      ([normalized, claim]) => [normalized, claim.text],
+    ),
+  );
+}
+
+export function collectTechnologyClaimsFromSections(
+  sections: ComplianceTextSection[] | null | undefined,
+  options?: {
+    resolveEntity?: (token: string) => { text: string; type: EntityType };
+  },
+): Map<string, { text: string; type: EntityType }> {
   const tokens = new Map<string, string>();
+  const claims = new Map<string, { text: string; type: EntityType }>();
 
   for (const span of collectSourcedTextSpans(sections, {
     includeSkillStacks: true,
@@ -1972,10 +2205,26 @@ export function collectTechnologyTokensFromSections(
       const candidate = normalizeCandidate(match[0]);
       if (!candidate || !isTechnologyTokenCandidate(candidate)) continue;
       addCandidate(tokens, candidate, normalizeTokenForComparison);
+      const normalized = normalizeTokenForComparison(candidate);
+      if (!normalized) continue;
+      if (claims.has(normalized)) continue;
+      const resolved = options?.resolveEntity
+        ? options.resolveEntity(candidate)
+        : { text: candidate, type: 'technology' as const };
+      claims.set(normalized, {
+        text: resolved.text || candidate,
+        type: resolved.type,
+      });
     }
   }
 
-  return tokens;
+  for (const [normalized, original] of tokens.entries()) {
+    if (!claims.has(normalized)) {
+      claims.set(normalized, { text: original, type: 'technology' });
+    }
+  }
+
+  return claims;
 }
 
 export function computeTechnologyConfidence(token: string): number {
@@ -1994,10 +2243,14 @@ export function computeTechnologyConfidence(token: string): number {
 export function detectFictionalTechnology(
   payload: DetectorPayload,
 ): ComplianceFlag[] {
-  const generatedTokens = collectTechnologyTokensFromSections(
+  const employerCanonicalSet = buildEmployerCanonicalSet(payload);
+  const resolveEntity = (token: string) =>
+    resolveEntityType(token, { employerCanonicalSet });
+  const generatedClaims = collectTechnologyClaimsFromSections(
     payload.generatedSections,
+    { resolveEntity },
   );
-  if (!generatedTokens.size) return [];
+  if (!generatedClaims.size) return [];
 
   const baselineTokenSet = payload.baselineAllowlist?.allowedTechnologies
     ?.length
@@ -2007,16 +2260,73 @@ export function detectFictionalTechnology(
       );
   const flags: ComplianceFlag[] = [];
 
-  for (const [normalized, original] of generatedTokens.entries()) {
+  for (const [normalized, claim] of generatedClaims.entries()) {
+    const original = claim.text;
     if (baselineTokenSet.has(normalized)) continue;
+    const entity = resolveEntity(original);
+    if (claim.type === 'company' && entity.verifiedCompany) {
+      continue;
+    }
+    if (claim.type === 'company') {
+      continue;
+    }
+    if (claim.type === 'derived' || claim.type === 'operational_descriptor') {
+      continue;
+    }
+    if (claim.type === 'concept') {
+      const supported = hasDerivedSemanticSupport(
+        original,
+        payload.baselineSections,
+      );
+      if (supported) {
+        continue;
+      }
+      flags.push({
+        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+        severity: ComplianceFlagSeverity.WARN,
+        message: `Conceptual claim "${original}" has limited direct baseline support.`,
+        confidence: 0.6,
+        evidence: [
+          {
+            baseline: '',
+            generated: original,
+            generatedClaim: claim,
+          },
+        ],
+      });
+      continue;
+    }
     const tokenForConfidence = original ?? normalized;
     const confidence = computeTechnologyConfidence(tokenForConfidence);
+    if (hasEquivalentCapability(original, payload.baselineSections)) {
+      flags.push({
+        code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+        severity: ComplianceFlagSeverity.WARN,
+        message: `Technology "${original}" is not explicitly listed, but equivalent baseline capability was detected.`,
+        confidence: Math.max(0.55, confidence - 0.2),
+        evidence: [
+          {
+            baseline: '',
+            generated: original,
+            generatedClaim: claim,
+          },
+        ],
+      });
+      continue;
+    }
 
     flags.push({
       code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
       severity: ComplianceFlagSeverity.BLOCK,
       message: `Technology "${original}" not found in baseline.`,
       confidence,
+      evidence: [
+        {
+          baseline: '',
+          generated: original,
+          generatedClaim: claim,
+        },
+      ],
     });
     console.warn(
       'inventedTechnology detector blocked span',

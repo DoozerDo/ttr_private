@@ -1,4 +1,8 @@
-import { DocumentType, GeneratedTextSourceType } from './compliance.types';
+import {
+  ComplianceFlagSeverity,
+  DocumentType,
+  GeneratedTextSourceType,
+} from './compliance.types';
 import {
   detectFictionalTechnology,
   detectInventedCompany,
@@ -697,6 +701,358 @@ describe('compliance detectors job context allowlist cover letters', () => {
       });
 
       expect(flags).toHaveLength(0);
+    });
+
+    it('does not block derived SaaS concept when baseline has indirect semantic support', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Led SaaS support transformations for enterprise customers.',
+            sentenceSources: [
+              {
+                text: 'Led SaaS support transformations for enterprise customers.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            content:
+              'Led software as a service support operations and subscription platform migrations.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+
+      expect(flags).toHaveLength(0);
+    });
+
+    it('does not block generic revenue-impacting descriptor claims', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Delivered revenue-impacting customer operations improvements.',
+            sentenceSources: [
+              {
+                text: 'Delivered revenue-impacting customer operations improvements.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+      });
+
+      expect(
+        flags.every((flag) => flag.severity !== ComplianceFlagSeverity.BLOCK),
+      ).toBe(true);
+    });
+
+    it('does not block AI-enabled conceptual claims', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Led AI-enabled support workflows for global teams.',
+            sentenceSources: [
+              {
+                text: 'Led AI-enabled support workflows for global teams.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+      });
+
+      expect(
+        flags.every((flag) => flag.severity !== ComplianceFlagSeverity.BLOCK),
+      ).toBe(true);
+    });
+
+    it('does not block SaaS conceptual claims', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Scaled SaaS support operations across enterprise customers.',
+            sentenceSources: [
+              {
+                text: 'Scaled SaaS support operations across enterprise customers.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+      });
+
+      expect(
+        flags.every((flag) => flag.severity !== ComplianceFlagSeverity.BLOCK),
+      ).toBe(true);
+    });
+
+    it('still blocks strict missing platform claims such as Salesforce', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Administered Salesforce Service Cloud workflows.',
+            sentenceSources: [
+              {
+                text: 'Administered Salesforce Service Cloud workflows.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Used Zendesk and Talkdesk to improve support operations.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.BLOCK)).toBe(true);
+      expect(flags.some((flag) => flag.message.includes('Salesforce'))).toBe(true);
+    });
+
+    it('does not treat SentinelOne employer matches as fictional technology', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Supported enterprise security programs at SentinelOne.',
+            sentenceSources: [
+              {
+                text: 'Supported enterprise security programs at SentinelOne.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        baselineAllowlist: {
+          allowedCompanies: ['Sentinel One'],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          allowedRoles: [],
+          generatedAt: '2026-03-22T00:00:00.000Z',
+        },
+      });
+
+      expect(
+        flags.some((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+      ).toBe(false);
+    });
+
+    it('classifies Salesforce as technology when it is not an employer match', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Implemented Salesforce automations for support operations.',
+            sentenceSources: [
+              {
+                text: 'Implemented Salesforce automations for support operations.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        baselineAllowlist: {
+          allowedCompanies: ['SentinelOne'],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          allowedRoles: [],
+          generatedAt: '2026-03-22T00:00:00.000Z',
+        },
+      });
+
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.BLOCK)).toBe(true);
+      expect(flags.some((flag) => flag.message.includes('Salesforce'))).toBe(true);
+    });
+
+    it('never emits fictional technology flags for CenturyLink when classified as company', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Led enterprise support modernization at CenturyLink.',
+            sentenceSources: [
+              {
+                text: 'Led enterprise support modernization at CenturyLink.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        baselineAllowlist: {
+          allowedCompanies: ['CenturyLink'],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          allowedRoles: [],
+          generatedAt: '2026-03-22T00:00:00.000Z',
+        },
+      });
+
+      expect(
+        flags.some((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+      ).toBe(false);
+    });
+
+    it('only blocks hard claims in mixed hard/soft claim sets', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content:
+              'Implemented Salesforce automations for AI-enabled SaaS support with revenue-impacting outcomes.',
+            sentenceSources: [
+              {
+                text:
+                  'Implemented Salesforce automations for AI-enabled SaaS support with revenue-impacting outcomes.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        baselineAllowlist: {
+          allowedCompanies: [],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          allowedRoles: [],
+          generatedAt: '2026-03-22T00:00:00.000Z',
+        },
+      });
+
+      const blocked = flags.filter((flag) => flag.severity === ComplianceFlagSeverity.BLOCK);
+      expect(blocked.some((flag) => flag.message.includes('Salesforce'))).toBe(true);
+      expect(blocked.some((flag) => flag.message.includes('AI-enabled'))).toBe(false);
+      expect(blocked.some((flag) => flag.message.includes('SaaS'))).toBe(false);
+      expect(blocked.some((flag) => flag.message.includes('revenue-impacting'))).toBe(false);
+    });
+
+    it('downgrades Salesforce to WARN when baseline shows equivalent CX platform capability', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Implemented Salesforce automations for support operations.',
+            sentenceSources: [
+              {
+                text: 'Implemented Salesforce automations for support operations.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            content:
+              'Led support organization strategy across global regions with incident management, escalation management, and tooling ownership for CX operations.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+
+      expect(flags.some((flag) => flag.message.includes('Salesforce'))).toBe(true);
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.BLOCK)).toBe(false);
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.WARN)).toBe(true);
+    });
+
+    it('keeps Salesforce as BLOCK when equivalent CX capability is missing', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Implemented Salesforce automations for support operations.',
+            sentenceSources: [
+              {
+                text: 'Implemented Salesforce automations for support operations.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            content: 'Improved hiring process quality and team onboarding.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+
+      expect(flags.some((flag) => flag.message.includes('Salesforce'))).toBe(true);
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.BLOCK)).toBe(true);
+    });
+
+    it('keeps specialized tools like Kubernetes as BLOCK when missing', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Built Kubernetes deployment workflows for support infrastructure.',
+            sentenceSources: [
+              {
+                text: 'Built Kubernetes deployment workflows for support infrastructure.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [
+          {
+            title: 'Experience',
+            content:
+              'Led support organization strategy across global regions with incident management, escalation management, and tooling ownership for CX operations.',
+            sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+          },
+        ],
+      });
+
+      expect(flags.some((flag) => flag.message.includes('Kubernetes'))).toBe(true);
+      expect(flags.some((flag) => flag.severity === ComplianceFlagSeverity.BLOCK)).toBe(true);
+    });
+
+    it('does not block Microsoft when it matches baseline employer history', () => {
+      const flags = detectFictionalTechnology({
+        generatedSections: [
+          {
+            title: 'Experience',
+            content: 'Drove global support operations at Microsoft.',
+            sentenceSources: [
+              {
+                text: 'Drove global support operations at Microsoft.',
+                sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+              },
+            ],
+          },
+        ],
+        baselineSections: [],
+        baselineAllowlist: {
+          allowedCompanies: ['Microsoft'],
+          allowedTechnologies: [],
+          allowedMetricTokens: [],
+          allowedRoles: [],
+          generatedAt: '2026-03-22T00:00:00.000Z',
+        },
+      });
+
+      expect(
+        flags.some((flag) => flag.code === ComplianceFlagCode.FICTIONAL_TECHNOLOGY),
+      ).toBe(false);
     });
   });
 });

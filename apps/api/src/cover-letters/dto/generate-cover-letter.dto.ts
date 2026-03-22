@@ -8,6 +8,8 @@ export class GenerateCoverLetterDto {
 
   jobId!: string;
 
+  analysisId!: string;
+
   jobContext?: JobApplicationContext;
 
   documentType?: DocumentType;

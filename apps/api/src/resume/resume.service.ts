@@ -69,6 +69,7 @@ import {
   detectClaimRiskForBullet,
   summarizeClaimRisk,
 } from './claim-risk';
+import { validateAnalysisContext } from '../common/analysis-context-binding';
 import type {
   DocumentGenerationExports,
   NormalizedResumeDocument,
@@ -79,12 +80,14 @@ export type GenerateResumeRequest = {
   baselineId: string;
   baselineVersionId?: string;
   jobId?: string | null;
+  analysisId?: string;
   oneTap?: boolean;
   editedResume?: NormalizedResumeDocument;
 };
 
 export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
+  preflightOnly?: boolean;
 };
 
 export type ResumePreExportSnapshot = {
@@ -588,6 +591,41 @@ export class ResumeService {
     });
   }
 
+  private buildScopeInflationBaselineSections(
+    allowedSections: BaselineSection[],
+    baselineVersion: BaselineVersion,
+  ): Array<{
+    title?: string | null;
+    content?: string | null;
+    sectionType?: string;
+  }> {
+    const baselineSections: Array<{
+      title?: string | null;
+      content?: string | null;
+      sectionType?: string;
+    }> = allowedSections.map(
+      (section) => ({
+        title: section.title,
+        content: section.content,
+        sectionType: section.sectionType ?? undefined,
+      }),
+    );
+
+    const verifiedAdditionSections = (baselineVersion.verifiedAdditions ?? [])
+      .map((content, index) => ({
+        title: `Verified addition ${index + 1}`,
+        content,
+        sectionType: BaselineSectionType.OTHER ?? undefined,
+      }))
+      .filter(
+        (section) =>
+          typeof section.content === 'string' &&
+          section.content.trim().length > 0,
+      );
+
+    return [...baselineSections, ...verifiedAdditionSections];
+  }
+
   private buildExperiencePipelineDiagnostics(payload: {
     baselineVersionLoaded: boolean;
     sectionsWithPolicies: BaselineSection[];
@@ -943,12 +981,36 @@ export class ResumeService {
       const baselineId = request.baselineId?.trim();
       const baselineVersionId = request.baselineVersionId?.trim();
       const jobId = request.jobId?.trim();
+      const analysisId = request.analysisId?.trim();
 
       if (!baselineId) {
         throw new BadRequestException('baselineId is required');
       }
       if (!baselineVersionId) {
         throw new BadRequestException('baselineVersionId is required');
+      }
+      if (!jobId) {
+        throw new BadRequestException('jobId is required');
+      }
+      if (!analysisId) {
+        throw new BadRequestException({
+          error: {
+            code: 'analysis_context_mismatch',
+            message: 'Generation request does not match the analyzed context.',
+            details: {
+              expected: {
+                jobId,
+                baselineId,
+                baselineVersionId,
+              },
+              received: {
+                jobId,
+                baselineId,
+                baselineVersionId,
+              },
+            },
+          },
+        });
       }
 
       const baseline = await this.baselineRepository.findOne({
@@ -971,6 +1033,16 @@ export class ResumeService {
     if (!baselineVersion.hash) {
       throw new BadRequestException('Baseline version hash missing');
     }
+
+    await validateAnalysisContext({
+      analysisRepository: this.fitAssessmentRepository,
+      baselineVersionRepository: this.baselineVersionRepository,
+      analysisId,
+      userId,
+      jobId,
+      baselineId: baseline.id,
+      baselineVersionId: baselineVersion.id,
+    });
 
     const policies = await this.baselineBlockPolicyRepository.find({
       where: { baselineVersionId: baselineVersion.id },
@@ -1278,6 +1350,7 @@ export class ResumeService {
     const cxFitScoreSnapshot = this.buildCxFitScoreSnapshot(latestAssessment);
 
     const shouldEnforceOneTap = options?.enforceOneTap ?? true;
+    const preflightOnly = options?.preflightOnly ?? false;
 
     if (request.oneTap && jobId && shouldEnforceOneTap) {
       this.ensureOneTapAllowed(latestAssessment);
@@ -1296,17 +1369,20 @@ export class ResumeService {
       generatedSections: sections,
     });
 
-    const scopeFlags = await this.complianceService.detectScopeInflation({
-      baselineSections: sections,
-      generatedSections: sections,
-    });
-
-    const normalizedSections =
-      this.complianceService.normalizeSectionsForOutput(sections);
     const generatedSectionsForCompliance =
       this.buildResumeGeneratedSectionsForCompliance(
         sections as ResumeExportSection[],
       );
+    const scopeInflationBaselineSections =
+      this.buildScopeInflationBaselineSections(allowedSections, baselineVersion);
+
+    const scopeFlags = await this.complianceService.detectScopeInflation({
+      baselineSections: scopeInflationBaselineSections,
+      generatedSections: generatedSectionsForCompliance,
+    });
+
+    const normalizedSections =
+      this.complianceService.normalizeSectionsForOutput(sections);
 
       const { complianceFlags, blocked, audit } =
         await validateComplianceWithFallback(this.complianceService, {
@@ -1378,6 +1454,51 @@ export class ResumeService {
       resumeGenerationStage: experienceDiagnostics.resumeGenerationStage ?? 'success',
       resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
     };
+
+    if (preflightOnly) {
+      return {
+        ok: true,
+        status: 'success',
+        generationStatus: 'success',
+        exportReady: true,
+        blocked: false,
+        baselineId: baseline.id,
+        baselineVersionId: baselineVersion.id,
+        jobId: jobId ?? null,
+        sections: normalizedSections,
+        compliance_flags: complianceFlags,
+        compliance_blocked: false,
+        audit_id: audit.id,
+        auditId: audit.id,
+        baseline_version_hash: audit.baselineVersionHash,
+        quality:
+          latestAssessment &&
+          latestAssessment.overallScore >= AUTO_GENERATE_THRESHOLD
+            ? 'optimized'
+            : 'draft',
+        exports: { docx: false, pdf: false } as DocumentGenerationExports,
+        preview: {
+          resume: null,
+        },
+        trackerEntryId: null,
+        trackerStatus: null,
+        opportunityId: null,
+        claimRiskSummary,
+        gapAnalysis: gapInsights,
+        gapGuidance,
+        display: this.buildSuccessDisplayPayload(),
+        safeDisplay: this.buildSuccessDisplayPayload(),
+        internal: {
+          auditId: audit.id,
+          baselineVersionHash: audit.baselineVersionHash,
+          complianceFlags,
+          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
+          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
+          resumeGenerationDiagnostics: experienceDiagnostics,
+          normalizationDiagnostics: experienceDiagnostics,
+        },
+      };
+    }
 
     const trackerEntry =
       await this.applicationsService.upsertPreparedFromResumeGeneration({
@@ -1694,6 +1815,41 @@ export class ResumeService {
       filename,
       auditId: audit.id,
       baselineVersionHash: audit.baselineVersionHash,
+    };
+  }
+
+  async getGenerationReadiness(userId: string, request: GenerateResumeRequest) {
+    const generation = await this.generateResume(
+      userId,
+      { ...request, oneTap: false },
+      { enforceOneTap: false, preflightOnly: true },
+    );
+    const flags = generation.compliance_flags ?? [];
+    const blocked =
+      generation.status === 'blocked' || generation.compliance_blocked === true;
+    const warningFlags = flags.filter((flag) => flag.severity === 'warn');
+    return {
+      status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
+      blocked,
+      compliance_flags: flags,
+      reasons:
+        blocked
+          ? [
+              {
+                code: 'full_block',
+                message:
+                  'Some claims required for tailored generation could not be verified against your baseline.',
+              },
+            ]
+          : warningFlags.length > 0
+            ? [
+                {
+                  code: 'personalization_limitation',
+                  message:
+                    'This role scored highly, but document generation is currently limited by verification constraints.',
+                },
+              ]
+            : [],
     };
   }
 }

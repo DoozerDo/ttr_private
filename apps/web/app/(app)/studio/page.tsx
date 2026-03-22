@@ -13,7 +13,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
-import { getGenerationReadiness } from "@/lib/generationReadiness";
+import {
+  aggregateVerificationIssues,
+  combineGenerationReadinessFromServer,
+  type GenerationReadiness,
+  deriveVerificationCoverage,
+} from "@/lib/generationReadiness";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import {
@@ -95,6 +100,21 @@ type LatestAnalysis = {
 const ANALYSIS_LOAD_ERROR_MESSAGE =
   "Unable to load role analysis. Please return to Results and reopen the document generator.";
 
+const READINESS_LOADING_STATE: GenerationReadiness = {
+  status: "limited",
+  blocked: false,
+  reasonCodes: ["readiness_pending"],
+  reasons: [
+    {
+      code: "personalization_limitation",
+      message: "Verifying generation readiness against compliance rules for this analyzed context.",
+    },
+  ],
+  badgeLabel: "LIMITED",
+  summary: "Fit score and generation readiness are separate. Tailored generation is currently limited.",
+  verificationIssues: [],
+};
+
 type DocumentState = {
   response: unknown | null;
   error: string | null;
@@ -110,6 +130,7 @@ type CoverLetterPayload = {
   jobId?: string;
   baselineId?: string;
   baselineVersionId?: string;
+  analysisId?: string;
   closingTemplateKey?: string;
   oneTap?: boolean;
   documentType: "cover_letter";
@@ -298,6 +319,55 @@ function collectEvidenceItems(analysis: LatestAnalysis | null): string[] {
   return Array.from(new Set(candidates)).slice(0, 5);
 }
 
+function formatVerificationIssueSource(
+  source: "resume_generation" | "cover_letter_generation" | "targeting_context",
+) {
+  if (source === "resume_generation") return "Resume generation";
+  if (source === "cover_letter_generation") return "Cover letter generation";
+  return "Targeting context";
+}
+
+type VerificationIssueAction = {
+  href: string;
+  label: string;
+};
+
+function resolveVerificationIssueAction(issue: GenerationReadiness["verificationIssues"][number]): VerificationIssueAction {
+  if (issue.code === "missing_baseline_evidence") {
+    const claim = issue.claim?.trim() ?? "";
+    const params = new URLSearchParams({ source: "studio" });
+    if (claim) {
+      params.set("highlightClaim", claim);
+    }
+    return {
+      label: "Review baseline evidence",
+      href: `/baseline?${params.toString()}`,
+    };
+  }
+  if (issue.code === "unsupported_technology_claim") {
+    return {
+      label: "Adjust targeting emphasis",
+      href: "/results#advanced-insights",
+    };
+  }
+  if (issue.code === "generation_overreach") {
+    return {
+      label: "Regenerate with stricter alignment",
+      href: "/results#advanced-insights",
+    };
+  }
+  if (issue.code === "role_targeting_emphasis_exceeds_support") {
+    return {
+      label: "Refine role targeting",
+      href: "/results#advanced-insights",
+    };
+  }
+  return {
+    label: "Review verification details",
+    href: "/results#advanced-insights",
+  };
+}
+
 export default function StudioPage() {
   const isNonProduction = process.env.NODE_ENV !== "production";
   const searchParams = useSearchParams();
@@ -389,6 +459,8 @@ export default function StudioPage() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
+  const [generationReadiness, setGenerationReadiness] =
+    useState<GenerationReadiness>(READINESS_LOADING_STATE);
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
   const [resumeGenerating, setResumeGenerating] = useState(false);
@@ -518,10 +590,57 @@ export default function StudioPage() {
   const hasLoadedAnalysis = Boolean(
     requestedAnalysisId && !analysisLoading && !analysisError && analysisScore !== null,
   );
-  const generationReadiness = useMemo(
-    () => getGenerationReadiness(analysis, null),
-    [analysis],
-  );
+  useEffect(() => {
+    if (!requestedAnalysisId || !effectiveJobId || !effectiveBaselineId || !effectiveBaselineVersionId) {
+      setGenerationReadiness(READINESS_LOADING_STATE);
+      return;
+    }
+    let cancelled = false;
+    setGenerationReadiness(READINESS_LOADING_STATE);
+    const body = {
+      analysisId: requestedAnalysisId,
+      jobId: effectiveJobId,
+      baselineId: effectiveBaselineId,
+      baselineVersionId: effectiveBaselineVersionId,
+    };
+    void (async () => {
+      try {
+        const [resumeResponse, coverResponse] = await Promise.all([
+          fetch("/api/resume/readiness", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          fetch("/api/cover-letters/readiness", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        ]);
+        const resumePayload = (await readResponsePayload(resumeResponse)) as
+          | Record<string, unknown>
+          | null;
+        const coverPayload = (await readResponsePayload(coverResponse)) as
+          | Record<string, unknown>
+          | null;
+        if (!resumeResponse.ok || !coverResponse.ok) {
+          if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+          return;
+        }
+        const resolved = combineGenerationReadinessFromServer(
+          resumePayload as any,
+          coverPayload as any,
+        );
+        if (!cancelled) setGenerationReadiness(resolved);
+      } catch {
+        if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
   const generationMessage = useMemo(() => {
     if (!requestedAnalysisId) {
       return "Run a role compatibility analysis first.";
@@ -529,8 +648,11 @@ export default function StudioPage() {
     if (analysisError) {
       return ANALYSIS_LOAD_ERROR_MESSAGE;
     }
-    if (generationReadiness.blocked) {
-      return "Document generation is blocked by verification issues. Review compliance in Results.";
+    if (generationReadiness.status === "blocked") {
+      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
+    }
+    if (generationReadiness.status === "limited") {
+      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
     }
     if (!effectiveBaselineVersionId) {
       return "Resume snapshot is still loading for this analysis.";
@@ -539,7 +661,15 @@ export default function StudioPage() {
       return "Fit score is unavailable for this role analysis.";
     }
     return null;
-  }, [analysisError, analysisScore, effectiveBaselineVersionId, generationReadiness.blocked, requestedAnalysisId]);
+  }, [analysisError, analysisScore, effectiveBaselineVersionId, generationReadiness.reasons, generationReadiness.status, generationReadiness.summary, requestedAnalysisId]);
+  const verificationCoverage = useMemo(
+    () => deriveVerificationCoverage(generationReadiness),
+    [generationReadiness],
+  );
+  const aggregatedVerificationIssues = useMemo(
+    () => aggregateVerificationIssues(generationReadiness.verificationIssues),
+    [generationReadiness.verificationIssues],
+  );
 
   const readyForDocuments =
     Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
@@ -710,6 +840,7 @@ export default function StudioPage() {
     const payload: CoverLetterPayload = {
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
+      analysisId: requestedAnalysisId,
       closingTemplateKey: defaultClosingTemplateKey,
       documentType: "cover_letter",
       oneTap,
@@ -727,6 +858,7 @@ export default function StudioPage() {
     const payload: Record<string, unknown> = {
       jobId: effectiveJobId,
       baselineId: effectiveBaselineId,
+      analysisId: requestedAnalysisId,
       oneTap,
     };
     if (effectiveBaselineVersionId) {
@@ -1419,6 +1551,118 @@ export default function StudioPage() {
           <span className="normal-case tracking-normal text-emerald-100">Context loaded</span>
         </div>
       ) : null}
+      {requestedAnalysisId ? (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm ${
+            generationReadiness.status === "blocked"
+              ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
+              : generationReadiness.status === "limited"
+                ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
+                : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+          }`}
+          data-testid="studio-generation-readiness"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+            Generation readiness: {generationReadiness.badgeLabel}
+          </p>
+          <p className="mt-1 text-sm text-slate-100">{generationReadiness.summary}</p>
+          {generationReadiness.reasons.length ? (
+            <ul className="mt-2 space-y-1 text-sm text-slate-200">
+              {generationReadiness.reasons.map((reason) => (
+                <li key={`studio-readiness-${reason.code}`}>{reason.message}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      {requestedAnalysisId ? (
+        <div className="rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+            Verification Coverage: {verificationCoverage.status.toUpperCase()}
+          </p>
+          <p className="mt-1 text-sm text-slate-100">{verificationCoverage.summary}</p>
+          <p className="mt-1 text-xs text-slate-200">
+            Fit score: {analysisScore === null ? "N/A" : Math.round(analysisScore)} · Supported claims:{" "}
+            {verificationCoverage.supportedClaims} / {verificationCoverage.totalClaims}
+          </p>
+        </div>
+      ) : null}
+      {requestedAnalysisId &&
+      generationReadiness.status !== "ready" &&
+      aggregatedVerificationIssues.primary.length ? (
+        <section
+          className="rounded-2xl border border-white/15 bg-slate-950/35 p-4"
+          data-testid="studio-verification-issues"
+        >
+          <h2 className="text-base font-semibold text-slate-100">Verification issues</h2>
+          <p className="mt-1 text-sm text-slate-300">
+            Review these issues to see what failed verification and what to do next.
+          </p>
+          <ul className="mt-3 space-y-3">
+            {aggregatedVerificationIssues.primary.map((issue, index) => (
+              <li
+                key={`verification-issue-${issue.source}-${issue.code}-${index}`}
+                className={`rounded-xl border p-3 ${
+                  issue.severity === "block"
+                    ? "border-rose-300/35 bg-rose-500/10"
+                    : "border-amber-300/35 bg-amber-500/10"
+                }`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                  {issue.severity === "block" ? "BLOCKER" : "LIMITATION"} ·{" "}
+                  {formatVerificationIssueSource(issue.source)}
+                </p>
+                {issue.claim ? (
+                  <p className="mt-1 text-sm text-slate-100">
+                    <span className="font-semibold">Claim:</span> {issue.claim}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-sm text-slate-100">{issue.explanation}</p>
+                {issue.sourceContext ? (
+                  <p className="mt-1 text-xs text-slate-300">
+                    <span className="font-semibold text-slate-200">Source context:</span>{" "}
+                    {issue.sourceContext}
+                  </p>
+                ) : null}
+                <p className="mt-2 text-sm text-slate-100">
+                  <span className="font-semibold">Next step:</span> {issue.recommendedAction}
+                </p>
+                <div className="mt-3">
+                  <Link
+                    href={resolveVerificationIssueAction(issue).href}
+                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+                  >
+                    {resolveVerificationIssueAction(issue).label}
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {aggregatedVerificationIssues.grouped.length ? (
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                Additional verification limitations (
+                {aggregatedVerificationIssues.grouped.reduce((sum, item) => sum + item.count, 0)})
+              </p>
+              <ul className="mt-2 space-y-1 text-sm text-slate-300">
+                {aggregatedVerificationIssues.grouped.map((group, index) => (
+                  <li key={`verification-group-${index}`}>
+                    {group.label} ({group.count})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="mt-3">
+            <Link
+              href="/results#advanced-insights"
+              className="text-sm font-medium text-slate-200 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+            >
+              Open Results verification details
+            </Link>
+          </div>
+        </section>
+      ) : null}
 
       {!hydratedFromResultsContext && contextHydrationMessage ? (
         <Alert intent="warning" title="Role context unavailable">
@@ -1458,12 +1702,25 @@ export default function StudioPage() {
             Top Band
           </p>
           <p className="text-sm text-slate-100">
-            Your score is in the top band. Generate your application package now.
+            {generationReadiness.status === "blocked"
+              ? "Your score is in the top band, but generation is currently blocked by verification requirements."
+              : generationReadiness.status === "limited"
+                ? "Your score is in the top band. Tailored generation is available with verification limits."
+                : "Your score is in the top band. Generate your application package now."}
           </p>
           <div className="flex justify-start">
-            <FormButton onClick={handleGenerateMyApplication} disabled={!canRunTopBandGeneration}>
-              {(resumeGenerating || coverGenerating) ? "Generating..." : "Generate My Application"}
-            </FormButton>
+            {generationReadiness.status === "blocked" ? (
+              <Link
+                href="/results#advanced-insights"
+                className="inline-flex items-center justify-center rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-400/20"
+              >
+                Review Verification Gaps
+              </Link>
+            ) : (
+              <FormButton onClick={handleGenerateMyApplication} disabled={!canRunTopBandGeneration}>
+                {(resumeGenerating || coverGenerating) ? "Generating..." : "Generate My Application"}
+              </FormButton>
+            )}
           </div>
         </section>
       ) : null}

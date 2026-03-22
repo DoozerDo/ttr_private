@@ -1,4 +1,4 @@
-import { extractClaimUnitsFromSections } from './claim-units';
+import { extractClaimUnitsFromSections, isValidClaim } from './claim-units';
 import { GeneratedTextSourceType, type ComplianceTextSection } from './compliance.types';
 import { ResumeLineType } from './resume-line-classifier';
 
@@ -57,6 +57,10 @@ describe('extractClaimUnitsFromSections', () => {
       'Software Development Engineer in Test',
     );
     expect(units[0]?.lineType).toBe(ResumeLineType.ROLE_HEADER);
+    expect(units[0]?.claim).toEqual({
+      text: 'Software Development Engineer in Test',
+      type: 'derived',
+    });
   });
 
   it('preserves fragment-style baseline evidence only when explicitly enabled', () => {
@@ -146,5 +150,53 @@ describe('extractClaimUnitsFromSections', () => {
         (unit) => unit.text === 'Azure | Terraform | Kubernetes',
       )?.lineType,
     ).toBe(ResumeLineType.SKILL_STACK);
+  });
+
+  it('filters non-verifiable descriptor claims and retains real technology claims', () => {
+    expect(isValidClaim('billing-impacting')).toBe(false);
+    expect(isValidClaim('client-impacting')).toBe(false);
+    expect(isValidClaim('cross-team')).toBe(false);
+    expect(isValidClaim('first-response')).toBe(false);
+    expect(isValidClaim('high-volume')).toBe(false);
+    expect(isValidClaim('customer-facing')).toBe(false);
+    expect(isValidClaim('Five9')).toBe(true);
+  });
+
+  it('does not emit descriptor-only claims into extracted units', () => {
+    const sections: ComplianceTextSection[] = [
+      {
+        title: 'Experience',
+        sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE,
+        sentenceSources: [
+          { text: 'billing-impacting', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+          { text: 'client-impacting', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+          { text: 'cross-team', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+          { text: 'first-response', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+          { text: 'high-volume', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+          { text: 'Implemented Five9 queue workflows.', sourceType: GeneratedTextSourceType.BASELINE_EVIDENCE },
+        ],
+      },
+    ];
+
+    const units = extractClaimUnitsFromSections(sections, {
+      baselineOnly: true,
+      enforceIntegrityForBaseline: false,
+      includeBaselineEvidenceFragments: true,
+    });
+
+    expect(units.map((unit) => unit.text)).toEqual(
+      expect.arrayContaining([
+        'Implemented Five9 queue workflows.',
+      ]),
+    );
+    expect(units.map((unit) => unit.text)).not.toEqual(
+      expect.arrayContaining([
+        'billing-impacting',
+        'client-impacting',
+        'cross-team',
+        'first-response',
+        'high-volume',
+      ]),
+    );
   });
 });

@@ -29,6 +29,7 @@ interface ResumeRequestBody {
   baselineId?: string;
   baselineVersionId?: string;
   jobId?: string;
+  analysisId?: string;
   format?: ResumeExportFormat;
   oneTap?: boolean;
   editedResume?: NormalizedResumeDocument;
@@ -84,6 +85,16 @@ export class ResumeController {
     return this.handleExport(body, request, res, format);
   }
 
+  @Post('readiness')
+  async getGenerationReadiness(
+    @Body() body: ResumeRequestBody,
+    @Req() request: TieredResumeRequest,
+  ) {
+    const userId = this.getUserId(request);
+    const payload = this.parsePayload(body);
+    return this.resumeService.getGenerationReadiness(userId, payload);
+  }
+
   private normalizeFormat(value: string): ResumeExportFormat {
     const normalized = (value ?? '').toLowerCase().trim();
     if (normalized === 'pdf') return 'pdf';
@@ -101,17 +112,38 @@ export class ResumeController {
     const baselineId = body.baselineId?.trim();
     const baselineVersionId = body.baselineVersionId?.trim();
     const jobId = body.jobId?.trim();
+    const analysisId = body.analysisId?.trim();
     const oneTap = Boolean(body.oneTap);
 
     if (!baselineId) throw new BadRequestException('baselineId is required');
     if (!baselineVersionId)
       throw new BadRequestException('baselineVersionId is required');
     if (!jobId) throw new BadRequestException('jobId is required');
+    if (!analysisId)
+      throw new BadRequestException({
+        error: {
+          code: 'analysis_context_mismatch',
+          message: 'Generation request does not match the analyzed context.',
+          details: {
+            expected: {
+              jobId,
+              baselineId,
+              baselineVersionId,
+            },
+            received: {
+              jobId,
+              baselineId,
+              baselineVersionId,
+            },
+          },
+        },
+      });
 
     return {
       baselineId,
       baselineVersionId,
       jobId,
+      analysisId,
       oneTap,
       editedResume: body.editedResume,
     };

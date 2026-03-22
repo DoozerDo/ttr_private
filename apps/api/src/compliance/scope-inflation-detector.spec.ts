@@ -114,6 +114,31 @@ describe('ScopeInflationDetector', () => {
     ]);
   });
 
+  it('flags inflation for small-team baseline vs global 200+ engineer claim with high confidence', async () => {
+    const flags = await detector.detect(
+      [
+        {
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Managed a team of 5 support agents',
+        },
+      ],
+      [
+        {
+          title: 'Generated Resume',
+          content: 'Led global support organization of 200+ engineers',
+        },
+      ],
+    );
+
+    expect(flags.length).toBeGreaterThan(0);
+    expect(flags[0]?.code).toBe(ComplianceFlagCode.SCOPE_INFLATION);
+    expect((flags[0]?.confidence ?? 0)).toBeGreaterThan(0.75);
+    expect([ComplianceFlagSeverity.BLOCK, ComplianceFlagSeverity.WARN]).toContain(
+      flags[0]?.severity,
+    );
+  });
+
   it('passes semantic global scope match before extreme-scale heuristics', async () => {
     const embed = jest
       .fn()

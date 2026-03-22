@@ -40,7 +40,16 @@ export type ComplianceFlag = {
   severity: ComplianceFlagSeverity;
   message: string;
   confidence?: number;
-  evidence?: Array<{ baseline: string; generated: string }>;
+  evidence?: Array<{
+    baseline: string;
+    generated: string;
+    reason?: string;
+    similarity?: number;
+    generatedClaim?: {
+      text: string;
+      type: 'company' | 'technology' | 'concept' | 'derived' | 'operational_descriptor';
+    };
+  }>;
 };
 
 export type ComplianceTextSection = {

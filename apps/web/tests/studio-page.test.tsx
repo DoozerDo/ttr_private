@@ -143,6 +143,12 @@ describe("Studio page UX", () => {
           }),
         );
       }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [] }));
+      }
       return Promise.resolve(createResponse({}));
     });
     setFetchImplementation(fetchMock);
@@ -155,9 +161,314 @@ describe("Studio page UX", () => {
 
     expect(screen.getByText("Studio ready")).toBeInTheDocument();
     expect(screen.getByText("Context loaded")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: READY")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Generation is ready for this scored analysis context."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Verification Coverage: STRONG")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-verification-issues")).not.toBeInTheDocument();
     expect(screen.getByText("Orbit — Head of Customer Operations")).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Platform Resume");
     expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/analysis-2");
+  });
+
+  it("renders the same limited readiness wording used in Results context", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 93,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            compliance_flags: [{ code: "limited_personalization", severity: "warn" }],
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [
+              {
+                code: "personalization_limitation",
+                message:
+                  "This role scored highly, but document generation is currently limited by verification constraints.",
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [
+              {
+                code: "personalization_limitation",
+                message:
+                  "This role scored highly, but document generation is currently limited by verification constraints.",
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: LIMITED")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Verification Coverage: PARTIAL")).toBeInTheDocument();
+    const readinessCard = screen.getByTestId("studio-generation-readiness");
+    expect(within(readinessCard).getByText("Generation readiness: LIMITED")).toBeInTheDocument();
+  });
+
+  it("renders blocked technology claim with specific claim text and next step", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 95,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce Service Cloud administration".',
+                evidence: [{ generated: "Salesforce Service Cloud administration" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Verification Coverage: WEAK")).toBeInTheDocument();
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(
+      within(issuesPanel).getByText("Salesforce Service Cloud administration"),
+    ).toBeInTheDocument();
+    expect(
+      within(issuesPanel).getByText(/Remove unsupported technology emphasis/i),
+    ).toBeInTheDocument();
+    const cta = within(issuesPanel).getByRole("link", { name: "Adjust targeting emphasis" });
+    expect(cta).toHaveAttribute("href", "/results#advanced-insights");
+    expect(within(issuesPanel).queryByText(/your baseline has issues/i)).not.toBeInTheDocument();
+  });
+
+  it("renders missing baseline evidence remediation CTA with encoded claim in baseline route", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 91,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "baseline_verification_gap", message: "gap" }],
+            compliance_flags: [
+              {
+                code: "missing_baseline_support",
+                severity: "warn",
+                message: "No support found",
+                evidence: [{ generated: "Salesforce Service Cloud administration" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-verification-issues")).toBeInTheDocument();
+    });
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    const cta = within(issuesPanel).getByRole("link", { name: "Review baseline evidence" });
+    expect(cta).toHaveAttribute(
+      "href",
+      "/baseline?source=studio&highlightClaim=Salesforce+Service+Cloud+administration",
+    );
+  });
+
+  it("renders generation overreach remediation CTA label", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 90,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [{ code: "scope_inflation", severity: "block", message: "overreach" }],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-verification-issues")).toBeInTheDocument();
+    });
+    expect(
+      within(screen.getByTestId("studio-verification-issues")).getByRole("link", {
+        name: "Regenerate with stricter alignment",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows only top three verification issues and groups additional limitations", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 95,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+              {
+                code: "scope_inflation",
+                severity: "block",
+                message: 'Unsupported claim "Led global org of 200+".',
+                evidence: [{ generated: "Led global org of 200+" }],
+              },
+              {
+                code: "limited_personalization",
+                severity: "warn",
+                message: 'Limited claim "revenue-impacting".',
+                evidence: [{ generated: "revenue-impacting" }],
+              },
+              {
+                code: "missing_baseline_support",
+                severity: "warn",
+                message: 'Missing claim "2022".',
+                evidence: [{ generated: "2022" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-verification-issues")).toBeInTheDocument();
+    });
+
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Salesforce")).toBeInTheDocument();
+    expect(within(issuesPanel).getByText("Five9")).toBeInTheDocument();
+    expect(within(issuesPanel).getByText("Led global org of 200+")).toBeInTheDocument();
+    expect(within(issuesPanel).queryByText("revenue-impacting")).not.toBeInTheDocument();
+    expect(within(issuesPanel).queryByText("2022")).not.toBeInTheDocument();
+    expect(
+      within(issuesPanel).queryByText(/Additional verification limitations \(\d+\)/i),
+    ).not.toBeInTheDocument();
   });
 
   it("uses top-band streamlined generation CTA when score is 90+", async () => {
@@ -189,6 +500,92 @@ describe("Studio page UX", () => {
     expect(await screen.findByRole("button", { name: "Generate My Application" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Generate Cover Letter" })).not.toBeInTheDocument();
+  });
+
+  it("does not render top-band generate CTA when readiness is blocked and shows replacement CTA", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [{ code: "fictional_technology", severity: "block" }],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Generate My Application" })).not.toBeInTheDocument();
+    const replacement = screen.getByRole("link", { name: "Review Verification Gaps" });
+    expect(replacement).toHaveAttribute("href", "/results#advanced-insights");
+  });
+
+  it("keeps top-band generate CTA when readiness is limited", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "limited",
+            reasons: [{ code: "personalization_limitation", message: "limited" }],
+            compliance_flags: [{ code: "limited_personalization", severity: "warn" }],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: LIMITED")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Generate My Application" })).toBeInTheDocument();
   });
 
   it("shows guidance when analysisId is missing", async () => {
@@ -928,6 +1325,7 @@ describe("Studio page UX", () => {
     expect(typeof requestBody).toBe("string");
     const parsedBody = JSON.parse(requestBody as string) as Record<string, unknown>;
     expect(parsedBody.baselineVersionId).toBeUndefined();
+    expect(parsedBody.analysisId).toBe("analysis-1");
   });
 
   it("supports assessmentId query param as a backward-compatible fallback", async () => {

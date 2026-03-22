@@ -117,10 +117,18 @@ describe('CoverLettersService', () => {
   const baselineVersionRepository = buildRepository<any>({
     id: 'baseline-version-1',
     baselineId: 'baseline-1',
+    versionNumber: 3,
     hash: 'baseline-hash',
   });
   const baselineBlockPolicyRepository = buildRepository<any>();
-  const fitAssessmentRepository = buildRepository<any>();
+  const fitAssessmentRepository = buildRepository<any>({
+    id: 'analysis-1',
+    userId: 'user-1',
+    jobId: 'job-1',
+    baselineId: 'baseline-1',
+    baselineVersion: 3,
+    overallScore: 88,
+  });
   const jobRepository = buildRepository<any>({
     id: 'job-1',
     userId: 'user-1',
@@ -189,6 +197,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
       closingTemplateKey: 'collaborative',
     });
 
@@ -201,6 +210,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(second.status).toBe('success');
@@ -226,6 +236,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(result.status).toBe('success');
@@ -255,6 +266,187 @@ describe('CoverLettersService', () => {
       result.preview?.coverLetter &&
         Array.isArray((result as any).preview?.coverLetter?.bodyParagraphs),
     ).toBe(true);
+  });
+
+  it('fails cover letter generation when analysis context mismatches requested job', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    fitAssessmentRepository.findOne.mockResolvedValueOnce({
+      id: 'analysis-1',
+      userId: 'user-1',
+      jobId: 'job-other',
+      baselineId: 'baseline-1',
+      baselineVersion: 3,
+      overallScore: 88,
+    });
+
+    await expect(
+      service.generateCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        analysisId: 'analysis-1',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { jobId: 'job-other' },
+            received: { jobId: 'job-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('fails cover letter export when analysis context mismatches baseline version', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    baselineVersionRepository.findOne
+      .mockResolvedValueOnce({
+        id: 'baseline-version-1',
+        baselineId: 'baseline-1',
+        versionNumber: 3,
+        hash: 'baseline-hash',
+      })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.exportCoverLetter(
+        'user-1',
+        {
+          baselineId: 'baseline-1',
+          baselineVersionId: 'baseline-version-2',
+          jobId: 'job-1',
+          analysisId: 'analysis-1',
+        },
+        'docx',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'analysis_context_mismatch',
+          details: {
+            expected: { baselineVersionId: null },
+            received: { baselineVersionId: 'baseline-version-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('reports blocked readiness when cover-letter compliance preflight would block', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const blockingFlag: ComplianceFlag = {
+      code: 'invented_scope',
+      message: 'Scope claim is unsupported.',
+      severity: 'block',
+      confidence: 0.95,
+      evidence: [],
+    };
+    const blockedAuditResult: ValidateAndAuditResult = {
+      complianceFlags: [blockingFlag],
+      blocked: true,
+      audit: {
+        id: 'audit-cover-blocked-readiness',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    };
+    complianceService.validateAndAudit
+      .mockResolvedValueOnce(blockedAuditResult)
+      .mockResolvedValueOnce(blockedAuditResult);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.status).toBe('blocked');
+    expect(readiness.blocked).toBe(true);
+  });
+
+  it('reports limited readiness when cover-letter compliance returns warnings only', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const warningFlag: ComplianceFlag = {
+      code: 'personalization_limited',
+      message: 'Draft is safe but personalization is constrained.',
+      severity: 'warn',
+      confidence: 0.71,
+      evidence: [],
+    };
+    complianceService.validateAndAudit.mockResolvedValueOnce({
+      complianceFlags: [warningFlag],
+      blocked: false,
+      audit: {
+        id: 'audit-cover-limited-readiness',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.status).toBe('limited');
+    expect(readiness.blocked).toBe(false);
+  });
+
+  it('reports ready readiness when cover-letter compliance has no issues and generation succeeds', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.status).toBe('ready');
+    expect(readiness.blocked).toBe(false);
+
+    await expect(
+      service.generateCoverLetter('user-1', {
+        baselineId: 'baseline-1',
+        baselineVersionId: 'baseline-version-1',
+        jobId: 'job-1',
+        analysisId: 'analysis-1',
+      }),
+    ).resolves.toMatchObject({ status: 'success' });
   });
 
   it('rejects freewritten cover letter paragraphs that cannot be anchored to baseline evidence', async () => {
@@ -299,6 +491,7 @@ describe('CoverLettersService', () => {
         baselineId: 'baseline-1',
         baselineVersionId: 'baseline-version-1',
         jobId: 'job-1',
+      analysisId: 'analysis-1',
       }),
     ).rejects.toMatchObject({
       response: {
@@ -328,6 +521,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(result.blocked).toBe(true);
@@ -379,6 +573,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(result.blocked).toBe(true);
@@ -481,6 +676,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(result.status).toBe('success');
@@ -568,6 +764,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     });
 
     expect(result.status).toBe('success');
@@ -588,6 +785,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
       jobContext: {
         allowedCompanies: ['Winona'],
         allowedRoleTitles: ['Head of Customer Services'],
@@ -621,6 +819,7 @@ describe('CoverLettersService', () => {
       service.generateCoverLetter('user-1', {
         baselineId: 'baseline-1',
         jobId: 'job-1',
+        analysisId: 'analysis-1',
         baselineVersionId: '',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -637,6 +836,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     }, 'docx');
 
     expect(result.filename).toBe('cover-letter.docx');
@@ -667,6 +867,7 @@ describe('CoverLettersService', () => {
         baselineId: 'baseline-1',
         baselineVersionId: 'baseline-version-1',
         jobId: 'job-1',
+      analysisId: 'analysis-1',
       },
       'docx',
     );
@@ -690,6 +891,7 @@ describe('CoverLettersService', () => {
       baselineId: 'baseline-1',
       baselineVersionId: 'baseline-version-1',
       jobId: 'job-1',
+      analysisId: 'analysis-1',
     }, 'pdf');
 
     expect(result.filename).toBe('cover-letter.pdf');
@@ -753,6 +955,7 @@ describe('CoverLettersService', () => {
         baselineId: 'baseline-1',
         baselineVersionId: 'baseline-version-1',
         jobId: 'job-1',
+      analysisId: 'analysis-1',
       }, 'pdf');
       throw new Error('expected export to reject');
     } catch (error) {
@@ -829,6 +1032,7 @@ describe('CoverLettersService', () => {
           baselineId: 'baseline-1',
           baselineVersionId: 'baseline-version-1',
           jobId: 'job-1',
+          analysisId: 'analysis-1',
         },
         'docx',
       ),
@@ -842,5 +1046,3 @@ describe('CoverLettersService', () => {
     );
   });
 });
-
-
