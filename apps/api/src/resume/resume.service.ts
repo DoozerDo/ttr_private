@@ -70,6 +70,7 @@ import {
   summarizeClaimRisk,
 } from './claim-risk';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
+import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
 import type {
   DocumentGenerationExports,
   NormalizedResumeDocument,
@@ -1819,14 +1820,26 @@ export class ResumeService {
   }
 
   async getGenerationReadiness(userId: string, request: GenerateResumeRequest) {
+    const analysisAssessment = await validateAnalysisContext({
+      analysisRepository: this.fitAssessmentRepository,
+      baselineVersionRepository: this.baselineVersionRepository,
+      analysisId: request.analysisId?.trim() ?? '',
+      userId,
+      jobId: request.jobId?.trim() ?? '',
+      baselineId: request.baselineId?.trim() ?? null,
+      baselineVersionId: request.baselineVersionId?.trim() ?? '',
+    });
+
     const generation = await this.generateResume(
       userId,
       { ...request, oneTap: false },
       { enforceOneTap: false, preflightOnly: true },
     );
-    const flags = generation.compliance_flags ?? [];
-    const blocked =
-      generation.status === 'blocked' || generation.compliance_blocked === true;
+    const flags = filterComplianceFlagsByCanonicalClaims(
+      generation.compliance_flags ?? [],
+      analysisAssessment,
+    );
+    const blocked = flags.some((flag) => flag.severity === 'block');
     const warningFlags = flags.filter((flag) => flag.severity === 'warn');
     return {
       status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',

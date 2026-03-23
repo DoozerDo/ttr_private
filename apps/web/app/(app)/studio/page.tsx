@@ -14,11 +14,17 @@ import { PageShell } from "@/components/PageShell";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
 import {
+  applyTargetingExclusionsToReadiness,
   aggregateVerificationIssues,
+  buildVerificationIssuesFromCanonicalClaims,
   combineGenerationReadinessFromServer,
+  filterClaimVerificationsByExcludedLabels,
+  reconcileReadinessWithClaimVerifications,
   type GenerationReadiness,
   deriveVerificationCoverage,
+  normalizeUserFacingRequirementLabel,
 } from "@/lib/generationReadiness";
+import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import {
@@ -95,6 +101,27 @@ type LatestAnalysis = {
   companyName?: string | null;
   jobTitle?: string | null;
   title?: string | null;
+  scoring_v2?: {
+    debug?: {
+      toolingCoverage?: {
+        claims?: unknown;
+      };
+    };
+  } | null;
+  scoringV2?: {
+    debug?: {
+      toolingCoverage?: {
+        claims?: unknown;
+      };
+    };
+  } | null;
+  verification_coverage?: {
+    totalClaims?: number | null;
+    verifiedClaims?: number | null;
+    inferredClaims?: number | null;
+    unverifiedClaims?: number | null;
+    unverifiedRequirements?: string[] | null;
+  } | null;
 };
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
@@ -328,8 +355,9 @@ function formatVerificationIssueSource(
 }
 
 type VerificationIssueAction = {
-  href: string;
+  href?: string;
   label: string;
+  action: "remove_from_targeting" | "link";
 };
 
 function resolveVerificationIssueAction(issue: GenerationReadiness["verificationIssues"][number]): VerificationIssueAction {
@@ -342,29 +370,32 @@ function resolveVerificationIssueAction(issue: GenerationReadiness["verification
     return {
       label: "Review baseline evidence",
       href: `/baseline?${params.toString()}`,
+      action: "link",
     };
   }
   if (issue.code === "unsupported_technology_claim") {
     return {
-      label: "Adjust targeting emphasis",
-      href: "/results#advanced-insights",
+      label: "Remove from targeting",
+      action: "remove_from_targeting",
     };
   }
   if (issue.code === "generation_overreach") {
     return {
       label: "Regenerate with stricter alignment",
       href: "/results#advanced-insights",
+      action: "link",
     };
   }
   if (issue.code === "role_targeting_emphasis_exceeds_support") {
     return {
-      label: "Refine role targeting",
-      href: "/results#advanced-insights",
+      label: "Exclude from generation targeting",
+      action: "remove_from_targeting",
     };
   }
   return {
     label: "Review verification details",
     href: "/results#advanced-insights",
+    action: "link",
   };
 }
 
@@ -461,6 +492,9 @@ export default function StudioPage() {
   const [contextHydrationMessage, setContextHydrationMessage] = useState<string | null>(null);
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
+  const [excludedTargetingLabels, setExcludedTargetingLabels] = useState<Set<string>>(new Set());
+  const [targetingAdjustmentFeedback, setTargetingAdjustmentFeedback] = useState<string | null>(null);
+  const [targetingAdjustmentStatus, setTargetingAdjustmentStatus] = useState<"success" | "warning" | null>(null);
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
   const [resumeGenerating, setResumeGenerating] = useState(false);
@@ -641,6 +675,11 @@ export default function StudioPage() {
       cancelled = true;
     };
   }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
+  useEffect(() => {
+    setExcludedTargetingLabels(new Set());
+    setTargetingAdjustmentFeedback(null);
+    setTargetingAdjustmentStatus(null);
+  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
   const generationMessage = useMemo(() => {
     if (!requestedAnalysisId) {
       return "Run a role compatibility analysis first.";
@@ -662,15 +701,131 @@ export default function StudioPage() {
     }
     return null;
   }, [analysisError, analysisScore, effectiveBaselineVersionId, generationReadiness.reasons, generationReadiness.status, generationReadiness.summary, requestedAnalysisId]);
+  const canonicalToolingClaims = useMemo(
+    () =>
+      analysis?.scoring_v2?.debug?.toolingCoverage?.claims ??
+      analysis?.scoringV2?.debug?.toolingCoverage?.claims,
+    [
+      analysis?.scoring_v2?.debug?.toolingCoverage?.claims,
+      analysis?.scoringV2?.debug?.toolingCoverage?.claims,
+    ],
+  );
+  const claimVerifications = useMemo(
+    () => normalizeClaimVerifications(canonicalToolingClaims),
+    [canonicalToolingClaims],
+  );
+  const activeClaimVerifications = useMemo(
+    () => filterClaimVerificationsByExcludedLabels(claimVerifications, excludedTargetingLabels),
+    [claimVerifications, excludedTargetingLabels],
+  );
+  const reconciledGenerationReadiness = useMemo(
+    () => reconcileReadinessWithClaimVerifications(generationReadiness, claimVerifications),
+    [claimVerifications, generationReadiness],
+  );
+  const adjustedReadinessResult = useMemo(
+    () => applyTargetingExclusionsToReadiness(reconciledGenerationReadiness, excludedTargetingLabels),
+    [reconciledGenerationReadiness, excludedTargetingLabels],
+  );
+  const activeGenerationReadiness = adjustedReadinessResult.readiness;
+  const canonicalClaimIssues = useMemo(
+    () => buildVerificationIssuesFromCanonicalClaims(activeClaimVerifications),
+    [activeClaimVerifications],
+  );
+  const canonicalCoverageIssues = useMemo(() => {
+    const unverifiedRequirements = analysis?.verification_coverage?.unverifiedRequirements;
+    if (!Array.isArray(unverifiedRequirements) || unverifiedRequirements.length === 0) {
+      return [] as GenerationReadiness["verificationIssues"];
+    }
+    const syntheticClaims = unverifiedRequirements
+      .map((requirement) =>
+        normalizeUserFacingRequirementLabel(requirement, {
+          sourceContext: null,
+          issueCode: "unsupported_technology_claim",
+        }),
+      )
+      .filter((label): label is string => typeof label === "string" && label.length > 0)
+      .filter((label) => !excludedTargetingLabels.has(label.toLowerCase()))
+      .map((label) => ({
+        key: label.toLowerCase(),
+        label,
+        category: "unknown",
+        sourceType: "job_required",
+        status: "UNVERIFIED" as const,
+        evidenceRefs: [] as string[],
+        generationBlocking: true,
+        scoreWeight: 0,
+      }));
+    return buildVerificationIssuesFromCanonicalClaims(syntheticClaims);
+  }, [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels]);
+  const hasCanonicalCoverage = useMemo(() => {
+    const coverage = analysis?.verification_coverage;
+    if (!coverage) return false;
+    return (
+      typeof coverage.totalClaims === "number" ||
+      typeof coverage.verifiedClaims === "number" ||
+      typeof coverage.inferredClaims === "number" ||
+      typeof coverage.unverifiedClaims === "number" ||
+      (Array.isArray(coverage.unverifiedRequirements) &&
+        coverage.unverifiedRequirements.length > 0)
+    );
+  }, [analysis?.verification_coverage]);
+  const verificationIssuesForStudio = useMemo(
+    () => {
+      if (hasCanonicalCoverage) {
+        if (canonicalClaimIssues.length > 0) return canonicalClaimIssues;
+        if (canonicalCoverageIssues.length > 0) return canonicalCoverageIssues;
+        return [];
+      }
+      if (activeClaimVerifications.length > 0) {
+        return canonicalClaimIssues;
+      }
+      return activeGenerationReadiness.verificationIssues;
+    },
+    [
+      hasCanonicalCoverage,
+      canonicalClaimIssues,
+      canonicalCoverageIssues,
+      activeClaimVerifications.length,
+      activeGenerationReadiness.verificationIssues,
+    ],
+  );
   const verificationCoverage = useMemo(
-    () => deriveVerificationCoverage(generationReadiness),
-    [generationReadiness],
+    () => {
+      const derived = deriveVerificationCoverage(
+        activeGenerationReadiness,
+        activeClaimVerifications,
+      );
+      const backendCoverage = analysis?.verification_coverage;
+      if (!backendCoverage) return derived;
+      const totalClaims = Number(backendCoverage.totalClaims ?? NaN);
+      const verifiedClaims = Number(backendCoverage.verifiedClaims ?? NaN);
+      const inferredClaims = Number(backendCoverage.inferredClaims ?? NaN);
+      const unverifiedClaims = Number(backendCoverage.unverifiedClaims ?? NaN);
+      if (
+        !Number.isFinite(totalClaims) ||
+        !Number.isFinite(verifiedClaims) ||
+        !Number.isFinite(inferredClaims) ||
+        !Number.isFinite(unverifiedClaims)
+      ) {
+        return derived;
+      }
+      const supportedClaims = verifiedClaims + inferredClaims;
+      return {
+        ...derived,
+        totalClaims,
+        verifiedClaims,
+        inferredClaims,
+        unverifiedClaims,
+        supportedClaims,
+        unsupportedClaims: unverifiedClaims,
+      };
+    },
+    [activeClaimVerifications, activeGenerationReadiness, analysis?.verification_coverage],
   );
   const aggregatedVerificationIssues = useMemo(
-    () => aggregateVerificationIssues(generationReadiness.verificationIssues),
-    [generationReadiness.verificationIssues],
+    () => aggregateVerificationIssues(verificationIssuesForStudio),
+    [verificationIssuesForStudio],
   );
-
   const readyForDocuments =
     Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
     analysisScore !== null;
@@ -680,7 +835,7 @@ export default function StudioPage() {
     (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
     Boolean(requestedAnalysisId) &&
     !analysisError &&
-    !generationReadiness.blocked;
+    !activeGenerationReadiness.blocked;
   const canRunTopBandGeneration =
     isTopBand && canGenerateDocuments && !resumeGenerating && !coverGenerating;
   const improveBaselineHref = useMemo(() => {
@@ -797,7 +952,7 @@ export default function StudioPage() {
   const resumeCardStatus: StudioCardStatus = useMemo(() => {
     const needsMoreBaselineDetail = isInsufficientBaselineEvidenceMessage(resumeState.error);
     if (resumeGenerating) return "generating";
-    if (generationReadiness.blocked) return "blocked_by_compliance";
+    if (activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (resumePresenter.status === "blocked") return "blocked_by_compliance";
     if (needsMoreBaselineDetail) return "needs_more_baseline_detail";
     if (resumeState.error) return "failed_due_to_system_error";
@@ -807,7 +962,7 @@ export default function StudioPage() {
     return canGenerateDocuments ? "ready_to_generate" : "not_generated_yet";
   }, [
     canGenerateDocuments,
-    generationReadiness.blocked,
+    activeGenerationReadiness.blocked,
     hasResumeArtifact,
     resumeGenerating,
     resumePresenter.status,
@@ -817,7 +972,7 @@ export default function StudioPage() {
 
   const coverCardStatus: StudioCardStatus = useMemo(() => {
     if (coverGenerating) return "generating";
-    if (generationReadiness.blocked) return "blocked_by_compliance";
+    if (activeGenerationReadiness.blocked) return "blocked_by_compliance";
     if (coverLetterComplianceBlocked || coverPresenter.status === "blocked") {
       return "blocked_by_compliance";
     }
@@ -830,7 +985,7 @@ export default function StudioPage() {
     canGenerateDocuments,
     coverGenerating,
     coverLetterComplianceBlocked,
-    generationReadiness.blocked,
+    activeGenerationReadiness.blocked,
     coverPresenter.status,
     coverState.error,
     hasCoverLetterArtifact,
@@ -851,6 +1006,9 @@ export default function StudioPage() {
     if (coverLetterJobContext) {
       payload.jobContext = coverLetterJobContext;
     }
+    if (excludedTargetingLabels.size > 0) {
+      payload.excludedRequirements = Array.from(excludedTargetingLabels);
+    }
     return payload;
   }
 
@@ -870,8 +1028,79 @@ export default function StudioPage() {
     if (savedEditedResumeModel) {
       payload.editedResume = savedEditedResumeModel;
     }
+    if (excludedTargetingLabels.size > 0) {
+      payload.excludedRequirements = Array.from(excludedTargetingLabels);
+    }
     return payload;
   }
+
+  const blockingTargetingLabels = useMemo(() => {
+    const labels = new Set<string>();
+    for (const issue of aggregatedVerificationIssues.primary) {
+      if (issue.severity !== "block") continue;
+      const normalized = normalizeUserFacingRequirementLabel(issue.claim, {
+        sourceContext: issue.sourceContext,
+        issueCode: issue.code,
+      });
+      if (!normalized) continue;
+      labels.add(normalized.toLowerCase());
+    }
+    return labels;
+  }, [aggregatedVerificationIssues.primary]);
+
+  const applyTargetingAdjustment = useCallback((labels: Set<string>) => {
+    if (!labels.size) {
+      setTargetingAdjustmentFeedback("No unsupported requirements were found to remove from targeting.");
+      setTargetingAdjustmentStatus("warning");
+      return;
+    }
+    setExcludedTargetingLabels((current) => {
+      const next = new Set(current);
+      labels.forEach((label) => next.add(label));
+      return next;
+    });
+  }, []);
+
+  const handleAutoAdjustTargeting = useCallback(() => {
+    applyTargetingAdjustment(blockingTargetingLabels);
+  }, [applyTargetingAdjustment, blockingTargetingLabels]);
+
+  const handleRemoveIssueFromTargeting = useCallback(
+    (issue: GenerationReadiness["verificationIssues"][number]) => {
+      const normalized = normalizeUserFacingRequirementLabel(issue.claim, {
+        sourceContext: issue.sourceContext,
+        issueCode: issue.code,
+      });
+      if (!normalized) {
+        setTargetingAdjustmentFeedback("This requirement could not be safely adjusted from targeting.");
+        setTargetingAdjustmentStatus("warning");
+        return;
+      }
+      applyTargetingAdjustment(new Set([normalized.toLowerCase()]));
+    },
+    [applyTargetingAdjustment],
+  );
+
+  useEffect(() => {
+    if (!excludedTargetingLabels.size) return;
+    const removedCount = adjustedReadinessResult.removedClaims.length;
+    const countLabel = removedCount === 1 ? "requirement" : "requirements";
+    const removedSuffix =
+      removedCount > 0
+        ? ` ${removedCount} unsupported ${countLabel} were removed from targeting.`
+        : "";
+    if (activeGenerationReadiness.status === "ready") {
+      setTargetingAdjustmentFeedback(
+        `Targeting updated. Generation is now enabled.${removedSuffix}`,
+      );
+      setTargetingAdjustmentStatus("success");
+      return;
+    }
+    setTargetingAdjustmentFeedback(
+      `Unsupported requirements were removed, but more verified evidence is needed to enable generation.${removedSuffix}`,
+    );
+    setTargetingAdjustmentStatus("warning");
+  }, [adjustedReadinessResult.removedClaims.length, activeGenerationReadiness.status, excludedTargetingLabels.size]);
 
   useEffect(() => {
     if (!generatedResumeModel) {
@@ -1041,7 +1270,7 @@ export default function StudioPage() {
     const loadAnalysis = async () => {
       try {
         const analysisUrl = buildAssessmentAnalysisUrl(requestedAnalysisId);
-        const response = await fetch(analysisUrl);
+        const response = await fetch(analysisUrl, { cache: "no-store" });
         const payload = await readResponsePayload(response);
         if (canceled) return;
         if (!response.ok) {
@@ -1554,25 +1783,58 @@ export default function StudioPage() {
       {requestedAnalysisId ? (
         <div
           className={`rounded-2xl border px-4 py-3 text-sm ${
-            generationReadiness.status === "blocked"
+            activeGenerationReadiness.status === "blocked"
               ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
-              : generationReadiness.status === "limited"
+              : activeGenerationReadiness.status === "limited"
                 ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
                 : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
           }`}
           data-testid="studio-generation-readiness"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Generation readiness: {generationReadiness.badgeLabel}
+            Generation readiness: {activeGenerationReadiness.badgeLabel}
           </p>
-          <p className="mt-1 text-sm text-slate-100">{generationReadiness.summary}</p>
-          {generationReadiness.reasons.length ? (
+          <p className="mt-1 text-sm text-slate-100">{activeGenerationReadiness.summary}</p>
+          {activeGenerationReadiness.reasons.length ? (
             <ul className="mt-2 space-y-1 text-sm text-slate-200">
-              {generationReadiness.reasons.map((reason) => (
+              {activeGenerationReadiness.reasons.map((reason) => (
                 <li key={`studio-readiness-${reason.code}`}>{reason.message}</li>
               ))}
             </ul>
           ) : null}
+        </div>
+      ) : null}
+      {requestedAnalysisId && activeGenerationReadiness.status === "blocked" ? (
+        <div
+          className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3"
+          data-testid="studio-auto-adjust-panel"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
+            Fix these issues to enable generation
+          </p>
+          <p className="mt-1 text-sm text-slate-100">
+            We'll remove unsupported requirements and recheck readiness.
+          </p>
+          <div className="mt-3">
+            <FormButton
+              onClick={handleAutoAdjustTargeting}
+              disabled={!blockingTargetingLabels.size}
+            >
+              Fix targeting and enable generation
+            </FormButton>
+          </div>
+        </div>
+      ) : null}
+      {targetingAdjustmentFeedback ? (
+        <div
+          className={`rounded-xl border px-4 py-2 text-sm ${
+            targetingAdjustmentStatus === "success"
+              ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+              : "border-amber-300/35 bg-amber-500/10 text-amber-100"
+          }`}
+          data-testid="studio-targeting-adjustment-feedback"
+        >
+          {targetingAdjustmentFeedback}
         </div>
       ) : null}
       {requestedAnalysisId ? (
@@ -1582,13 +1844,19 @@ export default function StudioPage() {
           </p>
           <p className="mt-1 text-sm text-slate-100">{verificationCoverage.summary}</p>
           <p className="mt-1 text-xs text-slate-200">
-            Fit score: {analysisScore === null ? "N/A" : Math.round(analysisScore)} · Supported claims:{" "}
-            {verificationCoverage.supportedClaims} / {verificationCoverage.totalClaims}
+            Fit score: {analysisScore === null ? "N/A" : Math.round(analysisScore)} · Verified claims:{" "}
+            {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
           </p>
+          {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
+            <p className="mt-1 text-xs text-slate-300">
+              Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
+              {verificationCoverage.unverifiedClaims}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {requestedAnalysisId &&
-      generationReadiness.status !== "ready" &&
+      activeGenerationReadiness.status !== "ready" &&
       aggregatedVerificationIssues.primary.length ? (
         <section
           className="rounded-2xl border border-white/15 bg-slate-950/35 p-4"
@@ -1614,7 +1882,7 @@ export default function StudioPage() {
                 </p>
                 {issue.claim ? (
                   <p className="mt-1 text-sm text-slate-100">
-                    <span className="font-semibold">Claim:</span> {issue.claim}
+                    <span className="font-semibold">Requirement:</span> {issue.claim}
                   </p>
                 ) : null}
                 <p className="mt-1 text-sm text-slate-100">{issue.explanation}</p>
@@ -1628,12 +1896,18 @@ export default function StudioPage() {
                   <span className="font-semibold">Next step:</span> {issue.recommendedAction}
                 </p>
                 <div className="mt-3">
-                  <Link
-                    href={resolveVerificationIssueAction(issue).href}
-                    className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-                  >
-                    {resolveVerificationIssueAction(issue).label}
-                  </Link>
+                  {resolveVerificationIssueAction(issue).action === "remove_from_targeting" ? (
+                    <FormButton onClick={() => handleRemoveIssueFromTargeting(issue)}>
+                      {resolveVerificationIssueAction(issue).label}
+                    </FormButton>
+                  ) : (
+                    <Link
+                      href={resolveVerificationIssueAction(issue).href ?? "/results#advanced-insights"}
+                      className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+                    >
+                      {resolveVerificationIssueAction(issue).label}
+                    </Link>
+                  )}
                 </div>
               </li>
             ))}
@@ -1702,14 +1976,14 @@ export default function StudioPage() {
             Top Band
           </p>
           <p className="text-sm text-slate-100">
-            {generationReadiness.status === "blocked"
-              ? "Your score is in the top band, but generation is currently blocked by verification requirements."
-              : generationReadiness.status === "limited"
+            {activeGenerationReadiness.status === "blocked"
+              ? "Strong role alignment detected, but tailored generation is blocked until verification gaps are resolved."
+              : activeGenerationReadiness.status === "limited"
                 ? "Your score is in the top band. Tailored generation is available with verification limits."
                 : "Your score is in the top band. Generate your application package now."}
           </p>
           <div className="flex justify-start">
-            {generationReadiness.status === "blocked" ? (
+            {activeGenerationReadiness.status === "blocked" ? (
               <Link
                 href="/results#advanced-insights"
                 className="inline-flex items-center justify-center rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-400/20"
@@ -2212,6 +2486,7 @@ export default function StudioPage() {
     </PageShell>
   );
 }
+
 
 
 

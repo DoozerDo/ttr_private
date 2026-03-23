@@ -1,5 +1,8 @@
 import { clamp, normalizeText } from '../scoring/fit-score/fit-score.utils';
-import { evaluateToolCoverage } from '../scoring/fit-score/tool-extractor';
+import {
+  evaluateToolCoverage,
+  type ToolRequirementClaim,
+} from '../scoring/fit-score/tool-extractor';
 import { getCharCount, safeSnippet, sha256 } from '../common/text-metrics';
 import { getCapabilityClusterRegistry } from '../scoring-v2/config/capability-clusters';
 import { extractCapabilityClusters } from '../scoring-v2/extractors/capability-cluster-extractor';
@@ -174,6 +177,7 @@ export type CxFitV2DebugInfo = {
   toolingCoverage: {
     requiredCoverage: number;
     preferredCoverage: number;
+    claims: ToolRequirementClaim[];
   };
   platformGroups: {
     totalBoost: number;
@@ -967,7 +971,12 @@ export const scoreCxFitV2 = (
   const advocacyMatchesBaseline = countPatternMatches(normalizedBaselineText, CUSTOMER_ADVOCACY_PATTERNS);
 
   // tooling
-  const toolingCoverage = evaluateToolCoverage(jobTextForScoring, baselineText);
+  const toolingCoverage = evaluateToolCoverage(jobTextForScoring, baselineText, {
+    baselineSections: input.baselineSections.map((section) => ({
+      title: section.type ?? null,
+      content: section.content,
+    })),
+  });
   const rawToolingPercent = clamp(
     Math.round(
       toolingCoverage.requiredCoverage * 70 + toolingCoverage.preferredCoverage * 30,
@@ -1313,6 +1322,7 @@ export const scoreCxFitV2 = (
       toolingCoverage: {
         requiredCoverage: toolingCoverage.requiredCoverage,
         preferredCoverage: toolingCoverage.preferredCoverage,
+        claims: toolingCoverage.claims,
       },
       platformGroups: {
         totalBoost: platformGroupBoost,
@@ -1368,6 +1378,7 @@ type BuildFitScoreDebugBundleParams = {
   toolingCoverage: {
     requiredCoverage: number;
     preferredCoverage: number;
+    claims: ToolRequirementClaim[];
   };
   toolingPercent: number;
   hasMissingHardTools: boolean;

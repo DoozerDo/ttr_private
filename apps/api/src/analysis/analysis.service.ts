@@ -74,6 +74,7 @@ import {
 
 import { countWords, getCharCount, sha256 } from '../common/text-metrics';
 import { buildJobPromptText, normalizeText } from '../scoring/fit-score/fit-score.utils';
+import { evaluateToolCoverage } from '../scoring/fit-score/tool-extractor';
 import type { FitScoreInput } from '../scoring/fit-score/fit-score.types';
 import type { FitScoreVerdictLabel } from '../scoring/fit-score/fit-verdict';
 import type { FitScoreRubricJson } from './prompts/fit-score-rubric.v1';
@@ -278,6 +279,13 @@ type FitScoreResponse = {
   confidenceReasons?: string[];
 
   scoring_v2?: CxFitV2Result;
+  verification_coverage?: {
+    totalClaims: number;
+    verifiedClaims: number;
+    inferredClaims: number;
+    unverifiedClaims: number;
+    unverifiedRequirements: string[];
+  };
   status?: 'ok' | 'compliance_blocked' | 'error';
 };
 
@@ -416,6 +424,106 @@ export class AnalysisService {
 
   private clampPercent(value: number) {
     return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private normalizeCanonicalClaimStatus(
+    status: unknown,
+  ): 'VERIFIED' | 'INFERRED' | 'UNVERIFIED' | null {
+    if (typeof status !== 'string') return null;
+    const normalized = status.trim().toUpperCase();
+    if (normalized === 'VERIFIED') return 'VERIFIED';
+    if (
+      normalized === 'INFERRED' ||
+      normalized === 'EQUIVALENT' ||
+      normalized === 'ADJACENT'
+    ) {
+      return 'INFERRED';
+    }
+    if (normalized === 'UNVERIFIED') return 'UNVERIFIED';
+    return null;
+  }
+
+  private normalizeCanonicalClaimLabel(claim: Record<string, unknown>): string | null {
+    const candidates = [
+      claim.label,
+      claim.name,
+      claim.requirement,
+      claim.claim,
+      claim.key,
+    ];
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  private normalizeCanonicalClaimStatusFromEntry(
+    claim: Record<string, unknown>,
+  ): 'VERIFIED' | 'INFERRED' | 'UNVERIFIED' | null {
+    const candidates = [claim.status, claim.claimStatus, claim.verificationStatus];
+    for (const value of candidates) {
+      const normalized = this.normalizeCanonicalClaimStatus(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return null;
+  }
+
+  private buildVerificationCoverageFromCanonicalClaims(
+    claims: unknown[],
+  ): {
+    totalClaims: number;
+    verifiedClaims: number;
+    inferredClaims: number;
+    unverifiedClaims: number;
+    unverifiedRequirements: string[];
+  } {
+    const normalizedClaims = (Array.isArray(claims) ? claims : [])
+      .map((claim) => {
+        if (!claim || typeof claim !== 'object') return null;
+        const typed = claim as Record<string, unknown>;
+        const mappedStatus = this.normalizeCanonicalClaimStatusFromEntry(typed);
+        if (!mappedStatus) return null;
+        const rawLabel = this.normalizeCanonicalClaimLabel(typed);
+        if (!rawLabel) return null;
+        return {
+          label: rawLabel,
+          status: mappedStatus,
+        };
+      })
+      .filter(
+        (claim): claim is { label: string; status: 'VERIFIED' | 'INFERRED' | 'UNVERIFIED' } =>
+          Boolean(claim),
+      );
+
+    const verifiedClaims = normalizedClaims.filter(
+      (claim) => claim.status === 'VERIFIED',
+    ).length;
+    const inferredClaims = normalizedClaims.filter(
+      (claim) => claim.status === 'INFERRED',
+    ).length;
+    const unverifiedRequirements = normalizedClaims
+      .filter((claim) => claim.status === 'UNVERIFIED')
+      .map((claim) => claim.label);
+
+    const normalizedStatuses = normalizedClaims.map((claim) => claim.status);
+    const hasVerifiedStatus = normalizedStatuses.includes('VERIFIED');
+    if (hasVerifiedStatus && verifiedClaims === 0) {
+      this.logger.warn(
+        'Canonical claim coverage invariant mismatch: VERIFIED claim present but verifiedClaims computed as zero.',
+      );
+    }
+
+    return {
+      totalClaims: normalizedClaims.length,
+      verifiedClaims,
+      inferredClaims,
+      unverifiedClaims: unverifiedRequirements.length,
+      unverifiedRequirements,
+    };
   }
 
   private readonly scoreBreakdownMeta: Array<{
@@ -1077,7 +1185,9 @@ export class AnalysisService {
       );
     }
 
-    return this.getFitAssessmentById(userId, result.assessmentId);
+    return this.getFitAssessmentById(userId, result.assessmentId, {
+      skipFreshRecompute: true,
+    });
   }
 
   private buildCompatibilityDebugPayload({
@@ -2792,6 +2902,12 @@ export class AnalysisService {
       dimensionScores: scoringV2DimensionScores ?? fallbackDimensionScores,
     });
     const scoreBreakdown = this.buildScoreBreakdown(assessment);
+    const refreshedScoringV2 = await this.refreshToolingCoverageForAssessment(
+      assessment,
+    );
+    const canonicalClaims = refreshedScoringV2?.debug?.toolingCoverage?.claims ?? [];
+    const verificationCoverage =
+      this.buildVerificationCoverageFromCanonicalClaims(canonicalClaims);
 
     return {
       ok: true,
@@ -2813,9 +2929,120 @@ export class AnalysisService {
       confidenceScore: assessment.confidenceScore ?? null,
       confidenceReasons: assessment.confidenceReasons ?? [],
       createdAt: assessment.createdAt,
-      scoring_v2: assessment.scoringV2 ?? null,
+      scoring_v2: refreshedScoringV2,
+      verification_coverage: verificationCoverage,
       score_breakdown: scoreBreakdown,
       narrative,
+    };
+  }
+
+  private async refreshToolingCoverageForAssessment(
+    assessment: FitAssessment,
+  ): Promise<CxFitV2Result | null> {
+    if (!assessment.scoringV2) return null;
+
+    const job = await this.jobRepository.findOne({
+      where: { id: assessment.jobId, userId: assessment.userId },
+    });
+    if (!job) return assessment.scoringV2;
+
+    const baseline = await this.loadBaselineWithSections(
+      assessment.userId,
+      assessment.baselineId,
+    );
+
+    let sections = baseline.sections ?? [];
+    if (assessment.baselineVersion) {
+      const baselineVersion = await this.baselineVersionRepository.findOne({
+        where: {
+          baselineId: assessment.baselineId,
+          versionNumber: assessment.baselineVersion,
+        },
+      });
+      if (baselineVersion) {
+        const policies = await this.baselineBlockPolicyRepository.find({
+          where: { baselineVersionId: baselineVersion.id },
+          relations: ['baselineSection'],
+          order: { order: 'ASC' },
+        });
+        sections = this.applyPoliciesToSections(sections, policies);
+
+        const additionSections =
+          (baselineVersion.verifiedAdditions ?? []).map((content, index) => {
+            const section: Partial<BaselineSection> = {
+              id: `addition-${index}`,
+              baselineId: assessment.baselineId,
+              sectionType: BaselineSectionType.OTHER,
+              title: 'Verified addition',
+              content,
+              includePolicy: BaselineIncludePolicy.ALWAYS,
+              order: sections.length + index,
+            };
+            return section as BaselineSection;
+          }) ?? [];
+        sections = [...sections, ...additionSections];
+      }
+    }
+
+    const selectedSections = sections.filter(
+      (section) => section.includePolicy !== BaselineIncludePolicy.NEVER,
+    );
+    const baselinePayloadSections = selectedSections.map((section) => ({
+      title: section.title ?? section.sectionType ?? section.type ?? null,
+      type: section.sectionType ?? section.type ?? null,
+      content: section.content ?? '',
+    }));
+
+    const canonicalSections = (() => {
+      try {
+        const canonicalBaseline = this.getCanonicalBaselineForScoring({
+          ...baseline,
+          sections,
+        } as Baseline);
+        return this.buildCanonicalSectionPayload(canonicalBaseline);
+      } catch {
+        return [] as Array<{ type?: string; content: string }>;
+      }
+    })();
+    const baselineSelection = selectBaselineTextForScoring({
+      baseline: { ...baseline, sections } as Baseline,
+      canonicalSections,
+    });
+    const sectionsForScoring = baselineSelection.sectionsForScoring;
+
+    const scoringBaselinePayloadSections = sectionsForScoring.map((section) => ({
+      title: section.type ?? null,
+      type: section.type ?? null,
+      content: section.content ?? '',
+    }));
+
+    const baselineText = sectionsForScoring
+      .map((section) => section.content)
+      .filter((content) => content.trim().length > 0)
+      .join('\n');
+    const jobText = buildJobPromptText({
+      rawDescription: job.rawDescription ?? '',
+      normalizedResponsibilities: job.normalizedResponsibilities ?? [],
+      normalizedRequirements: job.normalizedRequirements ?? [],
+    }).text;
+
+    const toolingCoverage = evaluateToolCoverage(jobText, baselineText, {
+      baselineSections:
+        scoringBaselinePayloadSections.length > 0
+          ? scoringBaselinePayloadSections
+          : baselinePayloadSections,
+    });
+
+    return {
+      ...assessment.scoringV2,
+      debug: {
+        ...assessment.scoringV2.debug,
+        toolingCoverage: {
+          requiredCoverage: toolingCoverage.requiredCoverage,
+          preferredCoverage: toolingCoverage.preferredCoverage,
+          claims: toolingCoverage.claims,
+        },
+      },
     };
   }
 
@@ -2859,13 +3086,34 @@ export class AnalysisService {
     return this.buildLatestAssessmentPayload(assessment);
   }
 
-  async getFitAssessmentById(userId: string, assessmentId: string) {
+  async getFitAssessmentById(
+    userId: string,
+    assessmentId: string,
+    options?: { forceFreshRecompute?: boolean; skipFreshRecompute?: boolean },
+  ) {
     const assessment = await this.fitAssessmentRepository.findOne({
       where: { id: assessmentId, userId },
     });
 
     if (!assessment) {
       throw new NotFoundException('Fit assessment not found');
+    }
+
+    if (options?.forceFreshRecompute && !options?.skipFreshRecompute) {
+      // Intentional beta stabilization:
+      // Studio fetches run a full live recompute to guarantee canonical, current claim status truth.
+      // Reintroduce caching/persistence optimizations only after stale-read invalidation is proven reliable.
+      const freshRun = await this.runFitAssessment(userId, {
+        jobId: assessment.jobId,
+        baselineId: assessment.baselineId,
+        baselineVersion: assessment.baselineVersion ?? undefined,
+      });
+
+      if (freshRun.status === 'ok' && freshRun.assessmentId) {
+        return this.getFitAssessmentById(userId, freshRun.assessmentId, {
+          skipFreshRecompute: true,
+        });
+      }
     }
 
     return this.buildLatestAssessmentPayload(assessment);

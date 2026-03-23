@@ -1,3 +1,5 @@
+import type { ClaimVerificationStatus, NormalizedClaimVerification } from "./claimVerification";
+
 export type GenerationReadiness = {
   status: "ready" | "limited" | "blocked";
   blocked: boolean;
@@ -17,10 +19,18 @@ export type GenerationReadiness = {
 
 export type VerificationCoverage = {
   status: "strong" | "partial" | "weak";
+  verifiedClaims: number;
+  inferredClaims: number;
+  unverifiedClaims: number;
   supportedClaims: number;
   unsupportedClaims: number;
   totalClaims: number;
   summary: string;
+};
+
+export type TargetingAdjustmentResult = {
+  readiness: GenerationReadiness;
+  removedClaims: string[];
 };
 
 type ServerReadinessPayload = {
@@ -39,6 +49,8 @@ export type VerificationIssue = {
   severity: "block" | "warn";
   claim: string | null;
   source: "resume_generation" | "cover_letter_generation" | "targeting_context";
+  claimStatus?: ClaimVerificationStatus;
+  requirementType?: "platform" | "role";
   explanation: string;
   sourceContext: string | null;
   recommendedAction: string;
@@ -48,6 +60,33 @@ export type AggregatedVerificationIssues = {
   primary: VerificationIssue[];
   grouped: Array<{ label: string; count: number }>;
 };
+
+export function buildVerificationIssuesFromCanonicalClaims(
+  claimVerifications: NormalizedClaimVerification[],
+): VerificationIssue[] {
+  if (!claimVerifications.length) return [];
+  return claimVerifications
+    .filter((claim) => claim.status === "UNVERIFIED")
+    .map((claim) => {
+      const normalizedLabel =
+        normalizeUserFacingRequirementLabel(claim.label, {}) ?? claim.label;
+      const claimLower = normalizedLabel.trim().toLowerCase();
+      const requirementType: "platform" | "role" = KNOWN_PLATFORM_TOKENS.has(claimLower)
+        ? "platform"
+        : "role";
+      return {
+        code: "unsupported_technology_claim",
+        severity: "block",
+        claim: normalizedLabel,
+        source: "targeting_context",
+        claimStatus: "UNVERIFIED" as ClaimVerificationStatus,
+        requirementType,
+        explanation: issueExplanation("unsupported_technology_claim", requirementType),
+        sourceContext: null,
+        recommendedAction: issueRecommendedAction("unsupported_technology_claim", requirementType),
+      };
+    });
+}
 
 type NormalizedComplianceFlag = {
   code: string;
@@ -175,6 +214,90 @@ function pickClaim(flag: NormalizedComplianceFlag): string | null {
   return null;
 }
 
+export function normalizeUserFacingClaimLabel(claim: string | null): string | null {
+  return normalizeUserFacingRequirementLabel(claim);
+}
+
+function coerceContextText(parts: Array<string | null | undefined>): string {
+  return parts
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join(" ")
+    .toLowerCase();
+}
+
+const KNOWN_PLATFORM_TOKENS = new Set([
+  "five9",
+  "salesforce",
+  "zendesk",
+  "servicenow",
+  "service now",
+  "talkdesk",
+  "jira",
+  "kubernetes",
+  "aws",
+  "azure",
+  "gcp",
+]);
+
+export function normalizeUserFacingRequirementLabel(
+  claim: string | null,
+  context?: { sourceContext?: string | null; flagMessage?: string | null; issueCode?: VerificationIssue["code"] },
+): string | null {
+  if (!claim) return null;
+  const trimmed = claim.trim().replace(/\s+/g, " ");
+  if (!trimmed) return null;
+  if (!/[a-z0-9]/i.test(trimmed)) return null;
+  const lowered = trimmed.toLowerCase();
+  const suppressedExact = new Set([
+    "multi-system",
+    "multisystem",
+    "multi system",
+    "platform stack",
+    "system stack",
+  ]);
+  if (suppressedExact.has(lowered)) return null;
+  if (/^[a-z]+(?:-[a-z]+)+$/.test(lowered) && !/[0-9]/.test(lowered)) {
+    const genericSuffixes = ["system", "platform", "stack", "process"];
+    const parts = lowered.split("-");
+    if (parts.length <= 2 && genericSuffixes.includes(parts[parts.length - 1] ?? "")) {
+      return null;
+    }
+  }
+  if (KNOWN_PLATFORM_TOKENS.has(lowered)) {
+    return trimmed;
+  }
+  if (lowered === "self-service" || lowered === "self service") {
+    const contextText = coerceContextText([
+      context?.sourceContext,
+      context?.flagMessage,
+      context?.issueCode ? String(context.issueCode) : null,
+    ]);
+    if (contextText.includes("customer")) return "Customer self-service";
+    if (contextText.includes("support") || contextText.includes("ticket")) return "Self-service support";
+    if (contextText.includes("experience")) return "Self-service experience";
+    return null;
+  }
+  return trimmed;
+}
+
+function classifyRequirementType(
+  label: string | null,
+  issueCode: VerificationIssue["code"],
+  hint?: "platform" | "role",
+): "platform" | "role" {
+  if (hint) return hint;
+  const lowered = (label ?? "").trim().toLowerCase();
+  if (!lowered) return "role";
+  if (KNOWN_PLATFORM_TOKENS.has(lowered)) return "platform";
+  if (issueCode === "unsupported_technology_claim") {
+    const tokenized = lowered.split(/[^\w+.-]+/).filter(Boolean);
+    if (tokenized.some((token) => KNOWN_PLATFORM_TOKENS.has(token))) {
+      return "platform";
+    }
+  }
+  return "role";
+}
+
 function isSanitizedClaimValid(claim: string): boolean {
   const trimmed = claim.trim();
   if (!trimmed) return false;
@@ -289,12 +412,19 @@ function classifyIssueCode(flag: NormalizedComplianceFlag): VerificationIssue["c
   return "verification_constraint";
 }
 
-function issueExplanation(code: VerificationIssue["code"]): string {
+function issueExplanation(
+  code: VerificationIssue["code"],
+  requirementType: "platform" | "role",
+): string {
   if (code === "unsupported_technology_claim") {
-    return "This technology/platform claim could not be verified from the current evidence set used for generation.";
+    return requirementType === "platform"
+      ? "This platform requirement could not be verified from the evidence currently used for generation."
+      : "This role requirement could not be verified from the evidence currently used for generation.";
   }
   if (code === "missing_baseline_evidence") {
-    return "This claim could not be verified because matching baseline evidence was not found.";
+    return requirementType === "platform"
+      ? "This platform requirement could not be verified from the evidence currently used for generation."
+      : "This role requirement could not be verified from the evidence currently used for generation.";
   }
   if (code === "generation_overreach") {
     return "The generated wording appears to exceed what is directly supported by verified evidence.";
@@ -302,12 +432,17 @@ function issueExplanation(code: VerificationIssue["code"]): string {
   if (code === "role_targeting_emphasis_exceeds_support") {
     return "Role-targeted personalization is currently stronger than the verified evidence available for this context.";
   }
-  return "This claim could not be verified from the current generation context.";
+  return "This requirement could not be verified from the current generation context.";
 }
 
-function issueRecommendedAction(code: VerificationIssue["code"]): string {
+function issueRecommendedAction(
+  code: VerificationIssue["code"],
+  requirementType: "platform" | "role",
+): string {
   if (code === "unsupported_technology_claim") {
-    return "Remove unsupported technology emphasis, or add verified evidence only if this experience is real.";
+    return requirementType === "platform"
+      ? "Remove unsupported platform emphasis, or add verified evidence only if this experience is real."
+      : "Remove unsupported requirement emphasis, or add verified evidence only if this experience is real.";
   }
   if (code === "missing_baseline_evidence") {
     return "Review baseline evidence and add missing verified details only if they are true.";
@@ -330,7 +465,13 @@ function mapFlagsToVerificationIssues(
   const sanitizedClaims = new Set(
     sanitizeClaims(
       normalized
-        .map((flag) => pickClaim(flag))
+        .map((flag) =>
+          normalizeUserFacingRequirementLabel(pickClaim(flag), {
+            sourceContext: pickSourceContext(flag),
+            flagMessage: flag.message,
+            issueCode: classifyIssueCode(flag),
+          }),
+        )
         .filter((claim): claim is string => Boolean(claim && claim.trim().length > 0)),
     ).map((claim) => claim.toLowerCase()),
   );
@@ -346,11 +487,19 @@ function mapFlagsToVerificationIssues(
       continue;
     }
     const issueCode = classifyIssueCode(flag);
-    const claim = pickClaim(flag);
+    const claim = normalizeUserFacingRequirementLabel(pickClaim(flag), {
+      sourceContext: pickSourceContext(flag),
+      flagMessage: flag.message,
+      issueCode,
+    });
     if (claim && !sanitizedClaims.has(claim.trim().toLowerCase())) {
       continue;
     }
     const sourceContext = pickSourceContext(flag);
+    const requirementTypeHint = flag.evidence.some((entry) => entry.generatedClaim?.type === "technology")
+      ? "platform"
+      : undefined;
+    const requirementType = classifyRequirementType(claim, issueCode, requirementTypeHint);
     const key = `${source}:${issueCode}:${flag.severity}:${(claim ?? "").toLowerCase()}`;
     if (
       deduped.some(
@@ -365,9 +514,12 @@ function mapFlagsToVerificationIssues(
       severity: flag.severity,
       claim,
       source,
-      explanation: issueExplanation(issueCode),
+      claimStatus:
+        issueCode === "role_targeting_emphasis_exceeds_support" ? "INFERRED" : "UNVERIFIED",
+      requirementType,
+      explanation: issueExplanation(issueCode, requirementType),
       sourceContext,
-      recommendedAction: issueRecommendedAction(issueCode),
+      recommendedAction: issueRecommendedAction(issueCode, requirementType),
     });
   }
 
@@ -376,6 +528,13 @@ function mapFlagsToVerificationIssues(
 
 function normalizeIssueClaim(claim: string | null): string {
   return (claim ?? "").trim().toLowerCase();
+}
+
+function getUserFacingIssueLabel(issue: VerificationIssue): string | null {
+  return normalizeUserFacingRequirementLabel(issue.claim, {
+    sourceContext: issue.sourceContext,
+    issueCode: issue.code,
+  });
 }
 
 function isNoiseClaim(claim: string | null): boolean {
@@ -413,22 +572,46 @@ function issueGroupLabel(groupType: "core" | "tooling" | "derived", source: Veri
       : source === "cover_letter_generation"
         ? "cover letter generation"
         : "targeting context";
-  if (groupType === "tooling") return `Multiple unsupported technology claims in ${sourceLabel}`;
+  if (groupType === "tooling") return `Multiple unsupported platform requirements in ${sourceLabel}`;
   if (groupType === "derived") return `Multiple derived verification limitations in ${sourceLabel}`;
   return `Multiple core verification blockers in ${sourceLabel}`;
+}
+
+function issueGroupLabelWithoutClaim(source: VerificationIssue["source"]): string {
+  const sourceLabel =
+    source === "resume_generation"
+      ? "resume generation"
+      : source === "cover_letter_generation"
+        ? "cover letter generation"
+        : "targeting context";
+  return `Additional verification limitations in ${sourceLabel}`;
 }
 
 export function aggregateVerificationIssues(
   issues: VerificationIssue[],
 ): AggregatedVerificationIssues {
   const deduped: VerificationIssue[] = [];
+  const hiddenMap = new Map<string, { label: string; count: number }>();
   const seen = new Set<string>();
   for (const issue of issues) {
-    if (isNoiseClaim(issue.claim)) continue;
-    const key = `${issue.severity}:${issue.code}:${issue.source}:${normalizeIssueClaim(issue.claim)}`;
+    const label = getUserFacingIssueLabel(issue);
+    if (!label || isNoiseClaim(label)) {
+      const key = `hidden:${issue.source}`;
+      const existing = hiddenMap.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        hiddenMap.set(key, { label: issueGroupLabelWithoutClaim(issue.source), count: 1 });
+      }
+      continue;
+    }
+    const key = `${issue.severity}:${issue.code}:${issue.source}:${normalizeIssueClaim(label)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    deduped.push(issue);
+    deduped.push({
+      ...issue,
+      claim: label,
+    });
   }
 
   deduped.sort((a, b) => {
@@ -459,7 +642,7 @@ export function aggregateVerificationIssues(
 
   return {
     primary,
-    grouped: Array.from(groupedMap.values()),
+    grouped: [...Array.from(groupedMap.values()), ...Array.from(hiddenMap.values())],
   };
 }
 
@@ -467,7 +650,7 @@ function addIssueFallbackFromReason(
   issues: VerificationIssue[],
   reason: { code: string; message: string },
 ): void {
-  const severity: VerificationIssue["severity"] =
+    const severity: VerificationIssue["severity"] =
     reason.code === "full_block" || reason.code.includes("block") ? "block" : "warn";
   const code: VerificationIssue["code"] =
     reason.code === "unsupported_technology_claim"
@@ -483,9 +666,11 @@ function addIssueFallbackFromReason(
     severity,
     claim: null,
     source: "targeting_context",
+    claimStatus: code === "role_targeting_emphasis_exceeds_support" ? "INFERRED" : "UNVERIFIED",
     explanation: reason.message,
     sourceContext: null,
-    recommendedAction: issueRecommendedAction(code),
+    recommendedAction: issueRecommendedAction(code, "role"),
+    requirementType: "role",
   });
 }
 
@@ -635,6 +820,8 @@ export function getGenerationReadiness(
       severity: reason.code === "full_block" ? "block" : "warn",
       claim: null,
       source: "targeting_context",
+      claimStatus:
+        reason.code === "personalization_limitation" ? "INFERRED" : "UNVERIFIED",
       explanation: reason.message,
       sourceContext: null,
       recommendedAction: issueRecommendedAction(
@@ -645,7 +832,9 @@ export function getGenerationReadiness(
           : reason.code === "personalization_limitation"
           ? "role_targeting_emphasis_exceeds_support"
           : "verification_constraint",
+        "role",
       ),
+      requirementType: "role",
     })),
   };
 }
@@ -708,7 +897,34 @@ export function combineGenerationReadinessFromServer(
   };
 }
 
-export function deriveVerificationCoverage(readiness: GenerationReadiness): VerificationCoverage {
+export function deriveVerificationCoverage(
+  readiness: GenerationReadiness,
+  claimVerifications: NormalizedClaimVerification[] = [],
+): VerificationCoverage {
+  if (claimVerifications.length > 0) {
+    const verified = claimVerifications.filter((claim) => claim.status === "VERIFIED").length;
+    const inferred = claimVerifications.filter((claim) => claim.status === "INFERRED").length;
+    const unverified = claimVerifications.filter((claim) => claim.status === "UNVERIFIED").length;
+    const total = claimVerifications.length;
+    const status: VerificationCoverage["status"] =
+      unverified > 0 ? "weak" : inferred > 0 ? "partial" : "strong";
+    const summary =
+      status === "strong"
+        ? "Your baseline explicitly verifies the claim requirements used for tailoring."
+        : status === "partial"
+        ? "Some role requirements are inferred from adjacent evidence and may need explicit proof for generation."
+          : "Some role-specific requirements are not verified from your baseline, which can block generation-safe tailoring.";
+    return {
+      verifiedClaims: verified,
+      inferredClaims: inferred,
+      unverifiedClaims: unverified,
+      status,
+      supportedClaims: verified,
+      unsupportedClaims: unverified,
+      totalClaims: total,
+      summary,
+    };
+  }
   const status: VerificationCoverage["status"] =
     readiness.status === "blocked"
       ? "weak"
@@ -719,20 +935,171 @@ export function deriveVerificationCoverage(readiness: GenerationReadiness): Veri
   const fallbackTotalClaims = readiness.status === "ready" ? 0 : 1;
   const totalClaims = Math.max(readiness.verificationIssues.length, fallbackTotalClaims);
   const unsupportedClaims = readiness.verificationIssues.filter((issue) => issue.severity === "block").length;
-  const supportedClaims = Math.max(totalClaims - unsupportedClaims, 0);
+  const inferredClaims = readiness.verificationIssues.filter(
+    (issue) => issue.claimStatus === "INFERRED",
+  ).length;
+  const unverifiedClaims = readiness.verificationIssues.filter(
+    (issue) => issue.claimStatus === "UNVERIFIED" || issue.severity === "block",
+  ).length;
+  const verifiedClaims = Math.max(totalClaims - inferredClaims - unverifiedClaims, 0);
 
   const summary =
     status === "strong"
       ? "Your baseline can fully support the claims required for this role."
       : status === "partial"
-        ? "Some claims required for this role have limited verification support."
-        : "Several claims required for this role cannot be verified from your baseline.";
+        ? "Some role requirements have adjacent support, but still need explicit proof for generation."
+        : "Several role-specific requirements cannot be verified from your baseline.";
 
   return {
+    verifiedClaims,
+    inferredClaims,
+    unverifiedClaims,
     status,
-    supportedClaims,
-    unsupportedClaims,
+    supportedClaims: verifiedClaims,
+    unsupportedClaims: unverifiedClaims,
     totalClaims,
     summary,
+  };
+}
+
+export function filterClaimVerificationsByExcludedLabels(
+  claimVerifications: NormalizedClaimVerification[],
+  excludedLabels: Set<string>,
+): NormalizedClaimVerification[] {
+  if (!excludedLabels.size) return claimVerifications;
+  return claimVerifications.filter((claim) => {
+    const normalized = normalizeUserFacingRequirementLabel(claim.label, {});
+    if (!normalized) return true;
+    return !excludedLabels.has(normalized.toLowerCase());
+  });
+}
+
+export function reconcileReadinessWithClaimVerifications(
+  readiness: GenerationReadiness,
+  claimVerifications: NormalizedClaimVerification[],
+): GenerationReadiness {
+  if (!claimVerifications.length) return readiness;
+
+  const normalizedClaims = claimVerifications
+    .map((claim) => {
+      const normalizedLabel = normalizeUserFacingRequirementLabel(claim.label, {});
+      return {
+        status: claim.status,
+        normalizedLabel: (normalizedLabel ?? claim.label).trim().toLowerCase(),
+      };
+    })
+    .filter((claim) => claim.normalizedLabel.length > 0);
+
+  if (!normalizedClaims.length) return readiness;
+
+  const resolveClaimStatus = (issueLabel: string): ClaimVerificationStatus | null => {
+    const normalizedIssue = issueLabel.trim().toLowerCase();
+    if (!normalizedIssue) return null;
+    const exact = normalizedClaims.find((claim) => claim.normalizedLabel === normalizedIssue);
+    if (exact) return exact.status;
+    const overlap = normalizedClaims.find(
+      (claim) =>
+        claim.normalizedLabel.includes(normalizedIssue) ||
+        normalizedIssue.includes(claim.normalizedLabel),
+    );
+    return overlap?.status ?? null;
+  };
+
+  const verificationIssues = readiness.verificationIssues.filter((issue) => {
+    const normalizedIssueLabel = normalizeUserFacingRequirementLabel(issue.claim, {
+      sourceContext: issue.sourceContext,
+      issueCode: issue.code,
+    });
+    if (!normalizedIssueLabel) return true;
+    const matchedStatus = resolveClaimStatus(normalizedIssueLabel);
+    if (!matchedStatus) return true;
+    return matchedStatus === "UNVERIFIED";
+  });
+
+  if (verificationIssues.length === readiness.verificationIssues.length) {
+    return readiness;
+  }
+
+  const hasBlockingIssues = verificationIssues.some((issue) => issue.severity === "block");
+  const hasWarnings = verificationIssues.some((issue) => issue.severity === "warn");
+  const status: GenerationReadiness["status"] = hasBlockingIssues
+    ? "blocked"
+    : hasWarnings
+      ? "limited"
+      : "ready";
+  const blocked = status === "blocked";
+  const badgeLabel: GenerationReadiness["badgeLabel"] =
+    status === "blocked" ? "BLOCKED" : status === "limited" ? "LIMITED" : "READY";
+  const summary =
+    status === "blocked"
+      ? "Strong fit can still be blocked for generation when verification requirements are not met."
+      : status === "limited"
+        ? "Fit score and generation readiness are separate. Tailored generation is currently limited."
+        : "Generation is ready for this scored analysis context.";
+
+  return {
+    ...readiness,
+    status,
+    blocked,
+    badgeLabel,
+    summary,
+    reasonCodes: blocked || hasWarnings ? readiness.reasonCodes : [],
+    reasons: blocked || hasWarnings ? readiness.reasons : [],
+    verificationIssues,
+  };
+}
+
+export function applyTargetingExclusionsToReadiness(
+  readiness: GenerationReadiness,
+  excludedLabels: Set<string>,
+): TargetingAdjustmentResult {
+  if (!excludedLabels.size) {
+    return { readiness, removedClaims: [] };
+  }
+  const removedClaims: string[] = [];
+  const nextIssues = readiness.verificationIssues.filter((issue) => {
+    const label = normalizeUserFacingRequirementLabel(issue.claim, {
+      sourceContext: issue.sourceContext,
+      issueCode: issue.code,
+    });
+    if (!label) return true;
+    const shouldExclude = excludedLabels.has(label.toLowerCase());
+    if (shouldExclude) {
+      removedClaims.push(label);
+    }
+    return !shouldExclude;
+  });
+
+  const hasBlockingIssues = nextIssues.some((issue) => issue.severity === "block");
+  const hasWarnings = nextIssues.some((issue) => issue.severity === "warn");
+  const status: GenerationReadiness["status"] = hasBlockingIssues
+    ? "blocked"
+    : hasWarnings
+      ? "limited"
+      : "ready";
+
+  const reasonCodes = status === "ready" ? [] : readiness.reasonCodes;
+  const reasons = status === "ready" ? [] : readiness.reasons;
+  const badgeLabel: GenerationReadiness["badgeLabel"] =
+    status === "blocked" ? "BLOCKED" : status === "limited" ? "LIMITED" : "READY";
+  const summary =
+    status === "blocked"
+      ? "Targeting was narrowed, but generation is still blocked until remaining requirements are verified."
+      : status === "limited"
+        ? "Targeting was narrowed to supported requirements, but some limitations still remain."
+        : "Targeting was narrowed to verified experience and generation is now ready.";
+
+  return {
+    removedClaims: Array.from(new Set(removedClaims)),
+    readiness: {
+      ...readiness,
+      status,
+      blocked: status === "blocked",
+      reasonCodes,
+      reasons,
+      badgeLabel,
+      summary,
+      verificationIssues: nextIssues,
+    },
   };
 }

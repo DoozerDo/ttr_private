@@ -103,7 +103,9 @@ export class AnalysisController {
       throw new BadRequestException('Invalid user context');
     }
 
-    return this.analysisService.getFitAssessmentById(userId, assessmentId);
+    return this.analysisService.getFitAssessmentById(userId, assessmentId, {
+      forceFreshRecompute: true,
+    });
   }
 
   @Get('fit-scores')
@@ -190,3 +192,4 @@ export class AnalysisController {
     return this.scoreSimulatorService.getSimulation(userId, assessmentId);
   }
 }
+

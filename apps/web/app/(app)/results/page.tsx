@@ -24,6 +24,7 @@ import {
   deriveVerificationCoverage,
   type VerificationCoverage,
 } from "@/lib/generationReadiness";
+import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
@@ -65,6 +66,7 @@ type ScoringV2Penalty = {
 type ScoringV2ToolingCoverage = {
   requiredCoverage: number;
   preferredCoverage: number;
+  claims?: unknown;
 };
 
 type ScoringV2DebugInfo = {
@@ -506,8 +508,14 @@ export function OpportunityMapSection({
               </p>
               <p className="mt-1 text-sm leading-5 text-slate-100">{verificationCoverage.summary}</p>
               <p className="mt-1 text-xs leading-5 text-slate-200">
-                Supported claims: {verificationCoverage.supportedClaims} / {verificationCoverage.totalClaims}
+                Verified claims: {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
               </p>
+              {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
+                <p className="mt-1 text-xs leading-5 text-slate-300">
+                  Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
+                  {verificationCoverage.unverifiedClaims}
+                </p>
+              ) : null}
             </div>
             <a
               href={scoreAnalysisHref}
@@ -1371,9 +1379,13 @@ export default function ResultsPage() {
     }));
   }, [scoringRubric]);
   const canOpenStudio = Boolean(latest?.jobId && latestBaselineId);
+  const claimVerifications = useMemo(
+    () => normalizeClaimVerifications(debugFields?.toolingCoverage?.claims),
+    [debugFields?.toolingCoverage?.claims],
+  );
   const verificationCoverage = useMemo(
-    () => deriveVerificationCoverage(generationReadiness),
-    [generationReadiness],
+    () => deriveVerificationCoverage(generationReadiness, claimVerifications),
+    [claimVerifications, generationReadiness],
   );
   const primaryResultsCta = useMemo(
     () =>

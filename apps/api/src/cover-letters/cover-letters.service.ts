@@ -84,6 +84,7 @@ import type {
   UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
+import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -107,6 +108,7 @@ type CoverLetterDraft = {
     blocked: boolean;
     audit: ValidateAndAuditResult['audit'];
   };
+  analysisAssessment: FitAssessment;
 };
 
 type ComplianceEvaluationResult = {
@@ -331,8 +333,11 @@ export class CoverLettersService {
 
   async getGenerationReadiness(userId: string, input: GenerateCoverLetterDto) {
     const draft = await this.buildCoverLetterDraft(userId, input);
-    const flags = draft.complianceResult.complianceFlags ?? [];
-    const blocked = draft.complianceResult.blocked === true;
+    const flags = filterComplianceFlagsByCanonicalClaims(
+      draft.complianceResult.complianceFlags ?? [],
+      draft.analysisAssessment,
+    );
+    const blocked = flags.some((flag) => flag.severity === 'block');
     const warningFlags = flags.filter((flag) => flag.severity === 'warn');
     return {
       status: blocked ? 'blocked' : warningFlags.length > 0 ? 'limited' : 'ready',
@@ -420,7 +425,7 @@ export class CoverLettersService {
       throw new BadRequestException('Baseline version hash missing');
     }
 
-    await validateAnalysisContext({
+    const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
       baselineVersionRepository: this.baselineVersionRepository,
       analysisId: input.analysisId.trim(),
@@ -702,6 +707,7 @@ export class CoverLettersService {
       baseline,
       baselineVersion,
       job,
+      analysisAssessment,
       allowedBlocks,
       jobContext,
       jobContextAllowlist,

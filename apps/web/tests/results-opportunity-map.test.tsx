@@ -16,6 +16,9 @@ const readyReadiness: GenerationReadiness = {
 
 const strongCoverage: VerificationCoverage = {
   status: "strong",
+  verifiedClaims: 3,
+  inferredClaims: 0,
+  unverifiedClaims: 0,
   supportedClaims: 3,
   unsupportedClaims: 0,
   totalClaims: 3,
@@ -138,6 +141,7 @@ describe("Results opportunity map", () => {
     expect(screen.queryByText("Risk")).toBeNull();
     expect(screen.getByText("Generation Readiness: READY")).toBeInTheDocument();
     expect(screen.getByText("Verification Coverage: STRONG")).toBeInTheDocument();
+    expect(screen.getByText(/Verified claims:\s*3 \/ 3/i)).toBeInTheDocument();
   });
 
   it("suppresses the advantage section when no verified advantages exist", () => {
@@ -209,6 +213,9 @@ describe("Results opportunity map", () => {
         }}
         verificationCoverage={{
           status: "partial",
+          verifiedClaims: 1,
+          inferredClaims: 1,
+          unverifiedClaims: 0,
           supportedClaims: 1,
           unsupportedClaims: 0,
           totalClaims: 2,
@@ -254,6 +261,9 @@ describe("Results opportunity map", () => {
         }}
         verificationCoverage={{
           status: "weak",
+          verifiedClaims: 0,
+          inferredClaims: 0,
+          unverifiedClaims: 2,
           supportedClaims: 0,
           unsupportedClaims: 2,
           totalClaims: 2,
@@ -263,6 +273,7 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByText("Generation Readiness: BLOCKED")).toBeInTheDocument();
+    expect(screen.getByText(/Verified claims:\s*0 \/ 2/i)).toBeInTheDocument();
     expect(
       screen.getByText(
         "Some claims required for tailored generation could not be verified against your baseline.",

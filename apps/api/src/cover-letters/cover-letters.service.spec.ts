@@ -384,6 +384,237 @@ describe('CoverLettersService', () => {
     expect(readiness.blocked).toBe(true);
   });
 
+  it('does not keep Salesforce unresolved in readiness when canonical claims mark Salesforce as VERIFIED', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const salesforceFlag: ComplianceFlag = {
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: 'Salesforce experience could not be verified.',
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.92,
+      evidence: [
+        {
+          baseline: '',
+          generated: 'Salesforce',
+          generatedClaim: {
+            text: 'Salesforce',
+            type: 'technology',
+          },
+        },
+      ],
+    };
+
+    fitAssessmentRepository.findOne.mockImplementation(({ where }: any) => {
+      if (where?.id === 'analysis-1') {
+        return Promise.resolve({
+          id: 'analysis-1',
+          userId: 'user-1',
+          jobId: 'job-1',
+          baselineId: 'baseline-1',
+          baselineVersion: 3,
+          scoringV2: {
+            score: 90,
+            rubric: {},
+            debug: {
+              toolingCoverage: {
+                requiredCoverage: 1,
+                preferredCoverage: 0,
+                claims: [
+                  {
+                    key: 'salesforce',
+                    label: 'Salesforce',
+                    status: 'VERIFIED',
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      return Promise.resolve({
+        id: 'analysis-latest',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+        baselineVersion: 3,
+        overallScore: 88,
+      });
+    });
+
+    complianceService.validateAndAudit.mockResolvedValueOnce({
+      complianceFlags: [salesforceFlag],
+      blocked: true,
+      audit: {
+        id: 'audit-cover-salesforce-filtered',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.blocked).toBe(false);
+    expect(readiness.status).toBe('ready');
+    expect(readiness.compliance_flags).toEqual([]);
+  });
+
+  it('does not block cover-letter readiness for obviously invalid fictional technology tokens', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const invalidTokens = [
+      '206-949-1418',
+      '2022',
+      '2025',
+      '500',
+      '000',
+      '2013',
+      'client-impacting',
+      'billing-impacting',
+      'self-service',
+      'multi-system',
+      '2018Support',
+    ];
+    const invalidFlags: ComplianceFlag[] = invalidTokens.map((token) => ({
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: `Technology "${token}" not found in baseline.`,
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.9,
+      evidence: [
+        {
+          baseline: '',
+          generated: token,
+          generatedClaim: {
+            text: token,
+            type: 'technology',
+          },
+        },
+      ],
+    }));
+
+    complianceService.validateAndAudit
+      .mockResolvedValueOnce({
+      complianceFlags: invalidFlags,
+      blocked: true,
+      audit: {
+        id: 'audit-cover-invalid-tech',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult)
+      .mockResolvedValueOnce({
+      complianceFlags: invalidFlags,
+      blocked: true,
+      audit: {
+        id: 'audit-cover-invalid-tech',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.blocked).toBe(false);
+    expect(readiness.status).toBe('ready');
+    expect(readiness.compliance_flags).toEqual([]);
+  });
+
+  it('still blocks cover-letter readiness for plausible unverified technology claims', async () => {
+    const service = new CoverLettersService(
+      dataSource,
+      complianceService as any,
+      gapAnalysisService as GapAnalysisService,
+    );
+    const netsuiteFlag: ComplianceFlag = {
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: 'Technology "NetSuite" not found in baseline.',
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.9,
+      evidence: [
+        {
+          baseline: '',
+          generated: 'NetSuite',
+          generatedClaim: {
+            text: 'NetSuite',
+            type: 'technology',
+          },
+        },
+      ],
+    };
+
+    complianceService.validateAndAudit
+      .mockResolvedValueOnce({
+      complianceFlags: [netsuiteFlag],
+      blocked: true,
+      audit: {
+        id: 'audit-cover-netsuite-block',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult)
+      .mockResolvedValueOnce({
+      complianceFlags: [netsuiteFlag],
+      blocked: true,
+      audit: {
+        id: 'audit-cover-netsuite-block',
+        baselineVersionId: 'baseline-version-1',
+        baselineVersionHash: 'hash-1',
+        outputHash: '',
+        action: ComplianceAction.COVER_LETTER_GENERATION,
+        actorId: 'user-1',
+        jobId: 'job-1',
+        createdAt: new Date().toISOString(),
+      },
+    } as ValidateAndAuditResult);
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      baselineId: 'baseline-1',
+      baselineVersionId: 'baseline-version-1',
+      jobId: 'job-1',
+      analysisId: 'analysis-1',
+    });
+
+    expect(readiness.blocked).toBe(true);
+    expect(readiness.status).toBe('blocked');
+    expect(readiness.compliance_flags).toHaveLength(1);
+    expect(readiness.compliance_flags[0]?.evidence?.[0]?.generatedClaim?.text).toBe('NetSuite');
+  });
+
   it('reports limited readiness when cover-letter compliance returns warnings only', async () => {
     const service = new CoverLettersService(
       dataSource,

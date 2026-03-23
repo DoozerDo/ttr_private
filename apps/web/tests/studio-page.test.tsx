@@ -171,7 +171,9 @@ describe("Studio page UX", () => {
     expect(screen.queryByTestId("studio-verification-issues")).not.toBeInTheDocument();
     expect(screen.getByText("Orbit — Head of Customer Operations")).toBeInTheDocument();
     expect(screen.getByText(/Using resume/i)).toHaveTextContent("Using resume Platform Resume");
-    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/analysis-2");
+    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/analysis-2", {
+      cache: "no-store",
+    });
   });
 
   it("renders the same limited readiness wording used in Results context", async () => {
@@ -287,11 +289,565 @@ describe("Studio page UX", () => {
       within(issuesPanel).getByText("Salesforce Service Cloud administration"),
     ).toBeInTheDocument();
     expect(
-      within(issuesPanel).getByText(/Remove unsupported technology emphasis/i),
+      within(issuesPanel).getByText(/Remove unsupported platform emphasis/i),
     ).toBeInTheDocument();
-    const cta = within(issuesPanel).getByRole("link", { name: "Adjust targeting emphasis" });
-    expect(cta).toHaveAttribute("href", "/results#advanced-insights");
+    expect(
+      within(issuesPanel).getByRole("button", { name: "Remove from targeting" }),
+    ).toBeInTheDocument();
     expect(within(issuesPanel).queryByText(/your baseline has issues/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show all-supported coverage in top-band blocked state when claim statuses include unverified requirements", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 95,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: {
+              debug: {
+                toolingCoverage: {
+                  claims: [
+                    {
+                      key: "leadership-ops",
+                      label: "Leadership and support operations",
+                      category: "process",
+                      sourceType: "job_required",
+                      status: "VERIFIED",
+                      evidenceRefs: ["support operations"],
+                      generationBlocking: false,
+                      scoreWeight: 1,
+                    },
+                    {
+                      key: "zendesk-adjacent",
+                      label: "Zendesk-adjacent support stack",
+                      category: "tooling",
+                      sourceType: "job_preferred",
+                      status: "INFERRED",
+                      evidenceRefs: ["ticketing system"],
+                      generationBlocking: false,
+                      scoreWeight: 0.4,
+                    },
+                    {
+                      key: "salesforce",
+                      label: "Salesforce",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Verified claims:\s*1 \/ 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adjacent support \(inferred\):\s*1 · Unverified:\s*1/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Verified claims:\s*3 \/ 3/i)).not.toBeInTheDocument();
+  });
+
+  it("shows nonzero inferred count for high-fit blocked scenario with adjacent support while keeping verified honest", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: {
+              debug: {
+                toolingCoverage: {
+                  claims: [
+                    {
+                      key: "salesforce",
+                      label: "Salesforce",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "INFERRED",
+                      evidenceRefs: ["crm"],
+                      generationBlocking: true,
+                      scoreWeight: 0.4,
+                    },
+                    {
+                      key: "five9",
+                      label: "Five9",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Fit score:\s*94/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verified claims:\s*0 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adjacent support \(inferred\):\s*1 · Unverified:\s*1/i)).toBeInTheDocument();
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Five9")).toBeInTheDocument();
+    expect(within(issuesPanel).queryByText("Salesforce")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Generation readiness:\s*READY/i)).not.toBeInTheDocument();
+  });
+
+  it("does not render stale Salesforce unresolved issues when analysis claims verify Salesforce", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: {
+              debug: {
+                toolingCoverage: {
+                  claims: [
+                    {
+                      key: "salesforce",
+                      label: "Salesforce",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "VERIFIED",
+                      evidenceRefs: ["Owned workflows in Salesforce Service Cloud"],
+                      generationBlocking: false,
+                      scoreWeight: 1,
+                    },
+                    {
+                      key: "five9",
+                      label: "Five9",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Verified claims:\s*1 \/ 2/i)).toBeInTheDocument();
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Five9")).toBeInTheDocument();
+    expect(within(issuesPanel).queryByText("Salesforce")).not.toBeInTheDocument();
+  });
+
+  it("uses canonical verification_coverage for both counts and issue cards when claims are unavailable", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            verification_coverage: {
+              totalClaims: 3,
+              verifiedClaims: 1,
+              inferredClaims: 1,
+              unverifiedClaims: 1,
+              unverifiedRequirements: ["Five9"],
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Verified claims:\s*1 \/ 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/Adjacent support \(inferred\):\s*1 .* Unverified:\s*1/i)).toBeInTheDocument();
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Five9")).toBeInTheDocument();
+    expect(within(issuesPanel).queryByText("Salesforce")).not.toBeInTheDocument();
+  });
+
+  it("falls back to readiness issues only when canonical analysis coverage is absent", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    });
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Salesforce")).toBeInTheDocument();
+  });
+
+  it("provides a top-level auto-adjust action that narrows targeting and recomputes readiness", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: {
+              debug: {
+                toolingCoverage: {
+                  claims: [
+                    {
+                      key: "salesforce",
+                      label: "Salesforce",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                    {
+                      key: "five9",
+                      label: "Five9",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-auto-adjust-panel")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("We'll remove unsupported requirements and recheck readiness."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fix targeting and enable generation" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Generation readiness: READY")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("studio-targeting-adjustment-feedback")).toHaveTextContent(
+      /Targeting updated\. Generation is now enabled\./i,
+    );
+    expect(screen.getByText(/Verified claims:\s*0 \/ 0/i)).toBeInTheDocument();
+  });
+
+  it("supports per-issue removal action and updates counts from adjusted targeting", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+            scoring_v2: {
+              debug: {
+                toolingCoverage: {
+                  claims: [
+                    {
+                      key: "salesforce",
+                      label: "Salesforce",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                    {
+                      key: "five9",
+                      label: "Five9",
+                      category: "platform",
+                      sourceType: "job_required",
+                      status: "UNVERIFIED",
+                      evidenceRefs: [],
+                      generationBlocking: true,
+                      scoreWeight: 0,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Five9".',
+                evidence: [{ generated: "Five9" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-verification-issues")).toBeInTheDocument();
+    });
+    fireEvent.click(within(screen.getByTestId("studio-verification-issues")).getAllByRole("button", { name: "Remove from targeting" })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Verified claims:\s*0 \/ 1/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Generation readiness: BLOCKED")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-targeting-adjustment-feedback")).toHaveTextContent(
+      /Unsupported requirements were removed, but more verified evidence is needed to enable generation\./i,
+    );
   });
 
   it("renders missing baseline evidence remediation CTA with encoded claim in baseline route", async () => {
@@ -369,7 +925,14 @@ describe("Studio page UX", () => {
           createResponse({
             status: "blocked",
             reasons: [{ code: "full_block", message: "blocked" }],
-            compliance_flags: [{ code: "scope_inflation", severity: "block", message: "overreach" }],
+            compliance_flags: [
+              {
+                code: "scope_inflation",
+                severity: "block",
+                message: 'Unsupported claim "Led global support transformation".',
+                evidence: [{ generated: "Led global support transformation" }],
+              },
+            ],
           }),
         );
       }
@@ -469,6 +1032,67 @@ describe("Studio page UX", () => {
     expect(
       within(issuesPanel).queryByText(/Additional verification limitations \(\d+\)/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("suppresses unlabeled verification cards while still showing grouped additional limitations", async () => {
+    const fetchMock = vi.fn((input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          createResponse([{ id: "base-version-1", fileHash: "hash-1", versionNumber: 1 }]),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          createResponse({
+            score: 94,
+            jobId: "job-1",
+            baselineId: "base-1",
+            baselineVersionId: "base-version-1",
+          }),
+        );
+      }
+      if (url.includes("/api/resume/readiness")) {
+        return Promise.resolve(
+          createResponse({
+            status: "blocked",
+            reasons: [{ code: "full_block", message: "blocked" }],
+            compliance_flags: [
+              {
+                code: "missing_baseline_support",
+                severity: "warn",
+                message: "No source support found",
+                evidence: [{ baseline: "source context only" }],
+              },
+              {
+                code: "fictional_technology",
+                severity: "block",
+                message: 'Unsupported claim "Salesforce".',
+                evidence: [{ generated: "Salesforce" }],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes("/api/cover-letters/readiness")) {
+        return Promise.resolve(createResponse({ status: "ready", reasons: [], compliance_flags: [] }));
+      }
+      return Promise.resolve(createResponse({}));
+    });
+    setFetchImplementation(fetchMock);
+    renderStudio();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-verification-issues")).toBeInTheDocument();
+    });
+
+    const issuesPanel = screen.getByTestId("studio-verification-issues");
+    expect(within(issuesPanel).getByText("Salesforce")).toBeInTheDocument();
+    expect(within(issuesPanel).getAllByText("Requirement:")).toHaveLength(1);
+    expect(within(issuesPanel).queryByText(/No source support found/i)).not.toBeInTheDocument();
+    expect(
+      within(issuesPanel).getByText(/Additional verification limitations \(\d+\)/i),
+    ).toBeInTheDocument();
   });
 
   it("uses top-band streamlined generation CTA when score is 90+", async () => {
@@ -1356,6 +1980,8 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(screen.getByText("81.0")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/assessment-legacy");
+    expect(fetchMock).toHaveBeenCalledWith("/api/analysis/fit-assessments/assessment-legacy", {
+      cache: "no-store",
+    });
   });
 });

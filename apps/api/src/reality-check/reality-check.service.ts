@@ -185,7 +185,13 @@ export class RealityCheckService {
       baselineSections: baselinePayloadSections,
     });
 
-    const toolCoverage = evaluateToolCoverage(jobText, baselineText);
+    const toolCoverage = evaluateToolCoverage(jobText, baselineText, {
+      baselineSections: baselinePayloadSections.map((section) => ({
+        title: section.type ?? null,
+        type: section.type ?? null,
+        content: section.content,
+      })),
+    });
     const missingSkillOptions = this.buildMissingSkillOptions(
       jobText,
       baselineText,

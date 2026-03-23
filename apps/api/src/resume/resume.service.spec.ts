@@ -2841,6 +2841,146 @@ Additional context line to ensure extracted text length remains above validation
     });
   });
 
+  it('does not keep Salesforce unresolved in readiness when canonical claims mark Salesforce as VERIFIED', async () => {
+    const salesforceFlag: ComplianceFlag = {
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: 'Salesforce experience could not be verified.',
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.94,
+      evidence: [
+        {
+          baseline: '',
+          generated: 'Salesforce',
+          generatedClaim: {
+            text: 'Salesforce',
+            type: 'technology',
+          },
+        },
+      ],
+    };
+    const { service } = buildService(95, [salesforceFlag], mockBaselineVersion);
+    const fitAssessmentRepository = (service as any).fitAssessmentRepository as {
+      findOne: jest.Mock;
+    };
+    fitAssessmentRepository.findOne.mockImplementation(({ where }: { where?: Record<string, unknown> }) => {
+      if (where?.id === 'analysis-1') {
+        return Promise.resolve({
+          id: 'analysis-1',
+          userId: 'user-1',
+          jobId: 'job-1',
+          baselineId: 'baseline-1',
+          baselineVersion: mockBaselineVersion.versionNumber,
+          overallScore: 95,
+          scoringV2: {
+            score: 95,
+            rubric: {},
+            debug: {
+              toolingCoverage: {
+                requiredCoverage: 1,
+                preferredCoverage: 0,
+                claims: [
+                  {
+                    key: 'salesforce',
+                    label: 'Salesforce',
+                    status: 'VERIFIED',
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      return Promise.resolve({
+        id: 'analysis-latest',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'baseline-1',
+        baselineVersion: mockBaselineVersion.versionNumber,
+        overallScore: 95,
+      });
+    });
+
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(readiness.blocked).toBe(false);
+    expect(readiness.status).toBe('ready');
+    expect(readiness.compliance_flags).toEqual([]);
+  });
+
+  it('does not block readiness for obviously invalid fictional technology tokens', async () => {
+    const invalidTokens = [
+      '206-949-1418',
+      '2022',
+      '2025',
+      '500',
+      '000',
+      '2013',
+      'client-impacting',
+      'billing-impacting',
+      'self-service',
+      'multi-system',
+      '2018Support',
+    ];
+    const invalidFlags: ComplianceFlag[] = invalidTokens.map((token) => ({
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: `Technology "${token}" not found in baseline.`,
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.9,
+      evidence: [
+        {
+          baseline: '',
+          generated: token,
+          generatedClaim: {
+            text: token,
+            type: 'technology',
+          },
+        },
+      ],
+    }));
+
+    const { service } = buildService(95, invalidFlags, mockBaselineVersion);
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(readiness.blocked).toBe(false);
+    expect(readiness.status).toBe('ready');
+    expect(readiness.compliance_flags).toEqual([]);
+  });
+
+  it('still blocks readiness for plausible unverified technology claims', async () => {
+    const netsuiteFlag: ComplianceFlag = {
+      code: ComplianceFlagCode.FICTIONAL_TECHNOLOGY,
+      message: 'Technology "NetSuite" not found in baseline.',
+      severity: ComplianceFlagSeverity.BLOCK,
+      confidence: 0.9,
+      evidence: [
+        {
+          baseline: '',
+          generated: 'NetSuite',
+          generatedClaim: {
+            text: 'NetSuite',
+            type: 'technology',
+          },
+        },
+      ],
+    };
+    const { service } = buildService(95, [netsuiteFlag], mockBaselineVersion);
+    const readiness = await service.getGenerationReadiness('user-1', {
+      ...baseRequest,
+      oneTap: false,
+    });
+
+    expect(readiness.blocked).toBe(true);
+    expect(readiness.status).toBe('blocked');
+    expect(readiness.compliance_flags).toHaveLength(1);
+    expect(readiness.compliance_flags[0]?.evidence?.[0]?.generatedClaim?.text).toBe('NetSuite');
+  });
+
   it('does not emit scope inflation when semantic baseline evidence supports phrasing variation', async () => {
     const detector = new ScopeInflationDetector();
     const baselineWithScope: Baseline = {

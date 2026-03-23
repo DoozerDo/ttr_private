@@ -20,6 +20,7 @@ import { ExpandedFitAssessment } from './expanded-fit-assessment.entity';
 import { AnalysisService } from './analysis.service';
 import { FitAssessment, FitAssessmentVerdict } from './fit-assessment.entity';
 import { FitScoringService } from './fit-scoring.service';
+import { GapAnalysisService } from './gap-analysis.service';
 import type { CalibrationProfile } from './calibration-profiles';
 import type { RunFitAssessmentDto } from './dto/run-fit-assessment.dto';
 import type { CxFitV2Result } from './cx-fit-scoring-v2';
@@ -208,6 +209,18 @@ const sampleScoringV2: CxFitV2Result = {
           },
         },
         {
+          provide: GapAnalysisService,
+          useValue: {
+            analyze: jest.fn().mockResolvedValue({
+              strengths: [],
+              criticalGaps: [],
+              recommendedActions: [],
+              positioningSuggestions: [],
+              interviewRisks: [],
+            }),
+          },
+        },
+        {
           provide: getRepositoryToken(Baseline),
           useValue: { findOne: jest.fn().mockResolvedValue(baseline) },
         },
@@ -328,7 +341,515 @@ const sampleScoringV2: CxFitV2Result = {
 
     const result = await service.getFitAssessmentById('user-1', 'fit-1');
 
-    expect(result.scoring_v2).toBe(sampleScoringV2);
+    expect(result.scoring_v2).toEqual(
+      expect.objectContaining({
+        score: sampleScoringV2.score,
+        rubric: sampleScoringV2.rubric,
+      }),
+    );
+    expect(result.scoring_v2?.debug?.toolingCoverage).toEqual(
+      expect.objectContaining({
+        requiredCoverage: expect.any(Number),
+        preferredCoverage: expect.any(Number),
+      }),
+    );
+  });
+
+  it('refreshes tooling claims for Studio payload so verified Salesforce is not returned as unresolved', async () => {
+    const salesforceSections: BaselineSection[] = [
+      {
+        id: 's-exp',
+        baselineId: 'b-1',
+        sectionType: 'EXPERIENCE' as any,
+        title: 'Experience',
+        content: 'Owned escalation and workflow administration in Salesforce Service Cloud.',
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as BaselineSection,
+    ];
+    const salesforceJob: Partial<Job> = {
+      ...defaultJobRecord,
+      rawDescription: 'Must have Salesforce experience for support operations.',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+    };
+
+    jobRepository.findOne.mockResolvedValue(salesforceJob);
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValue({
+      ...baseline,
+      sections: salesforceSections,
+      parsedRecords: [],
+    });
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue(salesforceSections);
+
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      createdAt: new Date(),
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+    const claims = result.scoring_v2?.debug?.toolingCoverage?.claims ?? [];
+    const salesforceClaim = claims.find((claim) => claim.key === 'salesforce');
+
+    expect(salesforceClaim?.status).toBe('VERIFIED');
+    const unresolved = claims.filter((claim) => claim.status !== 'VERIFIED').map((claim) => claim.key);
+    expect(unresolved).not.toContain('salesforce');
+    const verifiedCount = claims.filter((claim) => claim.status === 'VERIFIED').length;
+    expect(verifiedCount).toBeGreaterThan(0);
+    expect(result.verification_coverage).toEqual(
+      expect.objectContaining({
+        totalClaims: expect.any(Number),
+        verifiedClaims: expect.any(Number),
+        inferredClaims: expect.any(Number),
+        unverifiedClaims: expect.any(Number),
+      }),
+    );
+  });
+
+  it('maps equivalent canonical claim statuses to inferred in analysis verification coverage', async () => {
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: {
+        ...sampleScoringV2,
+        debug: {
+          ...(sampleScoringV2.debug ?? {}),
+          toolingCoverage: {
+            requiredCoverage: 0.5,
+            preferredCoverage: 0.5,
+            claims: [
+              {
+                key: 'salesforce',
+                label: 'Salesforce',
+                status: 'EQUIVALENT',
+                generationBlocking: false,
+                evidenceRefs: ['Salesforce Service Cloud'],
+              },
+              {
+                key: 'five9',
+                label: 'Five9',
+                status: 'UNVERIFIED',
+                generationBlocking: true,
+                evidenceRefs: [],
+              },
+            ],
+          },
+        },
+      },
+      createdAt: new Date(),
+    });
+    jobRepository.findOne.mockResolvedValue(defaultJobRecord);
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [],
+      parsedRecords: [],
+    });
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue([]);
+
+    const refreshSpy = jest
+      .spyOn(service as any, 'refreshToolingCoverageForAssessment')
+      .mockResolvedValue({
+        ...sampleScoringV2,
+        debug: {
+          ...(sampleScoringV2.debug ?? {}),
+          toolingCoverage: {
+            requiredCoverage: 0.5,
+            preferredCoverage: 0.5,
+            claims: [
+              {
+                key: 'salesforce',
+                label: 'Salesforce',
+                status: 'EQUIVALENT',
+                generationBlocking: false,
+                evidenceRefs: ['Salesforce Service Cloud'],
+              },
+              {
+                key: 'five9',
+                label: 'Five9',
+                status: 'UNVERIFIED',
+                generationBlocking: true,
+                evidenceRefs: [],
+              },
+            ],
+          },
+        },
+      } as any);
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+
+    expect(refreshSpy).toHaveBeenCalled();
+    expect(result.verification_coverage).toEqual(
+      expect.objectContaining({
+        totalClaims: 2,
+        verifiedClaims: 0,
+        inferredClaims: 1,
+        unverifiedClaims: 1,
+        unverifiedRequirements: ['Five9'],
+      }),
+    );
+  });
+
+  it('normalizes canonical claim status and label variants for verification coverage counts', async () => {
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      createdAt: new Date(),
+    });
+    jobRepository.findOne.mockResolvedValue(defaultJobRecord);
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [],
+      parsedRecords: [],
+    });
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue([]);
+
+    jest
+      .spyOn(service as any, 'refreshToolingCoverageForAssessment')
+      .mockResolvedValue({
+        ...sampleScoringV2,
+        debug: {
+          ...(sampleScoringV2.debug ?? {}),
+          toolingCoverage: {
+            requiredCoverage: 0.5,
+            preferredCoverage: 0.5,
+            claims: [
+              {
+                key: 'salesforce',
+                name: 'Salesforce',
+                status: 'verified',
+                generationBlocking: false,
+                evidenceRefs: ['Salesforce Service Cloud'],
+              },
+              {
+                key: 'zendesk',
+                requirement: 'Zendesk',
+                verificationStatus: 'adjacent',
+                generationBlocking: false,
+                evidenceRefs: ['Ticketing tools'],
+              },
+              {
+                key: 'five9',
+                claim: 'Five9',
+                claimStatus: 'UNVERIFIED',
+                generationBlocking: true,
+                evidenceRefs: [],
+              },
+            ],
+          },
+        },
+      } as any);
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+
+    expect(result.verification_coverage).toEqual(
+      expect.objectContaining({
+        totalClaims: 3,
+        verifiedClaims: 1,
+        inferredClaims: 1,
+        unverifiedClaims: 1,
+        unverifiedRequirements: ['Five9'],
+      }),
+    );
+  });
+
+  it('builds toolingCoverage.claims from canonical version-scoped baseline evidence in final analysis payload', async () => {
+    jobRepository.findOne.mockResolvedValue({
+      ...defaultJobRecord,
+      rawDescription: 'Must have Salesforce experience for support operations.',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+    });
+
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValue({
+      ...baseline,
+      sections: [
+        {
+          id: 's-no-sf',
+          baselineId: 'b-1',
+          sectionType: 'EXPERIENCE',
+          title: 'Experience',
+          content: 'Led customer support operations and escalation workflows.',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      parsedRecords: [],
+    });
+
+    baselineVersionRepository.findOne.mockResolvedValue({
+      ...baselineVersion,
+      id: 'bv-1',
+      baselineId: 'b-1',
+      versionNumber: 2,
+      verifiedAdditions: ['Owned case routing and administration in Salesforce Service Cloud.'],
+    });
+
+    const baselineBlockPolicyRepo = service['baselineBlockPolicyRepository'] as {
+      find: jest.Mock;
+    };
+    baselineBlockPolicyRepo.find.mockResolvedValue([]);
+
+    fitAssessmentRepository.findOne.mockResolvedValue({
+      id: 'fit-1',
+      userId: 'user-1',
+      jobId: 'job-1',
+      baselineId: 'b-1',
+      baselineVersion: 2,
+      overallScore: 82,
+      verdict: 'APPLY',
+      dimensionScores: {
+        experienceAlignment: 10,
+        leadershipLevel: 9,
+        technicalPlatformFit: 8,
+        industryContext: 7,
+        strategicTacticalFit: 6,
+      },
+      strengths: ['aws'],
+      gaps: ['golang'],
+      complianceFlags: [],
+      scoringV2: sampleScoringV2,
+      createdAt: new Date(),
+    });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-1');
+    const claims = result.scoring_v2?.debug?.toolingCoverage?.claims ?? [];
+    const salesforceClaim = claims.find((claim) => claim.key === 'salesforce');
+
+    expect(salesforceClaim?.status).toBe('VERIFIED');
+    expect(salesforceClaim?.evidenceRefs?.[0]).toContain('Salesforce Service Cloud');
+    expect(claims.filter((claim) => claim.status === 'VERIFIED').length).toBeGreaterThan(0);
+  });
+
+  it('forces fresh recomputation when fetching fit assessment by id and returns the recomputed assessment payload', async () => {
+    fitAssessmentRepository.findOne
+      .mockResolvedValueOnce({
+        id: 'fit-old',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: 2,
+        overallScore: 82,
+        verdict: 'APPLY',
+        dimensionScores: {
+          experienceAlignment: 10,
+          leadershipLevel: 9,
+          technicalPlatformFit: 8,
+          industryContext: 7,
+          strategicTacticalFit: 6,
+        },
+        strengths: ['aws'],
+        gaps: ['golang'],
+        complianceFlags: [],
+        scoringV2: sampleScoringV2,
+        createdAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 'fit-fresh',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: 2,
+        overallScore: 86,
+        verdict: 'APPLY',
+        dimensionScores: {
+          experienceAlignment: 10,
+          leadershipLevel: 9,
+          technicalPlatformFit: 8,
+          industryContext: 7,
+          strategicTacticalFit: 6,
+        },
+        strengths: ['aws'],
+        gaps: ['golang'],
+        complianceFlags: [],
+        scoringV2: sampleScoringV2,
+        createdAt: new Date(),
+      });
+
+    const runFitAssessmentSpy = jest
+      .spyOn(service as any, 'runFitAssessment')
+      .mockResolvedValue({
+        status: 'ok',
+        assessmentId: 'fit-fresh',
+      });
+
+    const result = await service.getFitAssessmentById('user-1', 'fit-old', {
+      forceFreshRecompute: true,
+    });
+
+    expect(runFitAssessmentSpy).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: 2,
+      }),
+    );
+    expect(result.assessmentId).toBe('fit-fresh');
+  });
+
+  it('returns fresh recomputed Studio payload claims with Salesforce verified when forceFreshRecompute is enabled', async () => {
+    const salesforceSections: BaselineSection[] = [
+      {
+        id: 's-exp',
+        baselineId: 'b-1',
+        sectionType: 'EXPERIENCE' as any,
+        title: 'Experience',
+        content: 'Owned escalation and workflow administration in Salesforce Service Cloud.',
+        includePolicy: BaselineIncludePolicy.OPTIONAL,
+        order: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as BaselineSection,
+    ];
+
+    jobRepository.findOne.mockResolvedValue({
+      ...defaultJobRecord,
+      rawDescription: 'Must have Salesforce experience for support operations.',
+      normalizedResponsibilities: [],
+      normalizedRequirements: [],
+    });
+
+    const baselineRepo = service['baselineRepository'] as { findOne: jest.Mock };
+    baselineRepo.findOne.mockResolvedValue({
+      ...baseline,
+      sections: salesforceSections,
+      parsedRecords: [],
+    });
+
+    const baselineSectionRepo = service['baselineSectionRepository'] as {
+      find: jest.Mock;
+    };
+    baselineSectionRepo.find.mockResolvedValue(salesforceSections);
+
+    fitAssessmentRepository.findOne
+      .mockResolvedValueOnce({
+        id: 'fit-old',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: 2,
+        overallScore: 80,
+        verdict: 'APPLY',
+        dimensionScores: {
+          experienceAlignment: 10,
+          leadershipLevel: 9,
+          technicalPlatformFit: 8,
+          industryContext: 7,
+          strategicTacticalFit: 6,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: sampleScoringV2,
+        createdAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 'fit-fresh',
+        userId: 'user-1',
+        jobId: 'job-1',
+        baselineId: 'b-1',
+        baselineVersion: 2,
+        overallScore: 86,
+        verdict: 'APPLY',
+        dimensionScores: {
+          experienceAlignment: 10,
+          leadershipLevel: 9,
+          technicalPlatformFit: 8,
+          industryContext: 7,
+          strategicTacticalFit: 6,
+        },
+        strengths: [],
+        gaps: [],
+        complianceFlags: [],
+        scoringV2: sampleScoringV2,
+        createdAt: new Date(),
+      });
+
+    const runFitAssessmentSpy = jest
+      .spyOn(service as any, 'runFitAssessment')
+      .mockResolvedValue({
+        status: 'ok',
+        assessmentId: 'fit-fresh',
+      });
+
+    const payload = await service.getFitAssessmentById('user-1', 'fit-old', {
+      forceFreshRecompute: true,
+    });
+
+    expect(runFitAssessmentSpy).toHaveBeenCalled();
+    const claims = payload.scoring_v2?.debug?.toolingCoverage?.claims ?? [];
+    const salesforceClaim = claims.find((claim) => claim.key === 'salesforce');
+    expect(salesforceClaim?.status).toBe('VERIFIED');
+    expect(
+      claims
+        .filter((claim) => claim.status !== 'VERIFIED')
+        .map((claim) => claim.key),
+    ).not.toContain('salesforce');
   });
 
   it('exposes score_breakdown invariants for latest assessment payload', async () => {
