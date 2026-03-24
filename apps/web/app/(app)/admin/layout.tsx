@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/admin/jobs", label: "Jobs" },
   { href: "/admin/baselines", label: "Baselines" },
   { href: "/admin/access-codes", label: "Access Codes" },
+  { href: "/admin/beta-feedback", label: "Beta Feedback" },
 ];
 
 export default function AdminLayout({ children }: AdminLayoutProps) {
@@ -37,3 +38,4 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     </div>
   );
 }
+

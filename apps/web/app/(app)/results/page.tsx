@@ -35,6 +35,7 @@ import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
+import { getNextMove, type NextMove } from "@/lib/nextMove";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
@@ -385,8 +386,7 @@ function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[
 }
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
-const RESULTS_BLOCKER_DETAILS_ANCHOR = "#generation-readiness-details";
-const STUDIO_VERIFICATION_GAPS_ANCHOR = "studio-auto-adjust-panel";
+const RESULTS_GAPS_SECTION_ANCHOR = "#fit-improvement-opportunities";
 
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
 
@@ -547,6 +547,7 @@ type OpportunityMapSectionProps = {
         label: string;
         href: string;
         disabled?: boolean;
+        description: string;
       }
     | null;
   scoreAnalysisHref: string;
@@ -560,13 +561,6 @@ type OpportunityMapSectionProps = {
         predictedOutcome: "full" | "partial";
         removeAndContinueHref: string;
         reviewInStudioHref: string;
-      }
-    | null;
-  secondaryCta?:
-    | {
-        label: string;
-        href: string;
-        disabled?: boolean;
       }
     | null;
 };
@@ -585,72 +579,64 @@ export function buildStudioHrefWithExcludedRequirements(
 }
 
 type PrimaryResultsCtaInput = {
-  scoreBand: ScoreBand | null;
-  verificationCoverage: VerificationCoverage;
+  activeScore: number | null;
   studioHref: string;
   canOpenStudio: boolean;
   fitReviewPath: string;
+  analysisId?: string | null;
 };
 
 type PrimaryResultsCtaOutput = {
   label: string;
   href: string;
   disabled: boolean;
+  description: string;
 };
 
 export function getPrimaryResultsCta({
-  scoreBand,
-  verificationCoverage,
+  activeScore,
   studioHref,
   canOpenStudio,
   fitReviewPath,
+  analysisId,
 }: PrimaryResultsCtaInput): PrimaryResultsCtaOutput {
-  if (verificationCoverage.status === "weak") {
+  if (typeof activeScore !== "number") {
     return {
-      label: "Review Verification Gaps",
-      href: RESULTS_BLOCKER_DETAILS_ANCHOR,
-      disabled: false,
-    };
-  }
-
-  if (scoreBand === null) {
-    return {
-      label: "Strengthen this match in Fit Review",
+      label: "Start Fit Improvement",
       href: fitReviewPath,
       disabled: false,
+      description: "You're close, but missing key signals. Improve fit before applying.",
     };
   }
 
-  if (scoreBand === ScoreBand.TOP) {
-    if (verificationCoverage.status === "partial") {
-      const studioHrefWithAnchor = studioHref.includes("#")
-        ? studioHref
-        : `${studioHref}#${STUDIO_VERIFICATION_GAPS_ANCHOR}`;
-      return {
-        label: "Resolve verification gaps in Studio",
-        href: studioHrefWithAnchor,
-        disabled: !canOpenStudio,
-      };
-    }
+  const nextMove = getNextMove(activeScore);
+  if ((nextMove.action === "generate" || nextMove.action === "studio") && !analysisId) {
+    console.warn("[results] Missing analysisId for Next Move studio routing fallback.");
+  }
+
+  if (nextMove.action === "generate" || nextMove.action === "studio") {
     return {
-      label: "Generate My Application",
+      label: nextMove.ctaText,
       href: studioHref,
       disabled: !canOpenStudio,
+      description: nextMove.description,
     };
   }
 
-  if (scoreBand === ScoreBand.MID || scoreBand === ScoreBand.LOW) {
+  if (nextMove.action === "improve") {
     return {
-      label: "Strengthen this match in Fit Review",
+      label: nextMove.ctaText,
       href: fitReviewPath,
       disabled: false,
+      description: nextMove.description,
     };
   }
 
   return {
-    label: "Open Resume and Cover Letter Studio",
-    href: studioHref,
-    disabled: !canOpenStudio,
+    label: nextMove.ctaText,
+    href: RESULTS_GAPS_SECTION_ANCHOR,
+    disabled: false,
+    description: nextMove.description,
   };
 }
 
@@ -659,7 +645,6 @@ export function OpportunityMapSection({
   verdict,
   advantageSignals,
   primaryCta,
-  secondaryCta = null,
   scoreAnalysisHref,
   readiness,
   verificationCoverage,
@@ -828,32 +813,22 @@ export function OpportunityMapSection({
               View score analysis
             </a>
             {primaryCta ? (
-              primaryCta.disabled ? (
-                <span className="inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2.5 text-sm font-semibold text-slate-400">
-                  {primaryCta.label}
-                </span>
-              ) : (
-                <a
-                  href={primaryCta.href}
-                  className="inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-                >
-                  {primaryCta.label}
-                </a>
-              )
-            ) : null}
-            {secondaryCta ? (
-              secondaryCta.disabled ? (
-                <span className="inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-400">
-                  {secondaryCta.label}
-                </span>
-              ) : (
-                <a
-                  href={secondaryCta.href}
-                  className="inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                >
-                  {secondaryCta.label}
-                </a>
-              )
+              <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Next Step</p>
+                <p className="mt-2 text-sm leading-5 text-slate-100">{primaryCta.description}</p>
+                {primaryCta.disabled ? (
+                  <span className="mt-3 inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2.5 text-sm font-semibold text-slate-400">
+                    {primaryCta.label}
+                  </span>
+                ) : (
+                  <a
+                    href={primaryCta.href}
+                    className="mt-3 inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+                  >
+                    {primaryCta.label}
+                  </a>
+                )}
+              </div>
             ) : null}
             {showStrongFitLimitationPanel ? (
               <a
@@ -1923,14 +1898,16 @@ export default function ResultsPage() {
   );
   const primaryResultsCta = useMemo(
     () =>
-      getPrimaryResultsCta({
-        scoreBand,
-        verificationCoverage,
-        studioHref,
-        canOpenStudio,
-        fitReviewPath,
-      }),
-    [scoreBand, verificationCoverage, studioHref, canOpenStudio, fitReviewPath],
+      typeof activeScore === "number"
+        ? getPrimaryResultsCta({
+            activeScore,
+            studioHref,
+            canOpenStudio,
+            fitReviewPath,
+            analysisId: latest?.assessmentId,
+          })
+        : null,
+    [activeScore, studioHref, canOpenStudio, fitReviewPath, latest?.assessmentId],
   );
   const oneClickResultsCta = useMemo(() => {
     if (!predictiveUnlock) return primaryResultsCta;
@@ -1938,16 +1915,9 @@ export default function ResultsPage() {
       label: "Remove unsupported requirements and continue",
       href: predictiveUnlock.removeAndContinueHref,
       disabled: !canOpenStudio,
+      description: "You're a strong match. Move forward and generate tailored materials.",
     };
   }, [canOpenStudio, predictiveUnlock, primaryResultsCta]);
-  const secondaryResultsCta = useMemo(() => {
-    if (!predictiveUnlock) return null;
-    return {
-      label: "Resolve verification gaps in Studio",
-      href: predictiveUnlock.reviewInStudioHref,
-      disabled: !canOpenStudio,
-    };
-  }, [canOpenStudio, predictiveUnlock]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -2548,7 +2518,6 @@ export default function ResultsPage() {
                     verdict={opportunityVerdict}
                     advantageSignals={advantageSignals}
                     primaryCta={oneClickResultsCta}
-                    secondaryCta={secondaryResultsCta}
                     scoreAnalysisHref="#advanced-insights"
                     readiness={generationReadiness}
                     verificationCoverage={verificationCoverage}
@@ -2767,11 +2736,13 @@ export default function ResultsPage() {
 
                 <div className="space-y-4 xl:sticky xl:top-6">
                   {scoreBand !== ScoreBand.TOP ? (
-                    <FitImprovementOpportunities
-                      assessmentId={latest.assessmentId ?? null}
-                      actionHref={fitReviewPath}
-                      compact
-                    />
+                    <section id="fit-improvement-opportunities">
+                      <FitImprovementOpportunities
+                        assessmentId={latest.assessmentId ?? null}
+                        actionHref={fitReviewPath}
+                        compact
+                      />
+                    </section>
                   ) : null}
                   <CareerAlignmentProgress showProgressSection={false} />
                 </div>

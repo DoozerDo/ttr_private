@@ -27,6 +27,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PreviewModule } from './preview/preview.module';
 import { SupportModule } from './support/support.module';
+import { BetaFeedbackModule } from './beta-feedback/beta-feedback.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { SupportModule } from './support/support.module';
     AnalyticsModule,
     PreviewModule,
     SupportModule,
+    BetaFeedbackModule,
   ],
   controllers: [AppController],
   providers: [

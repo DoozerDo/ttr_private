@@ -8,7 +8,6 @@ import {
   getPrimaryResultsCta,
 } from "@/app/(app)/results/page";
 import type { GenerationReadiness, VerificationCoverage } from "@/lib/generationReadiness";
-import { ScoreBand } from "@/src/lib/score-band";
 
 const readyReadiness: GenerationReadiness = {
   status: "ready",
@@ -32,106 +31,79 @@ const strongCoverage: VerificationCoverage = {
 };
 
 describe("Results opportunity map", () => {
-  it("maps high score + ready readiness to Studio CTA", () => {
+  it("maps >85 scores to generate CTA routed to studio", () => {
     const cta = getPrimaryResultsCta({
-      scoreBand: ScoreBand.TOP,
-      verificationCoverage: strongCoverage,
+      activeScore: 91,
       studioHref: "/studio",
       canOpenStudio: true,
       fitReviewPath: "/fit-review?jobId=job-1",
+      analysisId: "analysis-1",
     });
 
     expect(cta).toMatchObject({
-      label: "Generate My Application",
+      label: "Generate Resume & Cover Letter",
       href: "/studio",
       disabled: false,
     });
   });
 
-  it("maps high score + limited readiness to Studio CTA with limitation label", () => {
+  it("maps 70-85 scores to open studio CTA", () => {
     const cta = getPrimaryResultsCta({
-      scoreBand: ScoreBand.TOP,
-      verificationCoverage: {
-        ...strongCoverage,
-        status: "partial",
-        summary: "Some claims required for this role have limited verification support.",
-      },
-      studioHref: "/studio",
-      canOpenStudio: true,
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-
-    expect(cta).toMatchObject({
-      label: "Resolve verification gaps in Studio",
-      href: "/studio#studio-auto-adjust-panel",
-      disabled: false,
-    });
-  });
-
-  it("preserves studio query params when linking to verification gap resolution", () => {
-    const cta = getPrimaryResultsCta({
-      scoreBand: ScoreBand.TOP,
-      verificationCoverage: {
-        ...strongCoverage,
-        status: "partial",
-        summary: "Some claims required for this role have limited verification support.",
-      },
+      activeScore: 74,
       studioHref: "/studio?analysisId=analysis-1&baselineId=base-1",
       canOpenStudio: true,
       fitReviewPath: "/fit-review?jobId=job-1",
+      analysisId: "analysis-1",
     });
 
     expect(cta).toMatchObject({
-      label: "Resolve verification gaps in Studio",
-      href: "/studio?analysisId=analysis-1&baselineId=base-1#studio-auto-adjust-panel",
+      label: "Open Studio",
+      href: "/studio?analysisId=analysis-1&baselineId=base-1",
       disabled: false,
     });
   });
 
-  it("maps high score + blocked readiness away from Studio to blocker anchor", () => {
-    const cta = getPrimaryResultsCta({
-      scoreBand: ScoreBand.TOP,
-      verificationCoverage: {
-        ...strongCoverage,
-        status: "weak",
-      },
+  it("maps 50-69 scores to fit improvement and <50 to review gaps anchor", () => {
+    const improveCta = getPrimaryResultsCta({
+      activeScore: 62,
       studioHref: "/studio",
       canOpenStudio: true,
       fitReviewPath: "/fit-review?jobId=job-1",
+      analysisId: "analysis-1",
     });
-
-    expect(cta.label).toBe("Review Verification Gaps");
-    expect(cta.href).toBe("#generation-readiness-details");
-    expect(cta.href).not.toBe("/studio");
-  });
-
-  it("maps null scoreBand to safe non-Studio fallback, and still honors blocked routing", () => {
-    const nullBandCta = getPrimaryResultsCta({
-      scoreBand: null,
-      verificationCoverage: strongCoverage,
-      studioHref: "/studio",
-      canOpenStudio: true,
-      fitReviewPath: "/fit-review?jobId=job-1",
-    });
-    expect(nullBandCta).toMatchObject({
-      label: "Strengthen this match in Fit Review",
+    expect(improveCta).toMatchObject({
+      label: "Start Fit Improvement",
       href: "/fit-review?jobId=job-1",
       disabled: false,
     });
 
-    const nullBandBlockedCta = getPrimaryResultsCta({
-      scoreBand: null,
-      verificationCoverage: {
-        ...strongCoverage,
-        status: "weak",
-      },
+    const cta = getPrimaryResultsCta({
+      activeScore: 41,
       studioHref: "/studio",
       canOpenStudio: true,
       fitReviewPath: "/fit-review?jobId=job-1",
+      analysisId: "analysis-1",
     });
-    expect(nullBandBlockedCta.label).toBe("Review Verification Gaps");
-    expect(nullBandBlockedCta.href).toBe("#generation-readiness-details");
-    expect(nullBandBlockedCta.href).not.toBe("/studio");
+
+    expect(cta).toMatchObject({
+      label: "Review Gaps",
+      href: "#fit-improvement-opportunities",
+      disabled: false,
+    });
+  });
+
+  it("keeps studio routing when analysis context is included", () => {
+    const cta = getPrimaryResultsCta({
+      activeScore: 90,
+      studioHref: "/studio?jobId=job-1&analysisId=analysis-88&baselineId=base-1&baselineVersionId=base-version-4",
+      canOpenStudio: true,
+      fitReviewPath: "/fit-review?jobId=job-1",
+      analysisId: "analysis-88",
+    });
+
+    expect(cta.href).toBe(
+      "/studio?jobId=job-1&analysisId=analysis-88&baselineId=base-1&baselineVersionId=base-version-4",
+    );
   });
 
   it("renders the opportunity map as a concise executive summary", () => {
@@ -144,7 +116,11 @@ describe("Results opportunity map", () => {
           "Built escalation and incident workflows",
           "Drove cross-functional CX systems",
         ]}
-        primaryCta={{ label: "Open Resume and Cover Letter Studio", href: "/studio" }}
+        primaryCta={{
+          label: "Generate Resume & Cover Letter",
+          href: "/studio",
+          description: "You're a strong match. Move forward and generate tailored materials.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -163,7 +139,8 @@ describe("Results opportunity map", () => {
     expect(screen.getByText("Competitive Match")).toBeInTheDocument();
     expect(screen.getByText("YOUR ADVANTAGE")).toBeInTheDocument();
     expect(screen.getByText("View score analysis")).toBeInTheDocument();
-    expect(screen.getByText("Open Resume and Cover Letter Studio")).toBeInTheDocument();
+    expect(screen.getByText("Generate Resume & Cover Letter")).toBeInTheDocument();
+    expect(screen.getByText("Next Step")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();
@@ -179,7 +156,11 @@ describe("Results opportunity map", () => {
         score={74}
         verdict={getOpportunityVerdict(74)}
         advantageSignals={[]}
-        primaryCta={{ label: "Open Resume and Cover Letter Studio", href: "/studio" }}
+        primaryCta={{
+          label: "Open Studio",
+          href: "/studio",
+          description: "You're competitive. Tighten positioning before applying.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -207,7 +188,11 @@ describe("Results opportunity map", () => {
         score={94}
         verdict={getOpportunityVerdict(94)}
         advantageSignals={["Led global support operations"]}
-        primaryCta={{ label: "Generate My Application", href: "/studio" }}
+        primaryCta={{
+          label: "Generate Resume & Cover Letter",
+          href: "/studio",
+          description: "You're a strong match. Move forward and generate tailored materials.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
@@ -218,7 +203,7 @@ describe("Results opportunity map", () => {
     );
 
     expect(screen.getByText("Generation Readiness: READY")).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Generate My Application" });
+    const cta = screen.getByRole("link", { name: "Generate Resume & Cover Letter" });
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/studio");
   });
@@ -229,7 +214,11 @@ describe("Results opportunity map", () => {
         score={92}
         verdict={getOpportunityVerdict(92)}
         advantageSignals={["Led global support operations"]}
-        primaryCta={{ label: "Resolve verification gaps in Studio", href: "/studio" }}
+        primaryCta={{
+          label: "Open Studio",
+          href: "/studio",
+          description: "You're competitive. Tighten positioning before applying.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
           status: "limited",
@@ -281,7 +270,7 @@ describe("Results opportunity map", () => {
     expect(screen.getByText("Supported signals: Salesforce, Service Cloud, Omnichannel routing")).toBeInTheDocument();
     expect(screen.getByText(/Remove unsupported tools from targeting/i)).toBeInTheDocument();
     expect(screen.getByText(/Add verified evidence/i)).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Resolve verification gaps in Studio" });
+    const cta = screen.getByRole("link", { name: "Open Studio" });
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/studio");
     const baselineCta = screen.getByRole("link", { name: "Review baseline evidence" });
@@ -298,7 +287,11 @@ describe("Results opportunity map", () => {
         score={92}
         verdict={getOpportunityVerdict(92)}
         advantageSignals={["Led global support operations"]}
-        primaryCta={{ label: "Resolve verification gaps in Studio", href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel" }}
+        primaryCta={{
+          label: "Open Studio",
+          href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
+          description: "You're competitive. Tighten positioning before applying.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
           status: "limited",
@@ -344,7 +337,11 @@ describe("Results opportunity map", () => {
         score={92}
         verdict={getOpportunityVerdict(92)}
         advantageSignals={["Led global support operations"]}
-        primaryCta={{ label: "Resolve verification gaps in Studio", href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel" }}
+        primaryCta={{
+          label: "Open Studio",
+          href: "/studio?analysisId=analysis-1#studio-auto-adjust-panel",
+          description: "You're competitive. Tighten positioning before applying.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
           status: "limited",
@@ -382,7 +379,11 @@ describe("Results opportunity map", () => {
         score={95}
         verdict={getOpportunityVerdict(95)}
         advantageSignals={["Led global support operations"]}
-        primaryCta={{ label: "Review Verification Gaps", href: "#generation-readiness-details" }}
+        primaryCta={{
+          label: "Review Gaps",
+          href: "#fit-improvement-opportunities",
+          description: "This role is not a fit right now. Focus on closing core gaps.",
+        }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
           status: "blocked",
@@ -423,9 +424,9 @@ describe("Results opportunity map", () => {
         "Some claims required for tailored generation could not be verified against your baseline.",
       ),
     ).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Review Verification Gaps" });
+    const cta = screen.getByRole("link", { name: "Review Gaps" });
     expect(cta).toBeInTheDocument();
-    expect(cta).toHaveAttribute("href", "#generation-readiness-details");
+    expect(cta).toHaveAttribute("href", "#fit-improvement-opportunities");
     expect(cta).not.toHaveAttribute("href", "/studio");
   });
 
@@ -444,8 +445,8 @@ describe("Results opportunity map", () => {
         primaryCta={{
           label: "Remove unsupported requirements and continue",
           href: "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",
+          description: "You're a strong match. Move forward and generate tailored materials.",
         }}
-        secondaryCta={{ label: "Resolve verification gaps in Studio", href: "/studio?analysisId=analysis-1" }}
         scoreAnalysisHref="#advanced-insights"
         readiness={{
           status: "limited",
@@ -491,10 +492,6 @@ describe("Results opportunity map", () => {
     expect(screen.getByRole("link", { name: "Remove unsupported requirements and continue" })).toHaveAttribute(
       "href",
       "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",
-    );
-    expect(screen.getByRole("link", { name: "Resolve verification gaps in Studio" })).toHaveAttribute(
-      "href",
-      "/studio?analysisId=analysis-1",
     );
   });
 

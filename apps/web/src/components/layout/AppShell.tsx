@@ -5,6 +5,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { JourneyNavV1 } from "./JourneyNavV1";
 import { TopNavAccountArea } from "./TopNavAccountArea";
+import { BetaGuideNudge } from "./BetaGuideNudge";
 import { JourneyNavState } from "@/src/lib/journeyNav";
 import { resolveJourneyNavStateFromAppState, useJourneyNavAppState } from "@/src/lib/journeyNavStore";
 import { readLastAnalysis, type StoredAnalysisRecord } from "@/app/(app)/lib/session";
@@ -432,6 +433,7 @@ export function AppShell({ children, userEmail, userId }: AppShellProps) {
               <JourneyNavV1 state={journeyNavState} onStepClick={handleJourneyStepClick} />
             </div>
 
+            <BetaGuideNudge />
             {children}
           </main>
           <footer className="border-t border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-4 text-slate-400">
