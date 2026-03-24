@@ -28,3 +28,13 @@ This pass hardens image build determinism and reduces noisy build context for Ra
 
 - Transient Docker Hub/network issues (for example, pull interruptions from `registry-1.docker.io`) cannot be fully eliminated in repo code alone.
 - This hardening reduces build fragility but does not replace registry/network-side reliability controls.
+
+## Follow-up context fix (2026-03-24)
+
+- Root cause: web Dockerfile `COPY` statements were written for repo-root build context (`COPY apps/web/...`), but Railway web builds were using service-scoped context (`apps/web`). This caused `"/apps/web/package.json": not found`.
+- Fix:
+  - Converted `apps/web/Dockerfile` to service-scoped copy/install paths (`COPY package*.json ./`, `COPY . .`).
+  - Updated compose web build context to `../../apps/web` with `dockerfile: Dockerfile`.
+  - Added `apps/web/.dockerignore` for service-scoped context hygiene.
+- Rule of thumb:
+  - If Docker build context is `apps/web`, all `COPY` paths must be relative to `apps/web` and must not prefix `apps/web/`.
