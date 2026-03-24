@@ -566,6 +566,12 @@ type OpportunityMapSectionProps = {
         reviewInStudioHref: string;
       }
     | null;
+  reliabilityFacts: {
+    baselineCompleteness: string;
+    matchedSignals: number;
+    scoreImproved: boolean | null;
+    gapsResolvable: boolean;
+  };
 };
 
 export function buildStudioHrefWithExcludedRequirements(
@@ -681,6 +687,7 @@ export function OpportunityMapSection({
   canonicalCoverage,
   baselineEvidenceHref,
   predictiveUnlock,
+  reliabilityFacts,
 }: OpportunityMapSectionProps) {
   const roundedScore = typeof score === "number" ? Math.round(score) : null;
   const isStrongFit = typeof roundedScore === "number" && roundedScore >= 85;
@@ -858,8 +865,30 @@ export function OpportunityMapSection({
                     {primaryCta.label}
                   </a>
                 )}
+                <p className="mt-2 text-xs text-slate-300">Complete this step before taking other actions.</p>
               </div>
             ) : null}
+            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                Why this result is reliable
+              </p>
+              <ul className="mt-2 space-y-1 text-sm text-slate-100">
+                <li>{reliabilityFacts.baselineCompleteness}</li>
+                <li>Matched signals from your experience: {reliabilityFacts.matchedSignals}</li>
+                <li>
+                  {reliabilityFacts.scoreImproved == null
+                    ? "No prior analysis to compare yet."
+                    : reliabilityFacts.scoreImproved
+                      ? "Your score improved from the previous analysis."
+                      : "Your score has not improved from the previous analysis."}
+                </li>
+                <li>
+                  {reliabilityFacts.gapsResolvable
+                    ? "Current gaps are resolvable through Fit Review."
+                    : "Current gaps are not yet resolvable through Fit Review."}
+                </li>
+              </ul>
+            </div>
             {showStrongFitLimitationPanel ? (
               <a
                 href={baselineEvidenceHref}
@@ -1849,6 +1878,37 @@ export default function ResultsPage() {
     () => deriveVerificationCoverage(generationReadiness, claimVerifications),
     [claimVerifications, generationReadiness],
   );
+  const reliabilityFacts = useMemo(() => {
+    const totalClaims = verificationCoverage.totalClaims;
+    const verifiedClaims = verificationCoverage.verifiedClaims;
+    const completenessPercent =
+      totalClaims > 0 ? Math.round((verifiedClaims / totalClaims) * 100) : null;
+    const baselineCompleteness =
+      completenessPercent == null
+        ? "Baseline completeness is still being established."
+        : completenessPercent >= 100
+          ? "Your baseline is fully built for this role."
+          : `Baseline completeness for this role is ${completenessPercent}%.`;
+    const scoreImproved =
+      typeof reanalysisDelta.delta === "number" ? reanalysisDelta.delta > 0 : null;
+    const gapsResolvable = Boolean(
+      fitReviewPath && (criticalGapDetails.length > 0 || recommendedActions.length > 0),
+    );
+    return {
+      baselineCompleteness,
+      matchedSignals: Math.max(advantageSignals.length, verifiedClaims),
+      scoreImproved,
+      gapsResolvable,
+    };
+  }, [
+    verificationCoverage.totalClaims,
+    verificationCoverage.verifiedClaims,
+    reanalysisDelta.delta,
+    fitReviewPath,
+    criticalGapDetails.length,
+    recommendedActions.length,
+    advantageSignals.length,
+  ]);
   const canonicalUnverifiedRequirements = useMemo(() => {
     const raw = latest?.verification_coverage?.unverifiedRequirements;
     if (!Array.isArray(raw) || raw.length === 0) return [] as string[];
@@ -2810,6 +2870,7 @@ export default function ResultsPage() {
                     canonicalCoverage={latest?.verification_coverage ?? null}
                     baselineEvidenceHref={baselineEvidenceHref}
                     predictiveUnlock={predictiveUnlock}
+                    reliabilityFacts={reliabilityFacts}
                   />
                   {applicationInsights.length ? (
                     <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">
@@ -2821,7 +2882,7 @@ export default function ResultsPage() {
                       </ul>
                     </section>
                   ) : null}
-                  {discoveredRoles.length ? (
+                  {false ? (
                     <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
                       <h3 className="text-lg font-semibold text-slate-100">Where you are most competitive</h3>
                       <p className="mt-1 text-sm text-slate-200">

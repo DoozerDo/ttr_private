@@ -31,6 +31,7 @@ import { BetaFeedbackModule } from './beta-feedback/beta-feedback.module';
 import { AdminEngagementModule } from './admin-engagement/admin-engagement.module';
 import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-intelligence.module';
 import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
+import { AdminSignalModule } from './admin-signal/admin-signal.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
     AdminEngagementModule,
     FeedbackIntelligenceModule,
     AdminFunnelModule,
+    AdminSignalModule,
   ],
   controllers: [AppController],
   providers: [
