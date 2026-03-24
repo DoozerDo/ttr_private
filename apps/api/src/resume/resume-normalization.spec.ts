@@ -9,6 +9,7 @@ import {
   buildNormalizedResumeDocument,
   mapNormalizedResumeToDocxModel,
   buildResumePlainText,
+  normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from './resume-normalization';
 
@@ -824,6 +825,51 @@ describe('resume-normalization', () => {
     ]);
   });
 
+  it('flags duplicate role headers and collapsed punctuation noise during validation', () => {
+    const document = normalizeNormalizedResumeDocument({
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com | (703) 850-7289' },
+      summary: 'Operations leader',
+      experience: [
+        {
+          company: 'Acme',
+          roleTitle: 'Support Manager',
+          dateRange: '2020 - 2024',
+          bullets: ['Led incident governance...::::'],
+        },
+        {
+          company: 'Acme',
+          roleTitle: 'Support Manager',
+          dateRange: '2020 - 2024',
+          bullets: ['Improved response quality.'],
+        },
+      ],
+      education: [{ institution: 'University of Example', degree: 'MBA' }],
+    } as any);
+
+    const validation = validateNormalizedResumeDocument(document);
+    expect(validation.valid).toBe(false);
+    expect(validation.reasons.join(' ')).toContain('Duplicate role headers');
+    expect(validation.reasons.join(' ')).toContain('Collapsed punctuation noise');
+  });
+
+  it('flags malformed merged experience blobs during validation', () => {
+    const oversized = `Led service delivery outcomes ${'across enterprise workflows '.repeat(30)}`.trim();
+    const validation = validateNormalizedResumeDocument({
+      heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+      experience: [
+        {
+          company: 'Acme',
+          roleTitle: 'Support Manager',
+          bullets: [oversized],
+        },
+      ],
+      education: [{ institution: 'University of Example' }],
+    } as any);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.reasons.join(' ')).toContain('Experience section appears malformed');
+  });
+
   it('merges bullet continuations ending with including and across when next line is lowercase', () => {
     const document = buildNormalizedResumeDocument([
       {
@@ -1069,7 +1115,7 @@ describe('resume-normalization', () => {
       expect(firstHeaderParagraphIndex).toBeGreaterThanOrEqual(0);
       expect(firstBulletParagraphIndex).toBeGreaterThan(firstHeaderParagraphIndex);
       expect(secondHeaderParagraphIndex).toBeGreaterThan(firstBulletParagraphIndex);
-      expect(secondHeaderParagraph).toContain('w:before="120"');
+      expect(secondHeaderParagraph).toContain('w:before="220"');
       expect(paragraphs[secondHeaderParagraphIndex]).not.toContain('<w:numPr>');
 
       const educationSection = model.sections.find((section) => section.key === 'education');

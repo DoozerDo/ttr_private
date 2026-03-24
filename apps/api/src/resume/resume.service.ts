@@ -62,6 +62,7 @@ import {
   buildNormalizedResumeDocument,
   buildResumePlainText,
   mapNormalizedResumeToDocxModel,
+  normalizeNormalizedResumeDocument,
   validateNormalizedResumeDocument,
 } from './resume-normalization';
 import {
@@ -1718,13 +1719,30 @@ export class ResumeService {
         },
       });
     }
-    const normalizedDocument =
+    const normalizedDocumentInput =
       request.editedResume ?? generation.preview?.resume ?? null;
-    if (!normalizedDocument) {
+    if (!normalizedDocumentInput) {
       throw new UnprocessableEntityException({
         error: {
           code: 'NORMALIZATION_FAILED',
           message: 'Cannot export resume because the normalized model is missing.',
+        },
+      });
+    }
+    const normalizedDocument = normalizeNormalizedResumeDocument(
+      normalizedDocumentInput,
+    );
+    const normalizedValidation = validateNormalizedResumeDocument(
+      normalizedDocument,
+    );
+    if (!normalizedValidation.valid) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message: 'Cannot export resume because normalized model validation failed.',
+          details: {
+            reasons: normalizedValidation.reasons.slice(0, 6),
+          },
         },
       });
     }

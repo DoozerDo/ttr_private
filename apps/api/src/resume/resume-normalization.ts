@@ -1057,6 +1057,12 @@ function sanitizeNormalizedResumeDocument(
   };
 }
 
+export function normalizeNormalizedResumeDocument(
+  document: NormalizedResumeDocument,
+): NormalizedResumeDocument {
+  return sanitizeNormalizedResumeDocument(document);
+}
+
 export function mapNormalizedResumeToDocxModel(
   document: NormalizedResumeDocument,
 ): ResumeDocxModel {
@@ -1293,6 +1299,86 @@ export function validateNormalizedResumeDocument(document: NormalizedResumeDocum
   if (paginationInDocument) {
     reasons.push('Pagination artifact detected in normalized model.');
   }
+
+  const hasCollapsedPunctuationNoise = [
+    document.heading.name,
+    document.heading.contactLine,
+    document.summary ?? '',
+    ...document.experience.flatMap((entry) => [
+      entry.company,
+      entry.roleTitle,
+      entry.location ?? '',
+      ...(entry.bullets ?? []),
+    ]),
+    ...(document.education ?? []).flatMap((entry) => [
+      entry.degree ?? '',
+      entry.institution,
+      entry.location ?? '',
+    ]),
+  ].some((value) => /(?:[|,:;\-]{3,}|[.]{4,})/.test(String(value ?? '')));
+  if (hasCollapsedPunctuationNoise) {
+    reasons.push('Collapsed punctuation noise detected in normalized model.');
+  }
+
+  const hasMalformedExperienceBlob = document.experience.some((entry) => {
+    const bullets = entry.bullets ?? [];
+    if (bullets.length === 0) return true;
+    if (bullets.length > 30) return true;
+    return bullets.some((bullet) => {
+      const normalized = normalizeLine(bullet);
+      if (!normalized) return true;
+      if (normalized.length > 420) return true;
+      if ((normalized.match(/[|]/g) ?? []).length >= 6) return true;
+      return false;
+    });
+  });
+  if (hasMalformedExperienceBlob) {
+    reasons.push('Experience section appears malformed or merged into oversized blobs.');
+  }
+
+  const duplicateRoleHeaderDetected = (() => {
+    const seen = new Set<string>();
+    for (const entry of document.experience) {
+      const key = [
+        normalizeLine(entry.company).toLowerCase(),
+        normalizeLine(entry.roleTitle).toLowerCase(),
+        normalizeLine(entry.dateRange ?? `${entry.startDate ?? ''}|${entry.endDate ?? ''}`).toLowerCase(),
+      ].join('|');
+      if (!key.replace(/\|/g, '').trim()) {
+        continue;
+      }
+      if (seen.has(key)) {
+        return true;
+      }
+      seen.add(key);
+    }
+    return false;
+  })();
+  if (duplicateRoleHeaderDetected) {
+    reasons.push('Duplicate role headers detected in normalized experience entries.');
+  }
+
+  const hasCorruptedEducationRows = (document.education ?? []).some((entry) => {
+    const degree = normalizeLine(entry.degree ?? '');
+    const institution = normalizeLine(entry.institution);
+    const location = normalizeLine(entry.location ?? '');
+    if (!institution) return true;
+    const values = [degree, institution, location].filter(Boolean);
+    if (!values.length) return true;
+    const hasOnlyPunctuation = values.some((value) => /^[|,:;\-.\s]+$/.test(value));
+    if (hasOnlyPunctuation) return true;
+    const hasExtremeRepeatingToken = values.some((value) => {
+      const tokens = value.toLowerCase().split(/\s+/).filter(Boolean);
+      if (tokens.length < 3) return false;
+      const unique = new Set(tokens);
+      return unique.size <= 1;
+    });
+    return hasExtremeRepeatingToken;
+  });
+  if (hasCorruptedEducationRows) {
+    reasons.push('Education rows contain corrupted or placeholder-like content.');
+  }
+
   const validExperience = document.experience.filter(
     (entry) =>
       entry.company?.trim().length > 0 &&

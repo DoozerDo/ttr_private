@@ -417,6 +417,75 @@ describe('ResumeService', () => {
     });
   });
 
+  it('rejects export when edited resume model fails structural validation', async () => {
+    const { service } = buildService(95);
+
+    await expect(
+      service.exportResume(
+        'user-1',
+        {
+          ...baseRequest,
+          editedResume: {
+            heading: { name: 'Alex Candidate', contactLine: 'alex@example.com' },
+            experience: [
+              {
+                company: 'Acme',
+                roleTitle: 'Support Manager',
+                dateRange: '2020 - 2024',
+                bullets: ['Led response programs...::::'],
+              },
+              {
+                company: 'Acme',
+                roleTitle: 'Support Manager',
+                dateRange: '2020 - 2024',
+                bullets: ['Improved backlog health.'],
+              },
+            ],
+            education: [{ institution: 'University of Example', degree: 'MBA' }],
+          } as any,
+        },
+        'docx',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'NORMALIZATION_FAILED',
+          message:
+            'Cannot export resume because normalized model validation failed.',
+        },
+      },
+    });
+  });
+
+  it('repairs edited resume pagination artifacts before export validation and rendering', async () => {
+    const { service } = buildService(95);
+
+    const exported = await service.exportResume(
+      'user-1',
+      {
+        ...baseRequest,
+        editedResume: {
+          heading: { name: 'Alex Candidate', contactLine: 'alex@example.com | Page 1' },
+          experience: [
+            {
+              company: 'Acme | Page 2',
+              roleTitle: 'Support Manager',
+              dateRange: '2020 - 2024',
+              bullets: ['Led response programs across regional teams.'],
+            },
+          ],
+          education: [{ institution: 'University of Example', degree: 'MBA' }],
+        } as any,
+      },
+      'pdf',
+    );
+
+    const text = exported.buffer.toString('latin1');
+    expect(text).toContain('Led response programs across regional teams.');
+    expect(text).not.toContain('Page 1');
+    expect(text).not.toContain('Page 2');
+  });
+
   it('allows one-tap generation when score meets threshold', async () => {
     const { service } = buildService(AUTO_GENERATE_THRESHOLD);
 
