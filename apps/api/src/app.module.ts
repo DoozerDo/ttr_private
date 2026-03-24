@@ -29,6 +29,7 @@ import { PreviewModule } from './preview/preview.module';
 import { SupportModule } from './support/support.module';
 import { BetaFeedbackModule } from './beta-feedback/beta-feedback.module';
 import { AdminEngagementModule } from './admin-engagement/admin-engagement.module';
+import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-intelligence.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { AdminEngagementModule } from './admin-engagement/admin-engagement.modul
     SupportModule,
     BetaFeedbackModule,
     AdminEngagementModule,
+    FeedbackIntelligenceModule,
   ],
   controllers: [AppController],
   providers: [
