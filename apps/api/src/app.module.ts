@@ -30,6 +30,7 @@ import { SupportModule } from './support/support.module';
 import { BetaFeedbackModule } from './beta-feedback/beta-feedback.module';
 import { AdminEngagementModule } from './admin-engagement/admin-engagement.module';
 import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-intelligence.module';
+import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-int
     BetaFeedbackModule,
     AdminEngagementModule,
     FeedbackIntelligenceModule,
+    AdminFunnelModule,
   ],
   controllers: [AppController],
   providers: [

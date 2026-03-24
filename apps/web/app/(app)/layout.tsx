@@ -13,6 +13,7 @@ import {
   applyBetaForcePro,
   isBetaForceProEnabled,
 } from "@/app/api/users/me/betaForcePro";
+import { BetaFeedbackCapture } from "@/app/(app)/components/BetaFeedbackCapture";
 
 type AppLayoutProps = {
   children: ReactNode;
@@ -68,6 +69,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     <EntitlementsProvider entitlements={safeProfile}>
       <AppShell userEmail={email} userId={userId}>
         {children}
+        <BetaFeedbackCapture />
       </AppShell>
     </EntitlementsProvider>
   );
