@@ -23,6 +23,8 @@ describe('ApplicationsService', () => {
     appliedAt: null,
     lastTouchedAt: laterDate,
     baselineVersionId: null,
+    baselineId: null,
+    analysisId: null,
     appliedDate: null,
     fitScore: null,
     stage: ApplicationStage.SAVED,
@@ -30,6 +32,8 @@ describe('ApplicationsService', () => {
     sourceUrl: null,
     cxFitScoreSnapshot: {},
     resumeArtifacts: [],
+    verificationCoverageSnapshot: {},
+    outcomeLinkageSnapshot: {},
     createdAt: baseDate,
     updatedAt: laterDate,
   };
@@ -102,12 +106,16 @@ describe('ApplicationsService', () => {
           appliedAt: null,
           lastTouchedAt: expect.any(Date),
           baselineVersionId: null,
+          baselineId: null,
+          analysisId: null,
           fitScore: null,
           stage: ApplicationStage.SAVED,
           notes: null,
           sourceUrl: null,
           cxFitScoreSnapshot: {},
           resumeArtifacts: [],
+          verificationCoverageSnapshot: {},
+          outcomeLinkageSnapshot: {},
         }),
       );
       expect(repository.save).toHaveBeenCalled();
@@ -145,7 +153,13 @@ describe('ApplicationsService', () => {
 
     it('filters by stage', async () => {
       const repository = createMockRepository();
-      const queryBuilder = repository.createQueryBuilder();
+      const queryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockApplication]),
+      };
+      repository.createQueryBuilder.mockReturnValue(queryBuilder);
       const service = createService(repository);
 
       await service.listApplicationsForUser('user-1', {
@@ -160,7 +174,13 @@ describe('ApplicationsService', () => {
 
     it('filters by company', async () => {
       const repository = createMockRepository();
-      const queryBuilder = repository.createQueryBuilder();
+      const queryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockApplication]),
+      };
+      repository.createQueryBuilder.mockReturnValue(queryBuilder);
       const service = createService(repository);
 
       await service.listApplicationsForUser('user-1', { company: 'Acme' });
@@ -173,7 +193,13 @@ describe('ApplicationsService', () => {
 
     it('orders by lastTouchedAt', async () => {
       const repository = createMockRepository();
-      const queryBuilder = repository.createQueryBuilder();
+      const queryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockApplication]),
+      };
+      repository.createQueryBuilder.mockReturnValue(queryBuilder);
       const service = createService(repository);
 
       await service.listApplicationsForUser('user-1');
@@ -342,11 +368,53 @@ describe('ApplicationsService', () => {
           fingerprint: expect.stringContaining('job:'),
           status: ApplicationTrackerStatus.PREPARED,
           baselineVersionId: 'baseline-v1',
+          baselineId: null,
+          analysisId: null,
           fitScore: snapshot.overallScore,
           sourceUrl: null,
         }),
       );
       expect(repository.save).toHaveBeenCalled();
+    });
+
+    it('stores verification snapshot and linkage details', async () => {
+      const repository = createMockRepository();
+      repository.findOne.mockResolvedValue(null);
+      const service = createService(repository);
+
+      await service.upsertPreparedFromResumeGeneration({
+        userId: 'user-1',
+        jobId: 'job-1',
+        companyName: 'Acme Corp',
+        roleTitle: 'Engineer',
+        baselineVersionId: 'baseline-v1',
+        baselineId: 'baseline-1',
+        analysisId: 'analysis-1',
+        verificationCoverageSnapshot: {
+          verifiedRequirements: ['Salesforce'],
+          inferredRequirements: ['Service Cloud'],
+          unverifiedRequirements: ['Zendesk'],
+        },
+        outcomeLinkageSnapshot: {
+          removedTargeting: ['Five9'],
+          addedEvidence: ['Zendesk'],
+          evidenceAdded: true,
+        },
+        resumeArtifactId: 'artifact-1',
+      });
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          analysisId: 'analysis-1',
+          baselineId: 'baseline-1',
+          verificationCoverageSnapshot: expect.objectContaining({
+            unverifiedRequirements: ['Zendesk'],
+          }),
+          outcomeLinkageSnapshot: expect.objectContaining({
+            addedEvidence: ['Zendesk'],
+          }),
+        }),
+      );
     });
 
     it('dedupes and appends artifacts for prepared entries', async () => {
@@ -446,6 +514,42 @@ describe('ApplicationsService', () => {
           fingerprint: computed,
         }),
       );
+    });
+  });
+
+  describe('buildInsightsForUser', () => {
+    it('returns actionable insights from historical outcomes', async () => {
+      const repository = createMockRepository();
+      repository.find.mockResolvedValue([
+        {
+          ...mockApplication,
+          id: 'app-a',
+          stage: ApplicationStage.REJECTED,
+          verificationCoverageSnapshot: { unverifiedRequirements: ['Zendesk'] },
+        },
+        {
+          ...mockApplication,
+          id: 'app-b',
+          stage: ApplicationStage.NO_RESPONSE,
+          verificationCoverageSnapshot: { unverifiedRequirements: ['Zendesk'] },
+        },
+        {
+          ...mockApplication,
+          id: 'app-c',
+          stage: ApplicationStage.INTERVIEWING,
+          verificationCoverageSnapshot: { unverifiedRequirements: [] },
+        },
+      ]);
+      const service = createService(repository);
+
+      const insights = await service.buildInsightsForUser('user-1');
+
+      expect(insights.some((insight) => insight.message.includes('Zendesk'))).toBe(true);
+      expect(
+        insights.some((insight) =>
+          insight.message.includes('all core requirements were verified'),
+        ),
+      ).toBe(true);
     });
   });
 });

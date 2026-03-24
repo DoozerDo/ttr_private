@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
@@ -19,9 +20,12 @@ import {
   type ParsedComplianceError,
 } from "@/lib/compliance/parseComplianceError";
 import {
+  applyTargetingExclusionsToReadiness,
+  buildVerificationIssuesFromCanonicalClaims,
   combineGenerationReadinessFromServer,
   type GenerationReadiness,
   deriveVerificationCoverage,
+  normalizeUserFacingRequirementLabel,
   type VerificationCoverage,
 } from "@/lib/generationReadiness";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
@@ -29,6 +33,8 @@ import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/li
 import { getDecisionFromFitScore } from "@/lib/fit-verdict";
 import { buildStrategicBrief } from "@/lib/resultsInsights";
 import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
+import { appendStrengtheningAddition } from "@/lib/baselines";
+import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
@@ -144,6 +150,8 @@ type LatestAnalysis = {
   } | null;
   confidenceScore?: number | null;
   confidenceReasons?: string[] | null;
+  supportingSignals?: unknown;
+  baselineEvidence?: unknown;
   score_breakdown?: {
     total_score: number;
     dimensions: Array<{
@@ -158,7 +166,164 @@ type LatestAnalysis = {
       weight: number;
     }>;
   } | null;
+  verification_coverage?: {
+    totalClaims?: number | null;
+    verifiedClaims?: number | null;
+    inferredClaims?: number | null;
+    unverifiedClaims?: number | null;
+    unverifiedRequirements?: string[] | null;
+    verifiedRequirements?: string[] | null;
+    inferredRequirements?: string[] | null;
+    supportedRequirements?: string[] | null;
+  } | null;
 };
+
+type ApplicationInsight = {
+  message?: string;
+  type?: "warning" | "success" | "gap" | string;
+};
+
+type DiscoveredRole = {
+  roleTitle: string;
+  rank: number;
+  estimatedFitScore: number;
+  fitLevel: "High" | "Medium" | "Stretch";
+  verificationCoverageLevel: "high" | "moderate" | "low";
+  keySupportingSignals: string[];
+  missingGaps: string[];
+  explanation: string;
+  analyzeHref: string;
+};
+
+const ROLE_DISCOVERY_TEMPLATES: Array<{
+  roleTitle: string;
+  keywords: string[];
+  tools: string[];
+  explanation: string;
+}> = [
+  {
+    roleTitle: "Director of Customer Support",
+    keywords: ["leadership", "support", "operations", "escalation"],
+    tools: ["salesforce", "zendesk", "five9", "service cloud"],
+    explanation: "Strong leadership + support operations background aligns well with this role.",
+  },
+  {
+    roleTitle: "Head of Customer Operations",
+    keywords: ["operations", "leadership", "cross functional", "process"],
+    tools: ["salesforce", "servicenow", "zendesk", "hubspot"],
+    explanation: "Your operational rigor and cross-functional execution map to customer ops leadership.",
+  },
+  {
+    roleTitle: "CX Strategy Lead",
+    keywords: ["strategy", "cx", "change", "program"],
+    tools: ["salesforce", "tableau", "looker", "zendesk"],
+    explanation: "Change leadership and CX signal coverage make this a viable strategic path.",
+  },
+  {
+    roleTitle: "Support Operations Manager",
+    keywords: ["support", "operations", "workflow", "incident"],
+    tools: ["zendesk", "salesforce", "jira", "five9"],
+    explanation: "Process ownership and tooling signals indicate strong support ops execution fit.",
+  },
+];
+
+function toSignalText(supportingSignals: unknown, baselineEvidence: unknown): string {
+  const parts: string[] = [];
+  if (Array.isArray(supportingSignals)) {
+    supportingSignals.forEach((entry) => {
+      if (typeof entry === "string" && entry.trim()) parts.push(entry.trim());
+      if (entry && typeof entry === "object") {
+        const record = entry as Record<string, unknown>;
+        if (typeof record.label === "string" && record.label.trim()) parts.push(record.label.trim());
+        if (typeof record.name === "string" && record.name.trim()) parts.push(record.name.trim());
+      }
+    });
+  }
+  if (typeof baselineEvidence === "string" && baselineEvidence.trim()) parts.push(baselineEvidence.trim());
+  if (Array.isArray(baselineEvidence)) {
+    baselineEvidence.forEach((entry) => {
+      if (typeof entry === "string" && entry.trim()) parts.push(entry.trim());
+    });
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+function deriveVerificationCoverageLevel(missingGapCount: number): DiscoveredRole["verificationCoverageLevel"] {
+  if (missingGapCount === 0) return "high";
+  if (missingGapCount <= 2) return "moderate";
+  return "low";
+}
+
+function deriveFitLevel(input: {
+  fitScore: number;
+  verificationCoverageLevel: DiscoveredRole["verificationCoverageLevel"];
+}): DiscoveredRole["fitLevel"] {
+  if (input.fitScore >= 84 && input.verificationCoverageLevel === "high") return "High";
+  if (input.fitScore >= 72) return "Medium";
+  return "Stretch";
+}
+
+export function discoverCompetitiveRoles(input: {
+  analysis: LatestAnalysis | null;
+  applicationInsights: ApplicationInsight[];
+  activeScore: number | null;
+}): DiscoveredRole[] {
+  const { analysis, applicationInsights, activeScore } = input;
+  if (!analysis || typeof activeScore !== "number") return [];
+
+  const coverage = analysis.verification_coverage;
+  const supportedRequirements = Array.isArray(coverage?.supportedRequirements)
+    ? coverage.supportedRequirements
+    : [];
+  const unverifiedRequirements = Array.isArray(coverage?.unverifiedRequirements)
+    ? coverage.unverifiedRequirements
+    : [];
+  const signalText = toSignalText(analysis.supportingSignals, analysis.baselineEvidence ?? analysis.summary);
+  const outcomeBoost = applicationInsights.some(
+    (insight) => typeof insight.message === "string" && insight.message.toLowerCase().includes("received interviews"),
+  )
+    ? 4
+    : 0;
+
+  const roles: DiscoveredRole[] = ROLE_DISCOVERY_TEMPLATES.map((template) => {
+    const keywordMatches = template.keywords.filter((keyword) => signalText.includes(keyword)).length;
+    const toolMatches = template.tools.filter((tool) =>
+      supportedRequirements.some((signal) => signal.toLowerCase().includes(tool)),
+    ).length;
+    const missingGaps = template.tools.filter((tool) =>
+      unverifiedRequirements.some((gap) => gap.toLowerCase().includes(tool)),
+    );
+    const fitScore = Math.max(
+      45,
+      Math.min(
+        97,
+        Math.round(activeScore * 0.65 + keywordMatches * 6 + toolMatches * 5 - missingGaps.length * 4 + outcomeBoost),
+      ),
+    );
+    const verificationCoverageLevel = deriveVerificationCoverageLevel(missingGaps.length);
+    const fitLevel = deriveFitLevel({ fitScore, verificationCoverageLevel });
+    const params = new URLSearchParams({
+      suggestedRole: template.roleTitle,
+      source: "results",
+    });
+    return {
+      roleTitle: template.roleTitle,
+      rank: 0,
+      estimatedFitScore: fitScore,
+      fitLevel,
+      verificationCoverageLevel,
+      keySupportingSignals: supportedRequirements.slice(0, 3),
+      missingGaps,
+      explanation: template.explanation,
+      analyzeHref: `/analyze?${params.toString()}`,
+    };
+  })
+    .sort((a, b) => b.estimatedFitScore - a.estimatedFitScore)
+    .slice(0, 4)
+    .map((role, index): DiscoveredRole => ({ ...role, rank: index + 1 }));
+
+  return roles;
+}
 
 export function resolveDisplayedFitScore(latest: LatestAnalysis | null): number | null {
   if (!latest) return null;
@@ -221,6 +386,7 @@ function buildEvidenceLines(scoreBreakdown: ScoreBreakdownShape | null): string[
 
 const INTERVIEW_TOOLKIT_PATH = "/interview-toolkit";
 const RESULTS_BLOCKER_DETAILS_ANCHOR = "#generation-readiness-details";
+const STUDIO_VERIFICATION_GAPS_ANCHOR = "studio-auto-adjust-panel";
 
 const LAST_ASSESSMENT_STORAGE_KEY = "ttr-last-assessment-id";
 
@@ -386,7 +552,37 @@ type OpportunityMapSectionProps = {
   scoreAnalysisHref: string;
   readiness: GenerationReadiness;
   verificationCoverage: VerificationCoverage;
+  canonicalCoverage: LatestAnalysis["verification_coverage"];
+  baselineEvidenceHref: string;
+  predictiveUnlock:
+    | {
+        unverifiedRequirements: string[];
+        predictedOutcome: "full" | "partial";
+        removeAndContinueHref: string;
+        reviewInStudioHref: string;
+      }
+    | null;
+  secondaryCta?:
+    | {
+        label: string;
+        href: string;
+        disabled?: boolean;
+      }
+    | null;
 };
+
+export function buildStudioHrefWithExcludedRequirements(
+  studioHref: string,
+  excludedRequirements: string[],
+): string {
+  const [path, query = ""] = studioHref.split("?");
+  const params = new URLSearchParams(query);
+  excludedRequirements.forEach((requirement) => {
+    params.append("excludedRequirements", requirement);
+  });
+  const serialized = params.toString();
+  return serialized ? `${path}?${serialized}` : path;
+}
 
 type PrimaryResultsCtaInput = {
   scoreBand: ScoreBand | null;
@@ -427,9 +623,12 @@ export function getPrimaryResultsCta({
 
   if (scoreBand === ScoreBand.TOP) {
     if (verificationCoverage.status === "partial") {
+      const studioHrefWithAnchor = studioHref.includes("#")
+        ? studioHref
+        : `${studioHref}#${STUDIO_VERIFICATION_GAPS_ANCHOR}`;
       return {
-        label: "Open Studio (limited generation)",
-        href: studioHref,
+        label: "Resolve verification gaps in Studio",
+        href: studioHrefWithAnchor,
         disabled: !canOpenStudio,
       };
     }
@@ -460,10 +659,63 @@ export function OpportunityMapSection({
   verdict,
   advantageSignals,
   primaryCta,
+  secondaryCta = null,
   scoreAnalysisHref,
   readiness,
   verificationCoverage,
+  canonicalCoverage,
+  baselineEvidenceHref,
+  predictiveUnlock,
 }: OpportunityMapSectionProps) {
+  const roundedScore = typeof score === "number" ? Math.round(score) : null;
+  const isStrongFit = typeof roundedScore === "number" && roundedScore >= 85;
+  const isLimitedReadiness =
+    readiness.status === "limited" || verificationCoverage.status === "partial";
+  const showStrongFitLimitationPanel = isStrongFit && isLimitedReadiness;
+  const toCanonicalLabels = (labels: string[] | null | undefined): string[] =>
+    Array.isArray(labels)
+      ? Array.from(
+          new Set(
+            labels
+              .map((label) =>
+                normalizeUserFacingRequirementLabel(label, {
+                  sourceContext: null,
+                  issueCode: "unsupported_technology_claim",
+                }),
+              )
+              .filter((label): label is string => typeof label === "string" && label.length > 0),
+          ),
+        )
+      : [];
+  const hasCanonicalCoverage = useMemo(() => {
+    if (!canonicalCoverage) return false;
+    return (
+      typeof canonicalCoverage.totalClaims === "number" ||
+      typeof canonicalCoverage.verifiedClaims === "number" ||
+      typeof canonicalCoverage.inferredClaims === "number" ||
+      typeof canonicalCoverage.unverifiedClaims === "number" ||
+      Array.isArray(canonicalCoverage.supportedRequirements) ||
+      Array.isArray(canonicalCoverage.verifiedRequirements) ||
+      Array.isArray(canonicalCoverage.inferredRequirements) ||
+      Array.isArray(canonicalCoverage.unverifiedRequirements)
+    );
+  }, [canonicalCoverage]);
+  const supportedSignals = useMemo(() => {
+    const directSupported = toCanonicalLabels(canonicalCoverage?.supportedRequirements);
+    if (directSupported.length > 0) return directSupported;
+    return toCanonicalLabels([
+      ...(canonicalCoverage?.verifiedRequirements ?? []),
+      ...(canonicalCoverage?.inferredRequirements ?? []),
+    ]);
+  }, [
+    canonicalCoverage?.inferredRequirements,
+    canonicalCoverage?.supportedRequirements,
+    canonicalCoverage?.verifiedRequirements,
+  ]);
+  const unverifiedSignals = useMemo(
+    () => toCanonicalLabels(canonicalCoverage?.unverifiedRequirements),
+    [canonicalCoverage?.unverifiedRequirements],
+  );
   const readinessToneClass =
     readiness.status === "blocked"
       ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
@@ -490,33 +742,85 @@ export function OpportunityMapSection({
           </div>
 
           <div className="flex flex-col items-start gap-3 sm:items-end">
-            <div
-              id="generation-readiness-details"
-              className={`w-full rounded-2xl border px-3 py-2 sm:max-w-sm ${readinessToneClass}`}
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                Generation Readiness: {readiness.badgeLabel}
-              </p>
-              <p className="mt-1 text-sm leading-5 text-slate-100">{readiness.summary}</p>
-              {readiness.reasons[0] ? (
-                <p className="mt-1 text-xs leading-5 text-slate-200">{readiness.reasons[0].message}</p>
-              ) : null}
-            </div>
-            <div className="w-full rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 sm:max-w-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-                Verification Coverage: {verificationCoverage.status.toUpperCase()}
-              </p>
-              <p className="mt-1 text-sm leading-5 text-slate-100">{verificationCoverage.summary}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-200">
-                Verified claims: {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
-              </p>
-              {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
-                <p className="mt-1 text-xs leading-5 text-slate-300">
-                  Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
-                  {verificationCoverage.unverifiedClaims}
+            {showStrongFitLimitationPanel ? (
+              <div
+                id="generation-readiness-details"
+                className="w-full rounded-2xl border border-amber-300/35 bg-amber-500/10 px-3 py-3 text-amber-100 sm:max-w-sm"
+              >
+                <h3 className="text-base font-semibold tracking-tight text-white">
+                  Strong fit. Limited generation.
+                </h3>
+                <p className="mt-2 text-sm leading-5 text-slate-100">
+                  You are highly aligned for this role. Document generation is limited because some
+                  requirements are not yet verified from your baseline.
                 </p>
-              ) : null}
-            </div>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
+                  What&apos;s holding this back
+                </p>
+                {!hasCanonicalCoverage ? (
+                  <p className="mt-1 text-xs leading-5 text-slate-100">
+                    Verification data unavailable. Re-run analysis.
+                  </p>
+                ) : (
+                  <>
+                    {unverifiedSignals.length > 0 ? (
+                      <ul className="mt-1 space-y-1 text-xs leading-5 text-slate-100">
+                        {unverifiedSignals.map((label) => (
+                          <li key={`results-unverified-${label}`}>- {label}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-xs leading-5 text-slate-100">
+                        All required tools are supported. Generation limits may be due to evidence depth.
+                      </p>
+                    )}
+                    {supportedSignals.length > 0 ? (
+                      <p className="mt-2 text-xs leading-5 text-slate-200">
+                        Supported signals: {supportedSignals.join(", ")}
+                      </p>
+                    ) : null}
+                    <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
+                      Fastest path to unlock
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-100">
+                      1. Remove unsupported tools from targeting
+                      <br />
+                      2. Add verified evidence
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div
+                  id="generation-readiness-details"
+                  className={`w-full rounded-2xl border px-3 py-2 sm:max-w-sm ${readinessToneClass}`}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+                    Generation Readiness: {readiness.badgeLabel}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-slate-100">{readiness.summary}</p>
+                  {readiness.reasons[0] ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-200">{readiness.reasons[0].message}</p>
+                  ) : null}
+                </div>
+                <div className="w-full rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 sm:max-w-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
+                    Verification Coverage: {verificationCoverage.status.toUpperCase()}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-slate-100">{verificationCoverage.summary}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-200">
+                    Verified claims: {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
+                  </p>
+                  {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-300">
+                      Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
+                      {verificationCoverage.unverifiedClaims}
+                    </p>
+                  ) : null}
+                </div>
+              </>
+            )}
             <a
               href={scoreAnalysisHref}
               className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
@@ -536,6 +840,53 @@ export function OpportunityMapSection({
                   {primaryCta.label}
                 </a>
               )
+            ) : null}
+            {secondaryCta ? (
+              secondaryCta.disabled ? (
+                <span className="inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-400">
+                  {secondaryCta.label}
+                </span>
+              ) : (
+                <a
+                  href={secondaryCta.href}
+                  className="inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                >
+                  {secondaryCta.label}
+                </a>
+              )
+            ) : null}
+            {showStrongFitLimitationPanel ? (
+              <a
+                href={baselineEvidenceHref}
+                className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+              >
+                Review baseline evidence
+              </a>
+            ) : null}
+            {predictiveUnlock ? (
+              <div className="w-full rounded-2xl border border-sky-300/35 bg-sky-500/10 px-3 py-3 text-sky-100 sm:max-w-sm">
+                <h3 className="text-base font-semibold tracking-tight text-white">Unlock full generation</h3>
+                <p className="mt-2 text-sm leading-5 text-slate-100">
+                  You&apos;re a strong match for this role. A few unverified requirements are limiting
+                  document generation.
+                </p>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-sky-100">
+                  Unverified requirements:
+                </p>
+                <ul className="mt-1 space-y-1 text-xs leading-5 text-slate-100">
+                  {predictiveUnlock.unverifiedRequirements.map((requirement) => (
+                    <li key={`predictive-unverified-${requirement}`}>- {requirement}</li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-xs leading-5 text-slate-100">
+                  If these are removed from targeting:
+                  <br />-{" "}
+                  {predictiveUnlock.predictedOutcome === "full"
+                    ? "generation will be fully enabled"
+                    : "generation will improve but still require additional evidence"}
+                </p>
+                <p className="mt-2 text-xs text-slate-200">You can restore removed requirements later.</p>
+              </div>
             ) : null}
           </div>
         </header>
@@ -1107,6 +1458,16 @@ export default function ResultsPage() {
   const lastAssessmentHydrationAttempted = useRef(false);
   const trackedCompletionKeysRef = useRef<Set<string>>(new Set());
   const autoLoadPairRef = useRef<string | null>(null);
+  const [expandingRequirement, setExpandingRequirement] = useState<string | null>(null);
+  const [expansionContext, setExpansionContext] = useState("");
+  const [expansionDescription, setExpansionDescription] = useState("");
+  const [expansionImpact, setExpansionImpact] = useState("");
+  const [expansionConfirmedAccurate, setExpansionConfirmedAccurate] = useState(false);
+  const [expansionSubmitting, setExpansionSubmitting] = useState(false);
+  const [expansionError, setExpansionError] = useState<string | null>(null);
+  const [expansionSuccessByRequirement, setExpansionSuccessByRequirement] = useState<Record<string, string>>({});
+  const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
+  const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1135,6 +1496,32 @@ export default function ResultsPage() {
   const clearLastAssessmentId = useCallback(async () => {
     await persistLastAssessmentId(null);
   }, [persistLastAssessmentId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadInsights = async () => {
+      try {
+        const response = await fetch("/api/applications/insights", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!Array.isArray(payload) || cancelled) return;
+        setApplicationInsights(
+          payload.filter(
+            (item): item is ApplicationInsight =>
+              Boolean(item) &&
+              typeof item === "object" &&
+              typeof (item as { message?: unknown }).message === "string",
+          ),
+        );
+      } catch {
+        // non-blocking
+      }
+    };
+    void loadInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setManualBaselineId = (value: string) => {
     setBaselineId(value);
@@ -1347,6 +1734,11 @@ export default function ResultsPage() {
       analysisId: latest?.assessmentId ?? null,
     });
   }, [latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
+  const baselineEvidenceHref = useMemo(() => {
+    const analysisId = latest?.assessmentId?.trim() ?? "";
+    if (!analysisId) return "/baseline";
+    return `/baseline?analysisId=${encodeURIComponent(analysisId)}`;
+  }, [latest?.assessmentId]);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -1387,6 +1779,148 @@ export default function ResultsPage() {
     () => deriveVerificationCoverage(generationReadiness, claimVerifications),
     [claimVerifications, generationReadiness],
   );
+  const canonicalUnverifiedRequirements = useMemo(() => {
+    const raw = latest?.verification_coverage?.unverifiedRequirements;
+    if (!Array.isArray(raw) || raw.length === 0) return [] as string[];
+    const normalized = raw
+      .map((requirement) =>
+        normalizeUserFacingRequirementLabel(requirement, {
+          sourceContext: null,
+          issueCode: "unsupported_technology_claim",
+        }),
+      )
+      .filter((label): label is string => typeof label === "string" && label.length > 0);
+    return Array.from(new Set(normalized));
+  }, [latest?.verification_coverage?.unverifiedRequirements]);
+  const predictiveUnlock = useMemo(() => {
+    const scoreValue = typeof activeScore === "number" ? activeScore : null;
+    const readinessIsConstrained =
+      generationReadiness.status === "limited" || generationReadiness.status === "blocked";
+    if (!scoreValue || scoreValue < 85 || !readinessIsConstrained || canonicalUnverifiedRequirements.length === 0) {
+      return null;
+    }
+    const syntheticClaims = canonicalUnverifiedRequirements.map((label) => ({
+      key: label.toLowerCase(),
+      label,
+      category: "unknown",
+      sourceType: "job_required",
+      status: "UNVERIFIED" as const,
+      evidenceRefs: [] as string[],
+      generationBlocking: true,
+      scoreWeight: 0,
+    }));
+    const canonicalIssues = buildVerificationIssuesFromCanonicalClaims(syntheticClaims);
+    const syntheticReadiness: GenerationReadiness = {
+      ...generationReadiness,
+      verificationIssues: canonicalIssues,
+    };
+    const adjusted = applyTargetingExclusionsToReadiness(
+      syntheticReadiness,
+      new Set(canonicalUnverifiedRequirements.map((label) => label.toLowerCase())),
+    );
+    return {
+      unverifiedRequirements: canonicalUnverifiedRequirements,
+      predictedOutcome: adjusted.readiness.status === "ready" ? ("full" as const) : ("partial" as const),
+      removeAndContinueHref: buildStudioHrefWithExcludedRequirements(
+        studioHref,
+        canonicalUnverifiedRequirements,
+      ),
+      reviewInStudioHref: studioHref,
+    };
+  }, [activeScore, canonicalUnverifiedRequirements, generationReadiness, studioHref]);
+  const canShowEvidenceExpansion = useMemo(
+    () =>
+      typeof activeScore === "number" &&
+      activeScore >= 70 &&
+      canonicalUnverifiedRequirements.length > 0,
+    [activeScore, canonicalUnverifiedRequirements.length],
+  );
+  const resetExpansionForm = useCallback(() => {
+    setExpansionContext("");
+    setExpansionDescription("");
+    setExpansionImpact("");
+    setExpansionConfirmedAccurate(false);
+    setExpansionError(null);
+    setExpansionSubmitting(false);
+  }, []);
+  const submitEvidenceExpansion = useCallback(async (overrideRequirement?: string) => {
+    const requirement = (overrideRequirement ?? expandingRequirement)?.trim() ?? "";
+    if (!requirement) return;
+    if (!latestBaselineId) {
+      setExpansionError("Baseline context is missing. Reload Results and try again.");
+      return;
+    }
+    if (!expansionContext.trim() || !expansionDescription.trim()) {
+      setExpansionError("Please add where you used this and what you did.");
+      return;
+    }
+    if (!expansionConfirmedAccurate && !overrideRequirement) {
+      setExpansionError("Confirm this is accurate and reflects real experience.");
+      return;
+    }
+    setExpansionSubmitting(true);
+    setExpansionError(null);
+    try {
+      const rawText = [
+        `${requirement} evidence`,
+        `Context: ${expansionContext.trim()}`,
+        `Description: ${expansionDescription.trim()}`,
+        expansionImpact.trim() ? `Impact: ${expansionImpact.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      await appendStrengtheningAddition(latestBaselineId, {
+        signalType: "experience_expansion",
+        rawText,
+      });
+      setExpansionSuccessByRequirement((current) => ({
+        ...current,
+        [requirement]: `${requirement} is now verified`,
+      }));
+      setExpandingRequirement(null);
+      resetExpansionForm();
+      await loadLatest({ interactive: false, allowCreate: true });
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "This evidence could not be added. Only include real, defensible experience.";
+      setExpansionError(message);
+      setExpansionSubmitting(false);
+    }
+  }, [
+    expandingRequirement,
+    expansionConfirmedAccurate,
+    expansionContext,
+    expansionDescription,
+    expansionImpact,
+    latestBaselineId,
+    loadLatest,
+    resetExpansionForm,
+  ]);
+  const autoEvidenceSuggestions = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildEvidenceSuggestion>>();
+    for (const requirement of canonicalUnverifiedRequirements) {
+      map.set(
+        requirement,
+        buildEvidenceSuggestion({
+          requirement,
+          supportingSignals: latest?.supportingSignals,
+          baselineEvidence: latest?.baselineEvidence ?? latest?.summary,
+        }),
+      );
+    }
+    return map;
+  }, [canonicalUnverifiedRequirements, latest?.baselineEvidence, latest?.summary, latest?.supportingSignals]);
+  const discoveredRoles = useMemo(
+    () =>
+      discoverCompetitiveRoles({
+        analysis: latest,
+        applicationInsights,
+        activeScore: typeof activeScore === "number" ? activeScore : null,
+      }),
+    [activeScore, applicationInsights, latest],
+  );
   const primaryResultsCta = useMemo(
     () =>
       getPrimaryResultsCta({
@@ -1398,6 +1932,22 @@ export default function ResultsPage() {
       }),
     [scoreBand, verificationCoverage, studioHref, canOpenStudio, fitReviewPath],
   );
+  const oneClickResultsCta = useMemo(() => {
+    if (!predictiveUnlock) return primaryResultsCta;
+    return {
+      label: "Remove unsupported requirements and continue",
+      href: predictiveUnlock.removeAndContinueHref,
+      disabled: !canOpenStudio,
+    };
+  }, [canOpenStudio, predictiveUnlock, primaryResultsCta]);
+  const secondaryResultsCta = useMemo(() => {
+    if (!predictiveUnlock) return null;
+    return {
+      label: "Resolve verification gaps in Studio",
+      href: predictiveUnlock.reviewInStudioHref,
+      disabled: !canOpenStudio,
+    };
+  }, [canOpenStudio, predictiveUnlock]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -1736,6 +2286,12 @@ export default function ResultsPage() {
     setError(null);
     setLatest(null);
     setComplianceError(null);
+    console.info("[results] hydration_started", {
+      stage: "results",
+      jobId: targetJobId,
+      baselineId: targetBaselineId,
+      allowCreate,
+    });
 
     try {
       const res = await fetch(
@@ -1746,6 +2302,11 @@ export default function ResultsPage() {
       const payload = await readResponsePayload(res.clone());
 
       if (res.status === 404 && allowCreate) {
+        console.info("[results] hydration_not_found_running_analysis", {
+          stage: "results",
+          jobId: targetJobId,
+          baselineId: targetBaselineId,
+        });
         const runResponse = await fetch("/api/analysis/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1766,6 +2327,10 @@ export default function ResultsPage() {
             setComplianceError(compliance);
             return;
           }
+          console.warn("[results] hydration_run_failed", {
+            stage: "results",
+            status: runResponse.status,
+          });
           const message = formatErrorMessage(runPayload, "Unable to run compatibility analysis.");
           throw new Error(message);
         }
@@ -1793,6 +2358,10 @@ export default function ResultsPage() {
       }
 
       if (!res.ok) {
+        console.warn("[results] hydration_failed", {
+          stage: "results",
+          status: res.status,
+        });
         const compliance = parseComplianceError({ status: res.status, payload });
         if (compliance) {
           setComplianceError(compliance);
@@ -1804,6 +2373,12 @@ export default function ResultsPage() {
       }
 
       const data: LatestAnalysis = await res.json();
+      console.info("[results] hydration_succeeded", {
+        stage: "results",
+        assessmentId: data.assessmentId ?? null,
+        jobId: data.jobId ?? null,
+        baselineId: data.baselineId ?? null,
+      });
       if (!data.assessmentId) {
         throw new Error("Latest assessment is missing an assessment ID.");
       }
@@ -1816,6 +2391,10 @@ export default function ResultsPage() {
       const path = query ? `/results?${query}` : "/results";
       await router.replace(path);
     } catch {
+      console.error("[results] hydration_failed", {
+        stage: "results",
+        status: "exception",
+      });
       setError(COMPATIBILITY_ANALYSIS_ERROR);
     } finally {
       setLoadingLatest(false);
@@ -1968,11 +2547,214 @@ export default function ResultsPage() {
                     score={activeScore}
                     verdict={opportunityVerdict}
                     advantageSignals={advantageSignals}
-                    primaryCta={primaryResultsCta}
+                    primaryCta={oneClickResultsCta}
+                    secondaryCta={secondaryResultsCta}
                     scoreAnalysisHref="#advanced-insights"
                     readiness={generationReadiness}
                     verificationCoverage={verificationCoverage}
+                    canonicalCoverage={latest?.verification_coverage ?? null}
+                    baselineEvidenceHref={baselineEvidenceHref}
+                    predictiveUnlock={predictiveUnlock}
                   />
+                  {applicationInsights.length ? (
+                    <section className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-4">
+                      <h3 className="text-lg font-semibold text-slate-100">Based on your past applications</h3>
+                      <ul className="mt-2 space-y-2 text-sm text-slate-100">
+                        {applicationInsights.map((insight, index) => (
+                          <li key={`application-insight-${index}`}>{insight.message}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                  {discoveredRoles.length ? (
+                    <section className="rounded-2xl border border-emerald-300/30 bg-emerald-500/10 p-4">
+                      <h3 className="text-lg font-semibold text-slate-100">Where you are most competitive</h3>
+                      <p className="mt-1 text-sm text-slate-200">
+                        Based on your experience, these roles are strongest next targets.
+                      </p>
+                      <div className="mt-3 space-y-3">
+                        {discoveredRoles.map((role) => (
+                          <article
+                            key={`discovered-role-${role.roleTitle}`}
+                            className="rounded-xl border border-white/12 bg-slate-950/35 p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-slate-100">{role.roleTitle}</p>
+                              <p className="text-xs text-slate-200">
+                                {role.fitLevel} · {role.estimatedFitScore}
+                              </p>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-200">{role.explanation}</p>
+                            {role.missingGaps.length ? (
+                              <p className="mt-1 text-xs text-amber-200">
+                                Gaps to address: {role.missingGaps.join(", ")}
+                              </p>
+                            ) : null}
+                            <div className="mt-2">
+                              <Link
+                                href={role.analyzeHref}
+                                className="inline-flex rounded-xl border border-emerald-300/45 px-3 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/15"
+                              >
+                                Analyze this role
+                              </Link>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                  {canShowEvidenceExpansion ? (
+                    <section className="rounded-2xl border border-white/12 bg-white/5 p-4">
+                      <h3 className="text-lg font-semibold text-slate-100">Prove this experience instead</h3>
+                      <p className="mt-1 text-sm text-slate-300">
+                        Only include experience that is real and defensible.
+                      </p>
+                      <div className="mt-3 space-y-3">
+                        {canonicalUnverifiedRequirements.map((requirement) => {
+                          const isOpen = expandingRequirement === requirement;
+                          const suggestion = autoEvidenceSuggestions.get(requirement) ?? null;
+                          const isDismissed = dismissedSuggestionRequirements.has(requirement.toLowerCase());
+                          return (
+                            <article
+                              key={`results-expansion-${requirement}`}
+                              className="rounded-xl border border-white/10 bg-slate-950/35 p-3"
+                            >
+                              <p className="text-sm text-slate-100">{requirement} is not verified</p>
+                              {suggestion && !isDismissed ? (
+                                <div className="mt-2 rounded-lg border border-emerald-300/25 bg-emerald-500/10 p-3 text-xs text-slate-100">
+                                  <p className="font-semibold text-emerald-100">Suggested evidence:</p>
+                                  <p className="mt-1">{suggestion.intro}</p>
+                                  <p className="mt-1">
+                                    <span className="font-semibold">Context:</span> {suggestion.context}
+                                  </p>
+                                  <p className="mt-1">
+                                    <span className="font-semibold">Description:</span> {suggestion.description}
+                                  </p>
+                                  <p className="mt-1">
+                                    <span className="font-semibold">Scope:</span> {suggestion.scope}
+                                  </p>
+                                  <div className="mt-2 flex gap-2">
+                                    <FormButton
+                                      onClick={() => {
+                                        setExpansionContext(suggestion.context);
+                                        setExpansionDescription(suggestion.description);
+                                        setExpansionImpact(suggestion.scope);
+                                        setExpansionConfirmedAccurate(true);
+                                        void submitEvidenceExpansion(requirement);
+                                      }}
+                                      disabled={expansionSubmitting}
+                                    >
+                                      Accept and verify
+                                    </FormButton>
+                                    <FormButton
+                                      variant="secondary"
+                                      onClick={() => {
+                                        setExpandingRequirement(requirement);
+                                        setExpansionContext(suggestion.context);
+                                        setExpansionDescription(suggestion.description);
+                                        setExpansionImpact(suggestion.scope);
+                                        setExpansionConfirmedAccurate(false);
+                                        setExpansionError(null);
+                                      }}
+                                    >
+                                      Edit before adding
+                                    </FormButton>
+                                    <FormButton
+                                      variant="ghost"
+                                      onClick={() =>
+                                        setDismissedSuggestionRequirements((current) => {
+                                          const next = new Set(current);
+                                          next.add(requirement.toLowerCase());
+                                          return next;
+                                        })
+                                      }
+                                    >
+                                      Dismiss
+                                    </FormButton>
+                                  </div>
+                                </div>
+                              ) : null}
+                              <div className="mt-2">
+                                <FormButton
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setExpandingRequirement(requirement);
+                                    setExpansionError(null);
+                                  }}
+                                >
+                                  Add supporting experience
+                                </FormButton>
+                              </div>
+                              {expansionSuccessByRequirement[requirement] ? (
+                                <p className="mt-2 text-sm text-emerald-200">
+                                  {expansionSuccessByRequirement[requirement]}
+                                </p>
+                              ) : null}
+                              {isOpen ? (
+                                <div className="mt-3 space-y-2 rounded-lg border border-sky-300/30 bg-sky-500/10 p-3">
+                                  <label className="block text-xs text-slate-200">
+                                    Where did you use this?
+                                    <textarea
+                                      className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                                      value={expansionContext}
+                                      onChange={(event) => setExpansionContext(event.target.value)}
+                                      rows={2}
+                                    />
+                                  </label>
+                                  <label className="block text-xs text-slate-200">
+                                    What did you do with this tool?
+                                    <textarea
+                                      className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                                      value={expansionDescription}
+                                      onChange={(event) => setExpansionDescription(event.target.value)}
+                                      rows={3}
+                                    />
+                                  </label>
+                                  <label className="block text-xs text-slate-200">
+                                    What impact did this have? (optional)
+                                    <textarea
+                                      className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                                      value={expansionImpact}
+                                      onChange={(event) => setExpansionImpact(event.target.value)}
+                                      rows={2}
+                                    />
+                                  </label>
+                                  <label className="flex items-center gap-2 text-xs text-slate-200">
+                                    <input
+                                      type="checkbox"
+                                      checked={expansionConfirmedAccurate}
+                                      onChange={(event) => setExpansionConfirmedAccurate(event.target.checked)}
+                                    />
+                                    This is accurate and reflects real experience
+                                  </label>
+                                  {expansionError ? (
+                                    <p className="text-xs text-rose-200">{expansionError}</p>
+                                  ) : null}
+                                  <div className="flex gap-2">
+                                    <FormButton
+                                      onClick={() => void submitEvidenceExpansion()}
+                                      disabled={expansionSubmitting}
+                                    >
+                                      {expansionSubmitting ? "Saving..." : "Save evidence"}
+                                    </FormButton>
+                                    <FormButton
+                                      variant="ghost"
+                                      onClick={() => {
+                                        setExpandingRequirement(null);
+                                        resetExpansionForm();
+                                      }}
+                                    >
+                                      Cancel
+                                    </FormButton>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ) : null}
 
                   {signalAlignment.renderable ? (
                     <SignalAlignmentSection

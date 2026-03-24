@@ -1,6 +1,9 @@
 import {
   Body,
   Controller,
+  HttpException,
+  InternalServerErrorException,
+  Logger,
   Get,
   Query,
   Post,
@@ -31,6 +34,7 @@ const COOKIE_IS_SECURE = NODE_ENV === 'production';
   }),
 )
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
@@ -58,9 +62,29 @@ export class AuthController {
     @Body() payload: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const response = await this.authService.login(payload);
-    this.setAuthCookie(res, response.accessToken);
-    return response;
+    this.logger.log(
+      `AuthController.login entered email=${payload.email?.trim()?.toLowerCase() ?? 'unknown'}`,
+    );
+    try {
+      const response = await this.authService.login(payload);
+      this.setAuthCookie(res, response.accessToken);
+      return response;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        this.logger.warn(
+          `AuthController.login failed with controlled error status=${error.getStatus()} message=${error.message}`,
+        );
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `AuthController.login failed unexpectedly message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        'Login failed due to unexpected controller error.',
+      );
+    }
   }
 
 

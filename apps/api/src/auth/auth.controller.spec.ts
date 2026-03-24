@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -90,5 +91,31 @@ describe('AuthController', () => {
       }),
     );
     expect(result).toEqual({ ok: true });
+  });
+
+  it('rethrows controlled login errors', async () => {
+    const dto: LoginDto = {
+      email: 'test@example.com',
+      password: 'Password123',
+    };
+    authService.login.mockRejectedValue(new UnauthorizedException('Invalid credentials'));
+    const res = { cookie: jest.fn() };
+
+    await expect(controller.login(dto, res as any)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('maps unexpected login errors to InternalServerErrorException', async () => {
+    const dto: LoginDto = {
+      email: 'test@example.com',
+      password: 'Password123',
+    };
+    authService.login.mockRejectedValue(new Error('unexpected failure'));
+    const res = { cookie: jest.fn() };
+
+    await expect(controller.login(dto, res as any)).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
   });
 });

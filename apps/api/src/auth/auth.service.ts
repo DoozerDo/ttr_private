@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  InternalServerErrorException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -133,28 +134,61 @@ export class AuthService {
   }
 
   async login(payload: LoginDto): Promise<AuthResponseDto> {
-    const user = await this.validateCredentials(payload);
-    const isFounder = this.isFounder(user.email);
-    if (isFounder) {
-      this.logger.log(`Founder override applied for ${user.email}`);
-    }
-
-    if (this.requireAccessCode && !isFounder) {
-      const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
-        user.id,
+    this.logger.log(
+      `Login attempt started email=${payload.email?.trim()?.toLowerCase() ?? 'unknown'}`,
+    );
+    try {
+      this.ensureLoginConfig();
+      const user = await this.validateCredentials(payload);
+      this.logger.log(
+        `Login user lookup + password validation passed userId=${user.id ?? 'unknown'}`,
       );
 
-      if (!hasActiveAccess) {
-        const redeemedAssignedCode =
-          await this.accessCodesService.redeemAssignedCodeForUser(user);
+      const isFounder = this.isFounder(user.email);
+      if (isFounder) {
+        this.logger.log(`Founder override applied for ${user.email}`);
+      }
 
-        if (!redeemedAssignedCode) {
+      this.logger.log(
+        `Login access code enforcement check requireAccessCode=${this.requireAccessCode} isFounder=${isFounder}`,
+      );
+      if (this.requireAccessCode && !isFounder) {
+        if (!user?.id) {
           throw new ForbiddenException('Access code required');
         }
-      }
-    }
+        const hasActiveAccess = await this.accessCodesService.userHasActiveAccess(
+          user.id,
+        );
 
-    return this.buildAuthResponse(user);
+        if (!hasActiveAccess) {
+          const redeemedAssignedCode =
+            await this.accessCodesService.redeemAssignedCodeForUser(user);
+
+          if (!redeemedAssignedCode) {
+            throw new ForbiddenException('Access code required');
+          }
+        }
+      }
+
+      this.logger.log(`Login token generation starting userId=${user.id}`);
+      return this.buildAuthResponse(user);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        this.logger.warn(
+          `Login failed with controlled error status=${error.getStatus()} message=${error.message}`,
+        );
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(
+        `Login failed with unexpected error message=${message}`,
+        stack,
+      );
+      throw new InternalServerErrorException(
+        'Login failed due to unexpected server error.',
+      );
+    }
   }
 
 
@@ -250,15 +284,36 @@ export class AuthService {
 
 
   private async validateCredentials(payload: LoginDto): Promise<User> {
+    this.logger.log(
+      `Login credential validation started email=${payload.email?.trim()?.toLowerCase() ?? 'unknown'}`,
+    );
     const user = await this.usersService.findByEmail(payload.email);
+    this.logger.log(
+      `Login user lookup completed found=${Boolean(user)} email=${payload.email?.trim()?.toLowerCase() ?? 'unknown'}`,
+    );
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isValidPassword = await bcrypt.compare(
-      payload.password,
-      user.passwordHash,
+    let isValidPassword = false;
+    try {
+      if (!user.passwordHash) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+      isValidPassword = await bcrypt.compare(payload.password, user.passwordHash);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Login password comparison failed email=${payload.email?.trim()?.toLowerCase() ?? 'unknown'} message=${message}`,
+      );
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    this.logger.log(
+      `Login password validation completed isValidPassword=${isValidPassword} userId=${user.id ?? 'unknown'}`,
     );
 
     if (!isValidPassword) {
@@ -272,6 +327,33 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  private ensureLoginConfig() {
+    const appPublicWebUrl =
+      this.configService.get<string>('APP_PUBLIC_WEB_URL')?.trim() ?? '';
+    if (!appPublicWebUrl) {
+      throw new InternalServerErrorException(
+        'Missing APP_PUBLIC_WEB_URL environment variable for login.',
+      );
+    }
+    const jwtSecret = this.configService.get<string>('JWT_SECRET')?.trim() ?? '';
+    if (!jwtSecret) {
+      throw new InternalServerErrorException(
+        'Missing JWT_SECRET environment variable for login.',
+      );
+    }
+    const requireAccessCodeRaw =
+      this.configService.get<string>('REQUIRE_ACCESS_CODE');
+    if (
+      requireAccessCodeRaw !== undefined &&
+      requireAccessCodeRaw !== 'true' &&
+      requireAccessCodeRaw !== 'false'
+    ) {
+      throw new InternalServerErrorException(
+        'Invalid REQUIRE_ACCESS_CODE value. Expected true or false.',
+      );
+    }
   }
 
   private get requireEmailConfirmation(): boolean {
@@ -397,7 +479,19 @@ export class AuthService {
       entitlements,
     };
 
-    const accessToken = this.jwtService.sign(payload);
+    let accessToken: string;
+    try {
+      accessToken = this.jwtService.sign(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Login token generation failed userId=${user.id} message=${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new InternalServerErrorException(
+        'Unable to generate auth token.',
+      );
+    }
 
     const { passwordHash, ...sanitizedUser } = user;
 

@@ -13,7 +13,9 @@ import {
   Application,
   ApplicationStage,
   ApplicationTrackerStatus,
+  OutcomeLinkageSnapshot,
   ResumeArtifactRecord,
+  VerificationCoverageSnapshot,
 } from './application.entity';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
@@ -44,6 +46,15 @@ export type ResumeGenerationTrackerInput = {
   resumeArtifactId: string;
   resumeArtifactType?: 'resume' | 'cover';
   resumeArtifactFormat?: string | null;
+  analysisId?: string | null;
+  baselineId?: string | null;
+  verificationCoverageSnapshot?: VerificationCoverageSnapshot | null;
+  outcomeLinkageSnapshot?: OutcomeLinkageSnapshot | null;
+};
+
+export type ApplicationInsight = {
+  message: string;
+  type: 'warning' | 'success' | 'gap';
 };
 
 @Injectable()
@@ -82,6 +93,8 @@ export class ApplicationsService {
       appliedAt,
       lastTouchedAt: now,
       baselineVersionId: null,
+      baselineId: dto.baselineId?.trim() || null,
+      analysisId: dto.analysisId?.trim() || null,
       appliedDate: appliedAt,
       fitScore: dto.fitScore ?? null,
       stage: dto.stage ?? ApplicationStage.SAVED,
@@ -89,6 +102,10 @@ export class ApplicationsService {
       sourceUrl: dto.sourceUrl?.trim() || null,
       cxFitScoreSnapshot: {},
       resumeArtifacts: [],
+      verificationCoverageSnapshot:
+        this.normalizeVerificationCoverageSnapshot(dto.verificationCoverageSnapshot),
+      outcomeLinkageSnapshot:
+        this.normalizeOutcomeLinkageSnapshot(dto.outcomeLinkageSnapshot),
     });
 
     return this.applicationRepository.save(application);
@@ -141,6 +158,15 @@ export class ApplicationsService {
     if (dto.company !== undefined) application.company = dto.company.trim();
     if (dto.title !== undefined) application.title = dto.title.trim();
     if (dto.jobId !== undefined) application.jobId = dto.jobId || null;
+    if (dto.analysisId !== undefined) {
+      application.analysisId = dto.analysisId?.trim() || null;
+    }
+    if (dto.baselineId !== undefined) {
+      application.baselineId = dto.baselineId?.trim() || null;
+    }
+    if (dto.baselineVersionId !== undefined) {
+      application.baselineVersionId = dto.baselineVersionId?.trim() || null;
+    }
     if (dto.appliedDate !== undefined) {
       application.appliedDate = dto.appliedDate
         ? new Date(dto.appliedDate)
@@ -161,6 +187,15 @@ export class ApplicationsService {
     if (dto.sourceUrl !== undefined) {
       application.sourceUrl = dto.sourceUrl?.trim() || null;
       application.jobUrl = dto.sourceUrl?.trim() || null;
+    }
+    if (dto.verificationCoverageSnapshot !== undefined) {
+      application.verificationCoverageSnapshot =
+        this.normalizeVerificationCoverageSnapshot(dto.verificationCoverageSnapshot);
+    }
+    if (dto.outcomeLinkageSnapshot !== undefined) {
+      application.outcomeLinkageSnapshot = this.normalizeOutcomeLinkageSnapshot(
+        dto.outcomeLinkageSnapshot,
+      );
     }
 
     application.lastTouchedAt = new Date();
@@ -267,6 +302,14 @@ export class ApplicationsService {
       }
       entry.baselineVersionId =
         input.baselineVersionId ?? entry.baselineVersionId;
+      entry.baselineId = input.baselineId ?? entry.baselineId;
+      entry.analysisId = input.analysisId ?? entry.analysisId;
+      if (input.verificationCoverageSnapshot) {
+        entry.verificationCoverageSnapshot = input.verificationCoverageSnapshot;
+      }
+      if (input.outcomeLinkageSnapshot) {
+        entry.outcomeLinkageSnapshot = input.outcomeLinkageSnapshot;
+      }
       entry.lastTouchedAt = now;
       entry.resumeArtifacts = this.mergeArtifacts(
         entry.resumeArtifacts,
@@ -296,6 +339,8 @@ export class ApplicationsService {
       appliedAt: null,
       lastTouchedAt: now,
       baselineVersionId: input.baselineVersionId ?? null,
+      baselineId: input.baselineId ?? null,
+      analysisId: input.analysisId ?? null,
       appliedDate: null,
       fitScore: input.cxFitScoreSnapshot?.overallScore ?? null,
       stage: ApplicationStage.SAVED,
@@ -303,6 +348,8 @@ export class ApplicationsService {
       sourceUrl: input.jobUrl?.trim() || null,
       cxFitScoreSnapshot: input.cxFitScoreSnapshot ?? {},
       resumeArtifacts: [artifactRecord],
+      verificationCoverageSnapshot: input.verificationCoverageSnapshot ?? {},
+      outcomeLinkageSnapshot: input.outcomeLinkageSnapshot ?? {},
     });
 
     return this.applicationRepository.save(newEntry);
@@ -362,5 +409,109 @@ export class ApplicationsService {
       return existing;
     }
     return [...existing, incoming];
+  }
+
+  async buildInsightsForUser(userId: string): Promise<ApplicationInsight[]> {
+    const applications = await this.applicationRepository.find({
+      where: { userId },
+      order: { lastTouchedAt: 'DESC' },
+      take: 100,
+    });
+
+    const insights: ApplicationInsight[] = [];
+    const interviewingOrBetter = new Set([
+      ApplicationStage.INTERVIEWING,
+      ApplicationStage.OFFER,
+    ]);
+
+    const withUnverified = applications.filter((application) => {
+      const unverified =
+        application.verificationCoverageSnapshot?.unverifiedRequirements ?? [];
+      return Array.isArray(unverified) && unverified.length > 0;
+    });
+    const withUnverifiedNoInterviews = withUnverified.filter(
+      (application) => !interviewingOrBetter.has(application.stage),
+    );
+    if (withUnverified.length >= 2 && withUnverifiedNoInterviews.length >= 2) {
+      const recurring = this.collectTopRequirement(
+        withUnverifiedNoInterviews.flatMap(
+          (application) =>
+            application.verificationCoverageSnapshot?.unverifiedRequirements ?? [],
+        ),
+      );
+      if (recurring) {
+        insights.push({
+          type: 'warning',
+          message: `You applied to roles where ${recurring} was unverified and did not receive interviews yet.`,
+        });
+      }
+    }
+
+    const fullyVerified = applications.filter((application) => {
+      const snapshot = application.verificationCoverageSnapshot ?? {};
+      const unverified = Array.isArray(snapshot.unverifiedRequirements)
+        ? snapshot.unverifiedRequirements.length
+        : 0;
+      return unverified === 0;
+    });
+    const fullyVerifiedWithInterviews = fullyVerified.filter((application) =>
+      interviewingOrBetter.has(application.stage),
+    );
+    if (fullyVerified.length >= 1 && fullyVerifiedWithInterviews.length >= 1) {
+      insights.push({
+        type: 'success',
+        message: 'You received interviews when all core requirements were verified.',
+      });
+    }
+
+    return insights.slice(0, 3);
+  }
+
+  private collectTopRequirement(values: unknown[]) {
+    const counts = new Map<string, number>();
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const normalized = value.trim();
+      if (!normalized) continue;
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+    let winner: string | null = null;
+    let max = 0;
+    for (const [label, count] of counts.entries()) {
+      if (count > max) {
+        winner = label;
+        max = count;
+      }
+    }
+    return winner;
+  }
+
+  private normalizeVerificationCoverageSnapshot(value: unknown): VerificationCoverageSnapshot {
+    if (!value || typeof value !== 'object') return {};
+    const record = value as Record<string, unknown>;
+    const toList = (input: unknown) =>
+      Array.isArray(input)
+        ? input.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    return {
+      verifiedRequirements: toList(record.verifiedRequirements),
+      inferredRequirements: toList(record.inferredRequirements),
+      unverifiedRequirements: toList(record.unverifiedRequirements),
+      supportedRequirements: toList(record.supportedRequirements),
+    };
+  }
+
+  private normalizeOutcomeLinkageSnapshot(value: unknown): OutcomeLinkageSnapshot {
+    if (!value || typeof value !== 'object') return {};
+    const record = value as Record<string, unknown>;
+    const toList = (input: unknown) =>
+      Array.isArray(input)
+        ? input.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    return {
+      removedTargeting: toList(record.removedTargeting),
+      addedEvidence: toList(record.addedEvidence),
+      evidenceAdded: Boolean(record.evidenceAdded),
+    };
   }
 }

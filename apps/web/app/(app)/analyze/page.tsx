@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert } from "@/components/Alert";
 import { FormButton, SecondaryActionLink } from "@/components/FormButton";
@@ -427,6 +427,7 @@ function AssessmentHeader() {
 }
 
 export default function AnalyzePage() {
+  const searchParams = useSearchParams();
   const router = useRouter();
 
   const [baselines, setBaselines] = useState<BaselineDto[]>([]);
@@ -441,6 +442,7 @@ export default function AnalyzePage() {
   const [jobsError, setJobsError] = useState<string | null>(null);
 
   const [jobDescription, setJobDescription] = useState("");
+  const suggestedRole = useMemo(() => searchParams?.get("suggestedRole")?.trim() ?? "", [searchParams]);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [restoredAt, setRestoredAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -579,6 +581,14 @@ export default function AnalyzePage() {
     const selected = baselines.find((baseline) => baseline.id === baselineId);
     setBaselineVersionId(latestVersionId(selected));
   }, [baselineId, baselines]);
+
+  useEffect(() => {
+    if (!suggestedRole) return;
+    setJobDescription((current) => {
+      if (current.trim().length > 0) return current;
+      return `Target role: ${suggestedRole}\n\nPaste the job description here to analyze this role.`;
+    });
+  }, [suggestedRole]);
 
   useEffect(() => {
     const stored = readStoredAnalysis();

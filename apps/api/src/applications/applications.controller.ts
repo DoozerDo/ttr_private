@@ -7,12 +7,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
+import { ApplicationStage } from './application.entity';
 import { ApplicationsService } from './applications.service';
 
 @Controller('applications')
@@ -33,12 +35,28 @@ export class ApplicationsController {
   }
 
   @Get()
-  async listApplications(@Req() request: Request & { user?: { id?: string } }) {
+  async listApplications(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query('stage') stage?: ApplicationStage,
+    @Query('company') company?: string,
+  ) {
     const userId = request.user?.id;
     if (!userId) {
       throw new BadRequestException('Invalid user context');
     }
-    return this.applicationsService.listApplicationsForUser(userId);
+    return this.applicationsService.listApplicationsForUser(userId, {
+      stage,
+      company,
+    });
+  }
+
+  @Get('insights')
+  async getInsights(@Req() request: Request & { user?: { id?: string } }) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+    return this.applicationsService.buildInsightsForUser(userId);
   }
 
   @Get('export')

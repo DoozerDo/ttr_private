@@ -128,6 +128,15 @@ async function bootstrap() {
     console.log(
       `DEV CORS allowlist: ${corsOrigins.join(', ')}; credentials enabled`,
     );
+    const appPublicWebUrl =
+      config.get<string>('APP_PUBLIC_WEB_URL') ?? process.env.APP_PUBLIC_WEB_URL;
+    console.log(
+      `[DEV CONFIG] APP_PUBLIC_WEB_URL ${
+        appPublicWebUrl && appPublicWebUrl.trim().length > 0
+          ? 'present'
+          : 'missing'
+      }`,
+    );
   }
 
   await app.init();

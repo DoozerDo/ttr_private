@@ -14,6 +14,7 @@ export enum ApplicationStage {
   INTERVIEWING = 'INTERVIEWING',
   OFFER = 'OFFER',
   REJECTED = 'REJECTED',
+  NO_RESPONSE = 'NO_RESPONSE',
   WITHDRAWN = 'WITHDRAWN',
 }
 
@@ -27,6 +28,19 @@ export type ResumeArtifactRecord = {
   type: 'resume' | 'cover';
   createdAt: string;
   exportFormat?: string | null;
+};
+
+export type VerificationCoverageSnapshot = {
+  verifiedRequirements?: string[];
+  inferredRequirements?: string[];
+  unverifiedRequirements?: string[];
+  supportedRequirements?: string[];
+};
+
+export type OutcomeLinkageSnapshot = {
+  removedTargeting?: string[];
+  addedEvidence?: string[];
+  evidenceAdded?: boolean;
 };
 
 @Entity({ name: 'applications' })
@@ -78,6 +92,12 @@ export class Application {
   @Column({ type: 'uuid', nullable: true })
   baselineVersionId!: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  baselineId!: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  analysisId!: string | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   appliedDate!: Date | null;
 
@@ -108,6 +128,18 @@ export class Application {
     default: () => "'[]'::jsonb",
   })
   resumeArtifacts!: ResumeArtifactRecord[];
+
+  @Column({
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  verificationCoverageSnapshot!: VerificationCoverageSnapshot;
+
+  @Column({
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  outcomeLinkageSnapshot!: OutcomeLinkageSnapshot;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

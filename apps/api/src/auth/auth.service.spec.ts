@@ -3,6 +3,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import {
+  ForbiddenException,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -80,6 +85,9 @@ describe('AuthService', () => {
               }
               if (key === 'APP_PUBLIC_WEB_URL') {
                 return 'http://localhost:3000';
+              }
+              if (key === 'JWT_SECRET') {
+                return 'test-jwt-secret';
               }
               return undefined;
             }),
@@ -191,6 +199,50 @@ describe('AuthService', () => {
     });
   });
 
+  it('returns UnauthorizedException when user is not found', async () => {
+    const payload: LoginDto = {
+      email: 'missing@example.com',
+      password: 'Password123',
+    };
+    usersService.findByEmail.mockResolvedValue(null);
+
+    await expect(service.login(payload)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('returns UnauthorizedException when password is invalid', async () => {
+    const payload: LoginDto = {
+      email: 'user@example.com',
+      password: 'WrongPassword',
+    };
+    const passwordHash = await bcrypt.hash('Password123', 10);
+    usersService.findByEmail.mockResolvedValue({
+      id: 'user-id',
+      email: payload.email,
+      firstName: 'Test',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as User);
+
+    await expect(service.login(payload)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
   it('enforces access code for admin users when access code is required', async () => {
     const payload: LoginDto = {
       email: 'admin@example.com',
@@ -229,6 +281,12 @@ describe('AuthService', () => {
       }
       if (key === 'NODE_ENV') {
         return 'test';
+      }
+      if (key === 'APP_PUBLIC_WEB_URL') {
+        return 'http://localhost:3000';
+      }
+      if (key === 'JWT_SECRET') {
+        return 'test-jwt-secret';
       }
       return undefined;
     });
@@ -277,6 +335,12 @@ describe('AuthService', () => {
       }
       if (key === 'NODE_ENV') {
         return 'test';
+      }
+      if (key === 'APP_PUBLIC_WEB_URL') {
+        return 'http://localhost:3000';
+      }
+      if (key === 'JWT_SECRET') {
+        return 'test-jwt-secret';
       }
       return undefined;
     });
@@ -334,6 +398,12 @@ describe('AuthService', () => {
       if (key === 'NODE_ENV') {
         return 'test';
       }
+      if (key === 'APP_PUBLIC_WEB_URL') {
+        return 'http://localhost:3000';
+      }
+      if (key === 'JWT_SECRET') {
+        return 'test-jwt-secret';
+      }
       return undefined;
     });
 
@@ -344,6 +414,90 @@ describe('AuthService', () => {
 
     expect(accessCodesService.userHasActiveAccess).toHaveBeenCalledWith(savedUser.id);
     expect(accessCodesService.redeemAssignedCodeForUser).toHaveBeenCalledWith(savedUser);
+  });
+
+  it('returns ForbiddenException when access code is required and user id is missing', async () => {
+    const payload: LoginDto = {
+      email: 'broken@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser = {
+      id: '' as unknown as string,
+      email: payload.email,
+      firstName: 'Broken',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as User;
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_ACCESS_CODE') return 'true';
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
+      return undefined;
+    });
+
+    await expect(service.login(payload)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('returns InternalServerErrorException when JWT_SECRET is missing', async () => {
+    const payload: LoginDto = {
+      email: 'user@example.com',
+      password: 'Password123',
+    };
+    const passwordHash = await bcrypt.hash(payload.password, 10);
+    const savedUser: User = {
+      id: 'user-id',
+      email: payload.email,
+      firstName: 'Test',
+      lastName: 'User',
+      emailConfirmed: true,
+      passwordHash,
+      calibrationProfileName: null,
+      calibrationWeights: null,
+      roleTitle: null,
+      company: null,
+      linkedinUrl: null,
+      intendedUse: null,
+      profileCompletedAt: null,
+      role: 'user',
+      subscriptionTier: SubscriptionTier.FREE,
+      accountType: AccountType.FREE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    usersService.findByEmail.mockResolvedValue(savedUser);
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return '';
+      return undefined;
+    });
+
+    await expect(service.login(payload)).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+    await expect(service.login(payload)).rejects.toThrow(
+      'Missing JWT_SECRET environment variable for login.',
+    );
   });
 
   it('allows login with an existing active access code when required', async () => {
@@ -379,6 +533,8 @@ describe('AuthService', () => {
       if (key === 'REQUIRE_ACCESS_CODE') return 'true';
       if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
       if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
       return undefined;
     });
 
@@ -425,6 +581,8 @@ describe('AuthService', () => {
       if (key === 'REQUIRE_EMAIL_CONFIRMATION') return 'false';
       if (key === 'FOUNDER_EMAILS') return 'founder@targetthisrole.com';
       if (key === 'NODE_ENV') return 'test';
+      if (key === 'APP_PUBLIC_WEB_URL') return 'http://localhost:3000';
+      if (key === 'JWT_SECRET') return 'test-jwt-secret';
       return undefined;
     });
 

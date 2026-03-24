@@ -36,6 +36,9 @@ describe('ApplicationsController', () => {
         auditId: 'audit-id',
         baselineVersionHash: 'hash-id',
       }),
+      buildInsightsForUser: jest
+        .fn()
+        .mockResolvedValue([{ type: 'warning', message: 'Insight' }]),
     }) as unknown as ApplicationsService;
 
   afterEach(() => {
@@ -143,5 +146,16 @@ describe('ApplicationsController', () => {
       'X-Baseline-Version-Hash',
       'hash-id',
     );
+  });
+
+  it('returns user insights', async () => {
+    const service = createMockService();
+    const controller = new ApplicationsController(service);
+    const request = createMockRequest('user-1');
+
+    const result = await controller.getInsights(request as any);
+
+    expect(service.buildInsightsForUser).toHaveBeenCalledWith('user-1');
+    expect(result).toEqual([{ type: 'warning', message: 'Insight' }]);
   });
 });

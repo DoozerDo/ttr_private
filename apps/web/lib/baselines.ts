@@ -232,3 +232,22 @@ export async function updateBaselineBlockPolicies(
     "Update baseline blocks",
   );
 }
+
+export async function appendStrengtheningAddition(
+  baselineId: string,
+  payload: {
+    rawText: string;
+    signalType?: string | null;
+  },
+): Promise<BaselineDto> {
+  const response = await fetch(
+    `${BASELINE_API_PATH}/${encodeURIComponent(baselineId)}/strengthening-additions`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return ensureJsonPayload<BaselineDto>(response, "Append strengthening addition");
+}

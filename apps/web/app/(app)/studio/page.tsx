@@ -27,6 +27,8 @@ import {
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
+import { appendStrengtheningAddition } from "@/lib/baselines";
+import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import {
   buildCoverLetterParagraphs,
   collectNormalizedContextValues,
@@ -120,8 +122,16 @@ type LatestAnalysis = {
     verifiedClaims?: number | null;
     inferredClaims?: number | null;
     unverifiedClaims?: number | null;
+    verifiedRequirements?: string[] | null;
+    inferredRequirements?: string[] | null;
+    supportedRequirements?: string[] | null;
     unverifiedRequirements?: string[] | null;
   } | null;
+};
+
+type ApplicationInsight = {
+  message?: string;
+  type?: "warning" | "success" | "gap" | string;
 };
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
@@ -495,6 +505,61 @@ export default function StudioPage() {
   const [excludedTargetingLabels, setExcludedTargetingLabels] = useState<Set<string>>(new Set());
   const [targetingAdjustmentFeedback, setTargetingAdjustmentFeedback] = useState<string | null>(null);
   const [targetingAdjustmentStatus, setTargetingAdjustmentStatus] = useState<"success" | "warning" | null>(null);
+  const [lastRemovedTargetingLabels, setLastRemovedTargetingLabels] = useState<string[]>([]);
+  const [appliedExclusionsFromResults, setAppliedExclusionsFromResults] = useState(false);
+  const [expandingRequirement, setExpandingRequirement] = useState<string | null>(null);
+  const [expansionContext, setExpansionContext] = useState("");
+  const [expansionDescription, setExpansionDescription] = useState("");
+  const [expansionImpact, setExpansionImpact] = useState("");
+  const [expansionConfirmedAccurate, setExpansionConfirmedAccurate] = useState(false);
+  const [expansionSubmitting, setExpansionSubmitting] = useState(false);
+  const [expansionError, setExpansionError] = useState<string | null>(null);
+  const [expansionSuccessByRequirement, setExpansionSuccessByRequirement] = useState<Record<string, string>>({});
+  const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
+  const queryExcludedRequirements = useMemo(
+    () =>
+      (
+        typeof searchParams?.getAll === "function"
+          ? searchParams.getAll("excludedRequirements")
+          : (() => {
+              const single = searchParams?.get("excludedRequirements");
+              return single ? [single] : [];
+            })()
+      )
+        .map((requirement) =>
+          normalizeUserFacingRequirementLabel(requirement, {
+            sourceContext: null,
+            issueCode: "unsupported_technology_claim",
+          }),
+        )
+        .filter((label): label is string => typeof label === "string" && label.length > 0)
+        .map((label) => label.toLowerCase()),
+    [searchParams],
+  );
+  useEffect(() => {
+    if (!queryExcludedRequirements.length) {
+      setAppliedExclusionsFromResults(false);
+      return;
+    }
+    setExcludedTargetingLabels((current) => {
+      const next = new Set(current);
+      queryExcludedRequirements.forEach((label) => next.add(label));
+      return next;
+    });
+    setLastRemovedTargetingLabels(
+      Array.from(
+        new Set(
+          queryExcludedRequirements.map((label) =>
+            normalizeUserFacingRequirementLabel(label, {
+              sourceContext: null,
+              issueCode: "unsupported_technology_claim",
+            }) ?? label,
+          ),
+        ),
+      ),
+    );
+    setAppliedExclusionsFromResults(true);
+  }, [queryExcludedRequirements]);
 
   const [resumeState, setResumeState] = useState<DocumentState>(() => createDocumentState());
   const [resumeGenerating, setResumeGenerating] = useState(false);
@@ -515,6 +580,7 @@ export default function StudioPage() {
   const [, setCoverAuditId] = useState<string | undefined>();
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
+  const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
 
   function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
     setCoverLetterComplianceBlocked(blocked);
@@ -527,11 +593,71 @@ export default function StudioPage() {
   const trackerEntryId =
     readTrackerField(resumeState.response, "opportunityId") ??
     readTrackerField(resumeState.response, "trackerEntryId");
-  const trackerStatus = readTrackerField(resumeState.response, "trackerStatus");
   const handleOpenTracker = useCallback(() => {
     if (!trackerEntryId) return;
-    void router.push("/job-tracker");
-  }, [router, trackerEntryId]);
+    void (async () => {
+      try {
+        const coverage = analysis?.verification_coverage ?? null;
+        const verifiedRequirements = Array.isArray(coverage?.verifiedRequirements)
+          ? coverage.verifiedRequirements
+          : [];
+        const inferredRequirements = Array.isArray(coverage?.inferredRequirements)
+          ? coverage.inferredRequirements
+          : [];
+        const unverifiedRequirements = Array.isArray(coverage?.unverifiedRequirements)
+          ? coverage.unverifiedRequirements
+          : [];
+        const supportedRequirements = Array.isArray(coverage?.supportedRequirements)
+          ? coverage.supportedRequirements
+          : [];
+        const rawScore =
+          typeof analysis?.score === "number"
+            ? analysis.score
+            : typeof analysis?.overallScore === "number"
+            ? analysis.overallScore
+            : null;
+        const scoreValue = typeof rawScore === "number" ? Math.round(rawScore) : null;
+        await fetch(`/api/applications/${encodeURIComponent(trackerEntryId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            analysisId: requestedAnalysisId || null,
+            baselineId: selectedBaselineId || analysis?.baselineId || null,
+            baselineVersionId: selectedBaselineVersionId || analysis?.baselineVersionId || null,
+            fitScore: scoreValue,
+            verificationCoverageSnapshot: {
+              verifiedRequirements,
+              inferredRequirements,
+              unverifiedRequirements,
+              supportedRequirements,
+            },
+            outcomeLinkageSnapshot: {
+              removedTargeting: Array.from(excludedTargetingLabels),
+              addedEvidence: Object.keys(expansionSuccessByRequirement),
+              evidenceAdded: Object.keys(expansionSuccessByRequirement).length > 0,
+            },
+          }),
+        });
+      } catch {
+        // Best-effort snapshot capture before opening tracker.
+      } finally {
+        void router.push("/job-tracker");
+      }
+    })();
+  }, [
+    analysis?.baselineId,
+    analysis?.baselineVersionId,
+    analysis?.overallScore,
+    analysis?.score,
+    analysis?.verification_coverage,
+    excludedTargetingLabels,
+    expansionSuccessByRequirement,
+    requestedAnalysisId,
+    router,
+    selectedBaselineId,
+    selectedBaselineVersionId,
+    trackerEntryId,
+  ]);
 
   const { isPro } = useEntitlements();
 
@@ -558,6 +684,32 @@ export default function StudioPage() {
   useEffect(() => {
     setCoverLetterComplianceBlocked(null);
   }, [selectedJobId, selectedBaselineId, selectedBaselineVersionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadInsights = async () => {
+      try {
+        const response = await fetch("/api/applications/insights", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!Array.isArray(payload) || cancelled) return;
+        setApplicationInsights(
+          payload.filter(
+            (item): item is ApplicationInsight =>
+              Boolean(item) &&
+              typeof item === "object" &&
+              typeof (item as { message?: unknown }).message === "string",
+          ),
+        );
+      } catch {
+        // Non-blocking.
+      }
+    };
+    void loadInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
@@ -676,10 +828,16 @@ export default function StudioPage() {
     };
   }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
   useEffect(() => {
-    setExcludedTargetingLabels(new Set());
+    setExcludedTargetingLabels(new Set(queryExcludedRequirements));
     setTargetingAdjustmentFeedback(null);
     setTargetingAdjustmentStatus(null);
-  }, [requestedAnalysisId, effectiveJobId, effectiveBaselineId, effectiveBaselineVersionId]);
+  }, [
+    requestedAnalysisId,
+    effectiveJobId,
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    queryExcludedRequirements,
+  ]);
   const generationMessage = useMemo(() => {
     if (!requestedAnalysisId) {
       return "Run a role compatibility analysis first.";
@@ -757,6 +915,40 @@ export default function StudioPage() {
       }));
     return buildVerificationIssuesFromCanonicalClaims(syntheticClaims);
   }, [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels]);
+  const canonicalUnverifiedRequirements = useMemo(
+    () =>
+      (analysis?.verification_coverage?.unverifiedRequirements ?? [])
+        .map((requirement) =>
+          normalizeUserFacingRequirementLabel(requirement, {
+            sourceContext: null,
+            issueCode: "unsupported_technology_claim",
+          }),
+        )
+        .filter((label): label is string => typeof label === "string" && label.length > 0)
+        .filter((label) => !excludedTargetingLabels.has(label.toLowerCase())),
+    [analysis?.verification_coverage?.unverifiedRequirements, excludedTargetingLabels],
+  );
+  const showEvidenceExpansion = useMemo(
+    () =>
+      typeof analysisScore === "number" &&
+      analysisScore >= 70 &&
+      canonicalUnverifiedRequirements.length > 0,
+    [analysisScore, canonicalUnverifiedRequirements.length],
+  );
+  const autoEvidenceSuggestions = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildEvidenceSuggestion>>();
+    for (const requirement of canonicalUnverifiedRequirements) {
+      map.set(
+        requirement,
+        buildEvidenceSuggestion({
+          requirement,
+          supportingSignals: analysis?.supportingSignals,
+          baselineEvidence: analysis?.baselineEvidence ?? analysis?.summary,
+        }),
+      );
+    }
+    return map;
+  }, [analysis?.baselineEvidence, analysis?.summary, analysis?.supportingSignals, canonicalUnverifiedRequirements]);
   const hasCanonicalCoverage = useMemo(() => {
     const coverage = analysis?.verification_coverage;
     if (!coverage) return false;
@@ -779,14 +971,13 @@ export default function StudioPage() {
       if (activeClaimVerifications.length > 0) {
         return canonicalClaimIssues;
       }
-      return activeGenerationReadiness.verificationIssues;
+      return [];
     },
     [
       hasCanonicalCoverage,
       canonicalClaimIssues,
       canonicalCoverageIssues,
       activeClaimVerifications.length,
-      activeGenerationReadiness.verificationIssues,
     ],
   );
   const verificationCoverage = useMemo(
@@ -1034,36 +1225,133 @@ export default function StudioPage() {
     return payload;
   }
 
-  const blockingTargetingLabels = useMemo(() => {
-    const labels = new Set<string>();
-    for (const issue of aggregatedVerificationIssues.primary) {
-      if (issue.severity !== "block") continue;
-      const normalized = normalizeUserFacingRequirementLabel(issue.claim, {
-        sourceContext: issue.sourceContext,
-        issueCode: issue.code,
-      });
-      if (!normalized) continue;
-      labels.add(normalized.toLowerCase());
-    }
-    return labels;
-  }, [aggregatedVerificationIssues.primary]);
-
-  const applyTargetingAdjustment = useCallback((labels: Set<string>) => {
-    if (!labels.size) {
+  const applyTargetingAdjustment = useCallback((labels: string[]) => {
+    const normalizedLabels = labels
+      .map((label) =>
+        normalizeUserFacingRequirementLabel(label, {
+          sourceContext: null,
+          issueCode: "unsupported_technology_claim",
+        }),
+      )
+      .filter((label): label is string => typeof label === "string" && label.length > 0);
+    if (!normalizedLabels.length) {
       setTargetingAdjustmentFeedback("No unsupported requirements were found to remove from targeting.");
       setTargetingAdjustmentStatus("warning");
       return;
     }
+    setLastRemovedTargetingLabels(Array.from(new Set(normalizedLabels)));
     setExcludedTargetingLabels((current) => {
       const next = new Set(current);
-      labels.forEach((label) => next.add(label));
+      normalizedLabels.forEach((label) => next.add(label.toLowerCase()));
       return next;
     });
   }, []);
+  const resetExpansionForm = useCallback(() => {
+    setExpansionContext("");
+    setExpansionDescription("");
+    setExpansionImpact("");
+    setExpansionConfirmedAccurate(false);
+    setExpansionError(null);
+    setExpansionSubmitting(false);
+  }, []);
+  const runAnalysisRefreshAfterExpansion = useCallback(async () => {
+    if (!effectiveJobId || !effectiveBaselineId) return;
+    const response = await fetch("/api/analysis/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: effectiveJobId,
+        baseline_id: effectiveBaselineId,
+        baseline_version_id: effectiveBaselineVersionId || undefined,
+      }),
+    });
+    const payload = await readResponsePayload(response);
+    if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error(formatErrorMessage(payload, "Analysis refresh failed after saving evidence."));
+    }
+    const record = payload as Record<string, unknown>;
+    const nextAnalysisId =
+      (typeof record.assessmentId === "string" && record.assessmentId.trim()) ||
+      (typeof record.id === "string" && record.id.trim()) ||
+      requestedAnalysisId;
+    const nextBaselineVersionId =
+      (typeof record.baselineVersionId === "string" && record.baselineVersionId.trim()) ||
+      effectiveBaselineVersionId;
+    const params = new URLSearchParams();
+    if (nextAnalysisId) params.set("analysisId", nextAnalysisId);
+    if (effectiveJobId) params.set("jobId", effectiveJobId);
+    if (effectiveBaselineId) params.set("baselineId", effectiveBaselineId);
+    if (nextBaselineVersionId) params.set("baselineVersionId", nextBaselineVersionId);
+    const exclusions = Array.from(excludedTargetingLabels);
+    exclusions.forEach((value) => params.append("excludedRequirements", value));
+    await router.replace(`/studio?${params.toString()}`);
+  }, [
+    effectiveBaselineId,
+    effectiveBaselineVersionId,
+    effectiveJobId,
+    excludedTargetingLabels,
+    requestedAnalysisId,
+    router,
+  ]);
+  const handleEvidenceExpansionSubmit = useCallback(async (overrideRequirement?: string) => {
+    const requirement = (overrideRequirement ?? expandingRequirement)?.trim() ?? "";
+    if (!requirement) return;
+    if (!effectiveBaselineId) {
+      setExpansionError("Baseline context is missing. Reload Studio from Results.");
+      return;
+    }
+    if (!expansionContext.trim() || !expansionDescription.trim()) {
+      setExpansionError("Please add where you used this and what you did.");
+      return;
+    }
+    if (!expansionConfirmedAccurate && !overrideRequirement) {
+      setExpansionError("Confirm this is accurate and reflects real experience.");
+      return;
+    }
+    setExpansionSubmitting(true);
+    setExpansionError(null);
+    try {
+      const rawText = [
+        `${requirement} evidence`,
+        `Context: ${expansionContext.trim()}`,
+        `Description: ${expansionDescription.trim()}`,
+        expansionImpact.trim() ? `Impact: ${expansionImpact.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      await appendStrengtheningAddition(effectiveBaselineId, {
+        signalType: "experience_expansion",
+        rawText,
+      });
+      setExpansionSuccessByRequirement((current) => ({
+        ...current,
+        [requirement]: `${requirement} is now verified`,
+      }));
+      setExpandingRequirement(null);
+      resetExpansionForm();
+      await runAnalysisRefreshAfterExpansion();
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : "Unable to add supporting evidence. Only include real and defensible experience.";
+      setExpansionError(message);
+      setExpansionSubmitting(false);
+    }
+  }, [
+    effectiveBaselineId,
+    expandingRequirement,
+    expansionConfirmedAccurate,
+    expansionContext,
+    expansionDescription,
+    expansionImpact,
+    resetExpansionForm,
+    runAnalysisRefreshAfterExpansion,
+  ]);
 
   const handleAutoAdjustTargeting = useCallback(() => {
-    applyTargetingAdjustment(blockingTargetingLabels);
-  }, [applyTargetingAdjustment, blockingTargetingLabels]);
+    applyTargetingAdjustment(canonicalUnverifiedRequirements);
+  }, [applyTargetingAdjustment, canonicalUnverifiedRequirements]);
 
   const handleRemoveIssueFromTargeting = useCallback(
     (issue: GenerationReadiness["verificationIssues"][number]) => {
@@ -1076,7 +1364,7 @@ export default function StudioPage() {
         setTargetingAdjustmentStatus("warning");
         return;
       }
-      applyTargetingAdjustment(new Set([normalized.toLowerCase()]));
+      applyTargetingAdjustment([normalized]);
     },
     [applyTargetingAdjustment],
   );
@@ -1085,22 +1373,51 @@ export default function StudioPage() {
     if (!excludedTargetingLabels.size) return;
     const removedCount = adjustedReadinessResult.removedClaims.length;
     const countLabel = removedCount === 1 ? "requirement" : "requirements";
-    const removedSuffix =
-      removedCount > 0
-        ? ` ${removedCount} unsupported ${countLabel} were removed from targeting.`
+    const removedSummary =
+      lastRemovedTargetingLabels.length > 0
+        ? ` Removed: ${lastRemovedTargetingLabels.join(", ")}`
         : "";
+    const removedSuffix = removedCount > 0 ? ` ${removedCount} unsupported ${countLabel} were removed from targeting.` : "";
+    if (appliedExclusionsFromResults) {
+      const resolvedRemovedLabels =
+        lastRemovedTargetingLabels.length > 0
+          ? lastRemovedTargetingLabels.map(
+              (label) =>
+                canonicalUnverifiedRequirements.find(
+                  (requirement) => requirement.toLowerCase() === label.toLowerCase(),
+                ) ?? label,
+            )
+          : [];
+      const removedPrefix =
+        resolvedRemovedLabels.length > 0
+          ? `Removed from targeting: ${resolvedRemovedLabels.join(", ")}`
+          : "Removed from targeting.";
+      if (activeGenerationReadiness.status === "ready") {
+        setTargetingAdjustmentFeedback(`Generation is now enabled. ${removedPrefix}`);
+        setTargetingAdjustmentStatus("success");
+        return;
+      }
+      setTargetingAdjustmentFeedback(`Some limitations remain. ${removedPrefix}`);
+      setTargetingAdjustmentStatus("warning");
+      return;
+    }
     if (activeGenerationReadiness.status === "ready") {
-      setTargetingAdjustmentFeedback(
-        `Targeting updated. Generation is now enabled.${removedSuffix}`,
-      );
+      setTargetingAdjustmentFeedback(`Generation is now fully enabled.${removedSuffix}${removedSummary}`);
       setTargetingAdjustmentStatus("success");
       return;
     }
     setTargetingAdjustmentFeedback(
-      `Unsupported requirements were removed, but more verified evidence is needed to enable generation.${removedSuffix}`,
+      `Some requirements were removed, but more verified evidence is needed.${removedSuffix}${removedSummary}`,
     );
     setTargetingAdjustmentStatus("warning");
-  }, [adjustedReadinessResult.removedClaims.length, activeGenerationReadiness.status, excludedTargetingLabels.size]);
+  }, [
+    adjustedReadinessResult.removedClaims.length,
+    appliedExclusionsFromResults,
+    activeGenerationReadiness.status,
+    canonicalUnverifiedRequirements,
+    excludedTargetingLabels.size,
+    lastRemovedTargetingLabels,
+  ]);
 
   useEffect(() => {
     if (!generatedResumeModel) {
@@ -1267,6 +1584,10 @@ export default function StudioPage() {
     let canceled = false;
     setAnalysisLoading(true);
     setAnalysisError(null);
+    console.info("[studio] hydration_started", {
+      stage: "studio",
+      analysisId: requestedAnalysisId,
+    });
     const loadAnalysis = async () => {
       try {
         const analysisUrl = buildAssessmentAnalysisUrl(requestedAnalysisId);
@@ -1277,16 +1598,33 @@ export default function StudioPage() {
           const message = sanitizeAnalysisError(payload);
           setAnalysis(null);
           setAnalysisError(message);
+          console.warn("[studio] hydration_failed", {
+            stage: "studio",
+            analysisId: requestedAnalysisId,
+            status: response.status,
+          });
           return;
         }
         if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
           setAnalysis(null);
           setAnalysisError(ANALYSIS_LOAD_ERROR_MESSAGE);
+          console.warn("[studio] hydration_failed", {
+            stage: "studio",
+            analysisId: requestedAnalysisId,
+            status: "invalid_payload",
+          });
           return;
         }
         const nextAnalysis = payload as LatestAnalysis;
         setAnalysis(nextAnalysis);
         setAnalysisError(null);
+        console.info("[studio] hydration_succeeded", {
+          stage: "studio",
+          analysisId: requestedAnalysisId,
+          jobId: nextAnalysis?.jobId ?? null,
+          baselineId: nextAnalysis?.baselineId ?? null,
+          baselineVersionId: nextAnalysis?.baselineVersionId ?? null,
+        });
         const analysisJobId = trimString((payload as { jobId?: unknown }).jobId);
         const analysisBaselineId = trimString((payload as { baselineId?: unknown }).baselineId);
         const analysisBaselineVersionId = trimString(
@@ -1309,6 +1647,11 @@ export default function StudioPage() {
             ? error.message
             : ANALYSIS_LOAD_ERROR_MESSAGE,
         );
+        console.error("[studio] hydration_failed", {
+          stage: "studio",
+          analysisId: requestedAnalysisId,
+          status: "exception",
+        });
       } finally {
         if (!canceled) {
           setAnalysisLoading(false);
@@ -1393,6 +1736,13 @@ export default function StudioPage() {
       return;
     }
     setResumeGenerating(true);
+    console.info("[studio] generation_requested", {
+      documentType: "resume",
+      analysisId: requestedAnalysisId || null,
+      jobId: effectiveJobId || null,
+      baselineId: effectiveBaselineId || null,
+      baselineVersionId: effectiveBaselineVersionId || null,
+    });
     setResumeState(createDocumentState());
     setResumeWarningFlags([]);
     setResumeAuditId(undefined);
@@ -1405,6 +1755,10 @@ export default function StudioPage() {
       });
       const responsePayload = await readResponsePayload(response);
       if (!response.ok) {
+        console.warn("[studio] generation_failed", {
+          documentType: "resume",
+          status: response.status,
+        });
         const tierGate = parseTierGateError({ status: response.status, payload: responsePayload });
         if (tierGate) {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
@@ -1437,6 +1791,9 @@ export default function StudioPage() {
       setResumeState((current) => ({ ...current, response: responsePayload }));
       setResumeWarningFlags(extractComplianceWarnings(responsePayload));
       setResumeAuditId(normalizeAuditId(responsePayload));
+      console.info("[studio] generation_succeeded", {
+        documentType: "resume",
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Resume generation failed.";
       setResumeState((current) => ({ ...current, error: message }));
@@ -1594,6 +1951,13 @@ export default function StudioPage() {
       return;
     }
     setCoverGenerating(true);
+    console.info("[studio] generation_requested", {
+      documentType: "cover_letter",
+      analysisId: requestedAnalysisId || null,
+      jobId: effectiveJobId || null,
+      baselineId: effectiveBaselineId || null,
+      baselineVersionId: effectiveBaselineVersionId || null,
+    });
     setCoverState(createDocumentState());
     setCoverWarningFlags([]);
     setCoverAuditId(undefined);
@@ -1607,6 +1971,10 @@ export default function StudioPage() {
       });
       const responsePayload = await readResponsePayload(response);
       if (!response.ok) {
+        console.warn("[studio] generation_failed", {
+          documentType: "cover_letter",
+          status: response.status,
+        });
         if (response.status === 409) {
           const existingId = readDuplicateCoverLetterId(responsePayload);
           if (existingId) {
@@ -1631,6 +1999,9 @@ export default function StudioPage() {
       setCoverState((current) => ({ ...current, response: responsePayload }));
       setCoverWarningFlags(extractComplianceWarnings(responsePayload));
       setCoverAuditId(normalizeAuditId(responsePayload));
+      console.info("[studio] generation_succeeded", {
+        documentType: "cover_letter",
+      });
     } catch (error) {
       console.error("Cover letter generation failed", error);
       const message = error instanceof Error ? error.message : "Cover letter generation failed.";
@@ -1804,23 +2175,42 @@ export default function StudioPage() {
           ) : null}
         </div>
       ) : null}
-      {requestedAnalysisId && activeGenerationReadiness.status === "blocked" ? (
+      {applicationInsights.length ? (
+        <div className="rounded-2xl border border-indigo-300/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+            Based on your history
+          </p>
+          <p className="mt-1 text-slate-100">
+            Roles like this perform better when all support tools are verified.
+          </p>
+          <p className="mt-1 text-slate-200">{applicationInsights[0]?.message}</p>
+        </div>
+      ) : null}
+      {requestedAnalysisId &&
+      (activeGenerationReadiness.status === "blocked" || activeGenerationReadiness.status === "limited") &&
+      canonicalUnverifiedRequirements.length ? (
         <div
+          id="studio-auto-adjust-panel"
           className="rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3"
           data-testid="studio-auto-adjust-panel"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-100">
-            Fix these issues to enable generation
+            Fix this in one step
           </p>
           <p className="mt-1 text-sm text-slate-100">
-            We'll remove unsupported requirements and recheck readiness.
+            These requirements are not verified from your baseline and are limiting generation.
           </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-100" data-testid="studio-one-step-unverified-list">
+            {canonicalUnverifiedRequirements.map((requirement) => (
+              <li key={`one-step-unverified-${requirement}`}>- {requirement}</li>
+            ))}
+          </ul>
           <div className="mt-3">
             <FormButton
               onClick={handleAutoAdjustTargeting}
-              disabled={!blockingTargetingLabels.size}
+              disabled={!canonicalUnverifiedRequirements.length}
             >
-              Fix targeting and enable generation
+              Remove unsupported requirements and continue
             </FormButton>
           </div>
         </div>
@@ -1835,6 +2225,17 @@ export default function StudioPage() {
           data-testid="studio-targeting-adjustment-feedback"
         >
           {targetingAdjustmentFeedback}
+        </div>
+      ) : null}
+      {adjustedReadinessResult.removedClaims.length ? (
+        <div className="rounded-xl border border-slate-300/25 bg-slate-500/10 px-4 py-2 text-sm text-slate-100">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+            Removed from targeting
+          </p>
+          <p className="mt-1" data-testid="studio-removed-targeting-list">
+            {Array.from(new Set(adjustedReadinessResult.removedClaims)).join(", ") ||
+              lastRemovedTargetingLabels.join(", ")}
+          </p>
         </div>
       ) : null}
       {requestedAnalysisId ? (
@@ -1897,7 +2298,7 @@ export default function StudioPage() {
                 </p>
                 <div className="mt-3">
                   {resolveVerificationIssueAction(issue).action === "remove_from_targeting" ? (
-                    <FormButton onClick={() => handleRemoveIssueFromTargeting(issue)}>
+                    <FormButton variant="secondary" onClick={() => handleRemoveIssueFromTargeting(issue)}>
                       {resolveVerificationIssueAction(issue).label}
                     </FormButton>
                   ) : (
@@ -1934,6 +2335,145 @@ export default function StudioPage() {
             >
               Open Results verification details
             </Link>
+          </div>
+        </section>
+      ) : null}
+      {showEvidenceExpansion ? (
+        <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">
+          <h2 className="text-base font-semibold text-slate-100">Prove this experience instead</h2>
+          <p className="mt-1 text-sm text-slate-300">
+            Only include experience that is real and defensible.
+          </p>
+          <div className="mt-3 space-y-3">
+            {canonicalUnverifiedRequirements.map((requirement) => {
+              const isOpen = expandingRequirement === requirement;
+              const suggestion = autoEvidenceSuggestions.get(requirement) ?? null;
+              const isDismissed = dismissedSuggestionRequirements.has(requirement.toLowerCase());
+              return (
+                <article
+                  key={`studio-expansion-${requirement}`}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                >
+                  <p className="text-sm text-slate-100">{requirement} is not verified</p>
+                  {suggestion && !isDismissed ? (
+                    <div className="mt-2 rounded-lg border border-emerald-300/25 bg-emerald-500/10 p-3 text-xs text-slate-100">
+                      <p className="font-semibold text-emerald-100">Suggested evidence:</p>
+                      <p className="mt-1">{suggestion.intro}</p>
+                      <p className="mt-1"><span className="font-semibold">Context:</span> {suggestion.context}</p>
+                      <p className="mt-1"><span className="font-semibold">Description:</span> {suggestion.description}</p>
+                      <p className="mt-1"><span className="font-semibold">Scope:</span> {suggestion.scope}</p>
+                      <div className="mt-2 flex gap-2">
+                        <FormButton
+                          onClick={() => {
+                            setExpansionContext(suggestion.context);
+                            setExpansionDescription(suggestion.description);
+                            setExpansionImpact(suggestion.scope);
+                            setExpansionConfirmedAccurate(true);
+                            void handleEvidenceExpansionSubmit(requirement);
+                          }}
+                          disabled={expansionSubmitting}
+                        >
+                          Accept and verify
+                        </FormButton>
+                        <FormButton
+                          variant="secondary"
+                          onClick={() => {
+                            setExpandingRequirement(requirement);
+                            setExpansionContext(suggestion.context);
+                            setExpansionDescription(suggestion.description);
+                            setExpansionImpact(suggestion.scope);
+                            setExpansionConfirmedAccurate(false);
+                            setExpansionError(null);
+                          }}
+                        >
+                          Edit before adding
+                        </FormButton>
+                        <FormButton
+                          variant="ghost"
+                          onClick={() =>
+                            setDismissedSuggestionRequirements((current) => {
+                              const next = new Set(current);
+                              next.add(requirement.toLowerCase());
+                              return next;
+                            })
+                          }
+                        >
+                          Dismiss
+                        </FormButton>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="mt-2">
+                    <FormButton
+                      variant="secondary"
+                      onClick={() => {
+                        setExpandingRequirement(requirement);
+                        setExpansionError(null);
+                      }}
+                    >
+                      Add supporting experience
+                    </FormButton>
+                  </div>
+                  {expansionSuccessByRequirement[requirement] ? (
+                    <p className="mt-2 text-sm text-emerald-200">{expansionSuccessByRequirement[requirement]}</p>
+                  ) : null}
+                  {isOpen ? (
+                    <div className="mt-3 space-y-2 rounded-lg border border-sky-300/30 bg-sky-500/10 p-3">
+                      <label className="block text-xs text-slate-200">
+                        Where did you use this?
+                        <textarea
+                          className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                          value={expansionContext}
+                          onChange={(event) => setExpansionContext(event.target.value)}
+                          rows={2}
+                        />
+                      </label>
+                      <label className="block text-xs text-slate-200">
+                        What did you do with this tool?
+                        <textarea
+                          className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                          value={expansionDescription}
+                          onChange={(event) => setExpansionDescription(event.target.value)}
+                          rows={3}
+                        />
+                      </label>
+                      <label className="block text-xs text-slate-200">
+                        What impact did this have? (optional)
+                        <textarea
+                          className="mt-1 w-full rounded-md border border-white/15 bg-slate-900/70 p-2 text-sm text-slate-100"
+                          value={expansionImpact}
+                          onChange={(event) => setExpansionImpact(event.target.value)}
+                          rows={2}
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={expansionConfirmedAccurate}
+                          onChange={(event) => setExpansionConfirmedAccurate(event.target.checked)}
+                        />
+                        This is accurate and reflects real experience
+                      </label>
+                      {expansionError ? <p className="text-xs text-rose-200">{expansionError}</p> : null}
+                      <div className="flex gap-2">
+                        <FormButton onClick={() => void handleEvidenceExpansionSubmit()} disabled={expansionSubmitting}>
+                          {expansionSubmitting ? "Saving..." : "Save evidence"}
+                        </FormButton>
+                        <FormButton
+                          variant="ghost"
+                          onClick={() => {
+                            setExpandingRequirement(null);
+                            resetExpansionForm();
+                          }}
+                        >
+                          Cancel
+                        </FormButton>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}
