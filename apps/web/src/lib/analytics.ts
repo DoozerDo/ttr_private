@@ -11,6 +11,15 @@ export const ANALYTICS_EVENT_NAMES = [
   "role_analysis_completed",
   "opportunity_saved",
   "resume_studio_opened",
+  "resume_generation_attempted",
+  "resume_generation_succeeded",
+  "resume_generation_limited",
+  "resume_generation_blocked_compliance",
+  "cover_letter_generation_attempted",
+  "cover_letter_generation_succeeded",
+  "cover_letter_generation_limited",
+  "cover_letter_generation_blocked_compliance",
+  "analysis_load_failed",
   "scroll_depth_reached",
 ] as const;
 
@@ -66,6 +75,46 @@ export type AnalyticsEventMap = {
   resume_studio_opened: {
     entrySource: "results" | "nav" | "direct" | "unknown";
     baselineId?: string;
+  };
+  resume_generation_attempted: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+  };
+  resume_generation_succeeded: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+  };
+  resume_generation_limited: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    reasonCode?: string;
+  };
+  resume_generation_blocked_compliance: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    reasonCode?: string;
+  };
+  cover_letter_generation_attempted: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+  };
+  cover_letter_generation_succeeded: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+  };
+  cover_letter_generation_limited: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    reasonCode?: string;
+  };
+  cover_letter_generation_blocked_compliance: {
+    source: "studio" | "unknown";
+    analysisId?: string;
+    reasonCode?: string;
+  };
+  analysis_load_failed: {
+    source: "results" | "unknown";
+    status?: string;
   };
   scroll_depth_reached: {
     depthPercent: ScrollDepth;

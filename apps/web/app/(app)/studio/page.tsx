@@ -1854,6 +1854,10 @@ export default function StudioPage() {
       return;
     }
     setResumeGenerating(true);
+    trackEvent("resume_generation_attempted", {
+      source: "studio",
+      analysisId: requestedAnalysisId || undefined,
+    });
     console.info("[studio] generation_requested", {
       documentType: "resume",
       analysisId: requestedAnalysisId || null,
@@ -1886,12 +1890,22 @@ export default function StudioPage() {
       }
       const presenter = presentResumeGeneration(responsePayload);
       if (presenter.status === "blocked" && presenter.display) {
+        trackEvent("resume_generation_blocked_compliance", {
+          source: "studio",
+          analysisId: requestedAnalysisId || undefined,
+          reasonCode: "blocked",
+        });
         setResumeState((current) => ({ ...current, response: responsePayload }));
         setResumeWarningFlags([]);
         setResumeAuditId(undefined);
         return;
       }
       if (presenter.status === "error") {
+        trackEvent("resume_generation_limited", {
+          source: "studio",
+          analysisId: requestedAnalysisId || undefined,
+          reasonCode: "error",
+        });
         setResumeState((current) => ({
           ...current,
           response: responsePayload,
@@ -1931,6 +1945,11 @@ export default function StudioPage() {
       });
 
       if (!validatedResult.success) {
+        trackEvent("resume_generation_limited", {
+          source: "studio",
+          analysisId: requestedAnalysisId || undefined,
+          reasonCode: "validation_failed",
+        });
         setResumeState((current) => ({
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
@@ -1939,12 +1958,21 @@ export default function StudioPage() {
       }
 
       setResumeState((current) => ({ ...current, response: validatedResult.output }));
+      trackEvent("resume_generation_succeeded", {
+        source: "studio",
+        analysisId: requestedAnalysisId || undefined,
+      });
       setResumeWarningFlags(extractComplianceWarnings(validatedResult.output));
       setResumeAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
         documentType: "resume",
       });
     } catch (error) {
+      trackEvent("resume_generation_limited", {
+        source: "studio",
+        analysisId: requestedAnalysisId || undefined,
+        reasonCode: "exception",
+      });
       const message = error instanceof Error ? error.message : "Resume generation failed.";
       setResumeState((current) => ({ ...current, error: message }));
     } finally {
@@ -2101,6 +2129,10 @@ export default function StudioPage() {
       return;
     }
     setCoverGenerating(true);
+    trackEvent("cover_letter_generation_attempted", {
+      source: "studio",
+      analysisId: requestedAnalysisId || undefined,
+    });
     console.info("[studio] generation_requested", {
       documentType: "cover_letter",
       analysisId: requestedAnalysisId || null,
@@ -2135,6 +2167,11 @@ export default function StudioPage() {
         if (response.status === 422) {
           const blockedState = parseComplianceBlockedFromPayload(responsePayload);
           if (blockedState) {
+            trackEvent("cover_letter_generation_blocked_compliance", {
+              source: "studio",
+              analysisId: requestedAnalysisId || undefined,
+              reasonCode: "compliance_blocked",
+            });
             applyCoverLetterComplianceBlocked(blockedState);
             return;
           }
@@ -2148,6 +2185,11 @@ export default function StudioPage() {
       }
       const initialPresenter = presentCoverLetterGeneration(responsePayload);
       if (initialPresenter.status === "blocked" && initialPresenter.display) {
+        trackEvent("cover_letter_generation_blocked_compliance", {
+          source: "studio",
+          analysisId: requestedAnalysisId || undefined,
+          reasonCode: "blocked",
+        });
         applyCoverLetterComplianceBlocked({
           title: initialPresenter.display.title,
           body: initialPresenter.display.description,
@@ -2185,6 +2227,11 @@ export default function StudioPage() {
       });
 
       if (!validatedResult.success) {
+        trackEvent("cover_letter_generation_limited", {
+          source: "studio",
+          analysisId: requestedAnalysisId || undefined,
+          reasonCode: "validation_failed",
+        });
         setCoverState((current) => ({
           ...current,
           error: GENERATION_TRUST_FALLBACK_ERROR,
@@ -2193,12 +2240,21 @@ export default function StudioPage() {
       }
 
       setCoverState((current) => ({ ...current, response: validatedResult.output }));
+      trackEvent("cover_letter_generation_succeeded", {
+        source: "studio",
+        analysisId: requestedAnalysisId || undefined,
+      });
       setCoverWarningFlags(extractComplianceWarnings(validatedResult.output));
       setCoverAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
         documentType: "cover_letter",
       });
     } catch (error) {
+      trackEvent("cover_letter_generation_limited", {
+        source: "studio",
+        analysisId: requestedAnalysisId || undefined,
+        reasonCode: "exception",
+      });
       console.error("Cover letter generation failed", error);
       const message = error instanceof Error ? error.message : "Cover letter generation failed.";
       setCoverState((current) => ({ ...current, error: message }));

@@ -36,6 +36,7 @@ import { buildResultsSignalAlignment } from "@/lib/professionalSignals";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { getNextMove, type NextMove } from "@/lib/nextMove";
+import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
@@ -640,6 +641,33 @@ export function getPrimaryResultsCta({
     disabled: false,
     description: nextMove.description,
   };
+}
+
+function resolveLatestBaselineVersionId(baseline: { versions?: Array<{ id: string; versionNumber: number }> } | null): string | null {
+  if (!baseline?.versions?.length) return null;
+  const [latestVersion] = [...baseline.versions].sort((a, b) => (b.versionNumber ?? 0) - (a.versionNumber ?? 0));
+  return typeof latestVersion?.id === "string" && latestVersion.id.trim() ? latestVersion.id.trim() : null;
+}
+
+export async function getPreviousAnalysis(
+  jobId: string,
+  _userId?: string,
+  currentAssessmentId?: string | null,
+): Promise<LatestAnalysis | null> {
+  const targetJobId = jobId.trim();
+  if (!targetJobId) return null;
+  const response = await fetch(`/api/analysis/fit-assessments?jobId=${encodeURIComponent(targetJobId)}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as LatestAnalysis[];
+  const assessments = Array.isArray(payload) ? payload : [];
+  const excludedAssessmentId = currentAssessmentId?.trim() ?? "";
+  const previous = assessments.find((entry) => {
+    const candidateAssessmentId = entry?.assessmentId?.trim() ?? "";
+    return candidateAssessmentId.length > 0 && candidateAssessmentId !== excludedAssessmentId;
+  });
+  return previous ?? null;
 }
 
 export function OpportunityMapSection({
@@ -1446,7 +1474,11 @@ export default function ResultsPage() {
   const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
   const [opportunitySaved, setOpportunitySaved] = useState(false);
+  const [currentBaselineVersionId, setCurrentBaselineVersionId] = useState<string | null>(null);
+  const [previousAnalysis, setPreviousAnalysis] = useState<LatestAnalysis | null>(null);
+  const [reanalysisRunning, setReanalysisRunning] = useState(false);
   const savedOpportunityKeysRef = useRef<Set<string>>(new Set());
+  const upgradedOpportunityKeysRef = useRef<Set<string>>(new Set());
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1580,6 +1612,65 @@ export default function ResultsPage() {
     () => (typeof activeScore === "number" ? getScoreBand(activeScore) : null),
     [activeScore],
   );
+  const baselineUpdatedForReanalysis = useMemo(
+    () => hasBaselineUpdated(latest, currentBaselineVersionId),
+    [currentBaselineVersionId, latest],
+  );
+  const reanalysisDelta = useMemo(
+    () => buildScoreDelta(previousAnalysis, latest),
+    [previousAnalysis, latest],
+  );
+
+  useEffect(() => {
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    if (!baselineIdValue) {
+      setCurrentBaselineVersionId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/baselines/${encodeURIComponent(baselineIdValue)}/versions`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          if (!cancelled) setCurrentBaselineVersionId(null);
+          return;
+        }
+        const versions = (await response.json()) as Array<{ id: string; versionNumber: number }>;
+        const resolved = resolveLatestBaselineVersionId({ versions });
+        if (!cancelled) setCurrentBaselineVersionId(resolved);
+      } catch {
+        if (!cancelled) setCurrentBaselineVersionId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [latest?.baselineId]);
+
+  useEffect(() => {
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    const assessmentIdValue = latest?.assessmentId?.trim() ?? "";
+    if (!jobIdValue || !assessmentIdValue) {
+      setPreviousAnalysis(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const previous = await getPreviousAnalysis(jobIdValue, undefined, assessmentIdValue);
+        if (!cancelled) {
+          setPreviousAnalysis(previous ?? null);
+        }
+      } catch {
+        if (!cancelled) setPreviousAnalysis(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [latest?.assessmentId, latest?.jobId]);
   useEffect(() => {
     const analysisId = latest?.assessmentId?.trim() ?? "";
     const jobIdValue = latest?.jobId?.trim() ?? "";
@@ -2209,6 +2300,10 @@ export default function ResultsPage() {
         setAnalysisSource("latest");
         await persistLastAssessmentId(data.assessmentId ?? assessmentId);
       } catch {
+        trackEvent("analysis_load_failed", {
+          source: "results",
+          status: "assessment_exception",
+        });
         setError(COMPATIBILITY_ANALYSIS_ERROR);
       } finally {
         setLoadingLatest(false);
@@ -2369,6 +2464,10 @@ export default function ResultsPage() {
         stage: "results",
         status: "exception",
       });
+      trackEvent("analysis_load_failed", {
+        source: "results",
+        status: "latest_exception",
+      });
       setError(COMPATIBILITY_ANALYSIS_ERROR);
     } finally {
       setLoadingLatest(false);
@@ -2524,6 +2623,87 @@ export default function ResultsPage() {
     })();
   }, [activeScore, latest]);
 
+  const rerunAnalysisForCurrentRole = useCallback(async () => {
+    const targetJobId = latest?.jobId?.trim() ?? "";
+    const targetBaselineId = latest?.baselineId?.trim() ?? "";
+    if (!targetJobId || !targetBaselineId) return;
+    setReanalysisRunning(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/analysis/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          jobId: targetJobId,
+          baselineId: targetBaselineId,
+        }),
+      });
+      const payload = await readResponsePayload(response.clone());
+      if (!response.ok) {
+        const message = formatErrorMessage(payload, "Unable to run re-analysis.");
+        throw new Error(message);
+      }
+      const assessmentId =
+        (typeof (payload as { assessmentId?: unknown })?.assessmentId === "string"
+          ? (payload as { assessmentId: string }).assessmentId
+          : null) ??
+        (typeof (payload as { id?: unknown })?.id === "string"
+          ? (payload as { id: string }).id
+          : null);
+      if (!assessmentId) {
+        throw new Error("Re-analysis did not return an assessment ID.");
+      }
+      await router.replace(`/results?assessmentId=${encodeURIComponent(assessmentId)}`);
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : "Unable to run re-analysis.");
+    } finally {
+      setReanalysisRunning(false);
+    }
+  }, [latest?.baselineId, latest?.jobId, router]);
+
+  useEffect(() => {
+    const previousScore = reanalysisDelta.previousScore;
+    const currentScoreValue = reanalysisDelta.currentScore;
+    if (typeof previousScore !== "number" || typeof currentScoreValue !== "number") return;
+    const upgraded = (previousScore < 70 && currentScoreValue >= 70) || currentScoreValue >= 85;
+    if (!upgraded) return;
+    const baselineIdValue = latest?.baselineId?.trim() ?? "";
+    const jobIdValue = latest?.jobId?.trim() ?? "";
+    if (!baselineIdValue || !jobIdValue) return;
+
+    const upgradeKey = `${jobIdValue}:${baselineIdValue}:${currentScoreValue}`;
+    if (upgradedOpportunityKeysRef.current.has(upgradeKey)) return;
+    upgradedOpportunityKeysRef.current.add(upgradeKey);
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/opportunities", { cache: "no-store" });
+        if (!response.ok) return;
+        const opportunities = (await response.json()) as Array<{
+          id: string;
+          jobId?: string | null;
+          baselineId?: string | null;
+          status?: string | null;
+        }>;
+        const match = opportunities.find((entry) => {
+          const sameJob = (entry.jobId ?? "").trim() === jobIdValue;
+          const sameBaseline = (entry.baselineId ?? "").trim() === baselineIdValue;
+          return sameJob && sameBaseline;
+        });
+        if (!match?.id) return;
+        if (typeof match.status === "string" && match.status.trim() === "ready_to_apply") return;
+        await fetch(`/api/opportunities/${encodeURIComponent(match.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "ready_to_apply" }),
+        });
+      } catch {
+        // non-blocking
+      }
+    })();
+  }, [latest?.baselineId, latest?.jobId, reanalysisDelta.currentScore, reanalysisDelta.previousScore]);
+
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-5">
@@ -2533,6 +2713,62 @@ export default function ResultsPage() {
         />
         {opportunitySaved ? (
           <p className="text-xs font-medium text-emerald-300">Saved to Opportunities</p>
+        ) : null}
+        {baselineUpdatedForReanalysis && latest ? (
+          <section className="rounded-2xl border border-cyan-300/30 bg-cyan-500/10 p-4">
+            <p className="text-sm font-semibold text-cyan-100">Updated Baseline Detected</p>
+            <p className="mt-1 text-sm text-slate-100">
+              Your baseline changed since this analysis. Re-run this same role to measure progress.
+            </p>
+            <div className="mt-3">
+              <FormButton onClick={() => void rerunAnalysisForCurrentRole()} disabled={reanalysisRunning}>
+                {reanalysisRunning ? "Re-running..." : "Re-run Analysis"}
+              </FormButton>
+            </div>
+          </section>
+        ) : null}
+        {previousAnalysis && typeof reanalysisDelta.delta === "number" ? (
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <h2 className="text-base font-semibold text-slate-100">Progress since last analysis</h2>
+            <p
+              className={`mt-2 text-sm font-medium ${
+                reanalysisDelta.delta > 0
+                  ? "text-emerald-300"
+                  : reanalysisDelta.delta < 0
+                    ? "text-rose-300"
+                    : "text-slate-200"
+              }`}
+            >
+              {reanalysisDelta.delta > 0 ? "+" : ""}
+              {Math.round(reanalysisDelta.delta)} points (
+              {Math.round(reanalysisDelta.previousScore ?? 0)} {"->"} {Math.round(reanalysisDelta.currentScore ?? 0)})
+            </p>
+            {reanalysisDelta.newSignals.length > 0 ? (
+              <div className="mt-3">
+                <p className="text-sm font-semibold text-slate-100">New strengths identified:</p>
+                <ul className="mt-1 space-y-1 text-sm text-slate-200">
+                  {reanalysisDelta.newSignals.map((signal) => (
+                    <li key={`new-signal-${signal}`}>- {signal}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {reanalysisDelta.lostSignals.length > 0 ? (
+              <div className="mt-3">
+                <p className="text-sm font-semibold text-slate-100">Signals no longer detected:</p>
+                <ul className="mt-1 space-y-1 text-sm text-slate-200">
+                  {reanalysisDelta.lostSignals.map((signal) => (
+                    <li key={`lost-signal-${signal}`}>- {signal}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {reanalysisDelta.noImprovement ? (
+              <p className="mt-3 text-sm text-amber-200">
+                Your updates did not add new signals relevant to this role.
+              </p>
+            ) : null}
+          </section>
         ) : null}
 
         <section className="space-y-4 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4 shadow-[0_14px_40px_rgba(2,6,23,0.16)]">

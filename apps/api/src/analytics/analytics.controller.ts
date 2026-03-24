@@ -57,4 +57,10 @@ export class AnalyticsController {
       rangeKey: normalizedRange as '7d' | '14d' | '30d' | 'all',
     });
   }
+
+  @Get('beta-command-center')
+  @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
+  async betaCommandCenter() {
+    return this.analyticsService.getBetaCommandCenter();
+  }
 }

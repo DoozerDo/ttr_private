@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AccessCode } from '../access-codes/access-code.entity';
+import { FitAssessment } from '../analysis/fit-assessment.entity';
+import { Application } from '../applications/application.entity';
+import { BetaFeedback } from '../beta-feedback/beta-feedback.entity';
+import { Opportunity } from '../opportunities/opportunity.entity';
 import { User } from '../users/user.entity';
 import { AnalyticsEvent } from './analytics-event.entity';
 import type { TrackAnalyticsEventDto } from './dto/track-analytics-event.dto';
@@ -161,6 +166,73 @@ type FounderWindowMetrics = {
   averageAnalysesPerActiveUser: number;
 };
 
+type BetaUserStateSummary =
+  | 'Invited, not activated'
+  | 'Logged in, no analysis'
+  | 'Analysis complete, no generation'
+  | 'Limited generation, unresolved'
+  | 'Generated docs'
+  | 'Submitted bug report';
+
+type BetaUserRosterRow = {
+  userId: string;
+  email: string;
+  accessCodeStatus: 'none' | 'assigned' | 'redeemed' | 'revoked';
+  firstLoginAt: string | null;
+  lastActiveAt: string | null;
+  analysesRun: number;
+  studioVisits: number;
+  documentGenerations: number;
+  bugReportsSubmitted: number;
+  currentStateSummary: BetaUserStateSummary;
+};
+
+type CommandCenterSummary = {
+  invited: number;
+  activated: number;
+  loggedIn: number;
+  ranFirstAnalysis: number;
+  reachedResults: number;
+  openedStudio: number;
+  generatedResume: number;
+  generatedCoverLetter: number;
+  submittedBug: number;
+  trackedApplication: number;
+};
+
+type CommandCenterHotspot = {
+  key: string;
+  label: string;
+  count: number;
+  examples: string[];
+};
+
+type CommandCenterActionItem = {
+  key: string;
+  label: string;
+  count: number;
+  users: string[];
+};
+
+type BetaCommandCenterResponse = {
+  generatedAt: string;
+  roster: BetaUserRosterRow[];
+  funnel: CommandCenterSummary;
+  frictionHotspots: CommandCenterHotspot[];
+  bugFeed: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    category: string;
+    where: string;
+    createdAt: string;
+    userEmail: string | null;
+    status: 'open';
+    issueUrl: string | null;
+  }>;
+  actionNeededQueue: CommandCenterActionItem[];
+};
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -168,7 +240,331 @@ export class AnalyticsService {
     private readonly analyticsEventRepository: Repository<AnalyticsEvent>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(AccessCode)
+    private readonly accessCodeRepository: Repository<AccessCode>,
+    @InjectRepository(FitAssessment)
+    private readonly fitAssessmentRepository: Repository<FitAssessment>,
+    @InjectRepository(Opportunity)
+    private readonly opportunityRepository: Repository<Opportunity>,
+    @InjectRepository(Application)
+    private readonly applicationRepository: Repository<Application>,
+    @InjectRepository(BetaFeedback)
+    private readonly betaFeedbackRepository: Repository<BetaFeedback>,
   ) {}
+
+  async getBetaCommandCenter(): Promise<BetaCommandCenterResponse> {
+    const [users, accessCodes, events, assessments, opportunities, applications, feedback] =
+      await Promise.all([
+        this.usersRepository.find({
+          where: { role: 'user' },
+          select: ['id', 'email', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        }),
+        this.accessCodeRepository.find({
+          select: ['assignedUserId', 'redeemedByUserId', 'redeemedAt', 'revokedAt', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        }),
+        this.analyticsEventRepository.find({
+          where: {},
+          select: ['userId', 'eventName', 'createdAt', 'properties'],
+          order: { createdAt: 'DESC' },
+          take: 5000,
+        }),
+        this.fitAssessmentRepository.find({
+          select: ['id', 'userId', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        }),
+        this.opportunityRepository.find({
+          select: ['id', 'userId', 'status', 'updatedAt'],
+          order: { updatedAt: 'DESC' },
+        }),
+        this.applicationRepository.find({
+          select: ['id', 'userId', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        }),
+        this.betaFeedbackRepository.find({
+          select: ['id', 'title', 'severity', 'category', 'where', 'createdAt', 'userId'],
+          order: { createdAt: 'DESC' },
+          take: 200,
+        }),
+      ]);
+
+    const userEmailById = new Map(users.map((user) => [user.id, user.email]));
+
+    const accessStatusByUser = new Map<string, BetaUserRosterRow['accessCodeStatus']>();
+    for (const code of accessCodes) {
+      const assigned = code.assignedUserId ?? null;
+      const redeemed = code.redeemedByUserId ?? null;
+      if (assigned) {
+        const current = accessStatusByUser.get(assigned) ?? 'none';
+        if (code.revokedAt) accessStatusByUser.set(assigned, 'revoked');
+        else if (current !== 'redeemed') accessStatusByUser.set(assigned, 'assigned');
+      }
+      if (redeemed) {
+        accessStatusByUser.set(redeemed, 'redeemed');
+      }
+    }
+
+    const byUser = new Map<
+      string,
+      {
+        firstLoginAt: Date | null;
+        lastActiveAt: Date | null;
+        studioVisits: number;
+        resumeGenerated: number;
+        coverGenerated: number;
+        limitedGeneration: number;
+        analysisReachedResults: number;
+      }
+    >();
+    const ensureUser = (userId: string) => {
+      const existing = byUser.get(userId);
+      if (existing) return existing;
+      const seed = {
+        firstLoginAt: null,
+        lastActiveAt: null,
+        studioVisits: 0,
+        resumeGenerated: 0,
+        coverGenerated: 0,
+        limitedGeneration: 0,
+        analysisReachedResults: 0,
+      };
+      byUser.set(userId, seed);
+      return seed;
+    };
+
+    for (const event of events) {
+      const userId = event.userId?.trim();
+      if (!userId) continue;
+      const bucket = ensureUser(userId);
+      if (!bucket.firstLoginAt || event.createdAt < bucket.firstLoginAt) {
+        bucket.firstLoginAt = event.createdAt;
+      }
+      if (!bucket.lastActiveAt || event.createdAt > bucket.lastActiveAt) {
+        bucket.lastActiveAt = event.createdAt;
+      }
+      if (event.eventName === 'resume_studio_opened') bucket.studioVisits += 1;
+      if (event.eventName === 'resume_generation_succeeded') bucket.resumeGenerated += 1;
+      if (event.eventName === 'cover_letter_generation_succeeded') bucket.coverGenerated += 1;
+      if (
+        event.eventName === 'resume_generation_limited' ||
+        event.eventName === 'cover_letter_generation_limited' ||
+        event.eventName === 'resume_generation_blocked_compliance' ||
+        event.eventName === 'cover_letter_generation_blocked_compliance'
+      ) {
+        bucket.limitedGeneration += 1;
+      }
+      if (event.eventName === 'role_analysis_completed') {
+        bucket.analysisReachedResults += 1;
+      }
+    }
+
+    const analysisCountByUser = new Map<string, number>();
+    for (const assessment of assessments) {
+      analysisCountByUser.set(
+        assessment.userId,
+        (analysisCountByUser.get(assessment.userId) ?? 0) + 1,
+      );
+    }
+
+    const appCountByUser = new Map<string, number>();
+    for (const application of applications) {
+      appCountByUser.set(
+        application.userId,
+        (appCountByUser.get(application.userId) ?? 0) + 1,
+      );
+    }
+
+    const bugCountByUser = new Map<string, number>();
+    for (const bug of feedback) {
+      const userId = bug.userId?.trim();
+      if (!userId) continue;
+      bugCountByUser.set(userId, (bugCountByUser.get(userId) ?? 0) + 1);
+    }
+
+    const roster: BetaUserRosterRow[] = users.map((user) => {
+      const telemetry = byUser.get(user.id);
+      const analysesRun = analysisCountByUser.get(user.id) ?? 0;
+      const studioVisits = telemetry?.studioVisits ?? 0;
+      const generatedResume = telemetry?.resumeGenerated ?? 0;
+      const generatedCover = telemetry?.coverGenerated ?? 0;
+      const bugReportsSubmitted = bugCountByUser.get(user.id) ?? 0;
+      const documentGenerations = generatedResume + generatedCover;
+      const limitedGeneration = telemetry?.limitedGeneration ?? 0;
+      let currentStateSummary: BetaUserStateSummary = 'Invited, not activated';
+      if ((telemetry?.firstLoginAt ?? null) && analysesRun === 0) {
+        currentStateSummary = 'Logged in, no analysis';
+      } else if (analysesRun > 0 && documentGenerations === 0 && limitedGeneration > 0) {
+        currentStateSummary = 'Limited generation, unresolved';
+      } else if (analysesRun > 0 && documentGenerations === 0) {
+        currentStateSummary = 'Analysis complete, no generation';
+      } else if (documentGenerations > 0) {
+        currentStateSummary = 'Generated docs';
+      }
+      if (bugReportsSubmitted > 0) {
+        currentStateSummary = 'Submitted bug report';
+      }
+      return {
+        userId: user.id,
+        email: user.email ?? 'Unknown',
+        accessCodeStatus: accessStatusByUser.get(user.id) ?? 'none',
+        firstLoginAt: telemetry?.firstLoginAt?.toISOString() ?? null,
+        lastActiveAt: telemetry?.lastActiveAt?.toISOString() ?? null,
+        analysesRun,
+        studioVisits,
+        documentGenerations,
+        bugReportsSubmitted,
+        currentStateSummary,
+      };
+    });
+
+    const uniqueInvitedUsers = new Set<string>();
+    accessCodes.forEach((code) => {
+      if (code.assignedUserId) uniqueInvitedUsers.add(code.assignedUserId);
+      if (code.redeemedByUserId) uniqueInvitedUsers.add(code.redeemedByUserId);
+    });
+
+    const funnel: CommandCenterSummary = {
+      invited: Math.max(uniqueInvitedUsers.size, roster.length),
+      activated: roster.filter((row) => row.accessCodeStatus === 'redeemed').length,
+      loggedIn: roster.filter((row) => row.firstLoginAt !== null).length,
+      ranFirstAnalysis: roster.filter((row) => row.analysesRun > 0).length,
+      reachedResults: roster.filter((row) => (byUser.get(row.userId)?.analysisReachedResults ?? 0) > 0).length,
+      openedStudio: roster.filter((row) => row.studioVisits > 0).length,
+      generatedResume: roster.filter((row) => (byUser.get(row.userId)?.resumeGenerated ?? 0) > 0).length,
+      generatedCoverLetter: roster.filter((row) => (byUser.get(row.userId)?.coverGenerated ?? 0) > 0).length,
+      submittedBug: roster.filter((row) => row.bugReportsSubmitted > 0).length,
+      trackedApplication: roster.filter((row) => (appCountByUser.get(row.userId) ?? 0) > 0).length,
+    };
+
+    const limitedUsers = roster.filter((row) => (byUser.get(row.userId)?.limitedGeneration ?? 0) > 0);
+    const missingCoverageFeedback = feedback.filter((item) =>
+      item.title.toLowerCase().includes('missing') ||
+      item.category === 'data_missing' ||
+      item.category === 'ux_confusion',
+    );
+    const complianceBlockedUsers = events.filter(
+      (event) =>
+        event.eventName === 'resume_generation_blocked_compliance' ||
+        event.eventName === 'cover_letter_generation_blocked_compliance',
+    );
+    const analysisLoadFailures = events.filter((event) => event.eventName === 'analysis_load_failed');
+    const loginFailuresFromFeedback = feedback.filter((item) =>
+      item.title.toLowerCase().includes('login') || item.where.toLowerCase().includes('login'),
+    );
+
+    const frictionHotspots: CommandCenterHotspot[] = [
+      {
+        key: 'login_failures',
+        label: 'Login failures',
+        count: loginFailuresFromFeedback.length,
+        examples: loginFailuresFromFeedback.slice(0, 3).map((item) => item.title),
+      },
+      {
+        key: 'limited_generation',
+        label: 'Limited generation counts',
+        count: limitedUsers.length,
+        examples: limitedUsers.slice(0, 3).map((row) => row.email),
+      },
+      {
+        key: 'missing_verification_coverage',
+        label: 'Missing verification coverage',
+        count: missingCoverageFeedback.length,
+        examples: missingCoverageFeedback.slice(0, 3).map((item) => item.title),
+      },
+      {
+        key: 'generation_blocked_compliance',
+        label: 'Generation blocked by compliance',
+        count: complianceBlockedUsers.length,
+        examples: complianceBlockedUsers.slice(0, 3).map((event) => event.userId ?? 'unknown user'),
+      },
+      {
+        key: 'source_resume_or_version_issues',
+        label: 'Source resume/version issues',
+        count: feedback.filter((item) => item.category === 'formatting_resume').length,
+        examples: feedback
+          .filter((item) => item.category === 'formatting_resume')
+          .slice(0, 3)
+          .map((item) => item.title),
+      },
+      {
+        key: 'analysis_load_failures',
+        label: 'Analysis load failures',
+        count: analysisLoadFailures.length,
+        examples: analysisLoadFailures.slice(0, 3).map((event) => event.userId ?? 'unknown user'),
+      },
+    ];
+
+    const actionNeededQueue: CommandCenterActionItem[] = [
+      {
+        key: 'never_activated_after_invite',
+        label: 'Users who never activated after invite',
+        count: roster.filter((row) => row.accessCodeStatus === 'assigned').length,
+        users: roster
+          .filter((row) => row.accessCodeStatus === 'assigned')
+          .slice(0, 8)
+          .map((row) => row.email),
+      },
+      {
+        key: 'limited_generation_and_stopped',
+        label: 'Users who hit limited generation and stopped',
+        count: roster.filter(
+          (row) =>
+            (byUser.get(row.userId)?.limitedGeneration ?? 0) > 0 &&
+            row.documentGenerations === 0,
+        ).length,
+        users: roster
+          .filter(
+            (row) =>
+              (byUser.get(row.userId)?.limitedGeneration ?? 0) > 0 &&
+              row.documentGenerations === 0,
+          )
+          .slice(0, 8)
+          .map((row) => row.email),
+      },
+      {
+        key: 'multiple_bug_reports',
+        label: 'Users who submitted multiple bug reports',
+        count: roster.filter((row) => row.bugReportsSubmitted >= 2).length,
+        users: roster
+          .filter((row) => row.bugReportsSubmitted >= 2)
+          .slice(0, 8)
+          .map((row) => row.email),
+      },
+      {
+        key: 'generated_but_not_tracked_application',
+        label: 'Users who generated docs but never tracked an application',
+        count: roster.filter(
+          (row) => row.documentGenerations > 0 && (appCountByUser.get(row.userId) ?? 0) === 0,
+        ).length,
+        users: roster
+          .filter(
+            (row) => row.documentGenerations > 0 && (appCountByUser.get(row.userId) ?? 0) === 0,
+          )
+          .slice(0, 8)
+          .map((row) => row.email),
+      },
+    ];
+
+    return {
+      generatedAt: new Date().toISOString(),
+      roster,
+      funnel,
+      frictionHotspots,
+      bugFeed: feedback.slice(0, 40).map((item) => ({
+        id: item.id,
+        title: item.title,
+        severity: item.severity,
+        category: item.category,
+        where: item.where,
+        createdAt: item.createdAt.toISOString(),
+        userEmail: item.userId ? userEmailById.get(item.userId) ?? null : null,
+        status: 'open',
+        issueUrl: null,
+      })),
+      actionNeededQueue,
+    };
+  }
 
   async ingestEvent(dto: TrackAnalyticsEventDto) {
     const properties = this.normalizeProperties(dto.eventName, dto.properties);

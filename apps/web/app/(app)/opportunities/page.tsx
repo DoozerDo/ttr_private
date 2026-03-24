@@ -11,6 +11,7 @@ type OpportunityItem = {
   jobId: string | null;
   analysisId: string | null;
   baselineId: string | null;
+  baselineVersionId?: string | null;
   score: number;
   company: string;
   roleTitle: string;
@@ -36,6 +37,8 @@ export default function OpportunitiesPage() {
   const [minScore, setMinScore] = useState("");
   const [maxScore, setMaxScore] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [reanalysisAvailability, setReanalysisAvailability] = useState<Record<string, boolean>>({});
+  const [runningReanalysisId, setRunningReanalysisId] = useState<string | null>(null);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -77,6 +80,46 @@ export default function OpportunitiesPage() {
     };
   }, [query]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const evaluate = async () => {
+      if (!rows.length) {
+        setReanalysisAvailability({});
+        return;
+      }
+      const entries = await Promise.all(
+        rows.map(async (row): Promise<[string, boolean]> => {
+          const analysisId = row.analysisId?.trim() ?? "";
+          const baselineId = row.baselineId?.trim() ?? "";
+          if (!analysisId || !baselineId) return [row.id, false];
+          try {
+            const [assessmentResponse, versionsResponse] = await Promise.all([
+              fetch(`/api/analysis/fit-assessments/${encodeURIComponent(analysisId)}`, { cache: "no-store" }),
+              fetch(`/api/baselines/${encodeURIComponent(baselineId)}/versions`, { cache: "no-store" }),
+            ]);
+            if (!assessmentResponse.ok || !versionsResponse.ok) return [row.id, false];
+            const assessment = (await assessmentResponse.json()) as { baselineVersionId?: string | null };
+            const versions = (await versionsResponse.json()) as Array<{ id: string; versionNumber: number }>;
+            const currentVersion = [...(Array.isArray(versions) ? versions : [])].sort(
+              (a, b) => (b.versionNumber ?? 0) - (a.versionNumber ?? 0),
+            )[0];
+            const currentVersionId = currentVersion?.id?.trim() ?? "";
+            const analysisVersionId = assessment?.baselineVersionId?.trim() ?? "";
+            return [row.id, Boolean(currentVersionId && analysisVersionId && currentVersionId !== analysisVersionId)];
+          } catch {
+            return [row.id, false];
+          }
+        }),
+      );
+      if (cancelled) return;
+      setReanalysisAvailability(Object.fromEntries(entries));
+    };
+    void evaluate();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows]);
+
   const updateStatus = async (id: string, status: OpportunityItem["status"]) => {
     setUpdatingId(id);
     setError(null);
@@ -100,6 +143,34 @@ export default function OpportunitiesPage() {
       setError(err instanceof Error ? err.message : "Unable to update opportunity status.");
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  const runReanalysis = async (row: OpportunityItem) => {
+    const jobId = row.jobId?.trim() ?? "";
+    const baselineId = row.baselineId?.trim() ?? "";
+    if (!jobId || !baselineId) return;
+    setRunningReanalysisId(row.id);
+    setError(null);
+    try {
+      const response = await fetch("/api/analysis/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, baselineId }),
+      });
+      if (!response.ok) {
+        throw new Error("Unable to re-analyze this role.");
+      }
+      const payload = (await response.json()) as { assessmentId?: string | null; id?: string | null };
+      const assessmentId = (payload.assessmentId ?? payload.id ?? "").trim();
+      if (!assessmentId) {
+        throw new Error("Re-analysis did not return an assessment ID.");
+      }
+      router.push(`/results?assessmentId=${encodeURIComponent(assessmentId)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to re-analyze this role.");
+    } finally {
+      setRunningReanalysisId(null);
     }
   };
 
@@ -218,6 +289,15 @@ export default function OpportunitiesPage() {
                         >
                           Mark Passed
                         </FormButton>
+                        {reanalysisAvailability[row.id] ? (
+                          <FormButton
+                            variant="ghost"
+                            disabled={runningReanalysisId === row.id}
+                            onClick={() => void runReanalysis(row)}
+                          >
+                            {runningReanalysisId === row.id ? "Re-analyzing..." : "Re-analyze"}
+                          </FormButton>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -237,4 +317,3 @@ export default function OpportunitiesPage() {
     </PageShell>
   );
 }
-

@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/admin/jobs", label: "Jobs" },
   { href: "/admin/baselines", label: "Baselines" },
   { href: "/admin/access-codes", label: "Access Codes" },
+  { href: "/admin/beta-command-center", label: "Beta Command Center" },
   { href: "/admin/beta-feedback", label: "Beta Feedback" },
 ];
 

@@ -96,4 +96,57 @@ describe("Opportunities page", () => {
       expect(patchCall).toBeDefined();
     });
   });
+
+  it("shows re-analyze action when baseline changed and routes to new results", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = resolveUrl(input);
+      if (url.includes("/api/opportunities") && !url.includes("/api/opportunities/") && init?.method !== "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              {
+                id: "opp-1",
+                jobId: "job-1",
+                analysisId: "analysis-1",
+                baselineId: "base-1",
+                score: 64,
+                company: "Acme",
+                roleTitle: "Support Director",
+                status: "improving_fit",
+                updatedAt: new Date().toISOString(),
+              },
+            ]),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url.includes("/api/analysis/fit-assessments/analysis-1")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ baselineVersionId: "base-version-1" }), { status: 200 }),
+        );
+      }
+      if (url.includes("/api/baselines/base-1/versions")) {
+        return Promise.resolve(
+          new Response(JSON.stringify([{ id: "base-version-2", versionNumber: 2 }]), { status: 200 }),
+        );
+      }
+      if (url.includes("/api/analysis/run") && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({ assessmentId: "analysis-2" }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+    setFetchImplementation(fetchMock);
+
+    render(<OpportunitiesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Re-analyze" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-analyze" }));
+
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith("/results?assessmentId=analysis-2");
+    });
+  });
 });
