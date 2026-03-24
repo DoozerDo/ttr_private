@@ -1772,7 +1772,7 @@ describe("Studio page UX", () => {
     await waitFor(() => {
       expect(within(coverSection).getAllByText("Cover letter blocked by compliance").length).toBeGreaterThan(0);
     });
-    expect(within(coverSection).getByText("Next step")).toBeInTheDocument();
+    expect(within(coverSection).getByRole("button", { name: "Regenerate safely" })).toBeInTheDocument();
     expect(within(coverSection).getByRole("button", { name: "Download DOCX" })).toBeDisabled();
   });
 
@@ -2048,7 +2048,18 @@ describe("Studio page UX", () => {
             preview: {
               resume: {
                 heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
-                experience: [],
+                summary: "Operations leader with measurable delivery outcomes.",
+                competencies: ["Program management", "Cross-functional leadership"],
+                experience: [
+                  {
+                    company: "Acme Corp",
+                    roleTitle: "Senior Operations Manager",
+                    bullets: [
+                      "Led a cross-functional support transformation that reduced escalations by 28%.",
+                      "Built KPI dashboards for weekly executive reporting and SLA monitoring.",
+                    ],
+                  },
+                ],
                 education: [],
               },
             },
@@ -2404,7 +2415,16 @@ describe("Studio page UX", () => {
                 heading: { name: "Alex Candidate", contactLine: "alex@example.com" },
                 summary: "Summary",
                 competencies: [],
-                experience: [],
+                experience: [
+                  {
+                    company: "Acme Corp",
+                    roleTitle: "Operations Lead",
+                    bullets: [
+                      "Owned escalation operations and reduced repeat incidents by 24%.",
+                      "Improved support routing and documentation quality across teams.",
+                    ],
+                  },
+                ],
               },
             },
           }),
@@ -2416,7 +2436,16 @@ describe("Studio page UX", () => {
             status: "success",
             generationStatus: "success",
             exportReady: true,
-            content: "Cover letter",
+            preview: {
+              coverLetter: {
+                paragraphs: [
+                  "Dear Hiring Team, I am applying for this operations leadership role because my recent work aligns directly with the outcomes you need. I have led customer support process improvements, partnered with engineering on escalation flow changes, and built operating rhythms that help teams deliver with clarity and accountability.",
+                  "In my current role, I own cross-functional support operations and incident coordination. I redesigned intake paths, clarified ownership at each handoff, and introduced weekly quality reviews with measurable targets. That work reduced unresolved escalations, improved response quality, and gave leadership better visibility into trend risk before customer impact increased. I also partnered with product, success, and analytics to align issue taxonomy and escalation triggers so teams could prioritize the highest-impact gaps first.",
+                  "I also bring practical execution discipline. I convert broad priorities into clear plans, define realistic milestones, and keep stakeholders aligned through concise updates. I focus on defensible metrics, repeatable systems, and behavior that teams can sustain under pressure. The result is steady improvement rather than short bursts that fade after launch. I would bring the same approach here by improving operational clarity, strengthening cross-team accountability, and helping your team move faster without losing quality.",
+                  "Sincerely, Alex Candidate",
+                ],
+              },
+            },
           }),
         );
       }

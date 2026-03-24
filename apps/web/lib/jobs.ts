@@ -4,6 +4,7 @@ export interface JobDto {
   title: string | null;
   company: string | null;
   rawDescription: string;
+  description?: string;
   sourceUrl: string | null;
   normalizedResponsibilities: string[];
   normalizedRequirements: string[];

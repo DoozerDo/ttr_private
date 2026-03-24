@@ -29,6 +29,7 @@ import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
 import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
+import { type JobDto } from "@/lib/jobs";
 import {
   buildCoverLetterParagraphs,
   collectNormalizedContextValues,
@@ -46,6 +47,13 @@ import {
   type StudioCardStatus,
   type ResumeFocusOption,
 } from "@/src/lib/studio/helpers";
+import {
+  evaluateStudioTrustGate,
+  generateWithRetry,
+  hasBlockingComplianceViolations,
+  validateCoverLetterOutput,
+  validateResumeOutput,
+} from "@/lib/studioTrustGate";
 import { BaselineBlockPolicyPanel } from "./BaselineBlockPolicyPanel";
 import { readResumeModel, ResumePreview, type ResumeModel } from "./ResumePreview";
 import { listJobs } from "@/lib/jobsClient";
@@ -136,6 +144,8 @@ type ApplicationInsight = {
 
 const ANALYSIS_LOAD_ERROR_MESSAGE =
   "Unable to load role analysis. Please return to Results and reopen the document generator.";
+const GENERATION_TRUST_FALLBACK_ERROR =
+  "We couldn't generate a clean document for this role yet. Try improving your baseline or adjusting the job description.";
 
 const READINESS_LOADING_STATE: GenerationReadiness = {
   status: "limited",
@@ -321,6 +331,20 @@ function buildAssessmentAnalysisUrl(analysisId: string) {
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function extractJobDescription(job: JobDto | null): string | null {
+  if (!job) return null;
+
+  if (typeof job.rawDescription === "string" && job.rawDescription.trim()) {
+    return job.rawDescription.trim();
+  }
+
+  if (typeof job.description === "string" && job.description.trim()) {
+    return job.description.trim();
+  }
+
+  return null;
 }
 
 function collectEvidenceItems(analysis: LatestAnalysis | null): string[] {
@@ -752,6 +776,9 @@ export default function StudioPage() {
     if (roleTitles.length) context.allowedRoleTitles = roleTitles;
     return context;
   }, [selectedJob, analysis]);
+  const coverLetterJobDescriptionText = useMemo(() => {
+    return extractJobDescription(selectedJob ?? null);
+  }, [selectedJob]);
 
   const analysisScore = useMemo(() => {
     const value = analysis?.overallScore ?? analysis?.score;
@@ -838,27 +865,6 @@ export default function StudioPage() {
     effectiveBaselineVersionId,
     queryExcludedRequirements,
   ]);
-  const generationMessage = useMemo(() => {
-    if (!requestedAnalysisId) {
-      return "Run a role compatibility analysis first.";
-    }
-    if (analysisError) {
-      return ANALYSIS_LOAD_ERROR_MESSAGE;
-    }
-    if (generationReadiness.status === "blocked") {
-      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
-    }
-    if (generationReadiness.status === "limited") {
-      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
-    }
-    if (!effectiveBaselineVersionId) {
-      return "Resume snapshot is still loading for this analysis.";
-    }
-    if (analysisScore === null) {
-      return "Fit score is unavailable for this role analysis.";
-    }
-    return null;
-  }, [analysisError, analysisScore, effectiveBaselineVersionId, generationReadiness.reasons, generationReadiness.status, generationReadiness.summary, requestedAnalysisId]);
   const canonicalToolingClaims = useMemo(
     () =>
       analysis?.scoring_v2?.debug?.toolingCoverage?.claims ??
@@ -1017,6 +1023,47 @@ export default function StudioPage() {
     () => aggregateVerificationIssues(verificationIssuesForStudio),
     [verificationIssuesForStudio],
   );
+  const evidenceUnitsForTrustGate = useMemo(() => collectEvidenceItems(analysis), [analysis]);
+  const hasPreGenerationComplianceViolations = useMemo(
+    () =>
+      hasBlockingComplianceViolations(
+        activeGenerationReadiness.verificationIssues.map((issue) => ({
+          code: issue.code,
+          severity: issue.severity,
+        })),
+      ),
+    [activeGenerationReadiness.verificationIssues],
+  );
+  const hasMissingBaselineEvidenceIssue = useMemo(
+    () =>
+      activeGenerationReadiness.verificationIssues.some(
+        (issue) => issue.code === "missing_baseline_evidence",
+      ),
+    [activeGenerationReadiness.verificationIssues],
+  );
+  const trustGateDecision = useMemo(
+    () =>
+      evaluateStudioTrustGate({
+        score: analysisScore,
+        baselineId: effectiveBaselineId,
+        baselineVersionId: effectiveBaselineVersionId,
+        allowMissingBaselineVersion: isNonProduction,
+        evidenceUnits: evidenceUnitsForTrustGate,
+        hasActiveComplianceViolations: hasPreGenerationComplianceViolations,
+        hasMissingBaselineEvidenceIssue,
+      }),
+    [
+      analysisScore,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+      isNonProduction,
+      evidenceUnitsForTrustGate,
+      hasPreGenerationComplianceViolations,
+      hasMissingBaselineEvidenceIssue,
+    ],
+  );
+  const roleAlignmentLabel = trustGateDecision.roleAlignmentLabel;
+  const baselineStatusLabel = trustGateDecision.baselineStatusLabel;
   const readyForDocuments =
     Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
     analysisScore !== null;
@@ -1026,7 +1073,8 @@ export default function StudioPage() {
     (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
     Boolean(requestedAnalysisId) &&
     !analysisError &&
-    !activeGenerationReadiness.blocked;
+    !activeGenerationReadiness.blocked &&
+    trustGateDecision.allowed;
   const canRunTopBandGeneration =
     isTopBand && canGenerateDocuments && !resumeGenerating && !coverGenerating;
   const improveBaselineHref = useMemo(() => {
@@ -1100,6 +1148,40 @@ export default function StudioPage() {
     }
     return [];
   }, [analysis, hasLoadedAnalysis]);
+  const generationMessage = useMemo(() => {
+    if (!requestedAnalysisId) {
+      return "Run a role compatibility analysis first.";
+    }
+    if (!trustGateDecision.allowed && trustGateDecision.reason) {
+      return trustGateDecision.reason;
+    }
+    if (analysisError) {
+      return ANALYSIS_LOAD_ERROR_MESSAGE;
+    }
+    if (generationReadiness.status === "blocked") {
+      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
+    }
+    if (generationReadiness.status === "limited") {
+      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
+    }
+    if (!effectiveBaselineVersionId) {
+      return "Resume snapshot is still loading for this analysis.";
+    }
+    if (analysisScore === null) {
+      return "Fit score is unavailable for this role analysis.";
+    }
+    return null;
+  }, [
+    analysisError,
+    analysisScore,
+    effectiveBaselineVersionId,
+    generationReadiness.reasons,
+    generationReadiness.status,
+    generationReadiness.summary,
+    requestedAnalysisId,
+    trustGateDecision.allowed,
+    trustGateDecision.reason,
+  ]);
   const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
     () => [
@@ -1788,9 +1870,41 @@ export default function StudioPage() {
       if (presenter.status === "unknown") {
         throw new Error("Resume generation returned an unexpected response. Please try again.");
       }
-      setResumeState((current) => ({ ...current, response: responsePayload }));
-      setResumeWarningFlags(extractComplianceWarnings(responsePayload));
-      setResumeAuditId(normalizeAuditId(responsePayload));
+      const validatedResult = await generateWithRetry({
+        generate: async (strictMode) => {
+          if (!strictMode) return responsePayload;
+          const retryResponse = await fetch("/api/resume", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...buildResumePayload(false),
+              trustGateMode: "strict",
+            }),
+          });
+          const retryPayload = await readResponsePayload(retryResponse);
+          if (!retryResponse.ok) {
+            throw new Error(formatErrorMessage(retryPayload, "Resume generation failed."));
+          }
+          const retryPresenter = presentResumeGeneration(retryPayload);
+          if (retryPresenter.status !== "success") {
+            throw new Error("Resume retry did not return a usable document.");
+          }
+          return retryPayload;
+        },
+        validate: (payload) => validateResumeOutput(payload),
+      });
+
+      if (!validatedResult.success) {
+        setResumeState((current) => ({
+          ...current,
+          error: GENERATION_TRUST_FALLBACK_ERROR,
+        }));
+        return;
+      }
+
+      setResumeState((current) => ({ ...current, response: validatedResult.output }));
+      setResumeWarningFlags(extractComplianceWarnings(validatedResult.output));
+      setResumeAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
         documentType: "resume",
       });
@@ -1996,9 +2110,55 @@ export default function StudioPage() {
         }
         throw new Error(formatErrorMessage(responsePayload, "Cover letter generation failed."));
       }
-      setCoverState((current) => ({ ...current, response: responsePayload }));
-      setCoverWarningFlags(extractComplianceWarnings(responsePayload));
-      setCoverAuditId(normalizeAuditId(responsePayload));
+      const initialPresenter = presentCoverLetterGeneration(responsePayload);
+      if (initialPresenter.status === "blocked" && initialPresenter.display) {
+        applyCoverLetterComplianceBlocked({
+          title: initialPresenter.display.title,
+          body: initialPresenter.display.description,
+          reasons: initialPresenter.display.reasons,
+          cta: initialPresenter.display.cta,
+        });
+        return;
+      }
+      if (initialPresenter.status !== "success") {
+        throw new Error("Cover letter generation did not return a usable document.");
+      }
+      const validatedResult = await generateWithRetry({
+        generate: async (strictMode) => {
+          if (!strictMode) return responsePayload;
+          const retryResponse = await fetch("/api/cover-letters", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...buildCoverLetterPayload(false),
+              trustGateMode: "strict",
+            }),
+          });
+          const retryPayload = await readResponsePayload(retryResponse);
+          if (!retryResponse.ok) {
+            throw new Error(formatErrorMessage(retryPayload, "Cover letter generation failed."));
+          }
+          const retryPresenter = presentCoverLetterGeneration(retryPayload);
+          if (retryPresenter.status !== "success") {
+            throw new Error("Cover letter retry did not return a usable document.");
+          }
+          return retryPayload;
+        },
+        validate: (payload) =>
+          validateCoverLetterOutput(payload, coverLetterJobDescriptionText ?? ""),
+      });
+
+      if (!validatedResult.success) {
+        setCoverState((current) => ({
+          ...current,
+          error: GENERATION_TRUST_FALLBACK_ERROR,
+        }));
+        return;
+      }
+
+      setCoverState((current) => ({ ...current, response: validatedResult.output }));
+      setCoverWarningFlags(extractComplianceWarnings(validatedResult.output));
+      setCoverAuditId(normalizeAuditId(validatedResult.output));
       console.info("[studio] generation_succeeded", {
         documentType: "cover_letter",
       });
@@ -2141,6 +2301,17 @@ export default function StudioPage() {
         title="Document Generator"
         description="Generate, preview, and export tailored documents using your latest role analysis."
       />
+      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Trust status</p>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-white/15 bg-slate-900/60 px-3 py-1 text-slate-100">
+            Baseline status: {baselineStatusLabel}
+          </span>
+          <span className="rounded-full border border-white/15 bg-slate-900/60 px-3 py-1 text-slate-100">
+            Role alignment: {roleAlignmentLabel}
+          </span>
+        </div>
+      </div>
 
       {hydratedFromResultsContext ? (
         <div
