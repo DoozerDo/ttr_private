@@ -1,12 +1,12 @@
 # Install full dependencies for build
-FROM node:20 AS deps
+FROM node:20.19.5 AS deps
 WORKDIR /usr/src/app
 
 COPY apps/api/package*.json ./
 RUN npm ci --no-audit --no-fund
 
 # Build from source and verify compiled migrations
-FROM node:20 AS builder
+FROM node:20.19.5 AS builder
 WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY apps/api/package*.json ./
@@ -14,13 +14,13 @@ COPY apps/api ./
 RUN npm run build:verify
 
 # Install production dependencies only
-FROM node:20-slim AS prod-deps
+FROM node:20.19.5-slim AS prod-deps
 WORKDIR /usr/src/app
 COPY apps/api/package*.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # Runtime image
-FROM node:20-slim AS runtime
+FROM node:20.19.5-slim AS runtime
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 ENV TTR_TEMPLATES_DIR=/usr/src/app/templates

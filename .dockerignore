@@ -1,4 +1,44 @@
-**/.next
+# VCS / metadata
+.git
+.github
+
+# Dependencies and build artifacts
 **/node_modules
+**/dist
+**/coverage
+**/.next
 **/.turbo
+**/.cache
+**/.tmp
+**/tmp
+**/temp
+
+# Logs and test outputs
+**/*.log
+**/playwright-report
+**/test-results
+**/__screenshots__
+**/screenshots
+
+# Local env and editor/OS junk
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 **/.DS_Store
+**/Thumbs.db
+**/.idea
+**/.vscode
+
+# Repo areas not needed for image builds
+archive
+artifacts
+Clearbase
+docs
+
+# Local scratch files
+*.patch
+*.tmp
+temp_*
