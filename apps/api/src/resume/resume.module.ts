@@ -31,5 +31,6 @@ import { ResumeService } from './resume.service';
   ],
   controllers: [ResumeController],
   providers: [ResumeService, GapAnalysisService],
+  exports: [ResumeService],
 })
 export class ResumeModule {}

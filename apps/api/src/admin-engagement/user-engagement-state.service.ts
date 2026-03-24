@@ -71,21 +71,24 @@ export class UserEngagementStateService {
 
     const [users, baselines, assessments, opportunities, events] = await Promise.all([
       this.userRepository.find({
-        where: { role: 'user' },
+        where: { role: 'user', isSynthetic: false },
         select: ['id', 'email', 'createdAt'],
       }),
       this.baselineRepository.find({
+        where: { isSynthetic: false },
         select: ['id', 'userId', 'updatedAt', 'latestBaselineScore', 'firstAnalyzedAt'],
       }),
       this.fitAssessmentRepository.find({
+        where: { isSynthetic: false },
         select: ['id', 'userId', 'overallScore', 'createdAt'],
       }),
       this.opportunityRepository.find({
+        where: { isSynthetic: false },
         select: ['id', 'userId', 'dateCreated'],
       }),
       this.analyticsEventRepository.find({
         select: ['userId', 'eventName', 'createdAt'],
-        where: {},
+        where: { isSynthetic: false },
         order: { createdAt: 'DESC' },
         take: 10000,
       }),

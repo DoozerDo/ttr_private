@@ -7,6 +7,35 @@ function repoMock<T>(rows: T[]) {
 }
 
 describe('FunnelMetricsService', () => {
+  it('excludes synthetic records by default', async () => {
+    const userRepo = repoMock([]);
+    const baselineRepo = repoMock([]);
+    const assessmentRepo = repoMock([]);
+    const opportunityRepo = repoMock([]);
+    const analyticsRepo = repoMock([]);
+
+    const service = new FunnelMetricsService(
+      userRepo,
+      baselineRepo,
+      assessmentRepo,
+      opportunityRepo,
+      analyticsRepo,
+    );
+
+    await service.listUserFunnelStates();
+
+    expect(userRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { role: 'user', isSynthetic: false },
+      }),
+    );
+    expect(analyticsRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { isSynthetic: false },
+      }),
+    );
+  });
+
   it('computes canonical steps in deterministic order', async () => {
     const service = new FunnelMetricsService(
       repoMock([

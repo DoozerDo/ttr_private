@@ -16,6 +16,8 @@ import {
 } from './dto/list-opportunities.dto';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 
 type CreateOpportunityInput = {
   companyName: string;
@@ -52,20 +54,38 @@ export class OpportunitiesService {
     private readonly rescoreHandler: OpportunityRescoreHandler,
   ) {}
 
-  async createFromResumeStudio(userId: string, input: CreateOpportunityInput) {
+  async createFromResumeStudio(
+    userId: string,
+    input: CreateOpportunityInput,
+    syntheticMetadata?: SyntheticMetadataInput,
+  ) {
     if (input.fitScore < 70) {
       return null;
     }
-    return this.createFromIntent(userId, input, OpportunityStatus.SAVED);
+    return this.createFromIntent(
+      userId,
+      input,
+      OpportunityStatus.SAVED,
+      syntheticMetadata,
+    );
   }
 
-  async createFromFitReviewOverride(userId: string, input: CreateOpportunityInput) {
+  async createFromFitReviewOverride(
+    userId: string,
+    input: CreateOpportunityInput,
+    syntheticMetadata?: SyntheticMetadataInput,
+  ) {
     if (input.fitScore >= 70) {
       throw new BadRequestException(
         'Fit Review override is intended for opportunities below 70.',
       );
     }
-    return this.createFromIntent(userId, input, OpportunityStatus.IN_FIT_REVIEW);
+    return this.createFromIntent(
+      userId,
+      input,
+      OpportunityStatus.IN_FIT_REVIEW,
+      syntheticMetadata,
+    );
   }
 
   async listForUser(userId: string, now = new Date()) {
@@ -158,7 +178,11 @@ export class OpportunitiesService {
     return this.actionsNeededService.generateActionCards(opportunities, now);
   }
 
-  async upsertOpportunity(userId: string, dto: CreateOpportunityDto) {
+  async upsertOpportunity(
+    userId: string,
+    dto: CreateOpportunityDto,
+    syntheticMetadata?: SyntheticMetadataInput,
+  ) {
     const companyName = dto.company.trim();
     const jobTitle = dto.roleTitle.trim();
     if (!companyName || !jobTitle) {
@@ -184,6 +208,9 @@ export class OpportunitiesService {
         existing.status =
           normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
       }
+      if (syntheticMetadata?.isSynthetic) {
+        applySyntheticMetadata(existing, syntheticMetadata);
+      }
       return this.opportunityRepository.save(existing);
     }
 
@@ -205,6 +232,9 @@ export class OpportunitiesService {
       dormant: false,
       notes: dto.notes?.trim() || null,
     });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(created, syntheticMetadata);
+    }
 
     return this.opportunityRepository.save(created);
   }
@@ -284,6 +314,7 @@ export class OpportunitiesService {
     userId: string,
     input: CreateOpportunityInput,
     status: OpportunityStatus,
+    syntheticMetadata?: SyntheticMetadataInput,
   ) {
     const companyName = input.companyName.trim();
     const jobTitle = input.jobTitle.trim();
@@ -320,6 +351,9 @@ export class OpportunitiesService {
       lastStatusChange: new Date(),
       dormant: false,
     });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(opportunity, syntheticMetadata);
+    }
 
     return this.opportunityRepository.save(opportunity);
   }

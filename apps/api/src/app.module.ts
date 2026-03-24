@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -32,6 +33,7 @@ import { AdminEngagementModule } from './admin-engagement/admin-engagement.modul
 import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-intelligence.module';
 import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
 import { AdminSignalModule } from './admin-signal/admin-signal.module';
+import { SyntheticModule } from './synthetic/synthetic.module';
 
 @Module({
   imports: [
@@ -39,6 +41,7 @@ import { AdminSignalModule } from './admin-signal/admin-signal.module';
       isGlobal: true,
       envFilePath: ['.env.development.local', '.env.local', '.env'],
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -78,6 +81,7 @@ import { AdminSignalModule } from './admin-signal/admin-signal.module';
     FeedbackIntelligenceModule,
     AdminFunnelModule,
     AdminSignalModule,
+    SyntheticModule,
   ],
   controllers: [AppController],
   providers: [

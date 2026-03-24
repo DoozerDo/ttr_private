@@ -39,6 +39,21 @@ export class CoverLetter {
   @Column({ type: 'varchar', length: 255, nullable: true })
   generationInputsHash!: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  isSynthetic!: boolean;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticScenarioKey!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticRunId!: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  syntheticCreatedAt!: Date | null;
+
+  @Column({ type: 'boolean', default: false })
+  preserveFromCleanup!: boolean;
+
   @Index()
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

@@ -85,6 +85,8 @@ import type {
 } from '../documents/normalized-document.models';
 import { validateAnalysisContext } from '../common/analysis-context-binding';
 import { filterComplianceFlagsByCanonicalClaims } from '../common/readiness-claim-truth';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 
 type CoverLetterDraft = {
   baseline: Baseline;
@@ -151,7 +153,11 @@ export class CoverLettersService {
     this.generator = new TemplateCoverLetterGenerator();
   }
 
-  async generateCoverLetter(userId: string, input: GenerateCoverLetterDto) {
+  async generateCoverLetter(
+    userId: string,
+    input: GenerateCoverLetterDto,
+    syntheticMetadata?: SyntheticMetadataInput,
+  ) {
     const draft = await this.buildCoverLetterDraft(userId, input);
 
     if (draft.complianceResult.blocked) {
@@ -208,6 +214,9 @@ export class CoverLettersService {
       content: draft.complianceResult.normalizedContent,
       generationInputsHash: draft.generationInputsHash,
     });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(coverLetter, syntheticMetadata);
+    }
 
     const savedCoverLetter = await this.coverLetterRepository.save(coverLetter);
 

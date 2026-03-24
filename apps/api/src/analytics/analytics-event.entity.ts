@@ -31,6 +31,15 @@ export class AnalyticsEvent {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   properties!: Record<string, unknown>;
 
+  @Column({ type: 'boolean', default: false })
+  isSynthetic!: boolean;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticScenarioKey!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticRunId!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 }

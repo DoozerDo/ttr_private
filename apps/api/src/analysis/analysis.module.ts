@@ -46,6 +46,6 @@ import { SupportModule } from '../support/support.module';
     CareerGravityService,
     ScoreSimulatorService,
   ],
-  exports: [GapAnalysisService],
+  exports: [GapAnalysisService, AnalysisService],
 })
 export class AnalysisModule {}

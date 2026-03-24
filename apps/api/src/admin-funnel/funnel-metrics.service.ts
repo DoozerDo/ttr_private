@@ -119,21 +119,30 @@ export class FunnelMetricsService {
     private readonly analyticsRepository: Repository<AnalyticsEvent>,
   ) {}
 
-  async listUserFunnelStates(): Promise<UserFunnelState[]> {
+  async listUserFunnelStates(options?: {
+    includeSynthetic?: boolean;
+  }): Promise<UserFunnelState[]> {
+    const includeSynthetic = options?.includeSynthetic ?? false;
     const [users, baselines, assessments, opportunities, events] = await Promise.all([
-      this.userRepository.find({ where: { role: 'user' }, select: ['id', 'email', 'createdAt'] }),
+      this.userRepository.find({
+        where: includeSynthetic ? { role: 'user' } : { role: 'user', isSynthetic: false },
+        select: ['id', 'email', 'createdAt'],
+      }),
       this.baselineRepository.find({
+        where: includeSynthetic ? {} : { isSynthetic: false },
         select: ['id', 'userId', 'createdAt', 'updatedAt', 'latestBaselineScore', 'originalBaselineScore', 'firstAnalyzedAt'],
       }),
       this.assessmentRepository.find({
+        where: includeSynthetic ? {} : { isSynthetic: false },
         select: ['id', 'userId', 'jobId', 'overallScore', 'createdAt'],
       }),
       this.opportunityRepository.find({
+        where: includeSynthetic ? {} : { isSynthetic: false },
         select: ['id', 'userId', 'dateCreated'],
       }),
       this.analyticsRepository.find({
         select: ['userId', 'eventName', 'createdAt'],
-        where: {},
+        where: includeSynthetic ? {} : { isSynthetic: false },
         order: { createdAt: 'ASC' },
         take: 20000,
       }),
@@ -241,8 +250,8 @@ export class FunnelMetricsService {
     });
   }
 
-  async getFunnelMetrics(): Promise<FunnelMetricsResponse> {
-    const states = await this.listUserFunnelStates();
+  async getFunnelMetrics(options?: { includeSynthetic?: boolean }): Promise<FunnelMetricsResponse> {
+    const states = await this.listUserFunnelStates(options);
     const totalUsers = states.length;
     const stepCounts = Object.fromEntries(
       CANONICAL_FUNNEL_STEPS.map((step) => [step, states.filter((state) => state.steps[step]).length]),
@@ -326,8 +335,8 @@ export class FunnelMetricsService {
     };
   }
 
-  async getSegmentBreakdown(): Promise<SegmentBreakdown> {
-    const states = await this.listUserFunnelStates();
+  async getSegmentBreakdown(options?: { includeSynthetic?: boolean }): Promise<SegmentBreakdown> {
+    const states = await this.listUserFunnelStates(options);
     const scoreBucket: SegmentBreakdown['scoreBucket'] = {
       lt_70: 0,
       between_70_84: 0,
@@ -370,8 +379,11 @@ export class FunnelMetricsService {
     };
   }
 
-  async getUsersForStep(stepName: FunnelStepName): Promise<UserFunnelState[]> {
-    const states = await this.listUserFunnelStates();
+  async getUsersForStep(
+    stepName: FunnelStepName,
+    options?: { includeSynthetic?: boolean },
+  ): Promise<UserFunnelState[]> {
+    const states = await this.listUserFunnelStates(options);
     return states.filter((state) => state.steps[stepName] || state.currentStep === stepName);
   }
 }

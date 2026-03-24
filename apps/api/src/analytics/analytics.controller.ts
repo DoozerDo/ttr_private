@@ -32,7 +32,10 @@ export class AnalyticsController {
 
   @Get('summary')
   @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
-  async summary(@Query('days') daysRaw?: string) {
+  async summary(
+    @Query('days') daysRaw?: string,
+    @Query('includeSynthetic') includeSyntheticRaw?: string,
+  ) {
     const days =
       typeof daysRaw === 'string' && daysRaw.trim()
         ? Number(daysRaw)
@@ -40,12 +43,17 @@ export class AnalyticsController {
     if (!Number.isFinite(days) || days < 1) {
       throw new BadRequestException('days must be greater than 0');
     }
-    return this.analyticsService.getSummary(days);
+    return this.analyticsService.getSummary(days, {
+      includeSynthetic: includeSyntheticRaw === 'true',
+    });
   }
 
   @Get('metrics')
   @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
-  async metrics(@Query('range') rangeRaw?: string) {
+  async metrics(
+    @Query('range') rangeRaw?: string,
+    @Query('includeSynthetic') includeSyntheticRaw?: string,
+  ) {
     const normalizedRange =
       typeof rangeRaw === 'string' && rangeRaw.trim()
         ? rangeRaw.trim().toLowerCase()
@@ -55,12 +63,15 @@ export class AnalyticsController {
     }
     return this.analyticsService.getFounderMetrics({
       rangeKey: normalizedRange as '7d' | '14d' | '30d' | 'all',
+      includeSynthetic: includeSyntheticRaw === 'true',
     });
   }
 
   @Get('beta-command-center')
   @UseGuards(AuthGuard('jwt'), AdminBypassGuard)
-  async betaCommandCenter() {
-    return this.analyticsService.getBetaCommandCenter();
+  async betaCommandCenter(@Query('includeSynthetic') includeSyntheticRaw?: string) {
+    return this.analyticsService.getBetaCommandCenter({
+      includeSynthetic: includeSyntheticRaw === 'true',
+    });
   }
 }

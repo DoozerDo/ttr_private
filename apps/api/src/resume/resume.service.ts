@@ -76,6 +76,7 @@ import type {
   NormalizedResumeDocument,
   UserSafeDisplayPayload,
 } from '../documents/normalized-document.models';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
 
 export type GenerateResumeRequest = {
   baselineId: string;
@@ -969,6 +970,7 @@ export class ResumeService {
     userId: string,
     request: GenerateResumeRequest,
     options?: GenerateResumeOptions,
+    syntheticMetadata?: SyntheticMetadataInput,
   ) {
     const recordResumeEvent = (success: boolean) => {
       void this.criticalFlowTrackerService.recordCriticalFlowEvent({
@@ -1513,7 +1515,7 @@ export class ResumeService {
         cxFitScoreSnapshot,
         resumeArtifactId: audit.id,
         resumeArtifactType: 'resume',
-      });
+      }, syntheticMetadata);
     const opportunity = await this.opportunitiesService.createFromResumeStudio(
       userId,
       {
@@ -1522,6 +1524,7 @@ export class ResumeService {
         fitScore: latestAssessment?.overallScore ?? 0,
         baselineVersionUsed: baselineVersion.id,
       },
+      syntheticMetadata,
     );
 
     const quality =

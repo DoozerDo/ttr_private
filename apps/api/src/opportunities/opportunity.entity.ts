@@ -102,6 +102,21 @@ export class Opportunity {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  isSynthetic!: boolean;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticScenarioKey!: string | null;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  syntheticRunId!: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  syntheticCreatedAt!: Date | null;
+
+  @Column({ type: 'boolean', default: false })
+  preserveFromCleanup!: boolean;
+
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt!: Date;
 }

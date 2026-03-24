@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { SubscriptionTier } from '../subscription/subscription-tier.enum';
 import { User } from './user.entity';
 import { AccountType } from './account-type.enum';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 
 @Injectable()
 export class UsersService {
@@ -18,7 +20,7 @@ export class UsersService {
     firstName: string;
     lastName: string;
     emailConfirmed: boolean;
-  }): Promise<User> {
+  }, syntheticMetadata?: SyntheticMetadataInput): Promise<User> {
     const user = this.usersRepository.create({
       email: input.email,
       passwordHash: input.passwordHash,
@@ -37,6 +39,9 @@ export class UsersService {
       subscriptionTier: SubscriptionTier.FREE,
       accountType: AccountType.FREE,
     });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(user, syntheticMetadata);
+    }
     return this.usersRepository.save(user);
   }
 

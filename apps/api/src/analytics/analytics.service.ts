@@ -252,11 +252,16 @@ export class AnalyticsService {
     private readonly betaFeedbackRepository: Repository<BetaFeedback>,
   ) {}
 
-  async getBetaCommandCenter(): Promise<BetaCommandCenterResponse> {
+  async getBetaCommandCenter(input?: {
+    includeSynthetic?: boolean;
+  }): Promise<BetaCommandCenterResponse> {
+    const includeSynthetic = input?.includeSynthetic ?? false;
     const [users, accessCodes, events, assessments, opportunities, applications, feedback] =
       await Promise.all([
         this.usersRepository.find({
-          where: { role: 'user' },
+          where: includeSynthetic
+            ? { role: 'user' }
+            : { role: 'user', isSynthetic: false },
           select: ['id', 'email', 'createdAt'],
           order: { createdAt: 'DESC' },
         }),
@@ -265,24 +270,28 @@ export class AnalyticsService {
           order: { createdAt: 'DESC' },
         }),
         this.analyticsEventRepository.find({
-          where: {},
+          where: includeSynthetic ? {} : { isSynthetic: false },
           select: ['userId', 'eventName', 'createdAt', 'properties'],
           order: { createdAt: 'DESC' },
           take: 5000,
         }),
         this.fitAssessmentRepository.find({
+          where: includeSynthetic ? {} : { isSynthetic: false },
           select: ['id', 'userId', 'createdAt'],
           order: { createdAt: 'DESC' },
         }),
         this.opportunityRepository.find({
+          where: includeSynthetic ? {} : { isSynthetic: false },
           select: ['id', 'userId', 'status', 'updatedAt'],
           order: { updatedAt: 'DESC' },
         }),
         this.applicationRepository.find({
+          where: includeSynthetic ? {} : { isSynthetic: false },
           select: ['id', 'userId', 'createdAt'],
           order: { createdAt: 'DESC' },
         }),
         this.betaFeedbackRepository.find({
+          where: includeSynthetic ? {} : { isSynthetic: false },
           select: ['id', 'title', 'severity', 'category', 'where', 'createdAt', 'userId'],
           order: { createdAt: 'DESC' },
           take: 200,
@@ -576,17 +585,24 @@ export class AnalyticsService {
       userId: dto.userId?.trim() || null,
       path: dto.path?.trim() || null,
       properties,
+      isSynthetic: dto.isSynthetic ?? false,
+      syntheticScenarioKey: dto.syntheticScenarioKey?.trim() || null,
+      syntheticRunId: dto.syntheticRunId?.trim() || null,
       createdAt,
     });
 
     return this.analyticsEventRepository.save(event);
   }
 
-  async getSummary(days = 30): Promise<AnalyticsSummaryResponse> {
+  async getSummary(
+    days = 30,
+    options?: { includeSynthetic?: boolean },
+  ): Promise<AnalyticsSummaryResponse> {
     const normalizedDays = Number.isFinite(days)
       ? Math.max(1, Math.min(365, Math.floor(days)))
       : 30;
     const since = new Date(Date.now() - normalizedDays * 24 * 60 * 60 * 1000);
+    const includeSynthetic = options?.includeSynthetic ?? false;
 
     const [
       visitorRow,
@@ -602,6 +618,7 @@ export class AnalyticsService {
         .select('COUNT(DISTINCT event.sessionId)', 'count')
         .where('event.eventName = :eventName', { eventName: 'landing_viewed' })
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
@@ -613,6 +630,7 @@ export class AnalyticsService {
           source: 'landing',
         })
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
@@ -628,12 +646,14 @@ export class AnalyticsService {
           },
         )
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
         .select('COUNT(*)', 'count')
         .where('event.eventName = :eventName', { eventName: 'opportunity_saved' })
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
@@ -645,6 +665,7 @@ export class AnalyticsService {
           entrySource: 'results',
         })
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
@@ -653,6 +674,7 @@ export class AnalyticsService {
           eventName: 'compatibility_analysis_completed',
         })
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawOne<{ count: string }>(),
       this.analyticsEventRepository
         .createQueryBuilder('event')
@@ -668,6 +690,7 @@ export class AnalyticsService {
           },
         )
         .andWhere('event.createdAt >= :since', { since })
+        .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
         .getRawMany<{ properties: Record<string, unknown> | string }>(),
     ]);
 
@@ -737,9 +760,11 @@ export class AnalyticsService {
 
   async getFounderMetrics(input?: {
     rangeKey?: '7d' | '14d' | '30d' | 'all';
+    includeSynthetic?: boolean;
   }): Promise<FounderMetricsResponse> {
     const now = new Date();
     const rangeKey = input?.rangeKey ?? '7d';
+    const includeSynthetic = input?.includeSynthetic ?? false;
     const daysByRange: Record<'7d' | '14d' | '30d', number> = {
       '7d': 7,
       '14d': 14,
@@ -752,10 +777,12 @@ export class AnalyticsService {
         this.analyticsEventRepository
           .createQueryBuilder('event')
           .select('MIN(event.createdAt)', 'minCreatedAt')
+          .where(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
           .getRawOne<{ minCreatedAt: Date | string | null }>(),
         this.usersRepository
           .createQueryBuilder('user')
           .select('MIN(user.createdAt)', 'minCreatedAt')
+          .where(includeSynthetic ? '1=1' : 'user.isSynthetic = false')
           .getRawOne<{ minCreatedAt: Date | string | null }>(),
       ]);
       const minEventDate = eventMinRow?.minCreatedAt
@@ -808,6 +835,7 @@ export class AnalyticsService {
       .addSelect('event.createdAt', 'createdAt')
       .addSelect('event.properties', 'properties')
       .where('event.createdAt >= :since', { since: analyticsSince })
+      .andWhere(includeSynthetic ? '1=1' : 'event.isSynthetic = false')
       .andWhere('event.eventName IN (:...eventNames)', {
         eventNames: trackedEventNames,
       })
@@ -859,6 +887,7 @@ export class AnalyticsService {
       .createQueryBuilder('user')
       .select('user.createdAt', 'createdAt')
       .where('user.createdAt >= :since', { since: analyticsSince })
+      .andWhere(includeSynthetic ? '1=1' : 'user.isSynthetic = false')
       .getRawMany<{ createdAt: Date | string }>();
 
     const userCreatedAtMs = rawUsers
@@ -1288,3 +1317,4 @@ export class AnalyticsService {
     return properties;
   }
 }
+

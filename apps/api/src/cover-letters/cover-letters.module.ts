@@ -10,5 +10,6 @@ import { CoverLettersService } from './cover-letters.service';
   imports: [TypeOrmModule.forFeature([CoverLetter]), ComplianceModule],
   controllers: [CoverLettersController],
   providers: [CoverLettersService, GapAnalysisService],
+  exports: [CoverLettersService],
 })
 export class CoverLettersModule {}

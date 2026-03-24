@@ -19,6 +19,8 @@ import {
 } from './application.entity';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 
 export type ListApplicationsFilters = {
   stage?: ApplicationStage;
@@ -271,6 +273,7 @@ export class ApplicationsService {
 
   async upsertPreparedFromResumeGeneration(
     input: ResumeGenerationTrackerInput,
+    syntheticMetadata?: SyntheticMetadataInput,
   ) {
     const fingerprint = this.computeFingerprint(input);
     const now = new Date();
@@ -309,6 +312,9 @@ export class ApplicationsService {
       }
       if (input.outcomeLinkageSnapshot) {
         entry.outcomeLinkageSnapshot = input.outcomeLinkageSnapshot;
+      }
+      if (syntheticMetadata?.isSynthetic) {
+        applySyntheticMetadata(entry, syntheticMetadata);
       }
       entry.lastTouchedAt = now;
       entry.resumeArtifacts = this.mergeArtifacts(
@@ -351,6 +357,9 @@ export class ApplicationsService {
       verificationCoverageSnapshot: input.verificationCoverageSnapshot ?? {},
       outcomeLinkageSnapshot: input.outcomeLinkageSnapshot ?? {},
     });
+    if (syntheticMetadata?.isSynthetic) {
+      applySyntheticMetadata(newEntry, syntheticMetadata);
+    }
 
     return this.applicationRepository.save(newEntry);
   }

@@ -1,5 +1,6 @@
 import {
   IsIn,
+  IsBoolean,
   IsISO8601,
   IsObject,
   IsOptional,
@@ -38,4 +39,18 @@ export class TrackAnalyticsEventDto {
   @IsOptional()
   @IsObject()
   properties?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsBoolean()
+  isSynthetic?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  syntheticScenarioKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  syntheticRunId?: string | null;
 }

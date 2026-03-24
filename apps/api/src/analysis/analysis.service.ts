@@ -84,6 +84,8 @@ import {
   GapAnalysisResult,
   GapAnalysisService,
 } from './gap-analysis.service';
+import { SyntheticMetadataInput } from '../synthetic/synthetic-metadata.types';
+import { applySyntheticMetadata } from '../synthetic/synthetic-metadata.util';
 
 export type AnalysisRequest = {
   baselineId: string;
@@ -2178,6 +2180,7 @@ export class AnalysisService {
   async runFitAssessment(
     userId: string,
     payload: RunFitAssessmentDto,
+    syntheticMetadata?: SyntheticMetadataInput,
   ): Promise<RunAssessmentResult> {
     let shortTextWarningKey: string | undefined;
     try {
@@ -2562,6 +2565,9 @@ export class AnalysisService {
       confidenceScore: confidenceResult.confidenceScore,
       confidenceReasons: confidenceResult.confidenceReasons,
     });
+      if (syntheticMetadata?.isSynthetic) {
+        applySyntheticMetadata(assessment, syntheticMetadata);
+      }
 
       const savedAssessment = await this.fitAssessmentRepository.save(assessment);
 
