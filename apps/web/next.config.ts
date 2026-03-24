@@ -1,14 +1,13 @@
 import path from "path";
 import type { NextConfig } from "next";
 
-type DebugNextConfig = NextConfig & {
-  swcMinify?: boolean;
-};
+process.env.BROWSERSLIST_IGNORE_OLD_DATA ??= "1";
+process.env.BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA ??= "1";
+process.env.TTR_SILENCE_BASELINE_BROWSER_MAPPING_WARNING ??= "1";
 
-const nextConfig: DebugNextConfig = {
+const nextConfig: NextConfig = {
   // TEMP DEBUGGING: revert after hydration mismatch root cause is fixed.
   productionBrowserSourceMaps: true,
-  swcMinify: false,
   experimental: {
     externalDir: true,
   },

@@ -75,17 +75,160 @@ WARNING:
 - Use sparingly
 #>
 ## Import-Module .\docker-cmds.psm1  
-Function Invoke-BuildBoth {
-    # Smoke verification:
-    # - Builds api + web using current Dockerfile paths from compose.
-    # - Starts containers detached.
-    Invoke-SyncEnvFiles
-    docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+$script:ApiEnvFile = "apps/api/.env.development.local"
+$script:ApiSharedEnvFile = ".env.dreamhost"
+$script:WebEnvFile = "apps/web/.env.local"
+$script:CriticalApiVars = @("APP_PUBLIC_WEB_URL", "JWT_SECRET", "REQUIRE_ACCESS_CODE")
+
+function Get-RepoRoot {
+    $gitRootRaw = git rev-parse --show-toplevel 2>$null
+    if (-Not $gitRootRaw) {
+        throw "This directory is not inside a Git repository."
+    }
+    return (Resolve-Path $gitRootRaw.Trim()).Path
 }
+
+function Get-EnvValueFromFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+
+    if (-Not (Test-Path $Path)) {
+        return $null
+    }
+
+    $pattern = "^\s*{0}\s*=\s*(.*)\s*$" -f [Regex]::Escape($Key)
+    foreach ($line in Get-Content -Path $Path) {
+        if ($line -match "^\s*#" -or [string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+        $match = [Regex]::Match($line, $pattern)
+        if ($match.Success) {
+            $value = $match.Groups[1].Value.Trim()
+            return $value.Trim("'").Trim('"')
+        }
+    }
+    return $null
+}
+
+function Test-ApiCriticalEnv {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $apiEnvPath = Join-Path $RepoRoot $script:ApiEnvFile
+    $apiSharedPath = Join-Path $RepoRoot $script:ApiSharedEnvFile
+
+    $result = @{}
+    foreach ($key in $script:CriticalApiVars) {
+        $localValue = Get-EnvValueFromFile -Path $apiEnvPath -Key $key
+        $sharedValue = Get-EnvValueFromFile -Path $apiSharedPath -Key $key
+        $shellValue = [Environment]::GetEnvironmentVariable($key)
+        $effective = if (-not [string]::IsNullOrWhiteSpace($shellValue)) {
+            $shellValue
+        } elseif (-not [string]::IsNullOrWhiteSpace($localValue)) {
+            $localValue
+        } else {
+            $sharedValue
+        }
+
+        $source = if (-not [string]::IsNullOrWhiteSpace($shellValue)) {
+            "shell/compose interpolation"
+        } elseif (-not [string]::IsNullOrWhiteSpace($localValue)) {
+            $script:ApiEnvFile
+        } elseif (-not [string]::IsNullOrWhiteSpace($sharedValue)) {
+            $script:ApiSharedEnvFile
+        } else {
+            "compose default fallback"
+        }
+
+        $result[$key] = @{
+            present = -not [string]::IsNullOrWhiteSpace($effective)
+            source = $source
+            value = $effective
+        }
+    }
+    return $result
+}
+
+function Show-BuildContext {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$ComposeFile
+    )
+
+    Write-Host "Build context:"
+    Write-Host "  - Compose file: $ComposeFile"
+    Write-Host "  - API env_file[0]: $script:ApiEnvFile"
+    Write-Host "  - API env_file[1]: $script:ApiSharedEnvFile (local compose only)"
+    Write-Host "  - Web env_file: $script:WebEnvFile (local compose only)"
+    Write-Host "  - Env precedence: compose environment > compose env_file > default fallback"
+
+    $status = Test-ApiCriticalEnv -RepoRoot $RepoRoot
+    foreach ($key in $script:CriticalApiVars) {
+        $entry = $status[$key]
+        Write-Host ("  - {0}: {1} (source: {2})" -f $key, ($(if ($entry.present) { "present" } else { "missing" })), $entry.source)
+    }
+}
+
+function Invoke-LocalBuildPrecheck {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    Write-Host "Precheck: api build verification"
+    Push-Location $RepoRoot
+    try {
+        npm run build:api
+        Write-Host "Precheck: web typecheck (fast fail before Docker build)"
+        npm -w apps/web run typecheck:app
+    } finally {
+        Pop-Location
+    }
+}
+
+Function Invoke-BuildBoth {
+    param(
+        [switch]$SkipPrecheck,
+        [switch]$SkipEnvSync
+    )
+
+    $repoRoot = Get-RepoRoot
+    Push-Location $repoRoot
+    try {
+        if (-not $SkipEnvSync) {
+            Invoke-SyncEnvFiles -RepoRoot $repoRoot -RequireSource
+        }
+        Show-BuildContext -RepoRoot $repoRoot -ComposeFile "infra/docker/docker-compose.dev.yml"
+        if (-not $SkipPrecheck) {
+            Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
+        }
+        docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+    } finally {
+        Pop-Location
+    }
+}
+
 function Invoke-BuildAll {
-    Invoke-SyncEnvFiles
-    docker compose -f infra\docker\docker-compose.local.yml down -v 
-    docker compose -f infra\docker\docker-compose.local.yml up -d --build 
+    param(
+        [switch]$SkipPrecheck,
+        [switch]$SkipEnvSync
+    )
+
+    $repoRoot = Get-RepoRoot
+    Push-Location $repoRoot
+    try {
+        if (-not $SkipEnvSync) {
+            Invoke-SyncEnvFiles -RepoRoot $repoRoot -RequireSource
+        }
+        Show-BuildContext -RepoRoot $repoRoot -ComposeFile "infra/docker/docker-compose.local.yml"
+        if (-not $SkipPrecheck) {
+            Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
+        }
+        docker compose -f infra\docker\docker-compose.local.yml down -v
+        docker compose -f infra\docker\docker-compose.local.yml up -d --build
+    } finally {
+        Pop-Location
+    }
 }
 
 function Restart-Both {
@@ -102,7 +245,7 @@ Function Reset-Env {
 
     docker compose -f infra\docker\docker-compose.local.yml down -v
     docker builder prune -af
-    Invoke-SyncEnvFiles
+    Invoke-SyncEnvFiles -RequireSource
 }
 
 
@@ -147,14 +290,19 @@ function Invoke-SyncEnvFiles {
     param(
         [string]$RepoRoot = (Get-Location).Path,
         [string]$EnvRoot  = (Join-Path (Split-Path $RepoRoot -Parent) "TargetThisRole_env"),
-        [switch]$VerboseOutput
+        [switch]$VerboseOutput,
+        [switch]$RequireSource
     )
 
     # --- Normalize to absolute paths ---
     $RepoRoot = (Resolve-Path $RepoRoot).Path
 
     If (-Not (Test-Path $EnvRoot)) {
-        Write-Error "Env source folder not found: $EnvRoot"
+        $message = "Env source folder not found: $EnvRoot`nCreate it (shared env source) or run build with -SkipEnvSync."
+        if ($RequireSource) {
+            throw $message
+        }
+        Write-Warning $message
         return
     }
     $EnvRoot = (Resolve-Path $EnvRoot).Path

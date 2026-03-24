@@ -130,12 +130,26 @@ async function bootstrap() {
     );
     const appPublicWebUrl =
       config.get<string>('APP_PUBLIC_WEB_URL') ?? process.env.APP_PUBLIC_WEB_URL;
+    const jwtSecret = config.get<string>('JWT_SECRET') ?? process.env.JWT_SECRET;
+    const requireAccessCode =
+      config.get<string>('REQUIRE_ACCESS_CODE') ?? process.env.REQUIRE_ACCESS_CODE;
+    const requireAccessCodeState =
+      typeof requireAccessCode === 'string' &&
+      ['true', 'false'].includes(requireAccessCode.trim().toLowerCase())
+        ? requireAccessCode.trim().toLowerCase()
+        : 'missing_or_invalid';
     console.log(
-      `[DEV CONFIG] APP_PUBLIC_WEB_URL ${
+      `[DEV CONFIG] APP_PUBLIC_WEB_URL=${
         appPublicWebUrl && appPublicWebUrl.trim().length > 0
           ? 'present'
           : 'missing'
-      }`,
+      } JWT_SECRET=${jwtSecret && jwtSecret.trim().length > 0 ? 'present' : 'missing'} REQUIRE_ACCESS_CODE=${requireAccessCodeState}`,
+    );
+    console.log(
+      `[DEV CONFIG] Source precedence: compose environment > compose env_file > process env`,
+    );
+    console.log(
+      `[DEV CONFIG] Effective APP_PUBLIC_WEB_URL=${appPublicWebUrl?.trim() || 'unset'}`
     );
   }
 

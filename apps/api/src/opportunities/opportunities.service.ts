@@ -10,6 +10,12 @@ import { OpportunityActionsNeededService } from './opportunity-actions-needed.se
 import { OpportunityStateMachine } from './opportunity-state-machine';
 import { Opportunity, OpportunityStatus } from './opportunity.entity';
 import { OpportunityRescoreHandler } from './opportunity-rescore.handler';
+import {
+  ListOpportunitiesDto,
+  type SimpleOpportunityStatus,
+} from './dto/list-opportunities.dto';
+import { CreateOpportunityDto } from './dto/create-opportunity.dto';
+import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 
 type CreateOpportunityInput = {
   companyName: string;
@@ -152,6 +158,108 @@ export class OpportunitiesService {
     return this.actionsNeededService.generateActionCards(opportunities, now);
   }
 
+  async upsertOpportunity(userId: string, dto: CreateOpportunityDto) {
+    const companyName = dto.company.trim();
+    const jobTitle = dto.roleTitle.trim();
+    if (!companyName || !jobTitle) {
+      throw new BadRequestException('company and roleTitle are required');
+    }
+
+    const normalizedScore = Math.round(dto.score);
+    const existing = await this.opportunityRepository.findOne({
+      where: { userId, analysisId: dto.analysisId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (existing) {
+      existing.jobId = dto.jobId;
+      existing.analysisId = dto.analysisId;
+      existing.baselineId = dto.baselineId;
+      existing.companyName = companyName;
+      existing.jobTitle = jobTitle;
+      existing.currentScore = normalizedScore;
+      existing.currentBand = fitBandFromScore(normalizedScore);
+      existing.notes = dto.notes?.trim() || existing.notes || null;
+      if (existing.status !== OpportunityStatus.APPLIED && existing.status !== OpportunityStatus.REJECTED) {
+        existing.status =
+          normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
+      }
+      return this.opportunityRepository.save(existing);
+    }
+
+    const created = this.opportunityRepository.create({
+      userId,
+      jobId: dto.jobId,
+      analysisId: dto.analysisId,
+      baselineId: dto.baselineId,
+      companyName,
+      jobTitle,
+      salary: null,
+      status: normalizedScore >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW,
+      initialScore: normalizedScore,
+      currentScore: normalizedScore,
+      initialBand: fitBandFromScore(normalizedScore),
+      currentBand: fitBandFromScore(normalizedScore),
+      baselineVersionUsed: null,
+      lastStatusChange: new Date(),
+      dormant: false,
+      notes: dto.notes?.trim() || null,
+    });
+
+    return this.opportunityRepository.save(created);
+  }
+
+  async listSimpleForUser(userId: string, query: ListOpportunitiesDto) {
+    const opportunities = await this.opportunityRepository.find({
+      where: { userId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    const minScore =
+      query.minScore !== undefined && query.minScore.trim().length > 0
+        ? Number(query.minScore)
+        : null;
+    const maxScore =
+      query.maxScore !== undefined && query.maxScore.trim().length > 0
+        ? Number(query.maxScore)
+        : null;
+
+    return opportunities
+      .map((opportunity) => this.toSimpleOpportunity(opportunity))
+      .filter((entry) => {
+        if (query.analysisId && entry.analysisId !== query.analysisId) {
+          return false;
+        }
+        if (query.status && entry.status !== query.status) {
+          return false;
+        }
+        if (minScore !== null && !Number.isNaN(minScore) && entry.score < minScore) {
+          return false;
+        }
+        if (maxScore !== null && !Number.isNaN(maxScore) && entry.score > maxScore) {
+          return false;
+        }
+        return true;
+      });
+  }
+
+  async updateOpportunity(id: string, userId: string, dto: UpdateOpportunityDto) {
+    const opportunity = await this.mustFindForUser(id, userId);
+    const current = this.toSimpleStatus(opportunity);
+    const next = dto.status ?? current;
+
+    if (!this.isSimpleTransitionAllowed(current, next)) {
+      throw new BadRequestException(`Invalid status transition: ${current} -> ${next}`);
+    }
+
+    opportunity.status = this.fromSimpleStatus(next, opportunity.currentScore);
+    if (dto.notes !== undefined) {
+      opportunity.notes = dto.notes.trim() || null;
+    }
+    opportunity.lastStatusChange = new Date();
+    return this.opportunityRepository.save(opportunity);
+  }
+
   async exportForUser(userId: string, format: 'csv' | 'json', now = new Date()) {
     const opportunities = await this.listForUser(userId, now);
     if (format === 'json') {
@@ -291,6 +399,66 @@ export class OpportunitiesService {
 
   private escapeCsv(value: string) {
     return `"${value.replace(/"/g, '""')}"`;
+  }
+
+  private toSimpleOpportunity(opportunity: Opportunity) {
+    return {
+      id: opportunity.id,
+      userId: opportunity.userId,
+      jobId: opportunity.jobId,
+      analysisId: opportunity.analysisId,
+      baselineId: opportunity.baselineId,
+      score: opportunity.currentScore,
+      company: opportunity.companyName,
+      roleTitle: opportunity.jobTitle,
+      status: this.toSimpleStatus(opportunity),
+      notes: opportunity.notes,
+      createdAt: opportunity.dateCreated.toISOString(),
+      updatedAt: opportunity.updatedAt.toISOString(),
+    };
+  }
+
+  private toSimpleStatus(opportunity: Opportunity): SimpleOpportunityStatus {
+    if (opportunity.status === OpportunityStatus.APPLIED) return 'applied';
+    if (
+      opportunity.status === OpportunityStatus.REJECTED ||
+      opportunity.status === OpportunityStatus.WITHDRAWN ||
+      opportunity.status === OpportunityStatus.DORMANT
+    ) {
+      return 'passed';
+    }
+    if (opportunity.status === OpportunityStatus.IN_FIT_REVIEW) {
+      return 'improving_fit';
+    }
+    if (opportunity.status === OpportunityStatus.SAVED && opportunity.currentScore < 70) {
+      return 'improving_fit';
+    }
+    if (opportunity.status === OpportunityStatus.SAVED) {
+      return 'ready_to_apply';
+    }
+    return 'saved';
+  }
+
+  private fromSimpleStatus(
+    status: SimpleOpportunityStatus,
+    score: number,
+  ): OpportunityStatus {
+    if (status === 'applied') return OpportunityStatus.APPLIED;
+    if (status === 'passed') return OpportunityStatus.REJECTED;
+    if (status === 'improving_fit') return OpportunityStatus.IN_FIT_REVIEW;
+    if (status === 'ready_to_apply') return OpportunityStatus.SAVED;
+    return score >= 70 ? OpportunityStatus.SAVED : OpportunityStatus.IN_FIT_REVIEW;
+  }
+
+  private isSimpleTransitionAllowed(
+    current: SimpleOpportunityStatus,
+    next: SimpleOpportunityStatus,
+  ) {
+    if (current === next) return true;
+    if (next === 'passed') return true;
+    if (current === 'ready_to_apply' && next === 'applied') return true;
+    if (current === 'improving_fit' && next === 'ready_to_apply') return true;
+    return false;
   }
 }
 

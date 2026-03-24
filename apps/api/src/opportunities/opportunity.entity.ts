@@ -4,6 +4,7 @@ import {
   Entity,
   Index,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 export enum OpportunityFitBand {
@@ -43,6 +44,15 @@ export class Opportunity {
 
   @Column({ type: 'varchar', length: 255, name: 'job_title' })
   jobTitle!: string;
+
+  @Column({ type: 'uuid', name: 'job_id', nullable: true })
+  jobId!: string | null;
+
+  @Column({ type: 'uuid', name: 'analysis_id', nullable: true })
+  analysisId!: string | null;
+
+  @Column({ type: 'uuid', name: 'baseline_id', nullable: true })
+  baselineId!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   salary!: string | null;
@@ -88,5 +98,11 @@ export class Opportunity {
 
   @Column({ type: 'boolean', default: false })
   dormant!: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
+
+  @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
+  updatedAt!: Date;
 }
 

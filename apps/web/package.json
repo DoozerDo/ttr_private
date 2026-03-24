@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build",
+    "build": "node scripts/run-next-build.js",
+    "typecheck": "tsc --noEmit",
+    "typecheck:app": "tsc --noEmit -p tsconfig.preflight.json",
     "start": "next start",
     "lint": "eslint . || exit 0",
     "lint:strict": "eslint .",

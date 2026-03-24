@@ -605,6 +605,10 @@ export default function StudioPage() {
   const [coverLetterComplianceBlocked, setCoverLetterComplianceBlocked] =
     useState<CoverLetterComplianceBlocked | null>(null);
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
+  const [opportunityContext, setOpportunityContext] = useState<{
+    status: string;
+    updatedAt: string;
+  } | null>(null);
 
   function applyCoverLetterComplianceBlocked(blocked: CoverLetterComplianceBlocked) {
     setCoverLetterComplianceBlocked(blocked);
@@ -734,6 +738,38 @@ export default function StudioPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!requestedAnalysisId) {
+      setOpportunityContext(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/opportunities?analysisId=${encodeURIComponent(requestedAnalysisId)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as Array<{
+          status?: string;
+          updatedAt?: string;
+        }>;
+        if (!cancelled && Array.isArray(payload) && payload.length > 0) {
+          const first = payload[0];
+          if (typeof first.status === "string" && typeof first.updatedAt === "string") {
+            setOpportunityContext({ status: first.status, updatedAt: first.updatedAt });
+          }
+        }
+      } catch {
+        // non-blocking
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedAnalysisId]);
 
   const handleBlockPolicyVersionAdvance = useCallback(
     (newVersionId: string, newHash: string | null) => {
@@ -2297,10 +2333,16 @@ export default function StudioPage() {
 
   return (
     <PageShell className="space-y-4 pb-4">
-      <PageHeader
-        title="Document Generator"
-        description="Generate, preview, and export tailored documents using your latest role analysis."
-      />
+        <PageHeader
+          title="Document Generator"
+          description="Generate, preview, and export tailored documents using your latest role analysis."
+        />
+        {opportunityContext ? (
+          <p className="text-xs text-slate-300">
+            This role is in your Opportunities · Status: {opportunityContext.status} · Last updated:{" "}
+            {new Date(opportunityContext.updatedAt).toLocaleDateString()}
+          </p>
+        ) : null}
       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Trust status</p>
         <div className="mt-2 flex flex-wrap gap-2 text-xs">

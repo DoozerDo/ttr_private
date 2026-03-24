@@ -13,7 +13,8 @@ describe('OpportunitiesController', () => {
     ({
       createFromResumeStudio: jest.fn(),
       createFromFitReviewOverride: jest.fn(),
-      listForUser: jest.fn().mockResolvedValue([]),
+      upsertOpportunity: jest.fn(),
+      listSimpleForUser: jest.fn().mockResolvedValue([]),
       listGroupedByCompany: jest.fn().mockResolvedValue([]),
       getActionsNeeded: jest.fn().mockResolvedValue([]),
       runBoundaryRescoreFromOverrides: jest.fn().mockResolvedValue({ updatedCount: 0 }),
@@ -21,11 +22,12 @@ describe('OpportunitiesController', () => {
       exportForUser: jest.fn().mockResolvedValue('csv'),
       getByIdForUser: jest.fn(),
       transitionStatus: jest.fn(),
+      updateOpportunity: jest.fn(),
     }) as any;
 
   it('validates user context', async () => {
     const controller = new OpportunitiesController(service());
-    await expect(controller.list(request() as any)).rejects.toBeInstanceOf(
+    await expect(controller.list(request() as any, {} as any)).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });

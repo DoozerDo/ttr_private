@@ -117,6 +117,8 @@ type LatestAnalysis = {
   note?: string;
   verdict?: string | null;
   jobTitle?: string | null;
+  title?: string | null;
+  companyName?: string | null;
   company?: string | null;
   assessmentId?: string | null;
   score?: number | null;
@@ -1443,6 +1445,8 @@ export default function ResultsPage() {
   const [expansionSuccessByRequirement, setExpansionSuccessByRequirement] = useState<Record<string, string>>({});
   const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
   const [applicationInsights, setApplicationInsights] = useState<ApplicationInsight[]>([]);
+  const [opportunitySaved, setOpportunitySaved] = useState(false);
+  const savedOpportunityKeysRef = useRef<Set<string>>(new Set());
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -2477,6 +2481,49 @@ export default function ResultsPage() {
     });
   }, [activeScore, latest]);
 
+  useEffect(() => {
+    if (!latest || typeof activeScore !== "number") return;
+    const jobIdValue = latest.jobId?.trim() ?? "";
+    const analysisIdValue = latest.assessmentId?.trim() ?? "";
+    const baselineIdValue = latest.baselineId?.trim() ?? "";
+    if (!jobIdValue || !analysisIdValue || !baselineIdValue) return;
+
+    const saveKey = `${analysisIdValue}:${activeScore}`;
+    if (savedOpportunityKeysRef.current.has(saveKey)) return;
+    savedOpportunityKeysRef.current.add(saveKey);
+
+    const company =
+      (typeof latest.companyName === "string" && latest.companyName.trim()) ||
+      (typeof latest.company === "string" && latest.company.trim()) ||
+      "Unknown company";
+    const roleTitle =
+      (typeof latest.jobTitle === "string" && latest.jobTitle.trim()) ||
+      (typeof latest.title === "string" && latest.title.trim()) ||
+      "Untitled role";
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/opportunities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId: jobIdValue,
+            analysisId: analysisIdValue,
+            baselineId: baselineIdValue,
+            score: Math.round(activeScore),
+            company,
+            roleTitle,
+          }),
+        });
+        if (response.ok) {
+          setOpportunitySaved(true);
+        }
+      } catch {
+        // non-blocking
+      }
+    })();
+  }, [activeScore, latest]);
+
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-5">
@@ -2484,6 +2531,9 @@ export default function ResultsPage() {
           title="Results"
           description="Review your Compatibility Score and take the next step."
         />
+        {opportunitySaved ? (
+          <p className="text-xs font-medium text-emerald-300">Saved to Opportunities</p>
+        ) : null}
 
         <section className="space-y-4 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4 shadow-[0_14px_40px_rgba(2,6,23,0.16)]">
           {!latest ? (

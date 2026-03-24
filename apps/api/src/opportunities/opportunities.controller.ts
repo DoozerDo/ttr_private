@@ -17,8 +17,11 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { CreateOpportunityFromFitReviewDto } from './dto/create-opportunity-from-fit-review.dto';
 import { CreateOpportunityFromStudioDto } from './dto/create-opportunity-from-studio.dto';
+import { CreateOpportunityDto } from './dto/create-opportunity.dto';
+import { ListOpportunitiesDto } from './dto/list-opportunities.dto';
 import { RescoreOpportunitiesDto } from './dto/rescore-opportunities.dto';
 import { UpdateOpportunityStatusDto } from './dto/update-opportunity-status.dto';
+import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { OpportunitiesService } from './opportunities.service';
 
 @Controller('opportunities')
@@ -31,6 +34,15 @@ import { OpportunitiesService } from './opportunities.service';
 )
 export class OpportunitiesController {
   constructor(private readonly opportunitiesService: OpportunitiesService) {}
+
+  @Post()
+  async create(
+    @Body() body: CreateOpportunityDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = this.resolveUserId(request);
+    return this.opportunitiesService.upsertOpportunity(userId, body);
+  }
 
   @Post('from-resume-studio')
   async createFromResumeStudio(
@@ -51,9 +63,12 @@ export class OpportunitiesController {
   }
 
   @Get()
-  async list(@Req() request: Request & { user?: { id?: string } }) {
+  async list(
+    @Req() request: Request & { user?: { id?: string } },
+    @Query() query: ListOpportunitiesDto,
+  ) {
     const userId = this.resolveUserId(request);
-    return this.opportunitiesService.listForUser(userId);
+    return this.opportunitiesService.listSimpleForUser(userId, query);
   }
 
   @Get('grouped')
@@ -145,6 +160,16 @@ export class OpportunitiesController {
     return this.opportunitiesService.transitionStatus(id, userId, body.status, {
       manualReset: body.manualReset,
     });
+  }
+
+  @Patch(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() body: UpdateOpportunityDto,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = this.resolveUserId(request);
+    return this.opportunitiesService.updateOpportunity(id, userId, body);
   }
 
   private resolveUserId(request: Request & { user?: { id?: string } }) {

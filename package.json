@@ -5,6 +5,7 @@
     "apps/*"
   ],
   "scripts": {
+    "build:precheck": "npm run build:api && npm -w apps/web run typecheck:app",
     "build:web": "npm -w apps/web run build",
     "build:api": "npm -w apps/api run build:verify",
     "build:both": "npm run build:api && npm run build:web",
