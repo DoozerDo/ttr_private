@@ -24,10 +24,6 @@ function isDockerEnvironment(): boolean {
     return true;
   }
 
-  if (typeof process.env.NEXT_RUNTIME === "string") {
-    return true;
-  }
-
   return false;
 }
 
