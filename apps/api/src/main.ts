@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { requestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 import { initSentry } from './common/sentry';
+import { DataSource } from 'typeorm';
 
 type ExpressLayer = {
   name?: string;
@@ -84,6 +85,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const dataSource = app.get(DataSource);
   initSentry(config);
 
   app.use(requestLoggerMiddleware);
@@ -151,6 +153,87 @@ async function bootstrap() {
     console.log(
       `[DEV CONFIG] Effective APP_PUBLIC_WEB_URL=${appPublicWebUrl?.trim() || 'unset'}`
     );
+  }
+
+  const shouldRunMigrationsRaw = config.get<string>('TYPEORM_RUN_MIGRATIONS');
+  const shouldRunMigrations =
+    shouldRunMigrationsRaw === undefined
+      ? config.get<string>('NODE_ENV') !== 'test'
+      : shouldRunMigrationsRaw.toLowerCase() === 'true';
+
+  if (shouldRunMigrations) {
+    try {
+      const migrations = await dataSource.runMigrations();
+      if (migrations.length > 0) {
+        console.log(
+          `[DB MIGRATIONS] Applied migrations: ${migrations
+            .map((m) => m.name)
+            .join(', ')}`,
+        );
+      } else {
+        console.log('[DB MIGRATIONS] No pending migrations.');
+      }
+    } catch (error) {
+      console.error('[DB MIGRATIONS] Failed to run migrations on startup.', error);
+    }
+  } else {
+    console.log('[DB MIGRATIONS] Skipped (TYPEORM_RUN_MIGRATIONS=false).');
+  }
+
+  try {
+    const tableResult = (await dataSource.query(
+      `SELECT to_regclass('public.bug_reports') AS bug_reports_regclass`,
+    )) as Array<{ bug_reports_regclass: string | null }>;
+    const exists = Boolean(tableResult?.[0]?.bug_reports_regclass);
+    if (!exists) {
+      console.error('[SCHEMA CHECK] bug_reports table is missing.');
+    } else {
+      const columns = (await dataSource.query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'bug_reports'`,
+      )) as Array<{ column_name: string }>;
+      const existingColumns = new Set(columns.map((item) => item.column_name));
+      const expectedColumns = [
+        'id',
+        'user_id',
+        'reporter_email',
+        'what_happened',
+        'attempted_action',
+        'expected_behavior',
+        'route',
+        'page_label',
+        'app_version',
+        'git_sha',
+        'baseline_id',
+        'assessment_id',
+        'fit_score',
+        'browser_info',
+        'viewport',
+        'runtime_context',
+        'screenshot_storage_path',
+        'screenshot_original_filename',
+        'screenshot_mime_type',
+        'screenshot_size_bytes',
+        'status',
+        'severity',
+        'triage_notes',
+        'resolved_at',
+        'resolved_by_user_id',
+        'created_at',
+        'updated_at',
+      ];
+      const missing = expectedColumns.filter((column) => !existingColumns.has(column));
+      if (missing.length > 0) {
+        console.error(
+          `[SCHEMA CHECK] bug_reports is missing columns: ${missing.join(', ')}`,
+        );
+      } else {
+        console.log('[SCHEMA CHECK] bug_reports table present with expected columns.');
+      }
+    }
+  } catch (error) {
+    console.error('[SCHEMA CHECK] Unable to verify bug_reports schema.', error);
   }
 
   await app.init();

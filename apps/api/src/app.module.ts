@@ -34,6 +34,7 @@ import { FeedbackIntelligenceModule } from './feedback-intelligence/feedback-int
 import { AdminFunnelModule } from './admin-funnel/admin-funnel.module';
 import { AdminSignalModule } from './admin-signal/admin-signal.module';
 import { SyntheticModule } from './synthetic/synthetic.module';
+import { BugReportsModule } from './bug-reports/bug-reports.module';
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { SyntheticModule } from './synthetic/synthetic.module';
     AdminFunnelModule,
     AdminSignalModule,
     SyntheticModule,
+    BugReportsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -31,7 +31,7 @@ services:
       TYPEORM_SYNCHRONIZE: "false"
     ports:
       - "3001:3001"
-    command: sh -c "npm install && rm -rf dist tsconfig.build.tsbuildinfo && npm run build && npm run start:prod"
+    command: sh -c "npm install && rm -rf dist tsconfig.build.tsbuildinfo && npm run build && npm run migration:run && npm run start:prod"
     volumes:
       - ../../apps/api:/usr/src/app
       - /usr/src/app/node_modules

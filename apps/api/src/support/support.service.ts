@@ -107,9 +107,9 @@ export type FormatIssueBodyParams = {
   user: AuthUserDto;
   environment: string;
   timestamp: string;
-  sentryEventId: string | null;
-  severity: SeverityLevel | null;
-  suggestedArea: DerivedArea;
+  sessionId: string | null;
+  appVersion: string | null;
+  userAgent: string | null;
 };
 
 export type ReportBugResult = {
@@ -119,6 +119,7 @@ export type ReportBugResult = {
 };
 
 const SUPPORT_CONFIG_UNAVAILABLE_CODE = 'support_config_unavailable';
+const BUG_REPORT_FAILED_CODE = 'bug_report_failed';
 
 function createSupportConfigUnavailableException() {
   return new HttpException(
@@ -130,14 +131,20 @@ function createSupportConfigUnavailableException() {
   );
 }
 
-export function buildIssueTitle(message: string, severity?: SeverityLevel | null): string {
-  const tidy = message.trim();
-  const snippet = tidy.split(/\r?\n/)[0] ?? tidy;
-  const summary = snippet.split(/[\.\?\!]/)[0] ?? snippet;
-  const candidate = summary.trim() || 'Bug report';
-  const truncated = candidate.length > 70 ? `${candidate.slice(0, 67).trim()}...` : candidate;
-  const severityHint = severity ? ` (${severity === 'high' ? 'High' : 'Medium'} severity)` : '';
-  return `[BUG] ${truncated}${severityHint}`;
+function createBugReportFailedException() {
+  return new HttpException(
+    {
+      code: BUG_REPORT_FAILED_CODE,
+      message: 'Bug report failed to send',
+    },
+    HttpStatus.SERVICE_UNAVAILABLE,
+  );
+}
+
+export function buildIssueTitle(message: string): string {
+  const tidy = message.trim().replace(/\s+/g, ' ');
+  const title = tidy.slice(0, 80).trim();
+  return `[Bug] ${title || 'Bug report'}`;
 }
 
 function normalizeMessageForFingerprint(message: string): string {
@@ -294,96 +301,27 @@ function describeScreenshot(report: ReportBugDto): string {
   return `Provided (~${Math.round(sizeBytes / 1024)} KiB). TODO: persist screenshot artifacts to durable storage once available.`;
 }
 
-export function formatIssueBody({
-  report,
-  user,
-  environment,
-  timestamp,
-  sentryEventId,
-  severity,
-  suggestedArea,
-}: FormatIssueBodyParams): string {
-  const reporterEmail = report.email?.trim() || user.email || 'Not provided.';
-  const analysisSnapshot = formatAnalysisSnapshot(report.analysisContext);
-
-  const reproducibilityLines = [
-    `- Route: ${report.route ?? 'Not provided.'}`,
-    `- Context: ${sanitizeLine(report.tryingToDo, 'Not provided.')}`,
-    `- Baseline ID: ${report.baselineId ?? 'Not provided.'}`,
-    `- Job ID: ${report.jobId ?? 'Not provided.'}`,
-  ];
-
-  const userContext = [
-    `- User ID: ${user.id}`,
-    `- Reporter email: ${reporterEmail}`,
-    `- Role: ${user.role ?? 'unknown'}`,
-    `- Subscription tier: ${user.subscriptionTier ?? 'unknown'}`,
-    `- Entitlements: ${listEntitlements(user.entitlements)}`,
-  ].join('\n');
-
-  const productLines = [
-    `- Environment: ${environment}`,
-    `- Route: ${report.route ?? 'Not provided.'}`,
-    `- Page URL: ${report.pageUrl ?? 'Not provided.'}`,
-    `- Baseline ID: ${report.baselineId ?? 'Not provided.'}`,
-    `- Job ID: ${report.jobId ?? 'Not provided.'}`,
-    `- Score: ${report.score ?? 'Not provided.'}`,
-  ];
-
-  if (analysisSnapshot) {
-    productLines.push('', 'Analysis snapshot:', '```json', analysisSnapshot, '```');
-  }
-
-  const technicalLines = [
-    `- Timestamp: ${timestamp}`,
-    `- Browser / user agent: ${report.userAgent ?? 'Not provided.'}`,
-    `- Reporter message length: ${report.message.length} characters`,
-  ];
-
-  const severityLines = severity
-    ? [`- Severity estimate: ${severity === 'high' ? 'High' : 'Medium'}`]
-    : ['- Severity estimate: Not determined'];
-
-  const sections = [
-    `### Reporter message`,
+export function formatIssueBody({ report, user, environment, timestamp, sessionId, appVersion, userAgent }: FormatIssueBodyParams): string {
+  return [
+    'User Report:',
     report.message,
     '',
-    `### Reproducibility hint`,
-    ...reproducibilityLines,
+    'Context:',
+    `- route: ${report.route ?? 'unknown'}`,
+    `- page url: ${report.pageUrl ?? 'unknown'}`,
+    `- user: ${user.id || 'anonymous'}`,
+    `- session id: ${sessionId ?? 'unknown'}`,
+    `- timestamp: ${timestamp}`,
+    `- client timestamp: ${report.timestamp ?? 'unknown'}`,
+    `- app version: ${appVersion ?? 'unknown'}`,
+    `- baseline id: ${report.baselineId ?? 'unknown'}`,
+    `- job id: ${report.jobId ?? 'unknown'}`,
+    `- last user action: ${report.lastUserAction ?? 'unknown'}`,
     '',
-    `### Trying to do`,
-    report.tryingToDo ?? 'Not provided.',
-    '',
-    `### Expected behavior`,
-    report.expected ?? 'Not provided.',
-    '',
-    `### Suggested area`,
-    suggestedArea
-      ? `${suggestedArea.display} (${suggestedArea.reason})`
-      : 'Unable to identify a suggested area from the provided context.',
-    '',
-    `### Severity`,
-    ...severityLines,
-    '',
-    `### User context`,
-    userContext,
-    '',
-    `### Product context`,
-    productLines.join('\n'),
-    '',
-    `### Technical context`,
-    technicalLines.join('\n'),
-    '',
-    `### Sentry`,
-    sentryEventId
-      ? `- Event ID: ${sentryEventId}`
-      : '- Event ID: Not recorded (Sentry is not configured or capture failed).',
-    '',
-    `### Notes`,
-    describeScreenshot(report),
-  ];
-
-  return sections.join('\n');
+    'Environment:',
+    `- user agent: ${userAgent ?? 'unknown'}`,
+    `- environment: ${environment}`,
+  ].join('\n');
 }
 
 const HISTORY_PAGE_SIZE = 25;
@@ -639,15 +577,29 @@ function issueBelongsToUser(body: string | null | undefined, userId: string): bo
 @Injectable()
 export class SupportService {
   private readonly logger = new Logger(SupportService.name);
+  private readonly bugReportingEnabled: boolean;
   private readonly reportTimestamps = new Map<string, number>();
   private readonly autoErrorBuckets = new Map<string, AutoErrorIssueBucket>();
   private readonly autoErrorUserHits = new Map<string, number[]>();
   private readonly autoErrorGlobalHits: number[] = [];
   private readonly stillSeeingSignals = new Map<number, StillSeeingSignalRecord>();
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    const owner = this.configService.get<string>('GITHUB_BUG_REPORT_OWNER');
+    const repo = this.configService.get<string>('GITHUB_BUG_REPORT_REPO');
+    const token = this.configService.get<string>('GITHUB_BUG_REPORT_TOKEN');
+    this.bugReportingEnabled = Boolean(owner && repo && token);
+
+    if (!this.bugReportingEnabled) {
+      this.logger.error('Bug reporting misconfigured: missing GitHub credentials');
+    }
+  }
 
   async reportBug(report: ReportBugDto, user: AuthUserDto): Promise<ReportBugResult> {
+    if (!this.bugReportingEnabled) {
+      throw createSupportConfigUnavailableException();
+    }
+
     this.enforceRateLimit(user.id);
 
     const environment =
@@ -662,22 +614,21 @@ export class SupportService {
     const severity = deriveSeverity(report);
     const suggestedArea = deriveArea(report);
     const labels = ['bug', 'beta'];
-    if (suggestedArea) {
-      labels.push(suggestedArea.label);
-    }
-    if (severity) {
-      labels.push(`severity:${severity}`);
-    }
+    if (suggestedArea) labels.push(suggestedArea.label);
+    if (severity) labels.push(`severity:${severity}`);
 
-    const title = buildIssueTitle(report.message, severity);
+    const title = buildIssueTitle(report.message);
+    const userAgent = report.userAgent?.trim() || null;
+    const sessionId = report.sessionId?.trim() || null;
+    const appVersion = report.appVersion?.trim() || null;
     const body = formatIssueBody({
       report,
       user,
       environment,
       timestamp,
-      sentryEventId,
-      severity,
-      suggestedArea,
+      sessionId,
+      appVersion,
+      userAgent,
     });
 
     const issue = await this.createGitHubIssue({ title, body, labels });
@@ -688,6 +639,12 @@ export class SupportService {
       issueUrl: issue.html_url,
       sentryEventId,
     };
+  }
+
+  getSupportStatus() {
+    return {
+      bugReporting: this.bugReportingEnabled ? 'READY' : 'MISCONFIGURED',
+    } as const;
   }
 
   async getUserHistory(userId: string, options?: { page?: number }): Promise<SupportHistoryItem[]> {
@@ -1052,17 +1009,20 @@ export class SupportService {
         const errorPayload = (await response.json().catch(() => null)) as
           | { message?: string }
           | null;
-        this.logger.warn('GitHub API responded with an error.', {
+        this.logger.error('GitHub API responded with an error while creating bug report issue.', {
           status: response.status,
           message: errorPayload?.message,
         });
-        throw new ServiceUnavailableException('Failed to create GitHub issue. Please try again later.');
+        throw createBugReportFailedException();
       }
 
       return (await response.json()) as { number: number; html_url: string; id: number };
     } catch (error) {
       this.logger.error('Unable to create GitHub issue for bug report.', error ?? 'unknown error');
-      throw new ServiceUnavailableException('Failed to create GitHub issue. Please try again later.');
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw createBugReportFailedException();
     }
   }
 
@@ -1079,13 +1039,9 @@ export class SupportService {
   }
 
   async getConfiguration() {
-    const owner = this.configService.get<string>('GITHUB_BUG_REPORT_OWNER');
-    const repo = this.configService.get<string>('GITHUB_BUG_REPORT_REPO');
-    const token = this.configService.get<string>('GITHUB_BUG_REPORT_TOKEN');
-    const githubConfigured = Boolean(owner && repo && token);
     const projectColumnId = this.configService.get<string>('GITHUB_BUG_REPORT_PROJECT_COLUMN_ID');
     return {
-      githubConfigured,
+      githubConfigured: this.bugReportingEnabled,
       sentryConfigured: isSentryEnabled(),
       projectAssignmentEnabled: Boolean(projectColumnId),
     };
@@ -1317,6 +1273,10 @@ export class SupportService {
   }
 
   private ensureGitHubConfig() {
+    if (!this.bugReportingEnabled) {
+      throw createSupportConfigUnavailableException();
+    }
+
     const owner = this.configService.get<string>('GITHUB_BUG_REPORT_OWNER');
     const repo = this.configService.get<string>('GITHUB_BUG_REPORT_REPO');
     const token = this.configService.get<string>('GITHUB_BUG_REPORT_TOKEN');

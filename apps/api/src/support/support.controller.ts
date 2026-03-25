@@ -39,6 +39,11 @@ export class SupportController {
     };
   }
 
+  @Get('status')
+  async getStatus() {
+    return this.supportService.getSupportStatus();
+  }
+
   @Post('auto-error')
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async reportAutoError(@Body() payload: AutoErrorDto, @Req() request: SupportRequest) {

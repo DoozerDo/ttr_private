@@ -13,6 +13,7 @@ describe('SupportController', () => {
     getUserHistory: jest.fn(),
     recordStillSeeingIssue: jest.fn(),
     getConfiguration: jest.fn(),
+    getSupportStatus: jest.fn(),
     getErrorHealth: jest.fn(),
   } as any;
   const criticalFlowTrackerService = {
@@ -73,5 +74,11 @@ describe('SupportController', () => {
 
     expect(supportService.recordStillSeeingIssue).toHaveBeenCalledWith('u9', 55);
     expect(result).toEqual({ issueNumber: 55, count: 1 });
+  });
+
+  it('returns support status', async () => {
+    supportService.getSupportStatus.mockReturnValue({ bugReporting: 'MISCONFIGURED' });
+    const result = await controller.getStatus();
+    expect(result).toEqual({ bugReporting: 'MISCONFIGURED' });
   });
 });

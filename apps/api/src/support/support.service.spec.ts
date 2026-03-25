@@ -64,14 +64,14 @@ describe('SupportService', () => {
       user,
       environment: 'test',
       timestamp: '2026-03-18T00:00:00.000Z',
-      sentryEventId: 'event-id',
-      severity: 'high',
-      suggestedArea: deriveArea(report),
+      sessionId: 'session-1',
+      appVersion: '1.0.0',
+      userAgent: 'Mozilla/5.0',
     });
 
-    expect(body).toContain('### Reproducibility hint');
-    expect(body).toContain('### Suggested area');
-    expect(body).toContain('### Severity');
+    expect(body).toContain('User Report:');
+    expect(body).toContain('Context:');
+    expect(body).toContain('Environment:');
   });
 
   it('returns the created issue metadata when GitHub succeeds', async () => {
@@ -195,7 +195,13 @@ describe('SupportService', () => {
 
     const service = new SupportService(configService);
 
-    await expect(service.reportBug(report, user)).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.reportBug(report, user)).rejects.toMatchObject({
+      status: 503,
+      response: expect.objectContaining({
+        code: 'bug_report_failed',
+        message: 'Bug report failed to send',
+      }),
+    });
   });
 
   it('returns an intentional 503 when GitHub bug reporting config is missing', async () => {
@@ -217,6 +223,16 @@ describe('SupportService', () => {
         code: 'support_config_unavailable',
       }),
     });
+  });
+
+  it('returns MISCONFIGURED support status when GitHub env vars are missing', () => {
+    const configService = {
+      get() {
+        return undefined;
+      },
+    } as ConfigService;
+    const service = new SupportService(configService);
+    expect(service.getSupportStatus()).toEqual({ bugReporting: 'MISCONFIGURED' });
   });
 
   describe('getUserHistory', () => {

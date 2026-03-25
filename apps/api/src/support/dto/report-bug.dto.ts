@@ -3,6 +3,7 @@ import {
   IsBase64,
   IsEmail,
   IsNotEmpty,
+  MinLength,
   IsNumber,
   IsObject,
   IsOptional,
@@ -35,6 +36,7 @@ export class ReportBugDto {
   @Transform(({ value }) => trimValue(value))
   @IsString()
   @IsNotEmpty()
+  @MinLength(10)
   @MaxLength(4000)
   message!: string;
 
@@ -105,4 +107,28 @@ export class ReportBugDto {
   @IsOptional()
   @IsObject()
   analysisContext?: Record<string, unknown>;
+
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  timestamp?: string;
+
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  sessionId?: string;
+
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  appVersion?: string;
+
+  @Transform(({ value }) => trimValue(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  lastUserAction?: string;
 }

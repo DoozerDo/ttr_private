@@ -37,4 +37,4 @@ COPY --from=builder /usr/src/workspace/apps/api/dist ./dist
 COPY --from=builder /usr/src/workspace/apps/api/templates ./templates
 
 EXPOSE 3001
-CMD ["npm", "run", "start:prod"]
+CMD ["sh", "-c", "npm run migration:run && npm run start:prod"]
