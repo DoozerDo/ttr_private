@@ -48,6 +48,7 @@ export function RunYourAnalysisSection({
   const [showReadyPulse, setShowReadyPulse] = useState(false);
   const previousReadyRef = useRef(jdReady);
   const runButtonRef = useRef<HTMLButtonElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const wasReady = previousReadyRef.current;
@@ -67,14 +68,43 @@ export function RunYourAnalysisSection({
     }, 50);
   };
 
+  const handleUploadClick = () => {
+    onResumeUploadInitiated();
+    fileInputRef.current?.click();
+  };
+
   return (
     <>
       <div id="check-compatibility" className="scroll-mt-24" />
-      <section id="compatibility-form" className="scroll-mt-24 border-b border-slate-800/70 bg-slate-900/20">
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-14 md:px-10 lg:px-16">
-        <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/80 p-5 shadow-[0_24px_64px_rgba(15,23,42,0.38)]">
+      <section id="compatibility-form" className="scroll-mt-24 border-b border-slate-800/60 bg-slate-900/15">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-12 md:px-10 lg:px-16">
+        <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900/70 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.3)]">
           <h2 className="text-2xl font-semibold text-white lg:text-3xl">Check your compatibility</h2>
           <div className="mt-6 space-y-5">
+            <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-4">
+              <h3 className="text-base font-semibold text-white">Upload your resume</h3>
+              <p className="mt-1 text-sm text-slate-300">
+                Start by uploading your resume to generate your baseline.
+              </p>
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={handleUploadClick}
+                  className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/70"
+                >
+                  Upload your resume
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">{resumeFilename ? `Selected: ${resumeFilename}` : "PDF or DOCX"}</p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+                onChange={(event) => onResumeFileSelected(event.target.files?.[0] ?? null)}
+              />
+            </div>
+
             <div>
               <label className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
                 Paste job description
@@ -87,7 +117,7 @@ export function RunYourAnalysisSection({
                 className="mt-2 h-[144px] w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 focus:border-slate-500 focus:outline-none"
               />
               <div className="mt-3">
-                <p className="text-xs text-slate-400">Or try a sample role:</p>
+                <p className="text-xs text-slate-400">Try a sample role (example only):</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {SAMPLE_ROLES.map((sample) => (
                     <button
@@ -103,18 +133,6 @@ export function RunYourAnalysisSection({
               </div>
             </div>
 
-            <label className="flex cursor-pointer flex-col gap-1.5 rounded-xl border border-slate-700 bg-slate-950/80 p-4 text-xs text-slate-300 transition hover:border-slate-500">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Upload resume</span>
-              <span className="truncate text-sm text-slate-100">{resumeFilename ?? "Choose resume file"}</span>
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx"
-                className="hidden"
-                onClick={onResumeUploadInitiated}
-                onChange={(event) => onResumeFileSelected(event.target.files?.[0] ?? null)}
-              />
-            </label>
-
             <div className="space-y-2">
               <button
                 ref={runButtonRef}
@@ -127,7 +145,7 @@ export function RunYourAnalysisSection({
                     : "cursor-not-allowed border border-slate-700 bg-slate-900/70 text-slate-400"
                 } transform transition-transform duration-[175ms] ${showReadyPulse ? "scale-[1.03]" : "scale-100"}`}
               >
-                {isPreviewLoading ? "Running analysis..." : "Run analysis"}
+                {isPreviewLoading ? "Analyzing role..." : "Analyze this role"}
               </button>
               {!jdReady ? (
                 <p className="text-xs text-slate-600">Paste more of the job description to enable analysis.</p>

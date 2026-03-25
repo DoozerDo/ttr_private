@@ -125,7 +125,6 @@ describe("Results opportunity map", () => {
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline"
         predictiveUnlock={null}
       />,
     );
@@ -137,20 +136,21 @@ describe("Results opportunity map", () => {
       ),
     ).toBeNull();
     expect(screen.getByText("Competitive Match")).toBeInTheDocument();
-    expect(screen.getByText("YOUR ADVANTAGE")).toBeInTheDocument();
-    expect(screen.getByText("View score analysis")).toBeInTheDocument();
+    expect(screen.getByText("Decision summary")).toBeInTheDocument();
+    expect(screen.getByText("Built from your validated baseline and role requirements.")).toBeInTheDocument();
+    expect(screen.getByText("View detailed scoring breakdown")).toBeInTheDocument();
     expect(screen.getByText("Generate Resume & Cover Letter")).toBeInTheDocument();
-    expect(screen.getByText("Next Step")).toBeInTheDocument();
+    expect(screen.getByText("You're a strong match. Move forward and generate tailored materials.")).toBeInTheDocument();
     expect(screen.queryByText("Watchouts")).toBeNull();
     expect(screen.queryByText("Best next move")).toBeNull();
     expect(screen.queryByText("Fit")).toBeNull();
     expect(screen.queryByText("Risk")).toBeNull();
-    expect(screen.getByText("Generation Readiness: READY")).toBeInTheDocument();
-    expect(screen.getByText("Verification Coverage: STRONG")).toBeInTheDocument();
-    expect(screen.getByText(/Verified claims:\s*3 \/ 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*READY/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verification coverage:\s*STRONG/i)).toBeInTheDocument();
+    expect(screen.getByText(/3\s*\/\s*3 verified claims/i)).toBeInTheDocument();
   });
 
-  it("suppresses the advantage section when no verified advantages exist", () => {
+  it("keeps the hero focused when no advantage signals are provided", () => {
     render(
       <OpportunityMapSection
         score={74}
@@ -165,13 +165,12 @@ describe("Results opportunity map", () => {
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline"
         predictiveUnlock={null}
       />,
     );
 
+    expect(screen.getByText("Decision summary")).toBeInTheDocument();
     expect(screen.queryByText("YOUR ADVANTAGE")).toBeNull();
-    expect(screen.queryByText("Verified baseline advantages are not available for this run yet.")).toBeNull();
   });
 
   it("maps score bands to the expected verdict", () => {
@@ -197,15 +196,16 @@ describe("Results opportunity map", () => {
         readiness={readyReadiness}
         verificationCoverage={strongCoverage}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline"
         predictiveUnlock={null}
       />,
     );
 
-    expect(screen.getByText("Generation Readiness: READY")).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*READY/i)).toBeInTheDocument();
     const cta = screen.getByRole("link", { name: "Generate Resume & Cover Letter" });
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/studio");
+    expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
+    expect(screen.getByTestId("results-hero-secondary-action")).toBeInTheDocument();
   });
 
   it("renders strong fit limitation decision panel from canonical verification_coverage", () => {
@@ -253,32 +253,24 @@ describe("Results opportunity map", () => {
           supportedRequirements: ["Salesforce", "Service Cloud", "Omnichannel routing"],
           unverifiedRequirements: ["Zendesk", "Five9"],
         }}
-        baselineEvidenceHref="/baseline?analysisId=analysis-1"
         predictiveUnlock={null}
       />,
     );
 
-    expect(screen.getByText("Strong fit. Limited generation.")).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
     expect(
       screen.getByText(
-        "You are highly aligned for this role. Document generation is limited because some requirements are not yet verified from your baseline.",
+        "Some requirements need stronger verification. You can still generate documents, and improving evidence will strengthen results.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("What's holding this back", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText("- Zendesk")).toBeInTheDocument();
-    expect(screen.getByText("- Five9")).toBeInTheDocument();
-    expect(screen.getByText("Supported signals: Salesforce, Service Cloud, Omnichannel routing")).toBeInTheDocument();
-    expect(screen.getByText(/Remove unsupported tools from targeting/i)).toBeInTheDocument();
-    expect(screen.getByText(/Add verified evidence/i)).toBeInTheDocument();
+    expect(screen.getByText("Needs stronger verification: Zendesk, Five9")).toBeInTheDocument();
     const cta = screen.getByRole("link", { name: "Open Studio" });
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/studio");
-    const baselineCta = screen.getByRole("link", { name: "Review baseline evidence" });
-    expect(baselineCta).toHaveAttribute("href", "/baseline?analysisId=analysis-1");
+    expect(screen.queryByRole("link", { name: "Review baseline evidence" })).toBeNull();
     expect(screen.queryByText("Open Studio (limited generation)")).toBeNull();
     expect(screen.queryByText("No canonical labels provided")).toBeNull();
     expect(screen.queryByText("None listed")).toBeNull();
-    expect(screen.queryByText(/Generation Readiness:/i)).toBeNull();
   });
 
   it("shows evidence-depth guidance when canonical unverified requirements are empty", () => {
@@ -320,14 +312,11 @@ describe("Results opportunity map", () => {
           supportedRequirements: ["Salesforce", "Service Cloud"],
           unverifiedRequirements: [],
         }}
-        baselineEvidenceHref="/baseline?analysisId=analysis-1"
         predictiveUnlock={null}
       />,
     );
 
-    expect(
-      screen.getByText("All required tools are supported. Generation limits may be due to evidence depth."),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/Needs stronger verification:/i)).toBeNull();
     expect(screen.queryByText("None listed")).toBeNull();
   });
 
@@ -363,12 +352,12 @@ describe("Results opportunity map", () => {
           summary: "partial",
         }}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline?analysisId=analysis-1"
         predictiveUnlock={null}
       />,
     );
 
-    expect(screen.getByText("Verification data unavailable. Re-run analysis.")).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Needs stronger verification:/i)).toBeNull();
     expect(screen.queryByText("No canonical labels provided")).toBeNull();
     expect(screen.queryByText("None listed")).toBeNull();
   });
@@ -412,13 +401,12 @@ describe("Results opportunity map", () => {
           summary: "Several claims required for this role cannot be verified from your baseline.",
         }}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline"
         predictiveUnlock={null}
       />,
     );
 
-    expect(screen.getByText("Generation Readiness: BLOCKED")).toBeInTheDocument();
-    expect(screen.getByText(/Verified claims:\s*0 \/ 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*BLOCKED/i)).toBeInTheDocument();
+    expect(screen.getByText(/0\s*\/\s*2 verified claims/i)).toBeInTheDocument();
     expect(
       screen.getByText(
         "Some claims required for tailored generation could not be verified against your baseline.",
@@ -468,7 +456,6 @@ describe("Results opportunity map", () => {
           summary: "partial",
         }}
         canonicalCoverage={null}
-        baselineEvidenceHref="/baseline?analysisId=analysis-1"
         predictiveUnlock={{
           unverifiedRequirements: ["Zendesk", "Five9"],
           predictedOutcome: "full",
@@ -479,16 +466,8 @@ describe("Results opportunity map", () => {
       />,
     );
 
-    expect(screen.getByText("Unlock full generation")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "You're a strong match for this role. A few unverified requirements are limiting document generation.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("- Zendesk")).toBeInTheDocument();
-    expect(screen.getByText("- Five9")).toBeInTheDocument();
-    expect(screen.getByText(/generation will be fully enabled/i)).toBeInTheDocument();
-    expect(screen.getByText("You can restore removed requirements later.")).toBeInTheDocument();
+    expect(screen.getByText(/Generation readiness:\s*LIMITED/i)).toBeInTheDocument();
+    expect(screen.getByText(/can fully unlock generation/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Remove unsupported requirements and continue" })).toHaveAttribute(
       "href",
       "/studio?analysisId=analysis-1&excludedRequirements=Zendesk&excludedRequirements=Five9",

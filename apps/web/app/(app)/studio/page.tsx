@@ -9,7 +9,6 @@ import { Alert } from "@/components/Alert";
 import { type ComplianceFlag } from "@/components/ComplianceViolationPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { FormButton } from "@/components/FormButton";
-import { PageHeader } from "@/components/PageHeader";
 import { PageShell } from "@/components/PageShell";
 import { defaultClosingTemplateKey } from "@/lib/coverLetters";
 import { formatErrorMessage, readResponsePayload } from "@/lib/compliance/parseComplianceError";
@@ -343,6 +342,16 @@ function sanitizeAnalysisError(payload: unknown, fallback = ANALYSIS_LOAD_ERROR_
   const message = formatErrorMessage(payload, fallback);
   if (isHtmlLikePayload(message)) return fallback;
   return message;
+}
+
+function toConstraintMessage(message: string | null): string {
+  if (!message) return "Generation is currently constrained for this role.";
+  return message
+    .replace(/failed/gi, "limited")
+    .replace(/error/gi, "constraint")
+    .replace(/validation/gi, "verification")
+    .replace(/system/gi, "readiness")
+    .replace(/prerequisites/gi, "requirements");
 }
 
 function isInsufficientBaselineEvidenceMessage(message: string | null): boolean {
@@ -2415,13 +2424,6 @@ export default function StudioPage() {
     }
   };
 
-  const handleGenerateMyApplication = async () => {
-    if (!guardGenerationAction("application")) return;
-    if (!canGenerateDocuments || resumeGenerating || coverGenerating) return;
-    await handleResumeDraft();
-    await handleCoverDraft();
-  };
-
   const exportCoverLetter = async (format: "docx" | "pdf") => {
     if (!canGenerateDocuments) {
       setCoverState((current) => ({
@@ -2500,7 +2502,7 @@ export default function StudioPage() {
       case "needs_more_baseline_detail":
         return "More detail needed";
       case "failed_due_to_system_error":
-        return `${documentName} failed due to system error`;
+        return `${documentName} generation is currently constrained`;
       default:
         return `${documentName} status unavailable`;
     }
@@ -2508,78 +2510,77 @@ export default function StudioPage() {
 
   return (
     <PageShell className="space-y-4 pb-4">
-        <PageHeader
-          title="Document Generator"
-          description="Generate, preview, and export tailored documents using your latest role analysis."
-        />
-        {opportunityContext ? (
-          <p className="text-xs text-slate-300">
-            This role is in your Opportunities · Status: {opportunityContext.status} · Last updated:{" "}
-            {new Date(opportunityContext.updatedAt).toLocaleDateString()}
-          </p>
-        ) : null}
-      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Role fit summary</p>
-        <p className="mt-1 text-sm text-slate-100">
-          {typeof analysisScore === "number"
-            ? `Role fit score: ${Math.round(analysisScore)}`
-            : "Role fit score unavailable"}
-        </p>
-      </div>
-
-      {requestedAnalysisId ? (
-        <section
-          className={`space-y-3 rounded-2xl border px-4 py-4 ${
-            studioGenerationState === "BLOCKED"
-              ? "border-rose-300/35 bg-rose-500/10"
+      <section className="space-y-5 rounded-[28px] bg-slate-900/45 p-6 md:p-8" data-testid="studio-generation-readiness">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+            {studioGenerationState === "READY"
+              ? "Ready"
               : studioGenerationState === "LIMITED"
-              ? "border-amber-300/35 bg-amber-500/10"
-              : "border-emerald-300/35 bg-emerald-500/10"
-          }`}
-          data-testid="studio-generation-readiness"
-        >
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
-            Generation status: {studioGenerationState}
+              ? "Limited"
+              : "Blocked"}
           </p>
-          <h2 className="text-lg font-semibold text-slate-100">{authorityStateTitle}</h2>
-          <p className="text-sm text-slate-100">{authorityStateExplanation}</p>
-          {authorityReasons.length ? (
-            <ul className="space-y-1 text-sm text-slate-200">
-              {authorityReasons.map((reason, index) => (
-                <li key={`studio-authority-reason-${index}`}>- {reason}</li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="flex flex-wrap gap-2 pt-1">
-            {studioGenerationState === "BLOCKED" ? (
-              <Link
-                href={remediationHref}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-              >
-                Resolve Gaps Before Generating
-              </Link>
-            ) : (
+          <p className="text-sm text-slate-300">
+            {typeof analysisScore === "number" ? `Fit score ${Math.round(analysisScore)} · ` : "Fit score unavailable · "}
+            {(selectedJob?.company ?? analysis?.company ?? analysis?.companyName ?? "Unknown company")} -{" "}
+            {(selectedJob?.title ?? analysis?.jobTitle ?? analysis?.title ?? "Unknown role")}
+          </p>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-50 md:text-[34px]">
+            {authorityStateTitle}
+          </h1>
+          <p className="text-base leading-7 text-slate-200">{authorityStateExplanation}</p>
+          <p className="text-sm text-slate-400">
+            Based on your analyzed role context and verified baseline evidence.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {studioGenerationState === "BLOCKED" ? (
+            <Link
+              href={remediationHref}
+              className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Resolve gaps before generating
+            </Link>
+          ) : (
+            <>
               <FormButton
-                onClick={handleGenerateMyApplication}
-                disabled={!canGenerateDocuments || resumeGenerating || coverGenerating}
+                onClick={handleResumeDraft}
+                disabled={!canGenerateDocuments || resumeGenerating}
+                className="bg-indigo-600 text-white hover:bg-indigo-500"
               >
-                {(resumeGenerating || coverGenerating)
+                {resumeGenerating
                   ? "Generating..."
                   : studioGenerationState === "LIMITED"
-                  ? "Generate With Limits"
-                  : "Generate My Application"}
+                  ? "Generate Resume With Limits"
+                  : "Generate Resume"}
               </FormButton>
-            )}
-            {studioGenerationState === "LIMITED" ? (
-              <Link
-                href={remediationHref}
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+              <FormButton
+                variant="secondary"
+                onClick={handleCoverDraft}
+                disabled={!canGenerateDocuments || coverGenerating}
               >
-                Resolve Limits First
-              </Link>
-            ) : null}
-          </div>
-        </section>
+                {coverGenerating
+                  ? "Generating..."
+                  : studioGenerationState === "LIMITED"
+                  ? "Generate Cover Letter With Limits"
+                  : "Generate Cover Letter"}
+              </FormButton>
+              {studioGenerationState === "LIMITED" ? (
+                <Link
+                  href={remediationHref}
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                >
+                  Resolve gaps
+                </Link>
+              ) : null}
+            </>
+          )}
+        </div>
+      </section>
+      {opportunityContext ? (
+        <p className="text-xs text-slate-400">
+          Opportunity status: {opportunityContext.status} · Updated{" "}
+          {new Date(opportunityContext.updatedAt).toLocaleDateString()}
+        </p>
       ) : null}
       {targetingAdjustmentFeedback ? (
         <div
@@ -2780,12 +2781,12 @@ export default function StudioPage() {
       ) : null}
 
       {jobsError ? (
-        <Alert intent="error" title="Jobs could not be loaded">
+        <Alert intent="warning" title="Role list unavailable">
           {jobsError}
         </Alert>
       ) : null}
       {baselinesError ? (
-        <Alert intent="error" title="Source resume could not be loaded">
+        <Alert intent="warning" title="Baseline source unavailable">
           {baselinesError}
         </Alert>
       ) : null}
@@ -2795,18 +2796,29 @@ export default function StudioPage() {
         </Alert>
       ) : null}
       {requestedAnalysisId && analysisError ? (
-        <Alert intent="error" title="Unable to load role analysis">
+        <Alert intent="warning" title="Role analysis unavailable">
           {analysisError}
         </Alert>
       ) : null}
       {versionsError ? (
-        <Alert intent="error" title="Resume snapshot unavailable">
+        <Alert intent="warning" title="Resume snapshot unavailable">
           {versionsError}
         </Alert>
       ) : null}
 
       {studioGenerationState !== "BLOCKED" ? (
       <>
+      <section className="space-y-1 px-1">
+        <h2 className="text-xl font-semibold text-slate-100">Your application materials</h2>
+        <p className="text-sm text-slate-300">
+          Generate, preview, and export your resume and cover letter.
+        </p>
+        {studioGenerationState === "LIMITED" ? (
+          <p className="text-sm text-slate-300">
+            Generation is available, with constraints from current verification coverage.
+          </p>
+        ) : null}
+      </section>
       <section
         ref={(node) => {
           generationSectionRef.current = node;
@@ -2815,14 +2827,18 @@ export default function StudioPage() {
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Generate Resume</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Resume</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {renderCardStatus(resumeCardStatus, "Resume")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             {!resumeNeedsBaselineDetail ? (
-              <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
+              <FormButton
+                variant="secondary"
+                onClick={handleResumeDraft}
+                disabled={!canGenerateDocuments || resumeGenerating}
+              >
                 {resumeGenerating
                   ? "Generating..."
                   : studioGenerationState === "LIMITED"
@@ -2858,22 +2874,12 @@ export default function StudioPage() {
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
         ) : null}
 
-        {generationMessage ? (
-          <Alert intent="warning" title="Generation prerequisites">
-            {generationMessage}
-          </Alert>
-        ) : null}
-
         {resumeState.tierGateError ? (
           <Alert intent="warning">
             {resumeState.tierGateError.message ?? "Resume export is limited by your subscription tier."}
           </Alert>
         ) : null}
-        {resumeWarningFlags.length ? (
-          <p className="text-sm text-amber-200">
-            Verification signals detected. Personalization may be limited. See Results for details.
-          </p>
-        ) : null}
+        {resumeWarningFlags.length ? null : null}
         {resumeNeedsBaselineDetail ? (
           <div className="space-y-3 rounded-2xl border border-sky-300/35 bg-sky-500/10 p-4">
             <p className="text-sm font-semibold text-slate-100">
@@ -2910,16 +2916,16 @@ export default function StudioPage() {
               <summary className="cursor-pointer text-xs uppercase tracking-[0.2em] text-slate-400">
                 Technical detail
               </summary>
-              <p className="mt-2 text-xs text-slate-300">{resumeState.error}</p>
+              <p className="mt-2 text-xs text-slate-300">{toConstraintMessage(resumeState.error)}</p>
             </details>
           </div>
         ) : resumeState.error ? (
-          <Alert intent="error" title="Additional baseline detail required">
-            {resumeState.error}
+          <Alert intent="warning" title="Additional evidence is needed to strengthen this output">
+            {toConstraintMessage(resumeState.error)}
           </Alert>
         ) : null}
         {resumeEditError ? (
-          <Alert intent="error" title="Resume edits unavailable">
+          <Alert intent="warning" title="Resume edits are currently unavailable">
             {resumeEditError}
           </Alert>
         ) : null}
@@ -3019,20 +3025,27 @@ export default function StudioPage() {
 
           </div>
         ) : (
-          <EmptyState title="No resume generated yet" body="Generate Resume to preview it." />
+          <EmptyState
+            title="Resume not generated yet"
+            body="Generate your resume to preview and refine your application."
+          />
         )}
       </section>
 
       <section className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Generate Cover Letter</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Cover letter</h2>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
               {renderCardStatus(coverCardStatus, "Cover letter")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
+            <FormButton
+              variant="secondary"
+              onClick={handleCoverDraft}
+              disabled={!canGenerateDocuments || coverGenerating}
+            >
               {coverGenerating
                 ? "Generating..."
                 : studioGenerationState === "LIMITED"
@@ -3061,12 +3074,6 @@ export default function StudioPage() {
         </div>
         {showCoverDownloadActions ? (
           <p className="text-xs text-slate-400">Download: DOCX | PDF</p>
-        ) : null}
-
-        {generationMessage ? (
-          <Alert intent="warning" title="Generation prerequisites">
-            {generationMessage}
-          </Alert>
         ) : null}
 
         {coverLetterComplianceBlocked ? (
@@ -3112,11 +3119,7 @@ export default function StudioPage() {
               "Cover letter export is limited by your subscription tier."}
           </Alert>
         ) : null}
-        {coverWarningFlags.length ? (
-          <p className="text-sm text-amber-200">
-            Verification signals detected. Personalization may be limited. See Results for details.
-          </p>
-        ) : null}
+        {coverWarningFlags.length ? null : null}
         {coverState.error && !coverLetterComplianceBlocked ? null : null}
 
         {coverPresenter.display && !coverLetterComplianceBlocked && coverPresenter.status !== "blocked" ? (
@@ -3187,8 +3190,10 @@ export default function StudioPage() {
           ) : (
             coverState.error ? (
               <div className="space-y-3 rounded-2xl border border-rose-400/30 bg-rose-500/5 p-4">
-                <p className="text-sm font-semibold text-rose-100">Cover letter generation failed</p>
-                <p className="text-sm text-slate-200">{coverState.error}</p>
+                <p className="text-sm font-semibold text-slate-100">
+                  Cover letter generation is currently limited for this role
+                </p>
+                <p className="text-sm text-slate-200">{toConstraintMessage(coverState.error)}</p>
                 <div className="flex justify-end">
                   <FormButton onClick={handleCoverDraft} disabled={coverGenerating}>
                     Retry generation
@@ -3197,8 +3202,8 @@ export default function StudioPage() {
               </div>
             ) : (
               <EmptyState
-                title="No cover letter generated yet"
-                body="Generate Cover Letter to preview it."
+                title="Cover letter not generated yet"
+                body="Generate your cover letter to create a tailored introduction."
               />
             )
           )
@@ -3207,9 +3212,9 @@ export default function StudioPage() {
       </>
       ) : null}
 
-      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
-        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
-          Targeting and Evidence
+      <details className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+          Role and evidence
         </summary>
         <div className="mt-3 space-y-3">
           <p className="text-sm text-slate-300">
@@ -3250,8 +3255,8 @@ export default function StudioPage() {
       </details>
 
       <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
-        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">
-          Role Positioning
+        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+          Adjust positioning (optional)
         </summary>
         <div className="mt-3 space-y-3">
           <label className="flex flex-col gap-2 text-sm text-slate-400">
@@ -3286,8 +3291,8 @@ export default function StudioPage() {
 
       {selectedBaselineId && selectedBaselineVersionId ? (
         <details className="space-y-4">
-          <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold uppercase tracking-[0.3em] text-slate-200 shadow-sm">
-            Resume Content Control
+          <summary className="cursor-pointer list-none rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-slate-200 shadow-sm">
+            Customize content (advanced)
           </summary>
           <BaselineBlockPolicyPanel
             baselineId={selectedBaselineId}

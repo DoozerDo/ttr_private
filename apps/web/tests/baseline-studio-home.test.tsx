@@ -72,7 +72,7 @@ describe("BaselineStudioHome", () => {
     });
   });
 
-  it("renders certification progress checklist when baseline is not yet certified", async () => {
+  it("renders baseline readiness summary and checklist when baseline is not yet certified", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
@@ -89,7 +89,7 @@ describe("BaselineStudioHome", () => {
     fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
-      expect(screen.getByText("CERTIFICATION IN PROGRESS")).toBeInTheDocument();
+      expect(screen.getByText("Baseline readiness")).toBeInTheDocument();
     });
 
     expect(screen.getByText(/Strong signals:/i)).toBeInTheDocument();
@@ -292,7 +292,7 @@ describe("BaselineStudioHome", () => {
     expect(screen.getByText("Your experience clusters strongly around:")).toBeInTheDocument();
   });
 
-  it("renders score history on baseline library cards after analysis", async () => {
+  it("keeps baseline record streamlined after analysis without score history chip blocks", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
@@ -317,13 +317,13 @@ describe("BaselineStudioHome", () => {
     fireEvent.click(within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement).getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
-      expect(screen.getByText(/% current/i)).toBeInTheDocument();
+      expect(screen.getByText("Professional Signals Diagnosis")).toBeInTheDocument();
     });
-
-    expect(screen.getByText(/% original/i)).toBeInTheDocument();
+    expect(screen.queryByText(/% current/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/% original/i)).not.toBeInTheDocument();
   });
 
-  it("keeps workbench strength and stored card current value synchronized after update", async () => {
+  it("shows updated guidance state after baseline strengthening updates", async () => {
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
@@ -375,12 +375,8 @@ describe("BaselineStudioHome", () => {
       ).toBeInTheDocument();
     });
 
-    const strengthSection = screen.getByText("Baseline Strength").closest("section") as HTMLElement;
-    expect(within(strengthSection).getByText("81%")).toBeInTheDocument();
-
-    const recordCard = screen.getByText("resume-1.pdf").closest("article") as HTMLElement;
-    expect(within(recordCard).getByText("81% current")).toBeInTheDocument();
-    expect(within(recordCard).getByText("79% original")).toBeInTheDocument();
+    expect(screen.getByText("Baseline in progress")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Analyze baseline" })).toBeInTheDocument();
   });
 
   it("persists submitted detail, renders it back, and confirms unchanged score when recompute is flat", async () => {
@@ -481,7 +477,7 @@ describe("BaselineStudioHome", () => {
     ).toBe(true);
   });
 
-  it("renders positive and negative score deltas from baseline history", async () => {
+  it("does not surface score delta chips in streamlined baseline record list", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
@@ -508,9 +504,11 @@ describe("BaselineStudioHome", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("+8 since first analysis")).toBeInTheDocument();
-      expect(screen.getByText("-5 since first analysis")).toBeInTheDocument();
+      expect(screen.getByText("improved.pdf")).toBeInTheDocument();
+      expect(screen.getByText("decreased.pdf")).toBeInTheDocument();
     });
+    expect(screen.queryByText("+8 since first analysis")).not.toBeInTheDocument();
+    expect(screen.queryByText("-5 since first analysis")).not.toBeInTheDocument();
   });
 
   it("suppresses score history block when no successful analysis exists", async () => {

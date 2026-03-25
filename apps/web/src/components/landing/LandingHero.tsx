@@ -14,7 +14,7 @@ export function LandingHero() {
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-8 pt-10 md:px-10 md:pb-10 md:pt-12 lg:px-16">
+      <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-6 pt-10 md:px-10 md:pb-8 md:pt-12 lg:px-16">
         <div className="max-w-[860px]">
           <h1 className="text-3xl font-semibold leading-tight text-white md:text-4xl lg:text-[38px]">
             Know that you qualify before you apply.
@@ -22,6 +22,15 @@ export function LandingHero() {
           <p className="mt-2.5 max-w-[760px] text-base leading-relaxed text-slate-300 lg:text-lg">
             Target This Role compares your resume to real job descriptions and shows whether you actually qualify.
           </p>
+          <p className="mt-3 text-sm text-slate-400 md:text-base">
+            Grounded in your real experience and role requirements, not AI guesswork.
+          </p>
+          <a
+            href="#check-compatibility"
+            className="mt-6 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300/70 md:text-base"
+          >
+            Check your compatibility
+          </a>
         </div>
       </div>
     </section>

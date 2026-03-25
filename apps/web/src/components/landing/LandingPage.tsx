@@ -18,8 +18,8 @@ export function LandingPage({ isAuthenticated }: LandingPageProps) {
       <LandingNav isAuthenticated={isAuthenticated} />
       <main>
         <LandingHero />
-        <DemoAnalysisPreviewSection />
         <LandingCompatibilityInputSection />
+        <DemoAnalysisPreviewSection />
         <HowItWorksSection />
         <TruthFirstSection />
       </main>

@@ -204,12 +204,6 @@ function getStatusTone(status: ResumeAnalysisStatus) {
   }
 }
 
-function getStateMessage(state: BaselineStrengthState) {
-  if (state === "empty") return "Upload a resume to generate your baseline.";
-  if (state === "failed") return "We could not complete baseline analysis for this resume.";
-  return "Run baseline analysis to understand your professional signals.";
-}
-
 function createBaselineUpdateProposal(signalLabel: string, answer: string) {
   return `${signalLabel}: ${answer.trim()}`;
 }
@@ -368,6 +362,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
     return "ready";
   }, [activeBaselines.length, primaryAnalysisStatus, primaryBaselineId, primaryBaseline]);
   const analysisReady = baselineStrengthState === "ready";
+  const heroState: "no_baseline" | "in_progress" | "ready" = useMemo(() => {
+    if (activeBaselines.length === 0) return "no_baseline";
+    if (analysisReady && certification.isCertified) return "ready";
+    return "in_progress";
+  }, [activeBaselines.length, analysisReady, certification.isCertified]);
   const careerGravity = useMemo(
     () => buildCareerGravityUnlock(completedRoleAnalyses),
     [completedRoleAnalyses],
@@ -900,392 +899,263 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
   }, [baselineUpdatedNotice]);
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-6 2xl:px-10">
+    <div className="mx-auto w-full max-w-6xl px-6 2xl:px-8">
       <div className="space-y-8">
-        <div className="grid gap-6 xl:grid-cols-12">
-          <div className="space-y-6 xl:col-span-7">
-            <section className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.96))] p-5 shadow-[0_16px_45px_rgba(2,6,23,0.24)]">
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">
-                    Baseline Studio
-                  </p>
-                  <h1 className="text-2xl font-semibold tracking-tight text-white">
-                    Professional baseline workbench
-                  </h1>
-                  <p className="max-w-3xl text-sm leading-6 text-slate-300">
-                    Understand your professional signals, strengthen developing signals, and improve targeting confidence before you move into roles.
-                  </p>
-                </div>
-
-                <aside className="rounded-[20px] border border-white/10 bg-slate-950/45 p-4 min-h-[320px]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    Baseline Strength
-                  </p>
-                  {baselineStrengthState !== "ready" ? (
-                    <div className="mt-3 space-y-3">
-                      <p className="text-sm leading-6 text-slate-300">
-                        {getStateMessage(baselineStrengthState)}
-                      </p>
-                      {baselineStrengthState === "failed" && primaryBaselineId ? (
-                        <FormButton
-                          onClick={() => void fetchBaselineDetails(primaryBaselineId)}
-                          disabled={!isHydrated}
-                        >
-                          TRY AGAIN
-                        </FormButton>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="mt-3 space-y-4">
-                      <div className="flex items-end gap-3">
-                        <p className="text-6xl font-black leading-none tracking-[-0.06em] text-white">
-                          {baselineStrengthPercent}%
-                        </p>
-                        <p className="pb-1 text-xs uppercase tracking-[0.16em] text-slate-400">
-                          Operational signal quality
-                        </p>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                        <div
-                          className="h-full rounded-full bg-[var(--accent-primary)]"
-                          style={{ width: `${baselineStrengthPercent}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </aside>
-              </div>
-            </section>
-          </div>
-
-          <div className="space-y-6 xl:col-span-5">
-            <section className="rounded-[28px] border border-white/10 bg-slate-900/35 p-5 min-h-[220px]">
-              <header className="space-y-2 border-b border-white/10 pb-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">
-                  BASELINE LIBRARY
-                </p>
-                <h2 className="text-xl font-semibold tracking-tight text-slate-100">
-                  Stored baseline records
-                </h2>
-                <p className="text-sm leading-6 text-slate-300">
-                  Source history for your professional baseline and analysis progress.
-                </p>
-              </header>
-
-              <div className="mt-4 space-y-3">
-                {allBaselines.length === 0 ? (
-                  <div className="rounded-[20px] border border-white/10 bg-slate-950/35 p-4">
-                    <p className="text-sm leading-6 text-slate-300">
-                      Upload a resume to generate your professional baseline.
-                    </p>
-                    <p className="mt-2 text-xs uppercase tracking-[0.14em] text-slate-500">
-                      Stored versions and analysis status will appear here.
-                    </p>
-                  </div>
-                ) : (
-                  allBaselines.slice(0, 3).map((baseline) => {
-                    const isPrimary = primaryBaselineId === baseline.id;
-                    const status = analysisStatusByBaselineId[baseline.id] ?? "not_analyzed";
-                    const isArchived = baseline.status === "ARCHIVED";
-                    const canView = status === "ready";
-                    const isLoading = loadingBaselineId === baseline.id;
-                    const scoreHistoryViewModel = toBaselineScoreHistoryCardViewModel(
-                      buildBaselineScoreHistoryFromBaseline(
-                        baselineDetails[baseline.id] ?? baseline,
-                      ),
-                    );
-
-                    return (
-                      <article
-                        key={baseline.id}
-                        className={`rounded-[20px] border p-4 ${
-                          uploadSuccessId === baseline.id || highlightedBaselineId === baseline.id
-                            ? "border-cyan-300/25 bg-cyan-400/[0.06]"
-                            : "border-white/10 bg-slate-950/35"
-                        }`}
-                      >
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-100">{baseline.originalFilename}</p>
-                            {isPrimary ? (
-                              <span className="rounded-full border border-cyan-300/15 bg-cyan-400/[0.08] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100">
-                                Primary
-                              </span>
-                            ) : null}
-                            <span
-                              className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${getStatusTone(
-                                status,
-                              )}`}
-                            >
-                              {getStatusLabel(status)}
-                            </span>
-                          </div>
-
-                          <p className="text-xs text-slate-400">
-                            Uploaded {formatDateTime(baseline.createdAt)}
-                          </p>
-                          {scoreHistoryViewModel.hasSuccessfulAnalysis ? (
-                            <div className="rounded-[14px] border border-white/10 bg-white/[0.03] px-3 py-2 text-xs uppercase tracking-[0.12em] text-slate-300">
-                              <p>{scoreHistoryViewModel.currentScore}% current</p>
-                              <p className="mt-1">{scoreHistoryViewModel.originalScore}% original</p>
-                              {typeof scoreHistoryViewModel.scoreDelta === "number" &&
-                              scoreHistoryViewModel.scoreDelta !== 0 ? (
-                                <p
-                                  className={`mt-1 ${
-                                    scoreHistoryViewModel.scoreDeltaDirection === "up"
-                                      ? "text-emerald-200"
-                                      : scoreHistoryViewModel.scoreDeltaDirection === "down"
-                                        ? "text-amber-200"
-                                        : "text-slate-300"
-                                  }`}
-                                >
-                                  {scoreHistoryViewModel.scoreDelta > 0 ? "+" : ""}
-                                  {scoreHistoryViewModel.scoreDelta} since first analysis
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <div className="flex flex-wrap gap-2">
-                            <FormButton
-                              onClick={() => {
-                                if (isArchived) return;
-                                if (canView) {
-                                  setPrimaryBaselineId(baseline.id);
-                                  setPostUploadCtaBaselineId(null);
-                                  scrollToAnalysis();
-                                  return;
-                                }
-                                void fetchBaselineDetails(baseline.id);
-                              }}
-                              disabled={isLoading || !isHydrated}
-                            >
-                              {isLoading
-                                ? "Analyzing..."
-                                : canView
-                                  ? "VIEW BASELINE ANALYSIS"
-                                  : "ANALYZE"}
-                            </FormButton>
-                            {isEditableLibrary ? (
-                              <>
-                                <FormButton
-                                  variant="ghost"
-                                  onClick={() => void handleArchiveBaseline(baseline.id)}
-                                  disabled={archivingBaselineId === baseline.id || isArchived}
-                                >
-                                  {isArchived
-                                    ? "Archived"
-                                    : archivingBaselineId === baseline.id
-                                      ? "Archiving..."
-                                      : "Archive"}
-                                </FormButton>
-                                <FormButton
-                                  variant="ghost"
-                                  onClick={() => void handleDeleteBaseline(baseline.id)}
-                                  disabled={deletingBaselineId === baseline.id}
-                                >
-                                  {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
-                                </FormButton>
-                              </>
-                            ) : null}
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-12">
-          <div className="space-y-6 xl:col-span-7">
-            {isEditableLibrary ? (
-              <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(2,6,23,0.96))] p-5 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
-                <header className="space-y-2 border-b border-white/10 pb-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    UPLOAD YOUR RESUME
-                  </p>
-                  <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-                    Upload your resume to generate your professional baseline
-                  </h2>
-                  <p className="max-w-3xl text-sm leading-6 text-slate-300">
-                    Upload your resume to generate your professional baseline. Most professionals refine their baseline before targeting roles.
-                  </p>
-                </header>
-
-                <div className="mt-5 space-y-4">
-                  <div
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={onDrop}
-                    className={`rounded-[24px] border border-dashed p-5 transition ${
-                      uploadLimitReached
-                        ? "border-white/10 bg-slate-950/30"
-                        : "border-white/20 bg-slate-950/40"
-                    }`}
-                  >
-                    <div className="space-y-3">
-                      <p className="text-sm font-semibold text-slate-100">
-                        Drag and drop a resume here, or choose a file
-                      </p>
-                      <p className="text-sm leading-6 text-slate-400">Accepted formats: PDF and DOCX</p>
-                      <div className="flex flex-wrap gap-3">
-                        <FormButton
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isUploading || uploadLimitReached}
-                        >
-                          {isUploading ? "Uploading..." : "Choose Resume"}
-                        </FormButton>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          className="hidden"
-                          onChange={onFileChange}
-                          disabled={isUploading || uploadLimitReached}
-                        />
-                        <span className="inline-flex items-center rounded-[var(--button-radius)] border border-white/10 px-3 py-2 text-sm text-slate-400">
-                          {activeBaselines.length} / {BETA_BASELINE_UPLOAD_LIMIT} resumes stored
-                        </span>
-                      </div>
-                      {isUploading ? (
-                        <div className="space-y-2">
-                          <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                            <div className="h-full w-2/3 animate-pulse rounded-full bg-[var(--accent-primary)]" />
-                          </div>
-                          <p className="text-sm text-slate-400">
-                            Uploading your resume and preparing baseline extraction...
-                          </p>
-                        </div>
-                      ) : null}
-                      {uploadLimitReached ? (
-                        <p className="text-sm text-slate-300">
-                          Beta accounts can store up to {BETA_BASELINE_UPLOAD_LIMIT} resumes.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {postUploadCtaBaselineId ? (
-                    <article className="rounded-[24px] border border-cyan-300/20 bg-cyan-400/[0.08] p-5 shadow-[0_18px_40px_rgba(8,47,73,0.22)]">
-                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100/80">
-                            Resume uploaded
-                          </p>
-                          <p className="text-lg font-semibold text-white">Now analyze your baseline.</p>
-                          <p className="text-sm leading-6 text-slate-200/90">
-                            Your uploaded resume is ready to become the primary source for baseline analysis.
-                          </p>
-                        </div>
-                        <FormButton
-                          onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}
-                          disabled={!isHydrated}
-                        >
-                          ANALYZE
-                        </FormButton>
-                      </div>
-                    </article>
-                  ) : null}
-
-                  {uploadSuccessId && !postUploadCtaBaselineId ? (
-                    <Alert intent="success" title="Resume uploaded">
-                      <p className="text-sm text-current">
-                        Your resume was stored successfully and is available in Baseline Library.
-                      </p>
-                    </Alert>
-                  ) : null}
-
-                  {duplicateError ? <p className="text-sm text-slate-300">{duplicateError}</p> : null}
-                  {insufficientTextError ? <InsufficientExtractedText error={insufficientTextError} /> : null}
-                  {baselineUpdatedNotice ? (
-                    <Alert intent="success" title="Baseline updated">
-                      <p className="text-sm text-current">{baselineUpdatedNotice}</p>
-                    </Alert>
-                  ) : null}
-                  {error ? (
-                    <Alert intent="error" title="Upload issue">
-                      <p className="text-sm text-current">{error}</p>
-                    </Alert>
-                  ) : null}
-                </div>
-              </section>
-            ) : null}
-          </div>
-          <div className="space-y-6 xl:col-span-5">
-            <section className="rounded-[20px] border border-white/10 bg-slate-950/45 p-4 min-h-[320px]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                Certification Status
+        <section className="rounded-[28px] bg-slate-900/40 p-6 md:p-8">
+          <div className="max-w-3xl space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                {heroState === "ready"
+                  ? "Baseline ready"
+                  : heroState === "in_progress"
+                    ? "Baseline in progress"
+                    : "Baseline setup"}
               </p>
-              {baselineStrengthState === "failed" && primaryBaselineId ? (
-                <div className="mt-3 space-y-3">
-                  <span className="rounded-full border border-amber-300/15 bg-amber-400/[0.08] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-100">
-                    Analysis Failed
-                  </span>
-                  <p className="text-sm leading-6 text-slate-300">
-                    Certification is unavailable until baseline analysis completes successfully.
-                  </p>
-                </div>
+              <h1 className="text-3xl font-semibold tracking-tight text-white md:text-[34px]">
+                {heroState === "ready"
+                  ? "You can start targeting roles with confidence."
+                  : heroState === "in_progress"
+                    ? "Your baseline needs one more step before targeting."
+                    : "Upload your resume to create your baseline."}
+              </h1>
+              <p className="text-base leading-7 text-slate-300">
+                {heroState === "ready"
+                  ? "Your baseline analysis is complete and certified for role targeting."
+                  : heroState === "in_progress"
+                    ? "Complete baseline analysis to improve targeting confidence and generation quality."
+                    : "Your baseline is the trusted source used to analyze fit and prepare role-specific materials."}
+              </p>
+              <p className="text-sm text-slate-400">
+                Built from your uploaded baseline and readiness checks.
+              </p>
+            </div>
+            <div>
+              {heroState === "ready" ? (
+                <Link
+                  href="/target"
+                  className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                >
+                  Start targeting a role
+                </Link>
+              ) : heroState === "in_progress" && primaryBaselineId ? (
+                <FormButton
+                  onClick={() => void fetchBaselineDetails(primaryBaselineId)}
+                  disabled={loadingBaselineId === primaryBaselineId || !isHydrated}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  {loadingBaselineId === primaryBaselineId ? "Analyzing..." : "Analyze baseline"}
+                </FormButton>
               ) : (
-                <div className="mt-3 space-y-3">
-                  <span
-                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
-                      certification.status === "certified"
-                        ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
-                        : certification.status === "not_certified"
-                          ? "border-amber-300/15 bg-amber-400/[0.08] text-amber-100"
-                          : "border-white/10 bg-white/[0.05] text-slate-300"
-                    }`}
-                  >
-                    {certification.title}
-                  </span>
-                  <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
-                  <div className="grid gap-2">
-                    {certification.checklist.map((item) => (
-                      <p
-                        key={item.label}
-                        className={`rounded-[14px] border px-3 py-2 text-xs uppercase tracking-[0.11em] ${
-                          item.complete
-                            ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
-                            : "border-white/10 bg-white/[0.03] text-slate-300"
-                        }`}
-                      >
-                        {item.label}: {item.value}
-                      </p>
-                    ))}
-                  </div>
-                </div>
+                <FormButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || uploadLimitReached || !isEditableLibrary}
+                  className="bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  {isEditableLibrary
+                    ? isUploading
+                      ? "Uploading..."
+                      : "Upload your resume"
+                    : "Upload unavailable"}
+                </FormButton>
               )}
-            </section>
-          </div>
-        </div>
-
-        <section>
-          <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.8),rgba(2,6,23,0.94))] p-6 shadow-[0_18px_50px_rgba(2,6,23,0.2)]">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                  Target CTA
-                </p>
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-                  Ready to target a role?
-                </h2>
-                <p className="max-w-2xl text-sm leading-6 text-slate-300">
-                  {certification.isCertified
-                    ? "Using certified baseline data should improve scoring confidence and document personalization as you move into targeting."
-                    : "Baseline certification can improve scoring confidence and document personalization as you move into targeting."}
-                </p>
-              </div>
-              <Link
-                href="/target"
-                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-5 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-              >
-                TARGET
-              </Link>
             </div>
           </div>
+        </section>
+
+        <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/25 p-5">
+          <header className="space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-100">Your baseline</h2>
+            <p className="text-sm text-slate-400">Current file, status, and next action.</p>
+          </header>
+          {allBaselines.length === 0 ? (
+            <p className="text-sm leading-6 text-slate-300">
+              No baseline uploaded yet. Upload a resume to begin.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {allBaselines.slice(0, 3).map((baseline) => {
+                const isPrimary = primaryBaselineId === baseline.id;
+                const status = analysisStatusByBaselineId[baseline.id] ?? "not_analyzed";
+                const isArchived = baseline.status === "ARCHIVED";
+                const canView = status === "ready";
+                const isLoading = loadingBaselineId === baseline.id;
+
+                return (
+                  <article
+                    key={baseline.id}
+                    className={`rounded-[16px] border p-4 ${
+                      uploadSuccessId === baseline.id || highlightedBaselineId === baseline.id
+                        ? "border-cyan-300/20 bg-cyan-400/[0.04]"
+                        : "border-white/10 bg-slate-950/30"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-100">{baseline.originalFilename}</p>
+                      {isPrimary ? (
+                        <span className="rounded-full border border-cyan-300/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100">
+                          Primary
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${getStatusTone(
+                          status,
+                        )}`}
+                      >
+                        {getStatusLabel(status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <FormButton
+                        onClick={() => {
+                          if (isArchived) return;
+                          if (canView) {
+                            setPrimaryBaselineId(baseline.id);
+                            setPostUploadCtaBaselineId(null);
+                            scrollToAnalysis();
+                            return;
+                          }
+                          void fetchBaselineDetails(baseline.id);
+                        }}
+                        disabled={isLoading || !isHydrated}
+                      >
+                        {isLoading ? "Analyzing..." : canView ? "View baseline analysis" : "ANALYZE"}
+                      </FormButton>
+                      {isEditableLibrary ? (
+                        <>
+                          <FormButton
+                            variant="ghost"
+                            onClick={() => void handleArchiveBaseline(baseline.id)}
+                            disabled={archivingBaselineId === baseline.id || isArchived}
+                          >
+                            {isArchived
+                              ? "Archived"
+                              : archivingBaselineId === baseline.id
+                                ? "Archiving..."
+                                : "Archive"}
+                          </FormButton>
+                          <FormButton
+                            variant="ghost"
+                            onClick={() => void handleDeleteBaseline(baseline.id)}
+                            disabled={deletingBaselineId === baseline.id}
+                          >
+                            {deletingBaselineId === baseline.id ? "Deleting..." : "Delete"}
+                          </FormButton>
+                        </>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {isEditableLibrary && heroState !== "ready" ? (
+          <section className="space-y-4 rounded-[22px] border border-white/10 bg-slate-900/20 p-5">
+            <header className="space-y-1">
+              <h2 className="text-xl font-semibold tracking-tight text-slate-100">Upload resume</h2>
+              <p className="text-sm leading-6 text-slate-400">
+                Add or replace your baseline source file before targeting roles.
+              </p>
+            </header>
+            <div
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={onDrop}
+              className={`rounded-[16px] border border-dashed p-5 ${
+                uploadLimitReached ? "border-white/10 bg-slate-950/25" : "border-white/20 bg-slate-950/35"
+              }`}
+            >
+              <p className="text-sm font-semibold text-slate-100">Drag and drop a resume, or choose a file</p>
+              <p className="mt-1 text-sm text-slate-400">Accepted formats: PDF and DOCX</p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <FormButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || uploadLimitReached}
+                >
+                  {isUploading ? "Uploading..." : "Choose resume"}
+                </FormButton>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={onFileChange}
+                  disabled={isUploading || uploadLimitReached}
+                />
+                <span className="inline-flex items-center rounded-[var(--button-radius)] border border-white/10 px-3 py-2 text-sm text-slate-400">
+                  {activeBaselines.length} / {BETA_BASELINE_UPLOAD_LIMIT} resumes stored
+                </span>
+              </div>
+              {isUploading ? (
+                <p className="mt-3 text-sm text-slate-400">
+                  Uploading your resume and preparing baseline extraction...
+                </p>
+              ) : null}
+              {uploadLimitReached ? (
+                <p className="mt-2 text-sm text-slate-300">
+                  Beta accounts can store up to {BETA_BASELINE_UPLOAD_LIMIT} resumes.
+                </p>
+              ) : null}
+            </div>
+
+            {postUploadCtaBaselineId ? (
+              <article className="rounded-[16px] border border-cyan-300/20 bg-cyan-400/[0.06] p-4">
+                <p className="text-sm font-semibold text-slate-100">Resume uploaded. Analyze your baseline next.</p>
+                <div className="mt-3">
+                  <FormButton
+                    onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}
+                    disabled={!isHydrated}
+                  >
+                    ANALYZE
+                  </FormButton>
+                </div>
+              </article>
+            ) : null}
+
+            {uploadSuccessId && !postUploadCtaBaselineId ? (
+              <Alert intent="success" title="Resume uploaded">
+                <p className="text-sm text-current">
+                  Your resume was stored successfully and is available in your baseline records.
+                </p>
+              </Alert>
+            ) : null}
+            {duplicateError ? <p className="text-sm text-slate-300">{duplicateError}</p> : null}
+            {insufficientTextError ? <InsufficientExtractedText error={insufficientTextError} /> : null}
+            {baselineUpdatedNotice ? (
+              <Alert intent="success" title="Baseline updated">
+                <p className="text-sm text-current">{baselineUpdatedNotice}</p>
+              </Alert>
+            ) : null}
+            {error ? (
+              <Alert intent="error" title="Upload issue">
+                <p className="text-sm text-current">{error}</p>
+              </Alert>
+            ) : null}
+          </section>
+        ) : null}
+
+        <section className="space-y-3 rounded-[20px] border border-white/10 bg-slate-900/20 p-5">
+          <h2 className="text-xl font-semibold tracking-tight text-slate-100">Baseline readiness</h2>
+          {baselineStrengthState === "failed" && primaryBaselineId ? (
+            <p className="text-sm leading-6 text-slate-300">
+              Analysis failed for your current baseline. Retry analysis before targeting.
+            </p>
+          ) : (
+            <p className="text-sm leading-6 text-slate-300">{certification.summary}</p>
+          )}
+          <details className="rounded-[14px] border border-white/10 bg-slate-950/30 px-4 py-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+              View readiness details
+            </summary>
+            <div className="mt-3 grid gap-2">
+              {certification.checklist.map((item) => (
+                <p key={item.label} className="text-sm text-slate-300">
+                  {item.label}: {item.value}
+                </p>
+              ))}
+            </div>
+          </details>
         </section>
 
         {analysisReady ? (

@@ -466,25 +466,25 @@ export function getOpportunityVerdict(score?: number | null): {
   if (typeof score !== "number") {
     return {
       label: "Pending",
-      explanation: "Run an analysis to see how strong this role looks for you.",
+      explanation: "Run an analysis to see how this role aligns with your baseline.",
     };
   }
   const band = getScoreBand(score);
   if (band === ScoreBand.TOP) {
     return {
       label: "Prime Opportunity",
-      explanation: "You are exceptionally well aligned for this role.",
+      explanation: "You're a strong match for this role.",
     };
   }
   if (band === ScoreBand.MID) {
     return {
       label: "Competitive Match",
-      explanation: "You have a realistic shot if you tailor carefully.",
+      explanation: "You’re close. Focused tailoring can strengthen this application.",
     };
   }
   return {
     label: "Low Match",
-    explanation: "This role appears weakly aligned with your current baseline.",
+    explanation: "This role currently shows meaningful gaps against your baseline.",
   };
 }
 
@@ -557,7 +557,6 @@ type OpportunityMapSectionProps = {
   readiness: GenerationReadiness;
   verificationCoverage: VerificationCoverage;
   canonicalCoverage: LatestAnalysis["verification_coverage"];
-  baselineEvidenceHref: string;
   predictiveUnlock:
     | {
         unverifiedRequirements: string[];
@@ -679,21 +678,13 @@ export async function getPreviousAnalysis(
 export function OpportunityMapSection({
   score,
   verdict,
-  advantageSignals,
   primaryCta,
   scoreAnalysisHref,
   readiness,
   verificationCoverage,
   canonicalCoverage,
-  baselineEvidenceHref,
   predictiveUnlock,
-  reliabilityFacts,
 }: OpportunityMapSectionProps) {
-  const roundedScore = typeof score === "number" ? Math.round(score) : null;
-  const isStrongFit = typeof roundedScore === "number" && roundedScore >= 85;
-  const isLimitedReadiness =
-    readiness.status === "limited" || verificationCoverage.status === "partial";
-  const showStrongFitLimitationPanel = isStrongFit && isLimitedReadiness;
   const toCanonicalLabels = (labels: string[] | null | undefined): string[] =>
     Array.isArray(labels)
       ? Array.from(
@@ -709,242 +700,93 @@ export function OpportunityMapSection({
           ),
         )
       : [];
-  const hasCanonicalCoverage = useMemo(() => {
-    if (!canonicalCoverage) return false;
-    return (
-      typeof canonicalCoverage.totalClaims === "number" ||
-      typeof canonicalCoverage.verifiedClaims === "number" ||
-      typeof canonicalCoverage.inferredClaims === "number" ||
-      typeof canonicalCoverage.unverifiedClaims === "number" ||
-      Array.isArray(canonicalCoverage.supportedRequirements) ||
-      Array.isArray(canonicalCoverage.verifiedRequirements) ||
-      Array.isArray(canonicalCoverage.inferredRequirements) ||
-      Array.isArray(canonicalCoverage.unverifiedRequirements)
-    );
-  }, [canonicalCoverage]);
-  const supportedSignals = useMemo(() => {
-    const directSupported = toCanonicalLabels(canonicalCoverage?.supportedRequirements);
-    if (directSupported.length > 0) return directSupported;
-    return toCanonicalLabels([
-      ...(canonicalCoverage?.verifiedRequirements ?? []),
-      ...(canonicalCoverage?.inferredRequirements ?? []),
-    ]);
-  }, [
-    canonicalCoverage?.inferredRequirements,
-    canonicalCoverage?.supportedRequirements,
-    canonicalCoverage?.verifiedRequirements,
-  ]);
   const unverifiedSignals = useMemo(
-    () => toCanonicalLabels(canonicalCoverage?.unverifiedRequirements),
+    () => toCanonicalLabels(canonicalCoverage?.unverifiedRequirements).slice(0, 3),
     [canonicalCoverage?.unverifiedRequirements],
   );
   const readinessToneClass =
     readiness.status === "blocked"
-      ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
+      ? "border-rose-300/30 bg-rose-500/8 text-rose-100"
       : readiness.status === "limited"
-        ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
-        : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100";
+        ? "border-slate-500/50 bg-slate-800/80 text-slate-100"
+        : "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
+  const readinessMessage =
+    readiness.status === "blocked"
+      ? "Generation is currently blocked until key verification gaps are resolved."
+      : readiness.status === "limited"
+        ? "Some requirements need stronger verification. You can still generate documents, and improving evidence will strengthen results."
+        : "Your evidence supports generation for this role.";
   return (
-    <section className="overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-5 shadow-[0_20px_70px_rgba(2,6,23,0.34)]">
-      <div className="flex flex-col gap-5">
-        <header className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-3">
-            <div className="flex items-end gap-4">
-              <p className="text-[60px] font-black leading-none tracking-[-0.06em] text-white">
-                {typeof score === "number" ? Math.round(score) : "--"}
-              </p>
-              <div className="space-y-1 pb-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">
-                  Match strength
-                </p>
-                <p className="text-3xl font-semibold tracking-tight text-white">{verdict.label}</p>
-                <p className="max-w-sm text-sm leading-6 text-slate-300">{verdict.explanation}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col items-start gap-3 sm:items-end">
-            {showStrongFitLimitationPanel ? (
-              <div
-                id="generation-readiness-details"
-                className="w-full rounded-2xl border border-amber-300/35 bg-amber-500/10 px-3 py-3 text-amber-100 sm:max-w-sm"
+    <section className="rounded-3xl bg-slate-900/65 px-6 py-9 sm:px-8 sm:py-10">
+      <div className="max-w-4xl space-y-9">
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Decision summary</p>
+        <div className="space-y-5">
+          <p className="text-[86px] font-black leading-[0.95] tracking-[-0.055em] text-white md:text-[98px] xl:text-[110px] 2xl:text-[118px]">
+            {typeof score === "number" ? Math.round(score) : "--"}
+          </p>
+          <h2 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl xl:text-5xl">
+            {verdict.label}
+          </h2>
+          <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{verdict.explanation}</p>
+          <p className="max-w-2xl text-sm leading-6 text-slate-400">Built from your validated baseline and role requirements.</p>
+        </div>
+        <p className="max-w-2xl text-sm text-slate-300">{primaryCta?.description}</p>
+        <div className="space-y-4">
+          {primaryCta ? (
+            primaryCta.disabled ? (
+              <span
+                data-testid="results-hero-primary-cta"
+                className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
               >
-                <h3 className="text-base font-semibold tracking-tight text-white">
-                  Strong fit. Limited generation.
-                </h3>
-                <p className="mt-2 text-sm leading-5 text-slate-100">
-                  You are highly aligned for this role. Document generation is limited because some
-                  requirements are not yet verified from your baseline.
-                </p>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
-                  What&apos;s holding this back
-                </p>
-                {!hasCanonicalCoverage ? (
-                  <p className="mt-1 text-xs leading-5 text-slate-100">
-                    Verification data unavailable. Re-run analysis.
-                  </p>
-                ) : (
-                  <>
-                    {unverifiedSignals.length > 0 ? (
-                      <ul className="mt-1 space-y-1 text-xs leading-5 text-slate-100">
-                        {unverifiedSignals.map((label) => (
-                          <li key={`results-unverified-${label}`}>- {label}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-1 text-xs leading-5 text-slate-100">
-                        All required tools are supported. Generation limits may be due to evidence depth.
-                      </p>
-                    )}
-                    {supportedSignals.length > 0 ? (
-                      <p className="mt-2 text-xs leading-5 text-slate-200">
-                        Supported signals: {supportedSignals.join(", ")}
-                      </p>
-                    ) : null}
-                    <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
-                      Fastest path to unlock
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-100">
-                      1. Remove unsupported tools from targeting
-                      <br />
-                      2. Add verified evidence
-                    </p>
-                  </>
-                )}
-              </div>
+                {primaryCta.label}
+              </span>
             ) : (
-              <>
-                <div
-                  id="generation-readiness-details"
-                  className={`w-full rounded-2xl border px-3 py-2 sm:max-w-sm ${readinessToneClass}`}
-                >
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                    Generation Readiness: {readiness.badgeLabel}
-                  </p>
-                  <p className="mt-1 text-sm leading-5 text-slate-100">{readiness.summary}</p>
-                  {readiness.reasons[0] ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-200">{readiness.reasons[0].message}</p>
-                  ) : null}
-                </div>
-                <div className="w-full rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-3 py-2 sm:max-w-sm">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">
-                    Verification Coverage: {verificationCoverage.status.toUpperCase()}
-                  </p>
-                  <p className="mt-1 text-sm leading-5 text-slate-100">{verificationCoverage.summary}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-200">
-                    Verified claims: {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
-                  </p>
-                  {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-300">
-                      Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
-                      {verificationCoverage.unverifiedClaims}
-                    </p>
-                  ) : null}
-                </div>
-              </>
-            )}
+              <a
+                data-testid="results-hero-primary-cta"
+                href={primaryCta.href}
+                className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+              >
+                {primaryCta.label}
+              </a>
+            )
+          ) : null}
+          <div>
             <a
+              data-testid="results-hero-secondary-action"
               href={scoreAnalysisHref}
               className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
             >
-              View score analysis
+              View detailed scoring breakdown
             </a>
-            {primaryCta ? (
-              <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Next Step</p>
-                <p className="mt-2 text-sm leading-5 text-slate-100">{primaryCta.description}</p>
-                {primaryCta.disabled ? (
-                  <span className="mt-3 inline-flex min-w-[260px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-4 py-2.5 text-sm font-semibold text-slate-400">
-                    {primaryCta.label}
-                  </span>
-                ) : (
-                  <a
-                    href={primaryCta.href}
-                    className="mt-3 inline-flex min-w-[260px] items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2.5 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-                  >
-                    {primaryCta.label}
-                  </a>
-                )}
-                <p className="mt-2 text-xs text-slate-300">Complete this step before taking other actions.</p>
-              </div>
-            ) : null}
-            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/30 px-3 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
-                Why this result is reliable
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-100">
-                <li>{reliabilityFacts.baselineCompleteness}</li>
-                <li>Matched signals from your experience: {reliabilityFacts.matchedSignals}</li>
-                <li>
-                  {reliabilityFacts.scoreImproved == null
-                    ? "No prior analysis to compare yet."
-                    : reliabilityFacts.scoreImproved
-                      ? "Your score improved from the previous analysis."
-                      : "Your score has not improved from the previous analysis."}
-                </li>
-                <li>
-                  {reliabilityFacts.gapsResolvable
-                    ? "Current gaps are resolvable through Fit Review."
-                    : "Current gaps are not yet resolvable through Fit Review."}
-                </li>
-              </ul>
-            </div>
-            {showStrongFitLimitationPanel ? (
-              <a
-                href={baselineEvidenceHref}
-                className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-              >
-                Review baseline evidence
-              </a>
-            ) : null}
-            {predictiveUnlock ? (
-              <div className="w-full rounded-2xl border border-sky-300/35 bg-sky-500/10 px-3 py-3 text-sky-100 sm:max-w-sm">
-                <h3 className="text-base font-semibold tracking-tight text-white">Unlock full generation</h3>
-                <p className="mt-2 text-sm leading-5 text-slate-100">
-                  You&apos;re a strong match for this role. A few unverified requirements are limiting
-                  document generation.
-                </p>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-sky-100">
-                  Unverified requirements:
-                </p>
-                <ul className="mt-1 space-y-1 text-xs leading-5 text-slate-100">
-                  {predictiveUnlock.unverifiedRequirements.map((requirement) => (
-                    <li key={`predictive-unverified-${requirement}`}>- {requirement}</li>
-                  ))}
-                </ul>
-                <p className="mt-3 text-xs leading-5 text-slate-100">
-                  If these are removed from targeting:
-                  <br />-{" "}
-                  {predictiveUnlock.predictedOutcome === "full"
-                    ? "generation will be fully enabled"
-                    : "generation will improve but still require additional evidence"}
-                </p>
-                <p className="mt-2 text-xs text-slate-200">You can restore removed requirements later.</p>
-              </div>
-            ) : null}
           </div>
-        </header>
-
-        {advantageSignals.length ? (
-          <article className="rounded-[22px] border border-white/10 bg-slate-950/38 p-4">
-            <h3 className="text-xl font-semibold uppercase tracking-[0.16em] text-slate-100">
-              YOUR ADVANTAGE
-            </h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-              The strongest evidence already working in your favor for this role.
+        </div>
+        <div
+          id="generation-readiness-details"
+          className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}
+        >
+          <p className="text-xs font-medium tracking-[0.08em] text-slate-300">
+            Generation readiness: {readiness.badgeLabel}
+          </p>
+          <p className="mt-1 text-slate-100">{readinessMessage}</p>
+          {readiness.reasons[0]?.message ? (
+            <p className="mt-1 text-xs text-slate-300">{readiness.reasons[0].message}</p>
+          ) : null}
+          <p className="mt-1 text-xs text-slate-400">
+            Verification coverage: {verificationCoverage.status.toUpperCase()} · {verificationCoverage.verifiedClaims} /{" "}
+            {verificationCoverage.totalClaims > 0 ? verificationCoverage.totalClaims : "?"} verified claims
+          </p>
+          {unverifiedSignals.length > 0 ? (
+            <p className="mt-1 text-xs text-slate-300">Needs stronger verification: {unverifiedSignals.join(", ")}</p>
+          ) : null}
+          {predictiveUnlock ? (
+            <p className="mt-2 text-xs text-slate-300">
+              Removing unsupported requirements from targeting can{" "}
+              {predictiveUnlock.predictedOutcome === "full"
+                ? "fully unlock generation."
+                : "improve generation quality while you add stronger evidence."}
             </p>
-            <ul className="mt-4 grid gap-3 md:grid-cols-2">
-              {advantageSignals.map((strength) => (
-                <li
-                  key={strength}
-                  className="rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-slate-200"
-                >
-                  {strength}
-                </li>
-              ))}
-            </ul>
-          </article>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -957,16 +799,17 @@ type AdvancedInsightsCardProps = {
 };
 
 type SignalAlignmentSectionProps = {
-  strongSignals: string[];
-  weakerSignals: string[];
+  strengths: string[];
+  gaps: string[];
   summary: string;
 };
 
-function AdvancedInsightsCard({
+export function AdvancedInsightsCard({
   scoreBreakdown,
   showScoreDrivers,
   renderDriverGrid,
 }: AdvancedInsightsCardProps) {
+  const [expanded, setExpanded] = useState(false);
   if (!showScoreDrivers && !scoreBreakdown) {
     return null;
   }
@@ -983,88 +826,94 @@ function AdvancedInsightsCard({
         <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
           Deeper score analysis
         </h2>
-        <p className="max-w-2xl text-sm leading-6 text-slate-300">
-          Deeper score analysis for when you want to inspect the contributing dimensions and the
-          highest-impact levers behind this result.
-        </p>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="text-sm font-medium text-slate-200 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+        >
+          {expanded ? "Hide detailed scoring breakdown" : "View detailed scoring breakdown"}
+        </button>
       </header>
 
-      {showScoreDrivers ? <div className="mt-5">{renderDriverGrid(false)}</div> : null}
+      {expanded ? (
+        <>
+          {showScoreDrivers ? <div className="mt-5">{renderDriverGrid(false)}</div> : null}
 
-      {scoreBreakdown ? (
-        <section className="mt-6 rounded-[24px] border border-white/10 bg-slate-950/38 p-5">
-          <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
-          <div className="mt-4 space-y-3">
-            {scoreBreakdown.dimensions.map((dimension) => {
-              const percent =
-                dimension.weight > 0
-                  ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
-                  : 0;
-              return (
-                <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-slate-200">{dimension.label}</span>
-                    <span className="font-semibold text-white">
-                      {dimension.score.toFixed(1)} / {dimension.weight}
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full rounded bg-white/10">
-                    <div className="h-1.5 rounded bg-cyan-200/70" style={{ width: `${percent}%` }} />
-                  </div>
+          {scoreBreakdown ? (
+            <section className="mt-6 rounded-[24px] border border-white/10 bg-slate-950/38 p-5">
+              <h3 className="text-base font-semibold text-slate-100">Supporting score breakdown</h3>
+              <div className="mt-4 space-y-3">
+                {scoreBreakdown.dimensions.map((dimension) => {
+                  const percent =
+                    dimension.weight > 0
+                      ? Math.max(0, Math.min(100, (dimension.score / dimension.weight) * 100))
+                      : 0;
+                  return (
+                    <div key={`score-breakdown-${dimension.key}`} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-slate-200">{dimension.label}</span>
+                        <span className="font-semibold text-white">
+                          {dimension.score.toFixed(1)} / {dimension.weight}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full rounded bg-white/10">
+                        <div className="h-1.5 rounded bg-cyan-200/70" style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
+                  <span className="font-semibold text-slate-200">Total</span>
+                  <span className="font-semibold text-white">
+                    {scoreBreakdown.total_score.toFixed(1)} / 100
+                  </span>
                 </div>
-              );
-            })}
-            <div className="flex items-center justify-between border-t border-white/10 pt-2 text-sm">
-              <span className="font-semibold text-slate-200">Total</span>
-              <span className="font-semibold text-white">
-                {scoreBreakdown.total_score.toFixed(1)} / 100
-              </span>
-            </div>
-          </div>
-        </section>
-      ) : null}
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-4 text-sm text-slate-400">Collapsed by default to keep the decision flow focused.</p>
+      )}
     </section>
   );
 }
 
 export function SignalAlignmentSection({
-  strongSignals,
-  weakerSignals,
+  strengths,
+  gaps,
   summary,
 }: SignalAlignmentSectionProps) {
+  if (!strengths.length && !gaps.length) return null;
   return (
-    <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.88),rgba(2,6,23,0.96))] p-6 shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
-      <header className="space-y-2 border-b border-white/10 pb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-          SIGNAL ALIGNMENT
-        </p>
+    <section className="rounded-3xl bg-slate-900/55 p-6">
+      <header className="space-y-2">
         <h2 className="text-2xl font-semibold tracking-tight text-slate-100">
-          Why this role scored the way it did
+          Why this role fits you
         </h2>
         <p className="max-w-3xl text-sm leading-6 text-slate-300">{summary}</p>
       </header>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <article className="rounded-[22px] border border-emerald-300/15 bg-emerald-400/[0.06] p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-100/80">
-            Strong For This Role
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <article className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-200">
+            Strengths
           </p>
-          <ul className="mt-3 space-y-2 text-sm text-slate-200">
-            {strongSignals.map((signal) => (
-              <li key={signal} className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+          <ul className="space-y-2 text-sm text-slate-100">
+            {(strengths.length ? strengths : ["No strong signals were extracted for this run yet."]).map((signal) => (
+              <li key={`strength-${signal}`} className="border-b border-white/10 pb-2 last:border-0">
                 {signal}
               </li>
             ))}
           </ul>
         </article>
-
-        <article className="rounded-[22px] border border-amber-300/15 bg-amber-400/[0.05] p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-100/80">
-            Weaker For This Role
+        <article className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">
+            Gaps to be aware of
           </p>
-          <ul className="mt-3 space-y-2 text-sm text-slate-200">
-            {weakerSignals.map((signal) => (
-              <li key={signal} className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+          <ul className="space-y-2 text-sm text-slate-100">
+            {(gaps.length ? gaps : ["No material gaps were identified in this run."]).map((signal) => (
+              <li key={`gap-${signal}`} className="border-b border-white/10 pb-2 last:border-0">
                 {signal}
               </li>
             ))}
@@ -1498,6 +1347,7 @@ export default function ResultsPage() {
   const [expansionImpact, setExpansionImpact] = useState("");
   const [expansionConfirmedAccurate, setExpansionConfirmedAccurate] = useState(false);
   const [expansionSubmitting, setExpansionSubmitting] = useState(false);
+  const [showReliabilitySignals, setShowReliabilitySignals] = useState(false);
   const [expansionError, setExpansionError] = useState<string | null>(null);
   const [expansionSuccessByRequirement, setExpansionSuccessByRequirement] = useState<Record<string, string>>({});
   const [dismissedSuggestionRequirements, setDismissedSuggestionRequirements] = useState<Set<string>>(new Set());
@@ -1833,11 +1683,6 @@ export default function ResultsPage() {
       analysisId: latest?.assessmentId ?? null,
     });
   }, [latest?.assessmentId, latest?.jobId, latestBaselineId, latestBaselineVersionId]);
-  const baselineEvidenceHref = useMemo(() => {
-    const analysisId = latest?.assessmentId?.trim() ?? "";
-    if (!analysisId) return "/baseline";
-    return `/baseline?analysisId=${encodeURIComponent(analysisId)}`;
-  }, [latest?.assessmentId]);
 
   const normalizedDimensionScores = useMemo(
     () => normalizeDimensionScores(latest ?? null),
@@ -2767,10 +2612,7 @@ export default function ResultsPage() {
   return (
     <PageShell className="results-page-theme">
       <div className="space-y-5">
-        <PageHeader
-          title="Results"
-          description="Review your Compatibility Score and take the next step."
-        />
+        <PageHeader title="Your result" description="Review your compatibility score and next best step." />
         {opportunitySaved ? (
           <p className="text-xs font-medium text-emerald-300">Saved to Opportunities</p>
         ) : null}
@@ -2831,7 +2673,7 @@ export default function ResultsPage() {
           </section>
         ) : null}
 
-        <section className="space-y-4 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-4 shadow-[0_14px_40px_rgba(2,6,23,0.16)]">
+        <section className="space-y-7 rounded-3xl bg-slate-950/55 p-6">
           {!latest ? (
             <EmptyState
               title="No compatibility analysis yet"
@@ -2856,9 +2698,8 @@ export default function ResultsPage() {
               className="max-w-full border border-white/10 bg-transparent px-4 py-6 shadow-none text-slate-400"
             />
           ) : (
-            <div className="space-y-4">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_340px] xl:items-start">
-                <div className="space-y-6">
+            <div className="space-y-7">
+              <div className="space-y-7">
                   <OpportunityMapSection
                     score={activeScore}
                     verdict={opportunityVerdict}
@@ -2868,7 +2709,6 @@ export default function ResultsPage() {
                     readiness={generationReadiness}
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
-                    baselineEvidenceHref={baselineEvidenceHref}
                     predictiveUnlock={predictiveUnlock}
                     reliabilityFacts={reliabilityFacts}
                   />
@@ -3072,18 +2912,48 @@ export default function ResultsPage() {
                     </section>
                   ) : null}
 
-                  {signalAlignment.renderable ? (
-                    <SignalAlignmentSection
-                      strongSignals={signalAlignment.strongForRole}
-                      weakerSignals={signalAlignment.weakerForRole}
-                      summary={signalAlignment.summary}
-                    />
-                  ) : null}
-                </div>
-
-                <div className="space-y-4 xl:sticky xl:top-6">
+                  <SignalAlignmentSection
+                    strengths={Array.from(
+                      new Set([...advantageSignals, ...signalAlignment.strongForRole]),
+                    ).slice(0, 6)}
+                    gaps={signalAlignment.weakerForRole}
+                    summary={signalAlignment.summary}
+                  />
+                  <section className="rounded-2xl border border-slate-700/60 bg-slate-900/45 p-4">
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      aria-expanded={showReliabilitySignals}
+                      onClick={() => setShowReliabilitySignals((current) => !current)}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        Profile signals
+                      </p>
+                      <p className="mt-1 text-sm text-slate-200">
+                        {showReliabilitySignals ? "Hide reliability context" : "See reliability context"}
+                      </p>
+                    </button>
+                    {showReliabilitySignals ? (
+                      <ul className="mt-3 space-y-1 text-sm text-slate-300">
+                        <li>{reliabilityFacts.baselineCompleteness}</li>
+                        <li>Matched signals from your experience: {reliabilityFacts.matchedSignals}</li>
+                        <li>
+                          {reliabilityFacts.scoreImproved == null
+                            ? "No prior analysis to compare yet."
+                            : reliabilityFacts.scoreImproved
+                              ? "Your score improved from the previous analysis."
+                              : "Your score has not improved from the previous analysis."}
+                        </li>
+                        <li>
+                          {reliabilityFacts.gapsResolvable
+                            ? "Current gaps are resolvable through Fit Review."
+                            : "Current gaps are not yet resolvable through Fit Review."}
+                        </li>
+                      </ul>
+                    ) : null}
+                  </section>
                   {scoreBand !== ScoreBand.TOP ? (
-                    <section id="fit-improvement-opportunities">
+                    <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
                         assessmentId={latest.assessmentId ?? null}
                         actionHref={fitReviewPath}
@@ -3091,9 +2961,10 @@ export default function ResultsPage() {
                       />
                     </section>
                   ) : null}
-                  <CareerAlignmentProgress showProgressSection={false} />
+                  <section className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
+                    <CareerAlignmentProgress showProgressSection={false} />
+                  </section>
                 </div>
-              </div>
 
               <AdvancedInsightsCard
                 scoreBreakdown={scoreBreakdown}

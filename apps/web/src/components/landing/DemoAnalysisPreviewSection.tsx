@@ -85,9 +85,7 @@ export function DemoAnalysisPreviewSection() {
     <section id="demo-analysis-preview" ref={sectionRef} className="border-b border-slate-800/70 bg-slate-900/35">
       <div className="mx-auto w-full max-w-[1200px] px-4 pb-10 pt-7 md:px-10 lg:px-16">
         <div className="mb-6">
-          <h2 className="text-2xl font-semibold text-white lg:text-[1.75rem]">
-            See a compatibility analysis in action
-          </h2>
+          <h2 className="text-2xl font-semibold text-white lg:text-[1.75rem]">Example compatibility analysis</h2>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -138,9 +136,8 @@ export function DemoAnalysisPreviewSection() {
           </div>
         </div>
 
-        <p className="mt-4 text-sm text-slate-300">
-          Example analysis based on anonymized member data. Upload your resume to generate your own score and
-          opportunity map.
+        <p className="mt-4 text-sm font-medium text-slate-200">
+          Example analysis. Upload your resume to generate your own.
         </p>
       </div>
     </section>
