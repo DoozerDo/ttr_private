@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
-import { getServerApiBaseUrl } from "@/lib/apiBase";
 import { backendFetch, isBackendUnavailableResponse } from "../_lib/backendFetch";
-
-const AUTH_API_BASE_URL = getServerApiBaseUrl();
+import {
+  getRequiredServerApiBaseUrl,
+  UpstreamApiConfigError,
+} from "../_lib/serverApiConfig";
 
 export type RequireAuthTokenSuccess = {
   token: string;
@@ -54,7 +55,33 @@ export async function forwardAuthRequest(
   req: NextRequest,
   endpoint: string,
 ) {
-  const apiUrl = `${AUTH_API_BASE_URL}${endpoint}`;
+  let authApiBaseUrl: string;
+  try {
+    authApiBaseUrl = getRequiredServerApiBaseUrl();
+  } catch (error) {
+    const configError =
+      error instanceof UpstreamApiConfigError
+        ? error
+        : new UpstreamApiConfigError(
+            "UPSTREAM_API_URL_MALFORMED",
+            "Unexpected server API base URL configuration error.",
+          );
+    console.error("Auth proxy upstream config error", {
+      code: configError.code,
+      message: configError.message,
+      details: configError.details,
+      endpoint,
+    });
+    return NextResponse.json(
+      {
+        error: "SERVICE_UNAVAILABLE",
+        message: "Service temporarily unavailable. Please retry shortly.",
+      },
+      { status: 503 },
+    );
+  }
+
+  const apiUrl = `${authApiBaseUrl}${endpoint}`;
   const body = await req.text();
   let apiResponse: Response;
 

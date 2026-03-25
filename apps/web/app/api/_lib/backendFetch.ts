@@ -1,4 +1,4 @@
-const API_UNAVAILABLE_ERROR = "API_UNAVAILABLE";
+const API_UNAVAILABLE_ERROR = "UPSTREAM_UNAVAILABLE";
 
 function looksLikeConnectionFailure(error: unknown) {
   const candidate = error as {
@@ -17,8 +17,8 @@ function looksLikeConnectionFailure(error: unknown) {
 }
 
 /**
- * Guard against Docker/API startup races by turning connection failures into a friendly 503.
- * Only network-level failures (ECONNREFUSED/fetch failed) are converted; other errors still bubble.
+ * Convert upstream network-level failures into a controlled 503 for API proxy routes.
+ * We keep user-facing text neutral and log root cause server-side.
  */
 export async function backendFetch(
   input: RequestInfo,
@@ -28,10 +28,19 @@ export async function backendFetch(
     return await fetch(input, init);
   } catch (error) {
     if (looksLikeConnectionFailure(error)) {
+      const inputUrl = typeof input === "string" ? input : input?.url ?? "<unknown>";
+      console.error("Proxy upstream fetch failed", {
+        input: inputUrl,
+        method: init?.method ?? "GET",
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : String(error),
+      });
       return Response.json(
         {
           error: API_UNAVAILABLE_ERROR,
-          message: "Backend service is starting. Please retry shortly.",
+          message: "Service temporarily unavailable. Please retry shortly.",
         },
         { status: 503 },
       );

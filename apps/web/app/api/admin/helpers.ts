@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerApiBaseUrl } from "@/lib/apiBase";
+import { getRequiredServerApiBaseUrl } from "../_lib/serverApiConfig";
 
 export function getApiBaseUrl(): string {
-  return getServerApiBaseUrl();
+  return getRequiredServerApiBaseUrl();
 }
 
 /**
