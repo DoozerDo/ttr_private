@@ -91,6 +91,7 @@ export type GenerateResumeRequest = {
 export type GenerateResumeOptions = {
   enforceOneTap?: boolean;
   preflightOnly?: boolean;
+  skipReadinessGate?: boolean;
 };
 
 export type ResumePreExportSnapshot = {
@@ -423,6 +424,60 @@ export class ResumeService {
       gapSignals,
       reframingPriorities,
     };
+  }
+
+  private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
+    throw new UnprocessableEntityException({
+      code: 'generation_blocked',
+      message:
+        'Generation is not available for this role due to insufficient verified evidence.',
+      blockers: blockers.slice(0, 3),
+      error: {
+        code: 'generation_blocked',
+        message:
+          'Generation is not available for this role due to insufficient verified evidence.',
+        details: {
+          blockers: blockers.slice(0, 3),
+        },
+      },
+    });
+  }
+
+  private throwGenerationFailedError(
+    message: string,
+    details?: Record<string, unknown>,
+  ): never {
+    throw new UnprocessableEntityException({
+      code: 'generation_failed',
+      message,
+      ...(details ? { details } : {}),
+      error: {
+        code: 'generation_failed',
+        message,
+        ...(details ? { details } : {}),
+      },
+    });
+  }
+
+  private sanitizeDraftSectionText(value?: string | null): string {
+    return String(value ?? '')
+      .replace(/[\u2022\u25CF\u25E6]+/g, ' ')
+      .replace(/[|]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private sanitizeDraftSections(sections: ResumeDraftSection[]): ResumeDraftSection[] {
+    return sections.map((section) => ({
+      ...section,
+      content: this.sanitizeDraftSectionText(section.content),
+      bullets: (section.bullets ?? [])
+        .map((bullet) => ({
+          ...bullet,
+          text: this.sanitizeDraftSectionText(bullet.text),
+        }))
+        .filter((bullet) => bullet.text.length > 0),
+    }));
   }
 
   private logNormalizationDiagnostics(payload: {
@@ -974,7 +1029,7 @@ export class ResumeService {
     syntheticMetadata?: SyntheticMetadataInput,
   ) {
     const recordResumeEvent = (success: boolean) => {
-      void this.criticalFlowTrackerService.recordCriticalFlowEvent({
+      void this.criticalFlowTrackerService?.recordCriticalFlowEvent({
         flow: success
           ? CriticalFlowEventType.RESUME_GENERATED_SUCCESS
           : CriticalFlowEventType.RESUME_GENERATED_FAILURE,
@@ -982,6 +1037,8 @@ export class ResumeService {
       });
     };
     try {
+      const shouldEnforceOneTap = options?.enforceOneTap ?? true;
+      const preflightOnly = options?.preflightOnly ?? false;
       const baselineId = request.baselineId?.trim();
       const baselineVersionId = request.baselineVersionId?.trim();
       const jobId = request.jobId?.trim();
@@ -1047,6 +1104,20 @@ export class ResumeService {
       baselineId: baseline.id,
       baselineVersionId: baselineVersion.id,
     });
+
+    if (!options?.skipReadinessGate) {
+      const readiness = await this.getGenerationReadiness(userId, request, {
+        skipReadinessGate: true,
+      });
+      if (readiness.status !== 'ready') {
+        this.throwGenerationBlockedError(
+          (readiness.reasons ?? []).map((reason) => ({
+            code: reason.code,
+            message: reason.message,
+          })),
+        );
+      }
+    }
 
     const policies = await this.baselineBlockPolicyRepository.find({
       where: { baselineVersionId: baselineVersion.id },
@@ -1130,7 +1201,7 @@ export class ResumeService {
       .filter(Boolean)
       .join('\n');
 
-    let sections = buildResumeDraftSections(resumeInputSections, {
+    let sections = this.sanitizeDraftSections(buildResumeDraftSections(resumeInputSections, {
       jobText: draftJobText || null,
       gapGuidance: gapGuidance
         ? {
@@ -1139,7 +1210,7 @@ export class ResumeService {
       }
       : undefined,
       claimRiskInventory,
-    });
+    }));
     const hasExperienceBullets = sections.some(
       (section) =>
         String(section.type ?? '').toUpperCase() === 'EXPERIENCE' &&
@@ -1152,14 +1223,14 @@ export class ResumeService {
         claimRiskInventory,
       );
       if (fallbackExperienceSection) {
-        sections = [
+        sections = this.sanitizeDraftSections([
           ...sections.filter(
             (section) =>
               String(section.type ?? '').toUpperCase() !== 'EXPERIENCE' ||
               (Array.isArray(section.bullets) && section.bullets.length > 0),
           ),
           fallbackExperienceSection,
-        ];
+        ]);
       }
     }
     const claimRiskSummary = summarizeClaimRisk(
@@ -1217,55 +1288,17 @@ export class ResumeService {
           stageFailureReason: 'Draft bullet anchoring failed before compliance evaluation.',
           anchorValidationPassed: false,
         };
-      const display: UserSafeDisplayPayload = {
-        title: 'Resume generation failed',
-        description: this.mapResumeFailureDescription(
-          experienceDiagnostics.resumeGenerationReason,
-        ),
-        reasons: reasons.slice(0, 4),
-        cta: {
-          label: 'Review source resume in Results',
-          href: '/results',
-        },
-      };
       recordResumeEvent(false);
-      return {
-        ok: false,
-        status: 'error',
-        generationStatus: 'error',
-        exportReady: false,
-        blocked: false,
-        baselineId: baseline.id,
-        baselineVersionId: baselineVersion.id,
-        jobId: jobId ?? null,
-        sections: [],
-        compliance_flags: [],
-        compliance_blocked: false,
-        audit_id: null,
-        auditId: null,
-        baseline_version_hash: baselineVersion.hash,
-        quality: 'blocked',
-        exports: { docx: false, pdf: false } as DocumentGenerationExports,
-        preview: {
-          resume: null,
-        },
-        trackerEntryId: null,
-        trackerStatus: null,
-        opportunityId: null,
-        claimRiskSummary,
-        gapAnalysis: gapInsights,
-        gapGuidance,
-        display,
-        safeDisplay: display,
-        internal: {
-          complianceFlags: [],
-          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
-          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
-          resumeGenerationDiagnostics: experienceDiagnostics,
-          normalizationDiagnostics: experienceDiagnostics,
-          anchorValidationReasons: reasons,
-        },
-      };
+      if (!preflightOnly) {
+        this.throwGenerationFailedError(
+          this.mapResumeFailureDescription(experienceDiagnostics.resumeGenerationReason),
+          {
+            stage: experienceDiagnostics.resumeGenerationStage ?? 'anchor_validation',
+            reason: experienceDiagnostics.resumeGenerationReason ?? 'anchor_validation_failed',
+            blockers: reasons.slice(0, 4),
+          },
+        );
+      }
       }
     }
     experienceDiagnostics = {
@@ -1292,54 +1325,16 @@ export class ResumeService {
       ) {
         reasons.unshift(experienceDiagnostics.stageFailureReason);
       }
-      const display: UserSafeDisplayPayload = {
-        title: 'Resume generation failed',
-        description: this.mapResumeFailureDescription(
-          experienceDiagnostics.resumeGenerationReason,
-        ),
-        reasons: reasons.slice(0, 4),
-        cta: {
-          label: 'Review source resume in Results',
-          href: '/results',
-        },
-      };
-      return {
-        ok: false,
-        status: 'error',
-        generationStatus: 'error',
-        exportReady: false,
-        blocked: false,
-        baselineId: baseline.id,
-        baselineVersionId: baselineVersion.id,
-        jobId: jobId ?? null,
-        sections: [],
-        compliance_flags: [],
-        compliance_blocked: false,
-        audit_id: null,
-        auditId: null,
-        baseline_version_hash: baselineVersion.hash,
-        quality: 'blocked',
-        exports: { docx: false, pdf: false } as DocumentGenerationExports,
-        preview: {
-          resume: null,
-        },
-        trackerEntryId: null,
-        trackerStatus: null,
-        opportunityId: null,
-        claimRiskSummary,
-        gapAnalysis: gapInsights,
-        gapGuidance,
-        display,
-        safeDisplay: display,
-        internal: {
-          complianceFlags: [],
-          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
-          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
-          resumeGenerationDiagnostics: experienceDiagnostics,
-          normalizationDiagnostics: experienceDiagnostics,
-          normalizationValidationReasons: reasons,
-        },
-      };
+      if (!preflightOnly) {
+        this.throwGenerationFailedError(
+          this.mapResumeFailureDescription(experienceDiagnostics.resumeGenerationReason),
+          {
+            stage: experienceDiagnostics.resumeGenerationStage ?? 'resume_structure_assembly',
+            reason: experienceDiagnostics.resumeGenerationReason ?? 'resume_structure_empty',
+            blockers: reasons.slice(0, 4),
+          },
+        );
+      }
     }
     experienceDiagnostics = {
       ...experienceDiagnostics,
@@ -1352,9 +1347,6 @@ export class ResumeService {
       );
 
     const cxFitScoreSnapshot = this.buildCxFitScoreSnapshot(latestAssessment);
-
-    const shouldEnforceOneTap = options?.enforceOneTap ?? true;
-    const preflightOnly = options?.preflightOnly ?? false;
 
     if (request.oneTap && jobId && shouldEnforceOneTap) {
       this.ensureOneTapAllowed(latestAssessment);
@@ -1410,47 +1402,14 @@ export class ResumeService {
         resumeGenerationReason: 'compliance_blocked',
         complianceEvaluationPassed: false,
       };
-      const display = this.buildBlockedDisplayPayload(complianceFlags);
-      const shapedCompliance = shapeComplianceForUi(complianceFlags);
-      const exports: DocumentGenerationExports = { docx: false, pdf: false };
-      return {
-        ok: false,
-        status: 'blocked',
-        generationStatus: 'blocked',
-        exportReady: false,
-        blocked: true,
-        baselineId: baseline.id,
-        baselineVersionId: baselineVersion.id,
-        jobId: jobId ?? null,
-        sections: [],
-        compliance_flags: complianceFlags,
-        compliance_blocked: true,
-        audit_id: audit.id,
-        auditId: audit.id,
-        baseline_version_hash: audit.baselineVersionHash,
-        quality: 'blocked',
-        exports,
-        preview: {
-          resume: null,
-        },
-        trackerEntryId: null,
-        trackerStatus: null,
-        opportunityId: null,
-        claimRiskSummary,
-        gapAnalysis: gapInsights,
-        gapGuidance,
-        display,
-        safeDisplay: display,
-        internal: {
-          auditId: audit.id,
-          baselineVersionHash: audit.baselineVersionHash,
-          complianceFlags,
-          complianceDiagnostics: shapedCompliance.diagnostics,
-          resumeGenerationStage: experienceDiagnostics.resumeGenerationStage,
-          resumeGenerationReason: experienceDiagnostics.resumeGenerationReason,
-          resumeGenerationDiagnostics: experienceDiagnostics,
-        },
-      };
+      this.throwGenerationBlockedError(
+        complianceFlags.slice(0, 3).map((flag) => ({
+          code: flag.code ?? 'generation_blocked',
+          message:
+            flag.message ||
+            'Some claims required for tailored generation could not be verified against your baseline.',
+        })),
+      );
     }
     experienceDiagnostics = {
       ...experienceDiagnostics,
@@ -1840,7 +1799,11 @@ export class ResumeService {
     };
   }
 
-  async getGenerationReadiness(userId: string, request: GenerateResumeRequest) {
+  async getGenerationReadiness(
+    userId: string,
+    request: GenerateResumeRequest,
+    options?: { skipReadinessGate?: boolean },
+  ) {
     const analysisAssessment = await validateAnalysisContext({
       analysisRepository: this.fitAssessmentRepository,
       baselineVersionRepository: this.baselineVersionRepository,
@@ -1851,11 +1814,62 @@ export class ResumeService {
       baselineVersionId: request.baselineVersionId?.trim() ?? '',
     });
 
-    const generation = await this.generateResume(
-      userId,
-      { ...request, oneTap: false },
-      { enforceOneTap: false, preflightOnly: true },
-    );
+    let generation: Awaited<ReturnType<ResumeService['generateResume']>>;
+    try {
+      generation = await this.generateResume(
+        userId,
+        { ...request, oneTap: false },
+        {
+          enforceOneTap: false,
+          preflightOnly: true,
+          skipReadinessGate: options?.skipReadinessGate ?? true,
+        },
+      );
+    } catch (error) {
+      const response = (error as { response?: unknown })?.response;
+      const responseRecord =
+        response && typeof response === 'object'
+          ? (response as Record<string, unknown>)
+          : null;
+      const code =
+        (responseRecord?.code as string | undefined) ??
+        ((responseRecord?.error as Record<string, unknown> | undefined)
+          ?.code as string | undefined);
+      if (code === 'generation_blocked' || code === 'generation_failed') {
+        const rawBlockers =
+          (responseRecord?.blockers as Array<Record<string, unknown>> | undefined) ??
+          (((responseRecord?.error as Record<string, unknown> | undefined)?.details as
+            | Record<string, unknown>
+            | undefined)?.blockers as Array<Record<string, unknown>> | undefined) ??
+          [];
+        const reasons = rawBlockers
+          .map((blocker) => ({
+            code:
+              (typeof blocker?.code === 'string' && blocker.code.trim()) ||
+              'full_block',
+            message:
+              (typeof blocker?.message === 'string' && blocker.message.trim()) ||
+              'Some claims required for tailored generation could not be verified against your baseline.',
+          }))
+          .slice(0, 3);
+        return {
+          status: 'blocked' as const,
+          blocked: true,
+          compliance_flags: [],
+          reasons:
+            reasons.length > 0
+              ? reasons
+              : [
+                  {
+                    code: 'full_block',
+                    message:
+                      'Some claims required for tailored generation could not be verified against your baseline.',
+                  },
+                ],
+        };
+      }
+      throw error;
+    }
     const flags = filterComplianceFlagsByCanonicalClaims(
       generation.compliance_flags ?? [],
       analysisAssessment,

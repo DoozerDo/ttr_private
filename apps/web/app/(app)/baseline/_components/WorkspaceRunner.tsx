@@ -1,12 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from "react";
 
 import { Alert } from "@/components/Alert";
 import { FormButton } from "@/components/FormButton";
 import { buildEvidenceLines, type ScoreBreakdown } from "@/lib/evidenceLines";
 import { getGenerationReadiness } from "@/lib/generationReadiness";
+import { getGenerationAuthorityState } from "@/lib/generationAuthority";
 import { sanitizeScoreExplanationLine, sanitizeScoreExplanationList } from "@/lib/scoreExplanationCopy";
+import { trackEvent } from "@/src/lib/analytics";
 import { SetupModuleCard } from "./SetupModuleCard";
 import { JourneyStepId } from "@/src/lib/journeyNav";
 import { useJourneyNavAppState } from "@/src/lib/journeyNavStore";
@@ -102,7 +112,7 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
     return {
       key: "prime",
       label: "Prime Opportunity",
-      summary: "You should be confident applying to this role.",
+      summary: "Strong alignment with this role.",
       accentClassName: "text-emerald-200",
       surfaceClassName: "border-emerald-300/20 bg-emerald-400/10",
     };
@@ -112,7 +122,7 @@ export function resolveScoreBandPresentation(score: number): ScoreBandPresentati
     return {
       key: "strong",
       label: "Strong Match",
-      summary: "You should be confident applying to this role.",
+      summary: "Strong alignment with this role.",
       accentClassName: "text-sky-200",
       surfaceClassName: "border-sky-300/20 bg-sky-400/10",
     };
@@ -519,6 +529,7 @@ export function WorkspaceRunner({
   const autoRunCompletionTimerRef = useRef<number | null>(null);
   const autoRunInitiatedRef = useRef(false);
   const pendingCompletionKeyRef = useRef<string | null>(null);
+  const stateViewedEventKeyRef = useRef<string | null>(null);
   const autoRunTriggerTimerRef = useRef<number | null>(null);
   const scoreSummaryRef = useRef<HTMLDivElement | null>(null);
   const revealStartMsRef = useRef<number>(0);
@@ -616,11 +627,67 @@ export function WorkspaceRunner({
     baselineVersionId:
       asString((displayResult as { baselineVersionId?: unknown } | null)?.baselineVersionId) ?? null,
   });
-  const { blocked: isGenerationBlocked } = getGenerationReadiness(displayResult, runState);
+  const generationReadiness = useMemo(
+    () => getGenerationReadiness(displayResult, runState),
+    [displayResult, runState],
+  );
+  const targetGenerationState = useMemo(
+    () => getGenerationAuthorityState(generationReadiness),
+    [generationReadiness],
+  );
+  const isHighFit = typeof score === "number" && score > 70;
+  const isGenerationReady = targetGenerationState === "READY";
+  const isGenerationLimited = targetGenerationState === "LIMITED";
+  const isGenerationBlocked = targetGenerationState === "BLOCKED";
+  const isLimitedHighFit = isHighFit && isGenerationLimited;
+  const isBlockedHighFit = isHighFit && isGenerationBlocked;
+  const scoreBandSummary =
+    isBlockedHighFit
+      ? "This role scored well, but your current baseline does not support compliant generation yet."
+      : isLimitedHighFit
+      ? "This role scored well, but generation is constrained by current verification limits."
+      : scoreBand?.summary ?? "";
+  const blockingReasons = generationReadiness.verificationIssues.slice(0, 3);
 
   const resultCardClasses = [
     "score-summary-card space-y-3 rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.16),transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.98))] p-4 text-[13px] text-slate-200 shadow-[0_24px_80px_rgba(2,6,23,0.45)]",
   ].join(" ");
+  useEffect(() => {
+    if (typeof score !== "number" || !latestBaselineId || !latestJobId) return;
+    const assessmentId = asString((displayResult as { assessmentId?: unknown } | null)?.assessmentId) ?? "none";
+    const eventKey = `${assessmentId}:${targetGenerationState}:${Math.round(score)}`;
+    if (stateViewedEventKeyRef.current === eventKey) return;
+    stateViewedEventKeyRef.current = eventKey;
+    trackEvent("target_generation_state_viewed", {
+      state: targetGenerationState,
+      score,
+      baselineId: latestBaselineId,
+      jobId: latestJobId,
+    });
+  }, [displayResult, latestBaselineId, latestJobId, score, targetGenerationState]);
+
+  const handleGenerateClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>) => {
+      trackEvent("target_cta_clicked", {
+        state: targetGenerationState,
+        score,
+        actionType: isLimitedHighFit ? "open_studio_limited" : "open_studio_generate",
+      });
+      if (isBlockedHighFit) {
+        event.preventDefault();
+        trackEvent("target_cta_clicked", {
+          state: targetGenerationState,
+          score,
+          actionType: "blocked_redirect",
+        });
+        trackEvent("target_generation_blocked_redirect", {
+          score,
+          blockerCodes: generationReadiness.verificationIssues.map((issue) => issue.code),
+        });
+      }
+    },
+    [generationReadiness.verificationIssues, isBlockedHighFit, isLimitedHighFit, score, targetGenerationState],
+  );
 
   const runAssessment = useCallback(async () => {
     const baselineForRun = selectedBaselineId;
@@ -1004,7 +1071,7 @@ export function WorkspaceRunner({
                   <p className={`mt-3 text-xl font-semibold ${scoreBand.accentClassName}`}>
                     {scoreBand.label}
                   </p>
-                  <p className="mt-2 text-base text-slate-100">{scoreBand.summary}</p>
+                  <p className="mt-2 text-base text-slate-100">{scoreBandSummary}</p>
                   <a
                     href={resultsHref}
                     className="mt-3 inline-flex text-sm font-medium text-slate-300 underline decoration-white/10 underline-offset-4 transition hover:text-white hover:decoration-white/30"
@@ -1057,19 +1124,91 @@ export function WorkspaceRunner({
                 </div>
               </div>
             ) : null}
+            {isHighFit ? (
+              <div
+                className={`rounded-2xl border p-4 text-sm ${
+                  targetGenerationState === "BLOCKED"
+                    ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
+                    : targetGenerationState === "LIMITED"
+                    ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
+                    : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+                }`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.2em]">
+                  Generation status: {targetGenerationState}
+                </p>
+                <p className="mt-1 text-slate-100">
+                  {targetGenerationState === "READY"
+                    ? "Ready to generate tailored materials now."
+                    : targetGenerationState === "LIMITED"
+                    ? "Generation is limited by current verification constraints."
+                    : "Generation is blocked until verification gaps are resolved."}
+                </p>
+                {targetGenerationState !== "READY" && blockingReasons.length ? (
+                  <ul className="mt-2 space-y-1 text-slate-200">
+                    {blockingReasons.map((reason, index) => (
+                      <li key={`target-readiness-reason-${reason.code}-${index}`}>- {reason.explanation}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             {isStrongScore ? (
               <p className="text-sm font-medium text-slate-100">
-                {isGenerationBlocked
-                  ? "This role scored well, but tailored materials are blocked until verification issues are resolved."
-                  : "Recommended next step: Generate tailored materials and apply."}
+                {isBlockedHighFit
+                  ? "You are a strong match, but your materials need refinement before applying."
+                  : isLimitedHighFit
+                    ? "You are a strong match, but generation is constrained until verification is stronger."
+                  : "You are a strong match and ready to generate tailored materials."}
               </p>
             ) : null}
-            <a
-              href={isGenerationBlocked ? resultsHref : studioHref}
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-            >
-              {isGenerationBlocked ? "Review blockers in Results" : "Generate Tailored Materials"}
-            </a>
+            {isBlockedHighFit ? (
+              <div className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4">
+                <h3 className="text-base font-semibold text-amber-100">
+                  Strong match, but not ready to generate
+                </h3>
+                <p className="text-sm text-amber-50/90">
+                  Your experience aligns with this role. But your baseline does not yet support compliant
+                  document generation.
+                </p>
+                {blockingReasons.length ? (
+                  <ul className="space-y-2 text-sm text-amber-50/90">
+                    {blockingReasons.map((reason, index) => (
+                      <li key={`${reason.code}-${index}`}>&bull; {reason.explanation}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-slate-600 px-6 py-3 text-sm font-semibold text-slate-200 opacity-80"
+                >
+                  Resolve gaps before generating
+                </button>
+                <a
+                  href={resultsHref}
+                  onClick={() =>
+                    trackEvent("target_cta_clicked", {
+                      state: targetGenerationState,
+                      score,
+                      actionType: "resolve_gaps",
+                    })
+                  }
+                  className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+                >
+                  Fix baseline and continue
+                </a>
+              </div>
+            ) : (
+              <a
+                href={studioHref}
+                onClick={handleGenerateClick}
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl bg-[var(--accent-primary)] px-6 py-3 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+              >
+                {isLimitedHighFit ? "Open Studio With Limits" : "Open Studio"}
+              </a>
+            )}
           </div>
         </div>
       ) : null}

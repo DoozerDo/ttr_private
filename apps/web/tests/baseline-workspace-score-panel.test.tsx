@@ -4,6 +4,10 @@ import { vi } from "vitest";
 import { BaselineWorkspace } from "@/app/(app)/baseline/BaselineWorkspace";
 import { overrideSearchParams, setFetchImplementation } from "./setup";
 
+vi.mock("@/src/lib/analytics", () => ({
+  trackEvent: vi.fn(),
+}));
+
 vi.mock("@/app/(app)/baseline/baseline-dashboard", () => ({
   BaselineDashboard: () => <div>Baseline Dashboard Mock</div>,
 }));
@@ -167,7 +171,7 @@ describe("BaselineWorkspace live score panel", () => {
       ).toBeInTheDocument();
       expect(
         screen.getByRole("link", { name: "Generate Tailored Materials" }),
-      ).toHaveAttribute("href", "/studio?jobId=job-1&baselineId=base-1");
+      ).toHaveAttribute("href", "/studio?analysisId=assessment-1&jobId=job-1&baselineId=base-1");
       expect(screen.getByRole("link", { name: "View detailed analysis" })).toHaveAttribute(
         "href",
         "/results?assessmentId=assessment-1",
@@ -260,6 +264,156 @@ describe("BaselineWorkspace live score panel", () => {
       expect(
         screen.getByText(/Partnered with engineering teams to operate complex systems/i),
       ).toBeInTheDocument();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("blocks generation CTA when score is high but readiness is blocked", async () => {
+    stubWindowState();
+    const setTimeoutSpy = blockAutoRunTimer();
+
+    try {
+      setFetchImplementation(
+        vi.fn((input: RequestInfo) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : "url" in input
+                  ? input.url
+                  : String(input);
+
+          if (url.includes("/api/analysis/") && url.includes("/latest")) {
+            return Promise.resolve(
+              createResponse({
+                assessmentId: "assessment-3",
+                baselineId: "base-1",
+                jobId: "job-1",
+                score: 94,
+                strengths: ["Led global support operations with measurable outcomes."],
+                complianceFlags: [
+                  {
+                    code: "missing_baseline_support",
+                    severity: "block",
+                    message: "Missing baseline support for critical role claim.",
+                  },
+                ],
+              }),
+            );
+          }
+
+          return Promise.resolve(createResponse({}));
+        }),
+      );
+
+      render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Prime Opportunity")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("Strong match, but not ready to generate")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Your experience aligns with this role. But your baseline does not yet support compliant document generation.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Resolve gaps before generating" })).toBeDisabled();
+      expect(screen.getByRole("link", { name: "Fix baseline and continue" })).toHaveAttribute(
+        "href",
+        "/results?assessmentId=assessment-3",
+      );
+      expect(screen.queryByRole("link", { name: "Generate Tailored Materials" })).toBeNull();
+      expect(
+        screen.getByText("You are a strong match, but your materials need refinement before applying."),
+      ).toBeInTheDocument();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("keeps generation CTA behavior unchanged for scores at or below 70", async () => {
+    stubWindowState();
+    const setTimeoutSpy = blockAutoRunTimer();
+
+    try {
+      setFetchImplementation(
+        vi.fn((input: RequestInfo) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : "url" in input
+                  ? input.url
+                  : String(input);
+
+          if (url.includes("/api/analysis/") && url.includes("/latest")) {
+            return Promise.resolve(
+              createResponse({
+                assessmentId: "assessment-4",
+                baselineId: "base-1",
+                jobId: "job-1",
+                score: 69,
+                strengths: ["Worked across support workflows."],
+                complianceFlags: [
+                  {
+                    code: "missing_baseline_support",
+                    severity: "block",
+                    message: "Missing baseline support for critical role claim.",
+                  },
+                ],
+              }),
+            );
+          }
+
+          return Promise.resolve(createResponse({}));
+        }),
+      );
+
+      render(
+        <BaselineWorkspace
+          initialBaselines={[
+            {
+              id: "base-1",
+              originalFilename: "resume.pdf",
+              version: 1,
+            } as never,
+          ]}
+          initialFetchError={null}
+          initialBaselineId="base-1"
+          initialJobId="job-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Load last run" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: "Generate Tailored Materials" })).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole("link", { name: "Generate Tailored Materials" })).toHaveAttribute(
+        "href",
+        "/studio?analysisId=assessment-4&jobId=job-1&baselineId=base-1",
+      );
+      expect(screen.queryByText("Strong match, but not ready to generate")).toBeNull();
     } finally {
       setTimeoutSpy.mockRestore();
     }

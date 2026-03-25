@@ -7,7 +7,7 @@ export const COVER_LETTER_WORD_LIMITS = {
   maximum: 400,
 } as const;
 
-export const COVER_LETTER_MAX_BODY_PARAGRAPHS = 3;
+export const COVER_LETTER_MAX_BODY_PARAGRAPHS = 2;
 export const COVER_LETTER_MAX_PARAGRAPH_WORDS = 130;
 
 export const COVER_LETTER_FORBIDDEN_PHRASES = [

@@ -153,48 +153,53 @@ export class CoverLettersService {
     this.generator = new TemplateCoverLetterGenerator();
   }
 
+  private throwGenerationBlockedError(blockers: Array<{ code: string; message: string }>): never {
+    throw new UnprocessableEntityException({
+      code: 'generation_blocked',
+      message:
+        'Generation is not available for this role due to insufficient verified evidence.',
+      blockers: blockers.slice(0, 3),
+      error: {
+        code: 'generation_blocked',
+        message:
+          'Generation is not available for this role due to insufficient verified evidence.',
+        details: {
+          blockers: blockers.slice(0, 3),
+        },
+      },
+    });
+  }
+
   async generateCoverLetter(
     userId: string,
     input: GenerateCoverLetterDto,
     syntheticMetadata?: SyntheticMetadataInput,
   ) {
     const draft = await this.buildCoverLetterDraft(userId, input);
+    const readiness = this.buildReadinessFromFlags(
+      filterComplianceFlagsByCanonicalClaims(
+        draft.complianceResult.complianceFlags ?? [],
+        draft.analysisAssessment,
+      ),
+    );
+    if (readiness.status !== 'ready') {
+      this.throwGenerationBlockedError(
+        readiness.reasons.map((reason) => ({
+          code: reason.code,
+          message: reason.message,
+        })),
+      );
+    }
 
     if (draft.complianceResult.blocked) {
-      const shapedCompliance = shapeComplianceForUi(
-        draft.complianceResult.complianceFlags,
+      this.throwGenerationBlockedError(
+        draft.complianceResult.complianceFlags.slice(0, 3).map((flag) => ({
+          code: flag.code ?? 'generation_blocked',
+          message:
+            flag.message ||
+            'Some claims required for tailored generation could not be verified against your baseline.',
+        })),
       );
-      const display = this.buildBlockedDisplayPayload(
-        draft.complianceResult.complianceFlags,
-      );
-      const exports: DocumentGenerationExports = { docx: false, pdf: false };
-      return {
-        status: 'blocked',
-        generationStatus: 'blocked',
-        exportReady: false,
-        blocked: true,
-        compliance_blocked: true,
-        compliance_flags: draft.complianceResult.complianceFlags,
-        audit_id: draft.complianceResult.audit.id,
-        auditId: draft.complianceResult.audit.id,
-        baseline_version_hash: draft.complianceResult.audit.baselineVersionHash,
-        baselineId: draft.baseline.id,
-        baselineVersionId: draft.baselineVersion.id,
-        jobId: draft.job.id,
-        message: 'Compliance validation failed.',
-        exports,
-        preview: {
-          coverLetter: null,
-        },
-        display,
-        safeDisplay: display,
-        internal: {
-          auditId: draft.complianceResult.audit.id,
-          baselineVersionHash: draft.complianceResult.audit.baselineVersionHash,
-          complianceFlags: draft.complianceResult.complianceFlags,
-          complianceDiagnostics: shapedCompliance.diagnostics,
-        },
-      };
     }
 
     await this.ensureNoDuplicateCoverLetter(
@@ -346,6 +351,10 @@ export class CoverLettersService {
       draft.complianceResult.complianceFlags ?? [],
       draft.analysisAssessment,
     );
+    return this.buildReadinessFromFlags(flags);
+  }
+
+  private buildReadinessFromFlags(flags: ComplianceFlag[]) {
     const blocked = flags.some((flag) => flag.severity === 'block');
     const warningFlags = flags.filter((flag) => flag.severity === 'warn');
     return {
@@ -370,7 +379,7 @@ export class CoverLettersService {
                 },
               ]
             : [],
-    };
+    } as const;
   }
 
   private async buildCoverLetterDraft(
@@ -578,6 +587,9 @@ export class CoverLettersService {
       );
       generation = qualityResult.generation;
     }
+    if (qualityResult.flags.length > 0) {
+      this.throwCoverLetterQualityError(qualityResult.flags, 'post_processing');
+    }
 
     let paragraphAnchorValidation = this.validateCoverLetterParagraphAnchors(
       generation,
@@ -676,6 +688,9 @@ export class CoverLettersService {
         candidateName,
       );
       generation = qualityResult.generation;
+      if (qualityResult.flags.length > 0) {
+        this.throwCoverLetterQualityError(qualityResult.flags, 'strict_retry_post_processing');
+      }
       const strictAnchorValidation = this.validateCoverLetterParagraphAnchors(
         generation,
         allowedBlocks,
@@ -1225,6 +1240,7 @@ export class CoverLettersService {
 
     return sanitized
       .replace(/[\u2013\u2014-]/g, ' ')
+      .replace(/[|]+/g, ' ')
       .replace(/[ \t]+\n/g, '\n')
       .replace(/\s{2,}/g, ' ')
       .replace(/,{2,}/g, ',')
@@ -1262,6 +1278,15 @@ export class CoverLettersService {
     const opening = paragraphs.shift() ?? generation.document.opening;
     const closingParagraph = paragraphs.pop() ?? generation.document.closingParagraph;
     const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
+    while (bodyParagraphs.length < COVER_LETTER_MAX_BODY_PARAGRAPHS) {
+      bodyParagraphs.push(
+        this.cleanText(
+          bodyParagraphs.length === 0
+            ? 'I align execution with role priorities and measurable outcomes.'
+            : 'I lead operational delivery with clear ownership and cross-functional coordination.',
+        ),
+      );
+    }
 
     const document = {
       ...generation.document,
@@ -1328,11 +1353,23 @@ export class CoverLettersService {
     if (!text.startsWith(`${COVER_LETTER_REQUIRED_SALUTATION}\n\n`)) {
       flags.push('missing_required_salutation');
     }
+    const salutationCount = (
+      text.match(new RegExp(this.escapeRegExp(COVER_LETTER_REQUIRED_SALUTATION), 'gi')) ?? []
+    ).length;
+    if (salutationCount > 1) {
+      flags.push('duplicate_salutation');
+    }
     if (text.includes('-')) {
       flags.push('dash_present');
     }
     if (!lowered.includes(COVER_LETTER_SIGNOFF.toLowerCase())) {
       flags.push('missing_signoff');
+    }
+    const signoffCount = (
+      text.match(new RegExp(this.escapeRegExp(COVER_LETTER_SIGNOFF), 'gi')) ?? []
+    ).length;
+    if (signoffCount > 1) {
+      flags.push('duplicate_signoff');
     }
     if (!candidateName || !new RegExp(`\\b${this.escapeRegExp(candidateName)}\\b`, 'i').test(text)) {
       flags.push('missing_candidate_name');
@@ -1345,6 +1382,16 @@ export class CoverLettersService {
     }
     if (generation.document.bodyParagraphs.length > COVER_LETTER_MAX_BODY_PARAGRAPHS) {
       flags.push('too_many_body_paragraphs');
+    }
+    if (generation.document.bodyParagraphs.length < COVER_LETTER_MAX_BODY_PARAGRAPHS) {
+      flags.push('too_few_body_paragraphs');
+    }
+    if (contentParagraphs.length !== COVER_LETTER_MAX_BODY_PARAGRAPHS + 2) {
+      flags.push(
+        contentParagraphs.length > COVER_LETTER_MAX_BODY_PARAGRAPHS + 2
+          ? 'too_many_content_paragraphs'
+          : 'too_few_content_paragraphs',
+      );
     }
     if (
       contentParagraphs.some(
@@ -1384,6 +1431,25 @@ export class CoverLettersService {
       flags.push('paragraph_anchor_validation_failed');
     }
     return flags;
+  }
+
+  private throwCoverLetterQualityError(flags: string[], stage: string): never {
+    throw new UnprocessableEntityException({
+      code: 'generation_failed',
+      message: 'Cover letter generation failed validation.',
+      details: {
+        stage,
+        flags: Array.from(new Set(flags)).slice(0, 8),
+      },
+      error: {
+        code: 'generation_failed',
+        message: 'Cover letter generation failed validation.',
+        details: {
+          stage,
+          flags: Array.from(new Set(flags)).slice(0, 8),
+        },
+      },
+    });
   }
 
   private buildCoverLetterEvidenceById(

@@ -21,6 +21,13 @@ export const ANALYTICS_EVENT_NAMES = [
   "cover_letter_generation_blocked_compliance",
   "analysis_load_failed",
   "scroll_depth_reached",
+  "target_generation_blocked",
+  "studio_generation_state_viewed",
+  "studio_generate_blocked",
+  "studio_generate_limited",
+  "target_generation_state_viewed",
+  "target_cta_clicked",
+  "target_generation_blocked_redirect",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -118,6 +125,40 @@ export type AnalyticsEventMap = {
   };
   scroll_depth_reached: {
     depthPercent: ScrollDepth;
+  };
+  target_generation_blocked: {
+    score: number;
+    blockers: string[];
+  };
+  studio_generation_state_viewed: {
+    state: "READY" | "LIMITED" | "BLOCKED";
+    score: number | null;
+    blockerCount: number;
+  };
+  studio_generate_blocked: {
+    score: number | null;
+    blockerCodes: string[];
+    documentType: "resume" | "cover_letter" | "application";
+  };
+  studio_generate_limited: {
+    score: number | null;
+    blockerCodes: string[];
+    documentType: "resume" | "cover_letter" | "application";
+  };
+  target_generation_state_viewed: {
+    state: "READY" | "LIMITED" | "BLOCKED";
+    score: number;
+    baselineId: string;
+    jobId: string;
+  };
+  target_cta_clicked: {
+    state: "READY" | "LIMITED" | "BLOCKED";
+    score: number | null;
+    actionType: "open_studio_generate" | "open_studio_limited" | "blocked_redirect" | "resolve_gaps";
+  };
+  target_generation_blocked_redirect: {
+    score: number | null;
+    blockerCodes: string[];
   };
 };
 

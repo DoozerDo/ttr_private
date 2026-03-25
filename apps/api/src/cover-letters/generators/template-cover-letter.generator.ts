@@ -8,6 +8,7 @@ import type {
 import type { CoverLetterComplianceConstraints } from '../types/cover-letter-compliance-constraints';
 import type { NormalizedCoverLetterDocument } from '../../documents/normalized-document.models';
 import {
+  COVER_LETTER_MAX_BODY_PARAGRAPHS,
   COVER_LETTER_BULLET_PATTERN,
   COVER_LETTER_FORBIDDEN_PHRASES,
   COVER_LETTER_PHRASE_REWRITES,
@@ -67,21 +68,50 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     const openingEvidence = selectedEvidence[0] ? [selectedEvidence[0]] : [];
     const remainingEvidence = selectedEvidence.slice(openingEvidence.length);
 
-    const bodyOneEvidence = remainingEvidence.slice(0, 3);
-    const bodyTwoEvidence = remainingEvidence.slice(3, 6);
-    const bodyThreeEvidence = remainingEvidence.slice(6, 9);
+    const bodyOneEvidenceSeed = remainingEvidence.slice(0, 3);
+    const bodyOneEvidence =
+      bodyOneEvidenceSeed.length > 0
+        ? bodyOneEvidenceSeed
+        : openingEvidence.length > 0
+          ? openingEvidence
+          : [];
+    const bodyTwoEvidenceSeed = remainingEvidence.slice(3, 7);
+    const bodyTwoEvidence =
+      bodyTwoEvidenceSeed.length > 0
+        ? bodyTwoEvidenceSeed
+        : bodyOneEvidence.length > 0
+          ? [bodyOneEvidence[0]]
+          : openingEvidence.length > 0
+            ? openingEvidence
+            : [];
     const closingEvidence =
-      remainingEvidence[9] ?? bodyTwoEvidence[bodyTwoEvidence.length - 1] ?? selectedEvidence[0] ?? null;
+      remainingEvidence[7] ?? bodyTwoEvidence[bodyTwoEvidence.length - 1] ?? selectedEvidence[0] ?? null;
 
     const opening = this.joinSentences([
       this.ensureSentence(`I am applying for ${roleDescriptor}`),
       ...openingEvidence.map((entry) => this.ensureSentence(entry.normalizedText)),
     ]);
 
-    const bodyParagraphs = [bodyOneEvidence, bodyTwoEvidence, bodyThreeEvidence]
-      .filter((group) => group.length > 0)
-      .map((group) => this.joinSentences(group.map((entry) => this.ensureSentence(entry.normalizedText))))
-      .slice(0, 3);
+    const fallbackBodyOne =
+      normalizedJob.requirements[0] ??
+      normalizedJob.responsibilities[0] ??
+      'I align execution with role priorities and measurable outcomes.';
+    const fallbackBodyTwo =
+      normalizedJob.responsibilities[1] ??
+      normalizedJob.requirements[1] ??
+      'I lead operational delivery with clear ownership, communication, and follow-through.';
+    const bodyParagraphs = [
+      this.joinSentences(
+        bodyOneEvidence.length
+          ? bodyOneEvidence.map((entry) => this.ensureSentence(entry.normalizedText))
+          : [this.ensureSentence(fallbackBodyOne)],
+      ),
+      this.joinSentences(
+        bodyTwoEvidence.length
+          ? bodyTwoEvidence.map((entry) => this.ensureSentence(entry.normalizedText))
+          : [this.ensureSentence(fallbackBodyTwo)],
+      ),
+    ];
 
     const closing = this.joinSentences(
       [
@@ -114,7 +144,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       },
       ...bodyParagraphs.map((paragraph, index) => {
         void paragraph;
-        const source = [bodyOneEvidence, bodyTwoEvidence, bodyThreeEvidence][index] ?? [];
+        const source = [bodyOneEvidence, bodyTwoEvidence][index] ?? [];
         return {
           paragraphKey: (`body_${index + 1}` as 'body_1' | 'body_2' | 'body_3'),
           sourceEvidenceIds: source.map((entry) => entry.id),
@@ -275,7 +305,7 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
     return [
       COVER_LETTER_REQUIRED_SALUTATION,
       document.opening,
-      ...document.bodyParagraphs.slice(0, 3),
+      ...document.bodyParagraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS),
       document.closingParagraph,
       COVER_LETTER_SIGNOFF,
       document.signatureName,
@@ -296,29 +326,37 @@ export class TemplateCoverLetterGenerator implements CoverLetterGenerator {
       .map((part) => this.cleanText(part))
       .filter(Boolean);
 
-    if ((paragraphs[0] ?? '').toLowerCase() === COVER_LETTER_REQUIRED_SALUTATION.toLowerCase()) {
+    while ((paragraphs[0] ?? '').toLowerCase() === COVER_LETTER_REQUIRED_SALUTATION.toLowerCase()) {
       paragraphs.shift();
     }
 
     let signatureName = seed.signatureName;
-    const signoffIndex = paragraphs.findIndex(
-      (line) => line.toLowerCase() === COVER_LETTER_SIGNOFF.toLowerCase(),
-    );
-    if (signoffIndex >= 0) {
-      if (paragraphs[signoffIndex + 1]) {
-        signatureName = paragraphs[signoffIndex + 1];
+    for (let idx = paragraphs.length - 1; idx >= 0; idx -= 1) {
+      if ((paragraphs[idx] ?? '').toLowerCase() !== COVER_LETTER_SIGNOFF.toLowerCase()) continue;
+      if (paragraphs[idx + 1]) {
+        signatureName = paragraphs[idx + 1];
       }
-      paragraphs.splice(signoffIndex);
+      paragraphs.splice(idx);
     }
 
     const opening = paragraphs.shift() ?? seed.opening;
     const closingParagraph = paragraphs.pop() ?? seed.closingParagraph;
+    const bodyParagraphs = paragraphs.slice(0, COVER_LETTER_MAX_BODY_PARAGRAPHS);
+    while (bodyParagraphs.length < COVER_LETTER_MAX_BODY_PARAGRAPHS) {
+      bodyParagraphs.push(
+        this.ensureSentence(
+          bodyParagraphs.length === 0
+            ? 'I align execution with role priorities and measurable outcomes'
+            : 'I lead operational delivery with clear ownership and cross-functional coordination',
+        ),
+      );
+    }
 
     return {
       ...seed,
       salutation: COVER_LETTER_REQUIRED_SALUTATION,
       opening,
-      bodyParagraphs: paragraphs.slice(0, 3),
+      bodyParagraphs,
       closingParagraph,
       signoff: COVER_LETTER_SIGNOFF,
       signatureName,

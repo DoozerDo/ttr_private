@@ -24,6 +24,7 @@ import {
   deriveVerificationCoverage,
   normalizeUserFacingRequirementLabel,
 } from "@/lib/generationReadiness";
+import { getGenerationAuthorityState, type GenerationAuthorityState } from "@/lib/generationAuthority";
 import { normalizeClaimVerifications } from "@/lib/claimVerification";
 import { parseTierGateError, type TierGateError } from "@/lib/tiers";
 import { BaselineDto, BaselineVersionDto, listBaselines } from "@/lib/baselines";
@@ -258,7 +259,37 @@ function parseComplianceBlockedFromPayload(payload: unknown): CoverLetterComplia
     return null;
   }
   const errorRecord = error as Record<string, unknown>;
-  if (trimToString(errorRecord.code) !== "COMPLIANCE_VIOLATION") {
+  const errorCode = trimToString(errorRecord.code);
+  if (errorCode === "generation_blocked") {
+    const details =
+      (errorRecord.details as Record<string, unknown> | undefined) ??
+      (record.details as Record<string, unknown> | undefined);
+    const rawBlockers = Array.isArray(record.blockers)
+      ? record.blockers
+      : Array.isArray(details?.blockers)
+      ? details.blockers
+      : [];
+    const reasons = rawBlockers
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return "";
+        const candidate = entry as Record<string, unknown>;
+        return trimToString(candidate.message) || trimToString(candidate.code);
+      })
+      .filter((value) => value.length > 0)
+      .slice(0, 3);
+    return {
+      title: "Generation blocked",
+      body:
+        trimToString(errorRecord.message) ||
+        "Generation is not available for this role due to insufficient verified evidence.",
+      reasons,
+      cta: {
+        label: "Resolve gaps in Results",
+        href: "/results",
+      },
+    };
+  }
+  if (errorCode !== "COMPLIANCE_VIOLATION") {
     return null;
   }
   const details = errorRecord.details;
@@ -1098,8 +1129,17 @@ export default function StudioPage() {
       hasMissingBaselineEvidenceIssue,
     ],
   );
-  const roleAlignmentLabel = trustGateDecision.roleAlignmentLabel;
-  const baselineStatusLabel = trustGateDecision.baselineStatusLabel;
+  const studioGenerationState: GenerationAuthorityState = useMemo(
+    () => getGenerationAuthorityState(activeGenerationReadiness),
+    [activeGenerationReadiness],
+  );
+  const generationBlockerCodes = useMemo(
+    () => activeGenerationReadiness.verificationIssues.map((issue) => issue.code),
+    [activeGenerationReadiness.verificationIssues],
+  );
+  const generationBlockerCount = generationBlockerCodes.length;
+  const remediationHref = "/results#advanced-insights";
+
   const readyForDocuments =
     Boolean(effectiveJobId && effectiveBaselineId && effectiveBaselineVersionId) &&
     analysisScore !== null;
@@ -1109,10 +1149,8 @@ export default function StudioPage() {
     (Boolean(effectiveBaselineVersionId) || isNonProduction) &&
     Boolean(requestedAnalysisId) &&
     !analysisError &&
-    !activeGenerationReadiness.blocked &&
+    studioGenerationState !== "BLOCKED" &&
     trustGateDecision.allowed;
-  const canRunTopBandGeneration =
-    isTopBand && canGenerateDocuments && !resumeGenerating && !coverGenerating;
   const improveBaselineHref = useMemo(() => {
     const params = new URLSearchParams();
     if (requestedAnalysisId) params.set("analysisId", requestedAnalysisId);
@@ -1194,11 +1232,17 @@ export default function StudioPage() {
     if (analysisError) {
       return ANALYSIS_LOAD_ERROR_MESSAGE;
     }
-    if (generationReadiness.status === "blocked") {
-      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
+    if (studioGenerationState === "BLOCKED") {
+      return (
+        activeGenerationReadiness.reasons[0]?.message ??
+        "This role scored strongly, but your current baseline does not support compliant generation yet."
+      );
     }
-    if (generationReadiness.status === "limited") {
-      return generationReadiness.reasons[0]?.message ?? generationReadiness.summary;
+    if (studioGenerationState === "LIMITED") {
+      return (
+        activeGenerationReadiness.reasons[0]?.message ??
+        "This role scored strongly, but generation is constrained by verification limits."
+      );
     }
     if (!effectiveBaselineVersionId) {
       return "Resume snapshot is still loading for this analysis.";
@@ -1211,13 +1255,69 @@ export default function StudioPage() {
     analysisError,
     analysisScore,
     effectiveBaselineVersionId,
-    generationReadiness.reasons,
-    generationReadiness.status,
-    generationReadiness.summary,
+    activeGenerationReadiness.reasons,
+    studioGenerationState,
     requestedAnalysisId,
     trustGateDecision.allowed,
     trustGateDecision.reason,
   ]);
+  const authorityStateTitle =
+    studioGenerationState === "BLOCKED"
+      ? "Generation blocked"
+      : studioGenerationState === "LIMITED"
+      ? "Generation limited"
+      : "Ready to generate";
+  const authorityStateExplanation =
+    studioGenerationState === "BLOCKED"
+      ? "This role scored well, but your current baseline does not support compliant document generation yet."
+      : studioGenerationState === "LIMITED"
+      ? "This role scored strongly, but generation is constrained by verification limits."
+      : "Your role analysis and verification support generation. You can generate tailored materials now.";
+  const authorityReasons = useMemo(() => {
+    const reasons: string[] = [];
+    activeGenerationReadiness.verificationIssues.forEach((issue) => {
+      if (issue.explanation && !reasons.includes(issue.explanation)) {
+        reasons.push(issue.explanation);
+      }
+    });
+    activeGenerationReadiness.reasons.forEach((reason) => {
+      if (reason.message && !reasons.includes(reason.message)) {
+        reasons.push(reason.message);
+      }
+    });
+    return reasons.slice(0, 3);
+  }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues]);
+  useEffect(() => {
+    if (!requestedAnalysisId) return;
+    trackEvent("studio_generation_state_viewed", {
+      state: studioGenerationState,
+      score: analysisScore,
+      blockerCount: generationBlockerCount,
+    });
+  }, [analysisScore, generationBlockerCount, requestedAnalysisId, studioGenerationState]);
+
+  const guardGenerationAction = useCallback(
+    (documentType: "resume" | "cover_letter" | "application") => {
+      if (studioGenerationState === "BLOCKED") {
+        trackEvent("studio_generate_blocked", {
+          score: analysisScore,
+          blockerCodes: generationBlockerCodes,
+          documentType,
+        });
+        void router.push(remediationHref);
+        return false;
+      }
+      if (studioGenerationState === "LIMITED") {
+        trackEvent("studio_generate_limited", {
+          score: analysisScore,
+          blockerCodes: generationBlockerCodes,
+          documentType,
+        });
+      }
+      return true;
+    },
+    [analysisScore, generationBlockerCodes, router, studioGenerationState],
+  );
   const recommendedResumeFocus: ResumeFocusOption = "Operational Leadership";
   const resumeFocusDefinitions: Array<{ value: ResumeFocusOption; label: string; definition: string }> = useMemo(
     () => [
@@ -1835,6 +1935,7 @@ export default function StudioPage() {
   }, [analysis?.baselineVersionId, versions]);
 
   const handleResumeDraft = async () => {
+    if (!guardGenerationAction("resume")) return;
     if ((hasSavedResumeEdits || hasUnsavedResumeEdits) && resumeState.response) {
       const proceed =
         typeof window !== "undefined"
@@ -1885,6 +1986,21 @@ export default function StudioPage() {
         if (tierGate) {
           setResumeState((current) => ({ ...current, tierGateError: tierGate }));
           return;
+        }
+        if (response.status === 422) {
+          const blockedState = parseComplianceBlockedFromPayload(responsePayload);
+          if (blockedState) {
+            trackEvent("resume_generation_blocked_compliance", {
+              source: "studio",
+              analysisId: requestedAnalysisId || undefined,
+              reasonCode: "generation_blocked",
+            });
+            setResumeState((current) => ({
+              ...current,
+              error: [blockedState.body, ...blockedState.reasons].filter(Boolean).join(" "),
+            }));
+            return;
+          }
         }
         throw new Error(formatErrorMessage(responsePayload, "Resume generation failed."));
       }
@@ -2121,6 +2237,7 @@ export default function StudioPage() {
   }
 
   const handleCoverDraft = async () => {
+    if (!guardGenerationAction("cover_letter")) return;
     if (!canGenerateDocuments) {
       setCoverState((current) => ({
         ...current,
@@ -2264,6 +2381,7 @@ export default function StudioPage() {
   };
 
   const handleResumeBasicDraft = async () => {
+    if (!guardGenerationAction("resume")) return;
     if (!canGenerateDocuments) {
       setResumeState((current) => ({
         ...current,
@@ -2298,6 +2416,7 @@ export default function StudioPage() {
   };
 
   const handleGenerateMyApplication = async () => {
+    if (!guardGenerationAction("application")) return;
     if (!canGenerateDocuments || resumeGenerating || coverGenerating) return;
     await handleResumeDraft();
     await handleCoverDraft();
@@ -2400,59 +2519,89 @@ export default function StudioPage() {
           </p>
         ) : null}
       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Trust status</p>
-        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full border border-white/15 bg-slate-900/60 px-3 py-1 text-slate-100">
-            Baseline status: {baselineStatusLabel}
-          </span>
-          <span className="rounded-full border border-white/15 bg-slate-900/60 px-3 py-1 text-slate-100">
-            Role alignment: {roleAlignmentLabel}
-          </span>
-        </div>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Role fit summary</p>
+        <p className="mt-1 text-sm text-slate-100">
+          {typeof analysisScore === "number"
+            ? `Role fit score: ${Math.round(analysisScore)}`
+            : "Role fit score unavailable"}
+        </p>
       </div>
 
-      {hydratedFromResultsContext ? (
-        <div
-          className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200"
-          data-testid="studio-results-ready-banner"
-        >
-          <span>Studio ready</span>
-          <span className="normal-case tracking-normal text-emerald-100">Context loaded</span>
-        </div>
-      ) : null}
       {requestedAnalysisId ? (
-        <div
-          className={`rounded-2xl border px-4 py-3 text-sm ${
-            activeGenerationReadiness.status === "blocked"
-              ? "border-rose-300/35 bg-rose-500/10 text-rose-100"
-              : activeGenerationReadiness.status === "limited"
-                ? "border-amber-300/35 bg-amber-500/10 text-amber-100"
-                : "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+        <section
+          className={`space-y-3 rounded-2xl border px-4 py-4 ${
+            studioGenerationState === "BLOCKED"
+              ? "border-rose-300/35 bg-rose-500/10"
+              : studioGenerationState === "LIMITED"
+              ? "border-amber-300/35 bg-amber-500/10"
+              : "border-emerald-300/35 bg-emerald-500/10"
           }`}
           data-testid="studio-generation-readiness"
         >
-          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Generation readiness: {activeGenerationReadiness.badgeLabel}
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+            Generation status: {studioGenerationState}
           </p>
-          <p className="mt-1 text-sm text-slate-100">{activeGenerationReadiness.summary}</p>
-          {activeGenerationReadiness.reasons.length ? (
-            <ul className="mt-2 space-y-1 text-sm text-slate-200">
-              {activeGenerationReadiness.reasons.map((reason) => (
-                <li key={`studio-readiness-${reason.code}`}>{reason.message}</li>
+          <h2 className="text-lg font-semibold text-slate-100">{authorityStateTitle}</h2>
+          <p className="text-sm text-slate-100">{authorityStateExplanation}</p>
+          {authorityReasons.length ? (
+            <ul className="space-y-1 text-sm text-slate-200">
+              {authorityReasons.map((reason, index) => (
+                <li key={`studio-authority-reason-${index}`}>- {reason}</li>
               ))}
             </ul>
           ) : null}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {studioGenerationState === "BLOCKED" ? (
+              <Link
+                href={remediationHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
+              >
+                Resolve Gaps Before Generating
+              </Link>
+            ) : (
+              <FormButton
+                onClick={handleGenerateMyApplication}
+                disabled={!canGenerateDocuments || resumeGenerating || coverGenerating}
+              >
+                {(resumeGenerating || coverGenerating)
+                  ? "Generating..."
+                  : studioGenerationState === "LIMITED"
+                  ? "Generate With Limits"
+                  : "Generate My Application"}
+              </FormButton>
+            )}
+            {studioGenerationState === "LIMITED" ? (
+              <Link
+                href={remediationHref}
+                className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-white/20 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+              >
+                Resolve Limits First
+              </Link>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+      {targetingAdjustmentFeedback ? (
+        <div
+          className={`rounded-xl border px-4 py-2 text-sm ${
+            targetingAdjustmentStatus === "success"
+              ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
+              : "border-amber-300/35 bg-amber-500/10 text-amber-100"
+          }`}
+          data-testid="studio-targeting-adjustment-feedback"
+        >
+          {targetingAdjustmentFeedback}
         </div>
       ) : null}
-      {applicationInsights.length ? (
-        <div className="rounded-2xl border border-indigo-300/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-100">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Based on your history
+      {adjustedReadinessResult.removedClaims.length ? (
+        <div className="rounded-xl border border-slate-300/25 bg-slate-500/10 px-4 py-2 text-sm text-slate-100">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+            Removed from targeting
           </p>
-          <p className="mt-1 text-slate-100">
-            Roles like this perform better when all support tools are verified.
+          <p className="mt-1" data-testid="studio-removed-targeting-list">
+            {Array.from(new Set(adjustedReadinessResult.removedClaims)).join(", ") ||
+              lastRemovedTargetingLabels.join(", ")}
           </p>
-          <p className="mt-1 text-slate-200">{applicationInsights[0]?.message}</p>
         </div>
       ) : null}
       {requestedAnalysisId &&
@@ -2483,129 +2632,6 @@ export default function StudioPage() {
             </FormButton>
           </div>
         </div>
-      ) : null}
-      {targetingAdjustmentFeedback ? (
-        <div
-          className={`rounded-xl border px-4 py-2 text-sm ${
-            targetingAdjustmentStatus === "success"
-              ? "border-emerald-300/35 bg-emerald-500/10 text-emerald-100"
-              : "border-amber-300/35 bg-amber-500/10 text-amber-100"
-          }`}
-          data-testid="studio-targeting-adjustment-feedback"
-        >
-          {targetingAdjustmentFeedback}
-        </div>
-      ) : null}
-      {adjustedReadinessResult.removedClaims.length ? (
-        <div className="rounded-xl border border-slate-300/25 bg-slate-500/10 px-4 py-2 text-sm text-slate-100">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
-            Removed from targeting
-          </p>
-          <p className="mt-1" data-testid="studio-removed-targeting-list">
-            {Array.from(new Set(adjustedReadinessResult.removedClaims)).join(", ") ||
-              lastRemovedTargetingLabels.join(", ")}
-          </p>
-        </div>
-      ) : null}
-      {requestedAnalysisId ? (
-        <div className="rounded-2xl border border-cyan-300/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Verification Coverage: {verificationCoverage.status.toUpperCase()}
-          </p>
-          <p className="mt-1 text-sm text-slate-100">{verificationCoverage.summary}</p>
-          <p className="mt-1 text-xs text-slate-200">
-            Fit score: {analysisScore === null ? "N/A" : Math.round(analysisScore)} · Verified claims:{" "}
-            {verificationCoverage.verifiedClaims} / {verificationCoverage.totalClaims}
-          </p>
-          {verificationCoverage.inferredClaims > 0 || verificationCoverage.unverifiedClaims > 0 ? (
-            <p className="mt-1 text-xs text-slate-300">
-              Adjacent support (inferred): {verificationCoverage.inferredClaims} · Unverified:{" "}
-              {verificationCoverage.unverifiedClaims}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {requestedAnalysisId &&
-      activeGenerationReadiness.status !== "ready" &&
-      aggregatedVerificationIssues.primary.length ? (
-        <section
-          className="rounded-2xl border border-white/15 bg-slate-950/35 p-4"
-          data-testid="studio-verification-issues"
-        >
-          <h2 className="text-base font-semibold text-slate-100">Verification issues</h2>
-          <p className="mt-1 text-sm text-slate-300">
-            Review these issues to see what failed verification and what to do next.
-          </p>
-          <ul className="mt-3 space-y-3">
-            {aggregatedVerificationIssues.primary.map((issue, index) => (
-              <li
-                key={`verification-issue-${issue.source}-${issue.code}-${index}`}
-                className={`rounded-xl border p-3 ${
-                  issue.severity === "block"
-                    ? "border-rose-300/35 bg-rose-500/10"
-                    : "border-amber-300/35 bg-amber-500/10"
-                }`}
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
-                  {issue.severity === "block" ? "BLOCKER" : "LIMITATION"} ·{" "}
-                  {formatVerificationIssueSource(issue.source)}
-                </p>
-                {issue.claim ? (
-                  <p className="mt-1 text-sm text-slate-100">
-                    <span className="font-semibold">Requirement:</span> {issue.claim}
-                  </p>
-                ) : null}
-                <p className="mt-1 text-sm text-slate-100">{issue.explanation}</p>
-                {issue.sourceContext ? (
-                  <p className="mt-1 text-xs text-slate-300">
-                    <span className="font-semibold text-slate-200">Source context:</span>{" "}
-                    {issue.sourceContext}
-                  </p>
-                ) : null}
-                <p className="mt-2 text-sm text-slate-100">
-                  <span className="font-semibold">Next step:</span> {issue.recommendedAction}
-                </p>
-                <div className="mt-3">
-                  {resolveVerificationIssueAction(issue).action === "remove_from_targeting" ? (
-                    <FormButton variant="secondary" onClick={() => handleRemoveIssueFromTargeting(issue)}>
-                      {resolveVerificationIssueAction(issue).label}
-                    </FormButton>
-                  ) : (
-                    <Link
-                      href={resolveVerificationIssueAction(issue).href ?? "/results#advanced-insights"}
-                      className="inline-flex items-center justify-center rounded-[var(--button-radius)] bg-[var(--accent-primary)] px-3 py-2 text-xs font-semibold text-[var(--verdict-apply-text)] transition hover:bg-[var(--accent-primary-hover)]"
-                    >
-                      {resolveVerificationIssueAction(issue).label}
-                    </Link>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-          {aggregatedVerificationIssues.grouped.length ? (
-            <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
-                Additional verification limitations (
-                {aggregatedVerificationIssues.grouped.reduce((sum, item) => sum + item.count, 0)})
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-slate-300">
-                {aggregatedVerificationIssues.grouped.map((group, index) => (
-                  <li key={`verification-group-${index}`}>
-                    {group.label} ({group.count})
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="mt-3">
-            <Link
-              href="/results#advanced-insights"
-              className="text-sm font-medium text-slate-200 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-            >
-              Open Results verification details
-            </Link>
-          </div>
-        </section>
       ) : null}
       {showEvidenceExpansion ? (
         <section className="rounded-2xl border border-white/15 bg-slate-950/35 p-4" data-testid="studio-evidence-expansion">
@@ -2779,35 +2805,8 @@ export default function StudioPage() {
         </Alert>
       ) : null}
 
-      {isTopBand ? (
-        <section className="space-y-2 rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-3 shadow">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-200">
-            Top Band
-          </p>
-          <p className="text-sm text-slate-100">
-            {activeGenerationReadiness.status === "blocked"
-              ? "Strong role alignment detected, but tailored generation is blocked until verification gaps are resolved."
-              : activeGenerationReadiness.status === "limited"
-                ? "Your score is in the top band. Tailored generation is available with verification limits."
-                : "Your score is in the top band. Generate your application package now."}
-          </p>
-          <div className="flex justify-start">
-            {activeGenerationReadiness.status === "blocked" ? (
-              <Link
-                href="/results#advanced-insights"
-                className="inline-flex items-center justify-center rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-400/20"
-              >
-                Review Verification Gaps
-              </Link>
-            ) : (
-              <FormButton onClick={handleGenerateMyApplication} disabled={!canRunTopBandGeneration}>
-                {(resumeGenerating || coverGenerating) ? "Generating..." : "Generate My Application"}
-              </FormButton>
-            )}
-          </div>
-        </section>
-      ) : null}
-
+      {studioGenerationState !== "BLOCKED" ? (
+      <>
       <section
         ref={(node) => {
           generationSectionRef.current = node;
@@ -2822,9 +2821,13 @@ export default function StudioPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!isTopBand && !resumeNeedsBaselineDetail ? (
+            {!resumeNeedsBaselineDetail ? (
               <FormButton onClick={handleResumeDraft} disabled={!canGenerateDocuments || resumeGenerating}>
-                {resumeGenerating ? "Generating..." : "Generate Resume"}
+                {resumeGenerating
+                  ? "Generating..."
+                  : studioGenerationState === "LIMITED"
+                  ? "Generate Resume With Limits"
+                  : "Generate Resume"}
               </FormButton>
             ) : null}
             {showResumeDownloadActions ? (
@@ -3029,11 +3032,13 @@ export default function StudioPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {!isTopBand ? (
-              <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
-                {coverGenerating ? "Generating..." : "Generate Cover Letter"}
-              </FormButton>
-            ) : null}
+            <FormButton onClick={handleCoverDraft} disabled={!canGenerateDocuments || coverGenerating}>
+              {coverGenerating
+                ? "Generating..."
+                : studioGenerationState === "LIMITED"
+                ? "Generate Cover Letter With Limits"
+                : "Generate Cover Letter"}
+            </FormButton>
             {showCoverDownloadActions ? (
               <>
                 <FormButton
@@ -3199,6 +3204,8 @@ export default function StudioPage() {
           )
         ) : null}
       </section>
+      </>
+      ) : null}
 
       <details className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
         <summary className="cursor-pointer text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">

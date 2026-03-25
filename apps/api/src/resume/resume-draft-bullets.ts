@@ -167,6 +167,7 @@ const MIN_SENTENCE_TOKENS = 6;
 const KNOWN_SENTENCE_START_PATTERN =
   /^(?:[A-Z]|I\b|We\b|My\b|Our\b|He\b|She\b|They\b|It\b|This\b|That\b|These\b|Those\b)/;
 const LEADING_PUNCTUATION_ARTIFACT_PATTERN = /^[,;:)\]}]+/;
+const TRAILING_PUNCTUATION_DUPLICATION_PATTERN = /([.!?])(?:\s*[.!?])+$/;
 
 function buildNoClaimRiskResult(): ClaimRiskResult {
   return {
@@ -177,6 +178,46 @@ function buildNoClaimRiskResult(): ClaimRiskResult {
 
 function normalizeLine(line: string) {
   return line.replace(/\u00a0/g, ' ').trim();
+}
+
+function toSentenceCase(text: string): string {
+  const trimmed = normalizeLine(text);
+  if (!trimmed) return '';
+  return trimmed.replace(/^[a-z]/, (char) => char.toUpperCase());
+}
+
+function normalizeTrailingPunctuation(text: string): string {
+  const trimmed = normalizeLine(text);
+  if (!trimmed) return '';
+  const deduped = trimmed.replace(TRAILING_PUNCTUATION_DUPLICATION_PATTERN, '$1');
+  return deduped.replace(/\s+([.!?])/g, '$1').trim();
+}
+
+function toSingleSentence(text: string): string {
+  const spans = extractSentenceSpans(text);
+  if (spans.length > 0) {
+    return spans[0] ?? '';
+  }
+  const normalized = normalizeLine(text);
+  if (!normalized) return '';
+  const cutoff = normalized.search(/[.!?](?:\s|$)/);
+  if (cutoff >= 0) {
+    return normalizeLine(normalized.slice(0, cutoff + 1));
+  }
+  return normalized;
+}
+
+function sanitizeDraftBulletText(raw: string): string {
+  const withoutLead = String(raw ?? '')
+    .replace(/^[\s\u2022\u25CF\u25E6*\-]+/, '')
+    .replace(/[|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!withoutLead) return '';
+  const singleSentence = toSingleSentence(withoutLead);
+  const cased = toSentenceCase(singleSentence);
+  const punctuated = normalizeTrailingPunctuation(cased);
+  return punctuated;
 }
 
 function countTokens(text: string) {
@@ -698,13 +739,13 @@ function extractSummaryBullets(content?: string | null) {
 
   if (!spans.length) return [];
 
-  return spans.map((text) => ({
-    text,
+  return spans.slice(0, 4).map((text) => ({
+    text: sanitizeDraftBulletText(text),
     sourceIndex: 0,
     anchorText: text,
     anchorKind: 'sentence' as const,
     exactBaselineBullet: false,
-  }));
+  })).filter((entry) => entry.text.length > 0);
 }
 
 function extractSkillBullets(content?: string | null) {
@@ -818,10 +859,11 @@ function parseExperienceEntries(
     );
     if (evidenceUnits.length) {
       evidenceUnits.forEach((evidence) => {
-        if (!isValidExperienceBulletText(evidence.normalizedText)) return;
+        const sanitizedText = sanitizeDraftBulletText(evidence.normalizedText);
+        if (!isValidExperienceBulletText(sanitizedText)) return;
         active.bullets.push({
           evidenceId: evidence.id,
-          text: evidence.normalizedText,
+          text: sanitizedText,
           sourceIndex: evidence.sourceSpan.startLine ?? unit.startLine ?? unitIndex,
           anchorText: evidence.sourceText,
           anchorKind: evidence.anchorKind,
@@ -1011,14 +1053,18 @@ export function buildDraftBulletsForSection(
     stableIndex: number,
     experienceEntryIndex?: number,
   ) => {
+    const sanitizedText = sanitizeDraftBulletText(entry.text);
+    if (!sanitizedText) {
+      return null;
+    }
     const scoreResult = scoreBulletRelevance(
-      entry.text,
+      sanitizedText,
       jobSignals,
       strengthSignals,
       gapSignals,
     );
     const keywordOverlapFallback = keywordFallback
-      ? countKeywordOverlap(entry.text, keywordFallback)
+      ? countKeywordOverlap(sanitizedText, keywordFallback)
       : 0;
     const relevanceScore = scoreResult.totalScore || keywordOverlapFallback;
     const overlapCount =
@@ -1027,12 +1073,12 @@ export function buildDraftBulletsForSection(
       scoreResult.matchedCategories.length ||
       keywordOverlapFallback;
     const claimRisk = normalizedOptions.claimRiskInventory
-      ? detectClaimRiskForBullet(entry.text, normalizedOptions.claimRiskInventory)
+      ? detectClaimRiskForBullet(sanitizedText, normalizedOptions.claimRiskInventory)
       : buildNoClaimRiskResult();
 
     return {
       id: `${section.id}:${experienceEntryIndex ?? 'section'}:${entry.sourceIndex}:${stableIndex}`,
-      text: entry.text,
+      text: sanitizedText,
       source: {
         baselineSectionId: section.id,
         baselineSectionType: section.sectionType,
@@ -1046,7 +1092,7 @@ export function buildDraftBulletsForSection(
           ? { experienceEntryIndex }
           : {}),
       },
-      confidence: inferBulletConfidence(entry.text),
+      confidence: inferBulletConfidence(sanitizedText),
       keywordOverlapCount: overlapCount,
       relevance: {
         totalScore: Number(relevanceScore.toFixed(3)),
@@ -1057,7 +1103,7 @@ export function buildDraftBulletsForSection(
       claimRisk,
       relevanceScore,
       stableIndex,
-    };
+    } as (ResumeDraftBullet & { relevanceScore: number; stableIndex: number });
   };
 
   if (section.sectionType === 'EXPERIENCE') {
@@ -1070,17 +1116,19 @@ export function buildDraftBulletsForSection(
             entry,
             stableCounter,
             experienceEntry.entryIndex,
-          ) as ScoredDraftBullet;
+          );
           stableCounter += 1;
-          return scored;
-        });
+          return scored as ScoredDraftBullet;
+        }).filter((entry): entry is ScoredDraftBullet => Boolean(entry));
         return orderBulletsByRelevance(withScores, shouldRank);
       });
       return ordered.map(({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet);
     }
   }
 
-  const withScores = parsed.map((entry, index) => buildBullet(entry, index));
+  const withScores = parsed
+    .map((entry, index) => buildBullet(entry, index))
+    .filter((entry): entry is ScoredDraftBullet => Boolean(entry));
   return orderBulletsByRelevance(withScores, shouldRank).map(
     ({ relevanceScore: _relevanceScore, stableIndex: _stableIndex, ...bullet }) => bullet,
   );
