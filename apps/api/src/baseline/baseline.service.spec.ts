@@ -709,6 +709,53 @@ describe('BaselineService - score history persistence', () => {
     expect(result.lastAnalyzedAt).toBeInstanceOf(Date);
     expect(result.lastAnalyzedAt.getTime()).toBeGreaterThanOrEqual(firstAnalyzedAt.getTime());
   });
+
+  it('analyzes baseline readiness without job id and returns analyzed summary', async () => {
+    const baselineRecord = {
+      id: 'b-1',
+      userId: 'user-1',
+      originalBaselineScore: null,
+      latestBaselineScore: null,
+      firstAnalyzedAt: null,
+      lastAnalyzedAt: null,
+      sections: [
+        {
+          id: 's-raw',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.RAW,
+          title: 'Raw',
+          content: 'raw text',
+          includePolicy: BaselineIncludePolicy.NEVER,
+          order: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 's-exp',
+          baselineId: 'b-1',
+          sectionType: BaselineSectionType.EXPERIENCE,
+          title: 'Experience',
+          content: 'Led customer operations and improved SLA outcomes by 18%.',
+          includePolicy: BaselineIncludePolicy.OPTIONAL,
+          order: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    } as Baseline;
+
+    baselineRepository.findOne.mockImplementation(async () => baselineRecord);
+    baselineRepository.save.mockImplementation(async (value: any) => {
+      Object.assign(baselineRecord, value);
+      return value;
+    });
+
+    const result = await service.analyzeBaselineReadiness('user-1', 'b-1');
+
+    expect(result.latestAssessmentSummary.hasCompletedAssessment).toBe(true);
+    expect(result.latestAssessmentSummary.latestFitScore).toBeGreaterThanOrEqual(45);
+    expect(result.latestAssessmentSummary.latestAssessmentCreatedAt).toBeInstanceOf(Date);
+  });
 });
 
 describe('BaselineService - strengthening additions', () => {

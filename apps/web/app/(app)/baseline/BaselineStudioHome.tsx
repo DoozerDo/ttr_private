@@ -46,6 +46,11 @@ type BaselineStudioHomeProps = {
   libraryMode?: "editable" | "readonly";
 };
 
+type ErrorPayload = {
+  message?: unknown;
+  latestAssessmentSummary?: BaselineAssessmentSummaryDto;
+};
+
 type BaselineStrengthState = "empty" | "needs_analysis" | "ready";
 
 type StrengtheningPrompt = {
@@ -114,19 +119,6 @@ function deriveBaselineStrengthPercent(
   if (!scores.length) return 24;
   const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
   return Math.max(28, Math.min(91, Math.round(average)));
-}
-
-function buildBaselineUpdatedMessage(previousScore: number | null, nextScore: number) {
-  if (previousScore === null) {
-    return `Baseline updated. Saved successfully. Strength is ${nextScore}%.`;
-  }
-  if (previousScore === nextScore) {
-    return `Baseline updated. Saved successfully. Strength unchanged at ${nextScore}%.`;
-  }
-  if (nextScore > previousScore) {
-    return `Baseline updated. Strength improved from ${previousScore}% to ${nextScore}%.`;
-  }
-  return `Baseline updated. Strength changed from ${previousScore}% to ${nextScore}%.`;
 }
 
 function SignalPill({ label, tone }: { label: string; tone: "strong" | "developing" }) {
@@ -444,7 +436,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
 
   const scrollToAnalysis = useCallback(() => {
     window.setTimeout(() => {
-      analysisSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const sectionNode = analysisSectionRef.current;
+      if (sectionNode && typeof sectionNode.scrollIntoView === "function") {
+        sectionNode.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       analysisHeadingRef.current?.focus();
     }, 50);
   }, []);
@@ -518,107 +513,8 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         }
 
         const payload = (await response.json()) as BaselineDto;
-        const hasAnalysis = Boolean(payload.sections?.length);
-
         setBaselineDetails((current) => ({ ...current, [baselineId]: payload }));
-        if (hasAnalysis) {
-          const scoredGraph = buildBaselineSignalGraph({ baseline: payload });
-          const scoredPercent = deriveBaselineStrengthPercent(payload, scoredGraph);
-          const previousScore = (() => {
-            const existingRecord =
-              baselineDetails[baselineId] ?? baselineList.find((entry) => entry.id === baselineId) ?? null;
-            if (existingRecord && typeof existingRecord.latestBaselineScore === "number") {
-              return existingRecord.latestBaselineScore;
-            }
-            return null;
-          })();
-          const existingOriginal = (() => {
-            const existingRecord =
-              baselineDetails[baselineId] ?? baselineList.find((entry) => entry.id === baselineId) ?? null;
-            if (existingRecord && typeof existingRecord.originalBaselineScore === "number") {
-              return existingRecord.originalBaselineScore;
-            }
-            return null;
-          })();
-          const optimisticOriginalScore = existingOriginal ?? scoredPercent;
-          const optimisticBaseline = {
-            ...payload,
-            originalBaselineScore: optimisticOriginalScore,
-            latestBaselineScore: scoredPercent,
-          } as BaselineDto;
-
-          setBaselineDetails((current) => ({ ...current, [baselineId]: optimisticBaseline }));
-          setBaselineList((current) =>
-            current.map((item) =>
-              item.id === baselineId
-                ? {
-                    ...item,
-                    ...optimisticBaseline,
-                    latestAssessmentSummary: resolveCanonicalAssessmentSummary(
-                      item.latestAssessmentSummary,
-                      optimisticBaseline.latestAssessmentSummary,
-                    ),
-                  }
-                : item,
-            ),
-          );
-          setBaselineUpdatedNotice(buildBaselineUpdatedMessage(previousScore, scoredPercent));
-
-          setAnalysisRunsByBaselineId((current) => ({
-            ...current,
-            [baselineId]: (current[baselineId] ?? 0) + 1,
-          }));
-          try {
-            const scoreResponse = await fetch(
-              `/api/baselines/${encodeURIComponent(baselineId)}/analysis-score`,
-              {
-                method: "PATCH",
-                credentials: "include",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ score: scoredPercent }),
-              },
-            );
-
-            if (scoreResponse.ok) {
-              const persistedBaseline = (await scoreResponse.json()) as BaselineDto;
-              const persistedLatestScore =
-                typeof persistedBaseline.latestBaselineScore === "number"
-                  ? persistedBaseline.latestBaselineScore
-                  : scoredPercent;
-              setBaselineDetails((current) => ({
-                ...current,
-                [baselineId]: { ...payload, ...persistedBaseline, sections: payload.sections },
-              }));
-              setBaselineList((current) =>
-                current.map((item) =>
-                  item.id === baselineId
-                    ? {
-                        ...item,
-                        ...persistedBaseline,
-                        latestAssessmentSummary: resolveCanonicalAssessmentSummary(
-                          item.latestAssessmentSummary,
-                          persistedBaseline.latestAssessmentSummary,
-                        ),
-                      }
-                    : item,
-                ),
-              );
-              setBaselineUpdatedNotice(
-                buildBaselineUpdatedMessage(previousScore, persistedLatestScore),
-              );
-            }
-          } catch (scorePersistenceError) {
-            console.error("Unable to persist baseline score history", scorePersistenceError);
-          }
-        }
         setPostUploadCtaBaselineId((current) => (current === baselineId ? null : current));
-
-        if (!hasAnalysis) {
-          throw new Error("We could not complete baseline analysis for this resume.");
-        }
-
         scrollToAnalysis();
       } catch (fetchError) {
         console.error("Unable to load baseline details", fetchError);
@@ -631,7 +527,76 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
         setLoadingBaselineId(null);
       }
     },
-    [baselineDetails, baselineList, scrollToAnalysis],
+    [scrollToAnalysis],
+  );
+
+  const runCanonicalBaselineAnalysis = useCallback(
+    async (baselineId: string) => {
+      setPrimaryBaselineId(baselineId);
+      setLoadingBaselineId(baselineId);
+      setError(null);
+
+      try {
+        await fetchBaselineDetails(baselineId);
+
+        const currentSummary =
+          baselineDetails[baselineId]?.latestAssessmentSummary ??
+          baselineList.find((entry) => entry.id === baselineId)?.latestAssessmentSummary;
+        if (isBaselineAnalyzedFromSummary(currentSummary)) {
+          return;
+        }
+
+        const response = await fetch("/api/baselines/analyze", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baselineId }),
+        });
+        const payload: ErrorPayload | null = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(
+            typeof payload?.message === "string"
+              ? payload.message
+              : "Analysis did not complete successfully.",
+          );
+        }
+
+        const analyzedFromResponse = isBaselineAnalyzedFromSummary(
+          payload?.latestAssessmentSummary,
+        );
+        if (!analyzedFromResponse) {
+          throw new Error(
+            "Analysis did not complete successfully. Baseline readiness was not persisted.",
+          );
+        }
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("[BaselineStudioHome] canonical analyze complete", {
+            baselineId,
+            hasCompletedAssessment:
+              payload?.latestAssessmentSummary?.hasCompletedAssessment ?? false,
+            latestFitScore: payload?.latestAssessmentSummary?.latestFitScore ?? null,
+          });
+        }
+
+        setAnalysisRunsByBaselineId((current) => ({
+          ...current,
+          [baselineId]: (current[baselineId] ?? 0) + 1,
+        }));
+        await refreshBaselineLibrary();
+        publishBaselineUpdated({ baselineId, source: "analysis" });
+      } catch (runError) {
+        console.error("Unable to run baseline analysis", runError);
+        setError(
+          runError instanceof Error
+            ? runError.message
+            : "Unable to run baseline analysis right now.",
+        );
+      } finally {
+        setLoadingBaselineId(null);
+      }
+    },
+    [baselineDetails, baselineList, fetchBaselineDetails, refreshBaselineLibrary],
   );
 
   const handleApproveStrengtheningProposal = useCallback(async () => {
@@ -998,7 +963,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 </Link>
               ) : heroState === "in_progress" && primaryBaselineId ? (
                 <FormButton
-                  onClick={() => void fetchBaselineDetails(primaryBaselineId)}
+                  onClick={() => void runCanonicalBaselineAnalysis(primaryBaselineId)}
                   disabled={!isHydrated}
                   className="bg-indigo-600 text-white hover:bg-indigo-500"
                 >
@@ -1039,7 +1004,6 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const hasCompletedAssessment = isBaselineAnalyzedFromSummary(assessmentSummary);
                 const canView = hasCompletedAssessment;
                 const isLoading = loadingBaselineId === baseline.id;
-                const latestFitScore = assessmentSummary?.latestFitScore;
                 const latestAssessmentTimestamp = assessmentSummary?.latestAssessmentCreatedAt;
 
                 return (
@@ -1063,17 +1027,16 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           hasCompletedAssessment,
                         )}`}
                       >
-                        {isLoading ? "Analyzing..." : hasCompletedAssessment ? "Analysis ready" : "Not analyzed"}
+                        {isLoading ? "Analyzing..." : hasCompletedAssessment ? "Baseline ready" : "Not ready"}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
                     {hasCompletedAssessment ? (
                       <p className="mt-1 text-xs text-slate-400">
-                        Last analyzed{" "}
+                        Last baseline check{" "}
                         {latestAssessmentTimestamp
                           ? formatDateTime(latestAssessmentTimestamp)
                           : "recently"}
-                        {typeof latestFitScore === "number" ? ` • Fit ${latestFitScore}%` : ""}
                       </p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -1086,11 +1049,11 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                             scrollToAnalysis();
                             return;
                           }
-                          void fetchBaselineDetails(baseline.id);
+                          void runCanonicalBaselineAnalysis(baseline.id);
                         }}
                         disabled={isLoading || !isHydrated}
                       >
-                        {isLoading ? "Analyzing..." : canView ? "View baseline analysis" : "ANALYZE"}
+                        {isLoading ? "Analyzing..." : canView ? "Review baseline readiness" : "ANALYZE"}
                       </FormButton>
                       {isEditableLibrary ? (
                         <>
@@ -1183,7 +1146,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 <p className="text-sm font-semibold text-slate-100">Resume uploaded. Analyze your baseline next.</p>
                 <div className="mt-3">
                   <FormButton
-                    onClick={() => void fetchBaselineDetails(postUploadCtaBaselineId)}
+                    onClick={() => void runCanonicalBaselineAnalysis(postUploadCtaBaselineId)}
                     disabled={!isHydrated}
                   >
                     ANALYZE

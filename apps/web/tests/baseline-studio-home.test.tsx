@@ -363,20 +363,31 @@ describe("BaselineStudioHome", () => {
       />,
     );
 
-    expect(screen.getByText("Analysis ready")).toBeInTheDocument();
-    expect(screen.getByText(/Last analyzed/i)).toBeInTheDocument();
-    expect(screen.getByText(/Fit 82%/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "View baseline analysis" })).toBeInTheDocument();
+    expect(screen.getByText("Baseline ready")).toBeInTheDocument();
+    expect(screen.getByText(/Last baseline check/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Fit 82%/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review baseline readiness" })).toBeInTheDocument();
   });
 
-  it("replaces stale not-analyzed card state with canonical analyzed summary after detail fetch", async () => {
+  it("replaces stale not-analyzed card state with canonical analyzed summary after canonical analyze and refetch", async () => {
     setFetchImplementation(async (input: RequestInfo) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
-      if (url.includes("/api/baselines/base-1/analysis-score")) {
-        return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
+      if (url.includes("/api/baselines/analyze")) {
+        return createJsonResponse({
+          id: "base-1",
+          latestAssessmentSummary: {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
+          },
+        });
+      }
+      if (url.includes("/api/baselines?includeArchived=true")) {
+        return createJsonResponse([createAnalyzedBaseline("base-1", "resume-1.pdf")]);
       }
       if (url.includes("/api/baselines/base-1")) {
         return createJsonResponse(createAnalyzedBaseline("base-1", "resume-1.pdf"));
@@ -398,14 +409,14 @@ describe("BaselineStudioHome", () => {
     );
 
     const baselineArticle = within(screen.getByText("resume-1.pdf").closest("article") as HTMLElement);
-    expect(baselineArticle.getByText("Not analyzed")).toBeInTheDocument();
+    expect(baselineArticle.getByText("Not ready")).toBeInTheDocument();
 
     fireEvent.click(baselineArticle.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
-      expect(baselineArticle.getByText("Analysis ready")).toBeInTheDocument();
+      expect(baselineArticle.getByText("Baseline ready")).toBeInTheDocument();
     });
-    expect(baselineArticle.queryByText("Not analyzed")).toBeNull();
+    expect(baselineArticle.queryByText("Not ready")).toBeNull();
   });
 
   it("refetches authoritative baselines on baseline-updated event and updates only the analyzed baseline", async () => {
@@ -456,15 +467,15 @@ describe("BaselineStudioHome", () => {
 
     const baselineAArticle = within(screen.getByText("resume-a.pdf").closest("article") as HTMLElement);
     const baselineBArticle = within(screen.getByText("resume-b.pdf").closest("article") as HTMLElement);
-    expect(baselineAArticle.getByText("Not analyzed")).toBeInTheDocument();
-    expect(baselineBArticle.getByText("Not analyzed")).toBeInTheDocument();
+    expect(baselineAArticle.getByText("Not ready")).toBeInTheDocument();
+    expect(baselineBArticle.getByText("Not ready")).toBeInTheDocument();
 
     publishBaselineUpdated({ baselineId: "base-a", source: "analysis" });
 
     await waitFor(() => {
-      expect(baselineAArticle.getByText("Analysis ready")).toBeInTheDocument();
+      expect(baselineAArticle.getByText("Baseline ready")).toBeInTheDocument();
     });
-    expect(baselineBArticle.getByText("Not analyzed")).toBeInTheDocument();
+    expect(baselineBArticle.getByText("Not ready")).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(
         ([url]) => typeof url === "string" && url.includes("/api/baselines?includeArchived=true"),
@@ -473,12 +484,24 @@ describe("BaselineStudioHome", () => {
   });
 
   it("shows updated guidance state after baseline strengthening updates", async () => {
+    let hasCompletedCanonicalAnalyze = false;
+
     setFetchImplementation(async (input: RequestInfo, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/analysis/history")) {
         return createJsonResponse([]);
       }
       if (url.includes("/api/baselines?includeArchived=true")) {
+        if (hasCompletedCanonicalAnalyze) {
+          return createJsonResponse([
+            {
+              ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
+              originalBaselineScore: 79,
+              latestBaselineScore: 81,
+            },
+          ]);
+        }
+
         return createJsonResponse([
           {
             ...createBaseline("base-1", "2026-01-01T00:00:00.000Z", "resume-1.pdf"),
@@ -487,11 +510,16 @@ describe("BaselineStudioHome", () => {
           },
         ]);
       }
-      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
+      if (url.includes("/api/baselines/analyze")) {
+        hasCompletedCanonicalAnalyze = true;
         return createJsonResponse({
-          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
-          originalBaselineScore: 79,
-          latestBaselineScore: 81,
+          id: "base-1",
+          latestAssessmentSummary: {
+            latestAssessmentId: null,
+            latestAssessmentCreatedAt: "2026-03-20T12:00:00.000Z",
+            latestFitScore: 82,
+            hasCompletedAssessment: true,
+          },
         });
       }
       if (url.includes("/api/baselines/base-1")) {
@@ -519,9 +547,7 @@ describe("BaselineStudioHome", () => {
     fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Baseline updated. Strength improved from 79% to 81%."),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Baseline ready")).toBeInTheDocument();
     });
 
     expect(screen.getByText("Baseline in progress")).toBeInTheDocument();
@@ -553,13 +579,6 @@ describe("BaselineStudioHome", () => {
             ...(createAnalyzedBaseline("base-1", "resume-1.pdf").sections ?? []),
             persistedRefinementSection,
           ],
-          originalBaselineScore: 79,
-          latestBaselineScore: 79,
-        });
-      }
-      if (url.includes("/api/baselines/base-1/analysis-score") && init?.method === "PATCH") {
-        return createJsonResponse({
-          ...createAnalyzedBaseline("base-1", "resume-1.pdf"),
           originalBaselineScore: 79,
           latestBaselineScore: 79,
         });
@@ -607,23 +626,13 @@ describe("BaselineStudioHome", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve and Apply" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Baseline updated. Saved successfully. Strength unchanged at 79%."),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Baseline ready")).toBeInTheDocument();
     });
     expect(screen.getByText("Saved baseline updates")).toBeInTheDocument();
     const savedUpdatesSection = screen.getByText("Saved baseline updates").closest("article") as HTMLElement;
     expect(
       within(savedUpdatesSection).getByText(/Led cross-functional change rollout with adoption milestones\./i),
     ).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some(
-        ([url, requestInit]) =>
-          typeof url === "string" &&
-          url.includes("/api/baselines/base-1/analysis-score") &&
-          requestInit?.method === "PATCH",
-      ),
-    ).toBe(true);
   });
 
   it("does not surface score delta chips in streamlined baseline record list", async () => {

@@ -795,6 +795,33 @@ return {
     return summaryByBaselineId;
   }
 
+  private toBaselineReadinessSummary(
+    baseline: Pick<Baseline, 'latestBaselineScore' | 'lastAnalyzedAt'>,
+  ): BaselineAssessmentSummary {
+    const hasReadiness =
+      typeof baseline.latestBaselineScore === 'number' ||
+      baseline.lastAnalyzedAt instanceof Date;
+
+    if (!hasReadiness) {
+      return {
+        latestAssessmentId: null,
+        latestAssessmentCreatedAt: null,
+        latestFitScore: null,
+        hasCompletedAssessment: false,
+      };
+    }
+
+    return {
+      latestAssessmentId: null,
+      latestAssessmentCreatedAt: baseline.lastAnalyzedAt ?? null,
+      latestFitScore:
+        typeof baseline.latestBaselineScore === 'number'
+          ? baseline.latestBaselineScore
+          : null,
+      hasCompletedAssessment: true,
+    };
+  }
+
   async listBaselinesForUser(
     userId: string,
     includeArchived = false,
@@ -830,12 +857,10 @@ return {
 
     const rows = baselines.map((baseline) => ({
       ...baseline,
-      latestAssessmentSummary: summaries.get(baseline.id) ?? {
-        latestAssessmentId: null,
-        latestAssessmentCreatedAt: null,
-        latestFitScore: null,
-        hasCompletedAssessment: false,
-      },
+      latestAssessmentSummary:
+        summaries.get(baseline.id)?.hasCompletedAssessment
+          ? (summaries.get(baseline.id) as BaselineAssessmentSummary)
+          : this.toBaselineReadinessSummary(baseline),
     }));
 
     if (process.env.NODE_ENV !== 'production') {
@@ -990,13 +1015,43 @@ return {
 
     return {
       ...baseline,
-      latestAssessmentSummary: summary ?? {
-        latestAssessmentId: null,
-        latestAssessmentCreatedAt: null,
-        latestFitScore: null,
-        hasCompletedAssessment: false,
-      },
+      latestAssessmentSummary:
+        summary?.hasCompletedAssessment
+          ? summary
+          : this.toBaselineReadinessSummary(baseline),
     };
+  }
+
+  private deriveBaselineReadinessScore(baseline: Baseline): number {
+    const sections = baseline.sections ?? [];
+    const nonRawSections = sections.filter(
+      (section) => section.sectionType !== BaselineSectionType.RAW,
+    );
+    const nonRawCount = nonRawSections.length;
+    const contentLength = nonRawSections.reduce(
+      (total, section) => total + (section.content?.trim().length ?? 0),
+      0,
+    );
+
+    const sectionSignal = Math.min(20, nonRawCount * 4);
+    const contentSignal = Math.min(20, Math.floor(contentLength / 250));
+    return Math.max(45, Math.min(92, 50 + sectionSignal + contentSignal));
+  }
+
+  async analyzeBaselineReadiness(userId: string, baselineId: string) {
+    const baseline = await this.baselineRepository.findOne({
+      where: { id: baselineId, userId },
+      relations: ['sections'],
+      order: { sections: { order: 'ASC' } },
+    });
+
+    if (!baseline) {
+      throw new NotFoundException('Baseline not found');
+    }
+
+    const readinessScore = this.deriveBaselineReadinessScore(baseline);
+    await this.recordBaselineAnalysisScore(userId, baselineId, readinessScore);
+    return this.getBaselineByIdForUser(baselineId, userId);
   }
 
   async recordBaselineAnalysisScore(

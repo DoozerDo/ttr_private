@@ -50,6 +50,10 @@ type StrengtheningBody = {
   isEstimate?: unknown;
 };
 
+type AnalyzeBaselineBody = {
+  baselineId?: unknown;
+};
+
 const parsePositiveInt = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return Math.floor(value);
@@ -320,6 +324,29 @@ export class BaselineController {
       userId,
       id,
       body.score,
+    );
+    return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
+  }
+
+  @Post('analyze')
+  async analyzeBaseline(
+    @Body() body: AnalyzeBaselineBody,
+    @Req() request: Request & { user?: { id?: string } },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid user context');
+    }
+
+    const baselineId =
+      typeof body?.baselineId === 'string' ? body.baselineId.trim() : '';
+    if (!baselineId) {
+      throw new BadRequestException('baselineId is required');
+    }
+
+    const baseline = await this.baselineService.analyzeBaselineReadiness(
+      userId,
+      baselineId,
     );
     return stripBaselineVersioning(baseline as unknown as Record<string, unknown>);
   }
