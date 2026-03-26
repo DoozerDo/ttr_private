@@ -52,6 +52,7 @@ type ErrorPayload = {
 };
 
 type BaselineStrengthState = "empty" | "needs_analysis" | "ready";
+type BaselineReadinessState = "NOT_ANALYZED" | "ANALYZING" | "READY";
 
 type StrengtheningPrompt = {
   question: string;
@@ -175,10 +176,31 @@ function getUploadedBaselineRecord(data: unknown): BaselineDto | null {
   return baseline;
 }
 
-function getAssessmentSummaryStatusTone(hasCompletedAssessment: boolean) {
-  return hasCompletedAssessment
+function getAssessmentSummaryStatusTone(state: BaselineReadinessState) {
+  if (state === "ANALYZING") {
+    return "border-amber-300/20 bg-amber-400/[0.08] text-amber-100";
+  }
+  return state === "READY"
     ? "border-emerald-300/15 bg-emerald-400/[0.08] text-emerald-100"
     : "border-white/10 bg-white/[0.05] text-slate-300";
+}
+
+function getBaselineReadinessState({
+  hasCompletedAssessment,
+  isAnalyzing,
+}: {
+  hasCompletedAssessment: boolean;
+  isAnalyzing: boolean;
+}): BaselineReadinessState {
+  if (isAnalyzing) return "ANALYZING";
+  if (hasCompletedAssessment) return "READY";
+  return "NOT_ANALYZED";
+}
+
+function getBaselineReadinessLabel(state: BaselineReadinessState) {
+  if (state === "ANALYZING") return "Analyzing";
+  if (state === "READY") return "Ready for targeting";
+  return "Not analyzed";
 }
 
 function toEpoch(value: string | null | undefined) {
@@ -1005,6 +1027,15 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                 const canView = hasCompletedAssessment;
                 const isLoading = loadingBaselineId === baseline.id;
                 const latestAssessmentTimestamp = assessmentSummary?.latestAssessmentCreatedAt;
+                const latestRoleFitScore =
+                  typeof assessmentSummary?.latestFitScore === "number"
+                    ? Math.max(0, Math.min(100, Math.round(assessmentSummary.latestFitScore)))
+                    : null;
+                const readinessState = getBaselineReadinessState({
+                  hasCompletedAssessment,
+                  isAnalyzing: isLoading,
+                });
+                const readinessLabel = getBaselineReadinessLabel(readinessState);
 
                 return (
                   <article
@@ -1024,10 +1055,10 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                       ) : null}
                       <span
                         className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${getAssessmentSummaryStatusTone(
-                          hasCompletedAssessment,
+                          readinessState,
                         )}`}
                       >
-                        {isLoading ? "Analyzing..." : hasCompletedAssessment ? "Baseline ready" : "Not ready"}
+                        {readinessLabel}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Uploaded {formatDateTime(baseline.createdAt)}</p>
@@ -1038,6 +1069,9 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                           ? formatDateTime(latestAssessmentTimestamp)
                           : "recently"}
                       </p>
+                    ) : null}
+                    {latestRoleFitScore !== null ? (
+                      <p className="mt-1 text-xs text-slate-500">Last role analysis: {latestRoleFitScore}%</p>
                     ) : null}
                     <div className="mt-4 flex flex-wrap gap-2">
                       <FormButton
@@ -1053,8 +1087,20 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                         }}
                         disabled={isLoading || !isHydrated}
                       >
-                        {isLoading ? "Analyzing..." : canView ? "Review baseline readiness" : "ANALYZE"}
+                        {isLoading
+                          ? "Analyzing"
+                          : canView
+                            ? "View baseline analysis"
+                            : "Analyze baseline"}
                       </FormButton>
+                      {canView ? (
+                        <Link
+                          href="/target"
+                          className="inline-flex items-center justify-center rounded-[var(--button-radius)] border border-indigo-300/25 bg-indigo-500/15 px-4 py-2 text-sm font-semibold text-indigo-100 transition hover:bg-indigo-500/25"
+                        >
+                          Start targeting
+                        </Link>
+                      ) : null}
                       {isEditableLibrary ? (
                         <>
                           <FormButton
@@ -1149,7 +1195,7 @@ export function BaselineStudioHome({ baselines, libraryMode = "editable" }: Base
                     onClick={() => void runCanonicalBaselineAnalysis(postUploadCtaBaselineId)}
                     disabled={!isHydrated}
                   >
-                    ANALYZE
+                    Analyze baseline
                   </FormButton>
                 </div>
               </article>

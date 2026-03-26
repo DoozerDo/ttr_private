@@ -7,7 +7,7 @@ export class Interviews1780000000000 implements MigrationInterface {
     await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
 
     await queryRunner.query(`
-      CREATE TABLE "interview_sessions" (
+      CREATE TABLE IF NOT EXISTS "interview_sessions" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "userId" character varying(255) NOT NULL,
         "baselineId" character varying(255) NOT NULL,
@@ -20,7 +20,7 @@ export class Interviews1780000000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      CREATE TABLE "interview_responses" (
+      CREATE TABLE IF NOT EXISTS "interview_responses" (
         "id" uuid NOT NULL DEFAULT gen_random_uuid(),
         "sessionId" uuid NOT NULL,
         "question" text NOT NULL,
@@ -32,10 +32,10 @@ export class Interviews1780000000000 implements MigrationInterface {
     `);
 
     await queryRunner.query(
-      `CREATE INDEX "IDX_interview_sessions_userId" ON "interview_sessions" ("userId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_interview_sessions_userId" ON "interview_sessions" ("userId")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "IDX_interview_responses_sessionId" ON "interview_responses" ("sessionId")`,
+      `CREATE INDEX IF NOT EXISTS "IDX_interview_responses_sessionId" ON "interview_responses" ("sessionId")`,
     );
   }
 

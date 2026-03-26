@@ -481,6 +481,8 @@ export default function StudioPage() {
   const searchParams = useSearchParams();
   const searchParamValue = searchParams.toString();
   const trackedStudioOpenRef = useRef(false);
+  const lastReadinessKeyRef = useRef<string | null>(null);
+  const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const generationSectionRef = useRef<HTMLElement | null>(null);
   const requestedJobId = useMemo(
     () => searchParams.get("jobId")?.trim() ?? "",
@@ -907,8 +909,20 @@ export default function StudioPage() {
       setGenerationReadiness(READINESS_LOADING_STATE);
       return;
     }
-    let cancelled = false;
-    setGenerationReadiness(READINESS_LOADING_STATE);
+    const readinessKey = [
+      requestedAnalysisId,
+      effectiveJobId,
+      effectiveBaselineId,
+      effectiveBaselineVersionId,
+    ].join(":");
+    if (lastReadinessKeyRef.current === readinessKey) {
+      return;
+    }
+    lastReadinessKeyRef.current = readinessKey;
+    if (failedReadinessKeysRef.current.has(readinessKey)) {
+      return;
+    }
+
     const body = {
       analysisId: requestedAnalysisId,
       jobId: effectiveJobId,
@@ -936,22 +950,18 @@ export default function StudioPage() {
           | Record<string, unknown>
           | null;
         if (!resumeResponse.ok || !coverResponse.ok) {
-          if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+          failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
         const resolved = combineGenerationReadinessFromServer(
           resumePayload as any,
           coverPayload as any,
         );
-        if (!cancelled) setGenerationReadiness(resolved);
+        setGenerationReadiness(resolved);
       } catch {
-        if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+        failedReadinessKeysRef.current.add(readinessKey);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [effectiveBaselineId, effectiveBaselineVersionId, effectiveJobId, requestedAnalysisId]);
   useEffect(() => {
     setExcludedTargetingLabels(new Set(queryExcludedRequirements));
@@ -1351,15 +1361,6 @@ export default function StudioPage() {
     });
     return reasons.slice(0, 3);
   }, [activeGenerationReadiness.reasons, activeGenerationReadiness.verificationIssues]);
-  useEffect(() => {
-    if (!requestedAnalysisId) return;
-    trackEvent("studio_generation_state_viewed", {
-      state: studioGenerationState,
-      score: analysisScore,
-      blockerCount: generationBlockerCount,
-    });
-  }, [analysisScore, generationBlockerCount, requestedAnalysisId, studioGenerationState]);
-
   const guardGenerationAction = useCallback(
     (documentType: "resume" | "cover_letter" | "application") => {
       if (studioGenerationState === "BLOCKED") {

@@ -39,7 +39,7 @@ import { appendStrengtheningAddition } from "@/lib/baselines";
 import { buildEvidenceSuggestion } from "@/lib/evidenceSuggestions";
 import { buildScoreDelta, hasBaselineUpdated } from "@/lib/reanalysis";
 import { fetchLatestAssessmentForBaseline } from "@/lib/assessmentSource";
-import { resolveScoreBucket, trackEvent } from "@/src/lib/analytics";
+import { trackEvent } from "@/src/lib/analytics";
 import { getScoreBand, ScoreBand } from "@/src/lib/score-band";
 
 type FitDimensionScores = {
@@ -562,7 +562,16 @@ type OpportunityMapSectionProps = {
         unverifiedRequirements: string[];
         predictedOutcome: "full" | "partial";
         removeAndContinueHref: string;
-        reviewInStudioHref: string;
+      reviewInStudioHref: string;
+      }
+    | null;
+  weakFitRecovery?:
+    | {
+        href: string;
+        gapPreview: Array<{
+          requirement: string;
+          explanation: string;
+        }>;
       }
     | null;
   reliabilityFacts: {
@@ -572,6 +581,56 @@ type OpportunityMapSectionProps = {
     gapsResolvable: boolean;
   };
 };
+
+const GAP_EXPLANATION_FALLBACK = "Add concrete baseline evidence that proves this requirement.";
+
+function ResolveGapsBlock({
+  href,
+  gapPreview,
+  fullAnalysisHref,
+}: {
+  href: string;
+  gapPreview: Array<{ requirement: string; explanation: string }>;
+  fullAnalysisHref: string;
+}) {
+  return (
+    <section className="rounded-2xl border border-amber-300/35 bg-amber-500/10 p-4" data-testid="resolve-gaps-block">
+      <h3 className="text-lg font-semibold text-slate-100">
+        This role needs stronger proof before generation will be useful.
+      </h3>
+      <p className="mt-2 text-sm text-slate-200">
+        You have relevant experience, but a few requirements are not well supported in your baseline. Resolve the
+        gaps below to improve fit and strengthen output quality.
+      </p>
+      {gapPreview.length > 0 ? (
+        <ul className="mt-3 space-y-2 text-sm text-slate-100">
+          {gapPreview.map((item) => (
+            <li key={`resolve-gap-${item.requirement}`} className="rounded-lg border border-white/10 bg-slate-950/30 p-2">
+              <p className="font-medium">{item.requirement}</p>
+              <p className="mt-1 text-xs text-slate-300">{item.explanation || GAP_EXPLANATION_FALLBACK}</p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="mt-4 space-y-2">
+        <Link
+          href={href}
+          className="inline-flex min-h-[44px] min-w-[240px] items-center justify-center rounded-[var(--button-radius)] bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
+        >
+          Resolve Gaps
+        </Link>
+        <div>
+          <a
+            href={fullAnalysisHref}
+            className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+          >
+            View full analysis
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function buildStudioHrefWithExcludedRequirements(
   studioHref: string,
@@ -690,6 +749,7 @@ export function OpportunityMapSection({
   verificationCoverage,
   canonicalCoverage,
   predictiveUnlock,
+  weakFitRecovery,
 }: OpportunityMapSectionProps) {
   const toCanonicalLabels = (labels: string[] | null | undefined): string[] =>
     Array.isArray(labels)
@@ -736,36 +796,46 @@ export function OpportunityMapSection({
           <p className="max-w-2xl text-base leading-7 text-slate-100 md:text-lg">{verdict.explanation}</p>
           <p className="max-w-2xl text-sm leading-6 text-slate-400">Built from your validated baseline and role requirements.</p>
         </div>
-        <p className="max-w-2xl text-sm text-slate-300">{primaryCta?.description}</p>
-        <div className="space-y-4">
-          {primaryCta ? (
-            primaryCta.disabled ? (
-              <span
-                data-testid="results-hero-primary-cta"
-                className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
-              >
-                {primaryCta.label}
-              </span>
-            ) : (
-              <a
-                data-testid="results-hero-primary-cta"
-                href={primaryCta.href}
-                className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
-              >
-                {primaryCta.label}
-              </a>
-            )
-          ) : null}
+        {weakFitRecovery ? (
+          <ResolveGapsBlock
+            href={weakFitRecovery.href}
+            gapPreview={weakFitRecovery.gapPreview}
+            fullAnalysisHref={scoreAnalysisHref}
+          />
+        ) : (
           <div>
-            <a
-              data-testid="results-hero-secondary-action"
-              href={scoreAnalysisHref}
-              className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
-            >
-              View detailed scoring breakdown
-            </a>
+            <p className="max-w-2xl text-sm text-slate-300">{primaryCta?.description}</p>
+            <div className="space-y-4">
+              {primaryCta ? (
+                primaryCta.disabled ? (
+                  <span
+                    data-testid="results-hero-primary-cta"
+                    className="inline-flex min-h-[52px] min-w-[300px] cursor-not-allowed items-center justify-center rounded-[var(--button-radius)] bg-white/10 px-6 py-3 text-base font-semibold text-slate-400 md:min-w-[320px]"
+                  >
+                    {primaryCta.label}
+                  </span>
+                ) : (
+                  <a
+                    data-testid="results-hero-primary-cta"
+                    href={primaryCta.href}
+                    className="inline-flex min-h-[52px] min-w-[300px] items-center justify-center rounded-[var(--button-radius)] bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-indigo-500 md:min-w-[320px]"
+                  >
+                    {primaryCta.label}
+                  </a>
+                )
+              ) : null}
+              <div>
+                <a
+                  data-testid="results-hero-secondary-action"
+                  href={scoreAnalysisHref}
+                  className="text-sm font-medium text-slate-300 underline decoration-white/20 underline-offset-4 transition hover:text-white hover:decoration-white/50"
+                >
+                  View detailed scoring breakdown
+                </a>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
         <div
           id="generation-readiness-details"
           className={`rounded-xl border px-4 py-3 text-sm ${readinessToneClass}`}
@@ -1345,8 +1415,9 @@ export default function ResultsPage() {
   const [generationReadiness, setGenerationReadiness] =
     useState<GenerationReadiness>(READINESS_LOADING_STATE);
   const lastAssessmentHydrationAttempted = useRef(false);
-  const trackedCompletionKeysRef = useRef<Set<string>>(new Set());
   const autoLoadPairRef = useRef<string | null>(null);
+  const lastReadinessKeyRef = useRef<string | null>(null);
+  const failedReadinessKeysRef = useRef<Set<string>>(new Set());
   const [expandingRequirement, setExpandingRequirement] = useState<string | null>(null);
   const [expansionContext, setExpansionContext] = useState("");
   const [expansionDescription, setExpansionDescription] = useState("");
@@ -1567,8 +1638,14 @@ export default function ResultsPage() {
       return;
     }
 
-    let cancelled = false;
-    setGenerationReadiness(READINESS_LOADING_STATE);
+    const readinessKey = [analysisId, jobIdValue, baselineIdValue, baselineVersionIdValue].join(":");
+    if (lastReadinessKeyRef.current === readinessKey) {
+      return;
+    }
+    lastReadinessKeyRef.current = readinessKey;
+    if (failedReadinessKeysRef.current.has(readinessKey)) {
+      return;
+    }
 
     const body = {
       analysisId,
@@ -1598,22 +1675,18 @@ export default function ResultsPage() {
           | Record<string, unknown>
           | null;
         if (!resumeResponse.ok || !coverResponse.ok) {
-          if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+          failedReadinessKeysRef.current.add(readinessKey);
           return;
         }
         const resolved = combineGenerationReadinessFromServer(
           resumePayload as any,
           coverPayload as any,
         );
-        if (!cancelled) setGenerationReadiness(resolved);
+        setGenerationReadiness(resolved);
       } catch {
-        if (!cancelled) setGenerationReadiness(READINESS_LOADING_STATE);
+        failedReadinessKeysRef.current.add(readinessKey);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [latest?.assessmentId, latest?.baselineId, latest?.baselineVersionId, latest?.jobId]);
 
   const isLowScore = scoreBand === ScoreBand.LOW;
@@ -1927,7 +2000,38 @@ export default function ResultsPage() {
         : null,
     [activeScore, studioHref, canOpenStudio, fitReviewPath, productReadiness],
   );
+  const isWeakFitScore = typeof activeScore === "number" && activeScore < 70;
+  const resolveGapsHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (latest?.jobId?.trim()) {
+      params.set("jobId", latest.jobId.trim());
+    }
+    if (latest?.baselineId?.trim()) {
+      params.set("baselineId", latest.baselineId.trim());
+    }
+    const query = params.toString();
+    return query ? `/resolve-gaps?${query}` : "/resolve-gaps";
+  }, [latest?.baselineId, latest?.jobId]);
+  const resolveGapPreview = useMemo(
+    () =>
+      canonicalUnverifiedRequirements.slice(0, 3).map((requirement) => ({
+        requirement,
+        explanation: GAP_EXPLANATION_FALLBACK,
+      })),
+    [canonicalUnverifiedRequirements],
+  );
+  const weakFitRecovery = useMemo(
+    () =>
+      isWeakFitScore
+        ? {
+            href: resolveGapsHref,
+            gapPreview: resolveGapPreview,
+          }
+        : null,
+    [isWeakFitScore, resolveGapPreview, resolveGapsHref],
+  );
   const oneClickResultsCta = useMemo(() => {
+    if (isWeakFitScore) return null;
     if (!predictiveUnlock) return primaryResultsCta;
     return {
       label: "Remove unsupported requirements and continue",
@@ -1935,7 +2039,7 @@ export default function ResultsPage() {
       disabled: !canOpenStudio,
       description: "You're a strong match. Move forward and generate tailored materials.",
     };
-  }, [canOpenStudio, predictiveUnlock, primaryResultsCta]);
+  }, [canOpenStudio, isWeakFitScore, predictiveUnlock, primaryResultsCta]);
   const formatDriverValue = (value?: number | null) =>
     typeof value === "number" ? value.toFixed(1) : "n/a";
   const summarySnippet = typeof latest?.summary === "string" ? latest.summary.trim() : null;
@@ -2519,29 +2623,6 @@ export default function ResultsPage() {
   }, [runIdentifier, router, searchParams]);
 
   useEffect(() => {
-    if (!latest || typeof activeScore !== "number") {
-      return;
-    }
-
-    const completionKey =
-      latest.assessmentId?.trim() ||
-      `${latest.jobId ?? "job"}:${latest.baselineId ?? "baseline"}:${activeScore}`;
-
-    if (trackedCompletionKeysRef.current.has(completionKey)) {
-      return;
-    }
-
-    trackedCompletionKeysRef.current.add(completionKey);
-    trackEvent("role_analysis_completed", {
-      source: "results",
-      score: activeScore,
-      scoreBucket: resolveScoreBucket(activeScore),
-      jobId: latest.jobId ?? undefined,
-      baselineId: latest.baselineId ?? undefined,
-    });
-  }, [activeScore, latest]);
-
-  useEffect(() => {
     if (!latest || typeof activeScore !== "number") return;
     const jobIdValue = latest.jobId?.trim() ?? "";
     const analysisIdValue = latest.assessmentId?.trim() ?? "";
@@ -2766,6 +2847,7 @@ export default function ResultsPage() {
                     verificationCoverage={verificationCoverage}
                     canonicalCoverage={latest?.verification_coverage ?? null}
                     predictiveUnlock={predictiveUnlock}
+                    weakFitRecovery={weakFitRecovery}
                     reliabilityFacts={reliabilityFacts}
                   />
                   {applicationInsights.length ? (
@@ -3008,7 +3090,7 @@ export default function ResultsPage() {
                       </ul>
                     ) : null}
                   </section>
-                  {scoreBand !== ScoreBand.TOP ? (
+                  {!isWeakFitScore && scoreBand !== ScoreBand.TOP ? (
                     <section id="fit-improvement-opportunities" className="rounded-2xl border border-slate-700/50 bg-slate-900/35 p-3">
                       <FitImprovementOpportunities
                         assessmentId={latest.assessmentId ?? null}

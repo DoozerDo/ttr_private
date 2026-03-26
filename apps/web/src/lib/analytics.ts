@@ -314,15 +314,13 @@ export function trackEvent<TName extends AnalyticsEventName>(
       properties,
     };
 
-    try {
-      await fetch("/api/analytics/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-    } catch {
+    void fetch("/api/analytics/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {
       // Fire-and-forget: analytics must never break UX.
-    }
+    });
   })();
 }

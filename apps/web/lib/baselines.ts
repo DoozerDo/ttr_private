@@ -35,7 +35,9 @@ export type BaselineStatus = "ACTIVE" | "ARCHIVED";
 export interface BaselineAssessmentSummaryDto {
   latestAssessmentId: string | null;
   latestAssessmentCreatedAt: string | null;
+  // Role-analysis metadata only. Never use this field to derive baseline readiness.
   latestFitScore: number | null;
+  // Baseline-readiness metadata only.
   hasCompletedAssessment: boolean;
 }
 
@@ -43,11 +45,14 @@ export function isBaselineAnalyzedFromSummary(
   summary?: BaselineAssessmentSummaryDto | null,
 ): boolean {
   if (!summary) return false;
-  return (
-    summary.hasCompletedAssessment === true ||
-    Boolean(summary.latestAssessmentId) ||
-    typeof summary.latestFitScore === "number"
-  );
+  return summary.hasCompletedAssessment === true || Boolean(summary.latestAssessmentId);
+}
+
+export function getLatestRoleAnalysisFitScore(
+  summary?: BaselineAssessmentSummaryDto | null,
+): number | null {
+  if (!summary || typeof summary.latestFitScore !== "number") return null;
+  return summary.latestFitScore;
 }
 
 export interface BaselineDto {

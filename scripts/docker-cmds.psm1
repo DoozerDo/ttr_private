@@ -79,6 +79,8 @@ $script:ApiEnvFile = "apps/api/.env.development.local"
 $script:ApiSharedEnvFile = ".env.dreamhost"
 $script:WebEnvFile = "apps/web/.env.local"
 $script:CriticalApiVars = @("APP_PUBLIC_WEB_URL", "JWT_SECRET", "REQUIRE_ACCESS_CODE")
+$script:BuildBothComposeFile = "infra/docker/docker-compose.dev.yml"
+$script:BuildAllComposeFile = "infra/docker/docker-compose.local.yml"
 
 function Get-RepoRoot {
     $gitRootRaw = git rev-parse --show-toplevel 2>$null
@@ -186,23 +188,138 @@ function Invoke-LocalBuildPrecheck {
     }
 }
 
+function Show-BuildModeBanner {
+    param(
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$DbVolumeState,
+        [Parameter(Mandatory = $true)][string]$UseWhen,
+        [string]$Reason
+    )
+
+    Write-Host "Mode: $Mode"
+    Write-Host "DB volume: $DbVolumeState"
+    Write-Host "Use when: $UseWhen"
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        Write-Host "Reason: $Reason"
+    }
+}
+
+function Invoke-ComposeRebuild {
+    param(
+        [Parameter(Mandatory = $true)][string]$ComposeFile,
+        [switch]$ResetDbVolume
+    )
+
+    # Full schema rebuild mode explicitly tears down volumes to avoid
+    # persistent local Postgres drift versus migration history.
+    if ($ResetDbVolume) {
+        docker compose -f $ComposeFile down -v
+    }
+    docker compose -f $ComposeFile up -d --build
+}
+
+function Get-ChangedRepoPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    # Includes staged + unstaged changes against HEAD.
+    $changed = git -C $RepoRoot diff --name-only HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to read git diff state."
+    }
+
+    # Includes untracked files.
+    $untracked = git -C $RepoRoot ls-files --others --exclude-standard 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to read git untracked file state."
+    }
+
+    $allPaths = @()
+    $allPaths += $changed
+    $allPaths += $untracked
+
+    return $allPaths |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim().Replace('\', '/') } |
+        Sort-Object -Unique
+}
+
+function Get-PersistenceRiskChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $paths = Get-ChangedRepoPaths -RepoRoot $RepoRoot
+    $riskMatches = @()
+
+    foreach ($path in $paths) {
+        $isRisk = $false
+
+        if ($path -match '^apps/api/src/migrations/') { $isRisk = $true }
+        elseif ($path -match '^apps/api/src/.+\.entity\.ts$') { $isRisk = $true }
+        elseif ($path -match '^apps/api/src/data-source(\..+)?$') { $isRisk = $true }
+        elseif ($path -eq 'apps/api/src/app.module.ts') { $isRisk = $true }
+        elseif ($path -eq 'infra/docker/docker-compose.dev.yml') { $isRisk = $true }
+        elseif ($path -eq 'infra/docker/docker-compose.local.yml') { $isRisk = $true }
+        elseif ($path -eq 'apps/api/package.json') { $isRisk = $true }
+
+        if ($isRisk) {
+            $riskMatches += $path
+        }
+    }
+
+    return $riskMatches | Sort-Object -Unique
+}
+
 Function Invoke-BuildBoth {
     param(
         [switch]$SkipPrecheck,
-        [switch]$SkipEnvSync
+        [switch]$SkipEnvSync,
+        [switch]$Force
     )
 
     $repoRoot = Get-RepoRoot
     Push-Location $repoRoot
     try {
+        # Web/UI mode intentionally preserves DB state for fast iteration.
+        Show-BuildModeBanner `
+            -Mode "Web/UI rebuild" `
+            -DbVolumeState "preserved" `
+            -UseWhen "no schema or migration changes"
+
+        $riskChanges = Get-PersistenceRiskChanges -RepoRoot $repoRoot
+        if ($riskChanges.Count -gt 0 -and -not $Force) {
+            Write-Host ""
+            Write-Host "build-both blocked."
+            Write-Host "Detected persistence/schema-related changes:"
+            foreach ($file in $riskChanges) {
+                Write-Host " - $file"
+            }
+            Write-Host ""
+            Write-Host "Reason:"
+            Write-Host "build-both preserves the local DB volume and is intended only for Web/UI work."
+            Write-Host ""
+            Write-Host "Next step:"
+            Write-Host "Run build-all instead."
+            throw "build-both blocked due to persistence/schema-risk changes."
+        }
+        if ($riskChanges.Count -gt 0 -and $Force) {
+            Write-Host "WARNING: build-both override enabled with -Force."
+            Write-Host "WARNING: persistence/schema-risk files detected while DB volume is preserved:"
+            foreach ($file in $riskChanges) {
+                Write-Host " - $file"
+            }
+        }
+
         if (-not $SkipEnvSync) {
             Invoke-SyncEnvFiles -RepoRoot $repoRoot -RequireSource
         }
-        Show-BuildContext -RepoRoot $repoRoot -ComposeFile "infra/docker/docker-compose.dev.yml"
+        Show-BuildContext -RepoRoot $repoRoot -ComposeFile $script:BuildBothComposeFile
         if (-not $SkipPrecheck) {
             Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
         }
-        docker compose -f infra/docker/docker-compose.dev.yml up -d --build
+        Invoke-ComposeRebuild -ComposeFile $script:BuildBothComposeFile
     } finally {
         Pop-Location
     }
@@ -217,15 +334,28 @@ function Invoke-BuildAll {
     $repoRoot = Get-RepoRoot
     Push-Location $repoRoot
     try {
+        # Full API/schema mode intentionally resets DB volume so migrations
+        # re-run from a clean local state and avoid migration-drift confusion.
+        Show-BuildModeBanner `
+            -Mode "Full API/schema rebuild" `
+            -DbVolumeState "RESET" `
+            -UseWhen "API/entities/migrations/auth/persistence changes" `
+            -Reason "prevent local migration drift"
+        $riskChanges = Get-PersistenceRiskChanges -RepoRoot $repoRoot
+        if ($riskChanges.Count -gt 0) {
+            Write-Host "Detected persistence/schema-related changes:"
+            foreach ($file in $riskChanges) {
+                Write-Host " - $file"
+            }
+        }
         if (-not $SkipEnvSync) {
             Invoke-SyncEnvFiles -RepoRoot $repoRoot -RequireSource
         }
-        Show-BuildContext -RepoRoot $repoRoot -ComposeFile "infra/docker/docker-compose.local.yml"
+        Show-BuildContext -RepoRoot $repoRoot -ComposeFile $script:BuildAllComposeFile
         if (-not $SkipPrecheck) {
             Invoke-LocalBuildPrecheck -RepoRoot $repoRoot
         }
-        docker compose -f infra\docker\docker-compose.local.yml down -v
-        docker compose -f infra\docker\docker-compose.local.yml up -d --build
+        Invoke-ComposeRebuild -ComposeFile $script:BuildAllComposeFile -ResetDbVolume
     } finally {
         Pop-Location
     }

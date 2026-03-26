@@ -213,6 +213,62 @@ describe("Results opportunity map", () => {
     expect(screen.getByTestId("results-hero-secondary-action")).toBeInTheDocument();
   });
 
+  it("renders ResolveGapsBlock for weak-fit scores", () => {
+    render(
+      <OpportunityMapSection
+        score={62}
+        verdict={getOpportunityVerdict(62)}
+        advantageSignals={["Led global support operations"]}
+        primaryCta={null}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+        weakFitRecovery={{
+          href: "/resolve-gaps?jobId=job-1&baselineId=base-1",
+          gapPreview: [
+            { requirement: "Salesforce", explanation: "Add concrete baseline evidence that proves this requirement." },
+            { requirement: "Zendesk", explanation: "Add concrete baseline evidence that proves this requirement." },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("resolve-gaps-block")).toBeInTheDocument();
+    expect(
+      screen.getByText("This role needs stronger proof before generation will be useful."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Resolve Gaps" })).toHaveAttribute(
+      "href",
+      "/resolve-gaps?jobId=job-1&baselineId=base-1",
+    );
+    expect(screen.queryByTestId("results-hero-primary-cta")).toBeNull();
+  });
+
+  it("does not render ResolveGapsBlock when fit score is 70 or higher", () => {
+    render(
+      <OpportunityMapSection
+        score={74}
+        verdict={getOpportunityVerdict(74)}
+        advantageSignals={["Led global support operations"]}
+        primaryCta={{
+          label: "Open Studio",
+          href: "/studio",
+          description: "You're competitive. Tighten positioning before applying.",
+        }}
+        scoreAnalysisHref="#advanced-insights"
+        readiness={readyReadiness}
+        verificationCoverage={strongCoverage}
+        canonicalCoverage={null}
+        predictiveUnlock={null}
+      />,
+    );
+
+    expect(screen.queryByTestId("resolve-gaps-block")).toBeNull();
+    expect(screen.getByTestId("results-hero-primary-cta")).toBeInTheDocument();
+  });
+
   it("renders strong fit limitation decision panel from canonical verification_coverage", () => {
     render(
       <OpportunityMapSection

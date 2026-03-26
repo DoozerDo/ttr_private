@@ -12,7 +12,7 @@ function createJsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("Baseline analyze entrypoint", () => {
-  it("keeps ANALYZE in baseline UX and does not redirect to /analyze", async () => {
+  it("keeps Analyze baseline in baseline UX and does not redirect to /analyze", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/analysis/history")) {
@@ -86,7 +86,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "ANALYZE" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -173,7 +173,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Analyze baseline" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -188,7 +188,7 @@ describe("Baseline analyze entrypoint", () => {
     expect(JSON.parse(String(runCall?.[1]?.body))).toMatchObject({ baselineId: "base-1" });
   });
 
-  it("card ANALYZE runs baseline readiness analysis without requiring a job", async () => {
+  it("card Analyze baseline runs baseline readiness analysis without requiring a job", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/analysis/history")) {
@@ -260,7 +260,7 @@ describe("Baseline analyze entrypoint", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "ANALYZE" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Analyze baseline" }))[0]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
